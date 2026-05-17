@@ -40,6 +40,11 @@ enum CleanTarget {
         #[arg(long)]
         dry_run: bool,
     },
+    /// Remove unused mise runtime versions
+    Mise {
+        #[arg(long)]
+        dry_run: bool,
+    },
 }
 
 fn home() -> PathBuf {
@@ -55,6 +60,10 @@ fn all_cleaners(home: &std::path::Path) -> Vec<Box<dyn cleaner::Cleaner>> {
             Box::new(SystemCommandRunner),
         )),
         Box::new(cleaners::brew::BrewCleaner::new(
+            home,
+            Box::new(SystemCommandRunner),
+        )),
+        Box::new(cleaners::mise::MiseCleaner::new(
             home,
             Box::new(SystemCommandRunner),
         )),
@@ -79,6 +88,11 @@ fn main() -> anyhow::Result<()> {
             CleanTarget::Brew { dry_run } => {
                 let cleaner =
                     cleaners::brew::BrewCleaner::new(&home, Box::new(SystemCommandRunner));
+                let result = cleaner.clean(dry_run)?;
+                println!("Freed: {}", format::format_bytes(result.bytes_freed));
+            }
+            CleanTarget::Mise { dry_run } => {
+                let cleaner = cleaners::mise::MiseCleaner::new(&home, Box::new(SystemCommandRunner));
                 let result = cleaner.clean(dry_run)?;
                 println!("Freed: {}", format::format_bytes(result.bytes_freed));
             }
