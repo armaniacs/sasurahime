@@ -6,6 +6,7 @@ pub enum ScanStatus {
     Pruneable(u64),
     Clean,
     NotFound,
+    #[allow(dead_code)]
     PermissionDenied,
 }
 
@@ -17,6 +18,7 @@ pub struct ScanResult {
 
 #[derive(Debug)]
 pub struct CleanResult {
+    #[allow(dead_code)]
     pub name: &'static str,
     pub bytes_freed: u64,
 }

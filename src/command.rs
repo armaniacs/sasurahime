@@ -1,6 +1,7 @@
 use anyhow::Result;
 use std::process::{Command, Output};
 
+#[allow(dead_code)]
 pub trait CommandRunner: Send + Sync {
     fn run(&self, program: &str, args: &[&str]) -> Result<Output>;
     /// Returns true if `program` is available in PATH.
