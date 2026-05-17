@@ -1,1 +1,15 @@
 .DS_Store
+
+# Rust
+target/
+
+# エディタ
+.vscode/
+.idea/
+*.swp
+*.swo
+
+
+# Added by cargo
+
+/target
