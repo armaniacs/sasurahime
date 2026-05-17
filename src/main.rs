@@ -1,3 +1,7 @@
+mod cleaner;
+mod command;
+mod format;
+
 fn main() {
-    println!("Hello, world!");
+    println!("sasurahime");
 }
