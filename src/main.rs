@@ -45,6 +45,11 @@ enum CleanTarget {
         #[arg(long)]
         dry_run: bool,
     },
+    /// Remove old Playwright / Puppeteer browser binaries
+    Browsers {
+        #[arg(long)]
+        dry_run: bool,
+    },
 }
 
 fn home() -> PathBuf {
@@ -64,6 +69,10 @@ fn all_cleaners(home: &std::path::Path) -> Vec<Box<dyn cleaner::Cleaner>> {
             Box::new(SystemCommandRunner),
         )),
         Box::new(cleaners::mise::MiseCleaner::new(
+            home,
+            Box::new(SystemCommandRunner),
+        )),
+        Box::new(cleaners::browser::BrowserCleaner::new(
             home,
             Box::new(SystemCommandRunner),
         )),
@@ -93,6 +102,11 @@ fn main() -> anyhow::Result<()> {
             }
             CleanTarget::Mise { dry_run } => {
                 let cleaner = cleaners::mise::MiseCleaner::new(&home, Box::new(SystemCommandRunner));
+                let result = cleaner.clean(dry_run)?;
+                println!("Freed: {}", format::format_bytes(result.bytes_freed));
+            }
+            CleanTarget::Browsers { dry_run } => {
+                let cleaner = cleaners::browser::BrowserCleaner::new(&home, Box::new(SystemCommandRunner));
                 let result = cleaner.clean(dry_run)?;
                 println!("Freed: {}", format::format_bytes(result.bytes_freed));
             }
