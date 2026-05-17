@@ -1,6 +1,6 @@
 use assert_cmd::Command;
-use tempfile::TempDir;
 use std::fs;
+use tempfile::TempDir;
 
 fn sasurahime(home: &std::path::Path) -> Command {
     let mut cmd = Command::cargo_bin("sasurahime").unwrap();
@@ -42,8 +42,14 @@ fn clean_uv_dry_run_does_not_delete_old_indexes() {
 
     assert!(output.status.success());
     // Files must still exist after dry-run
-    assert!(uv_cache.join("simple-v16").exists(), "simple-v16 was deleted during dry-run");
-    assert!(uv_cache.join("simple-v21").exists(), "simple-v21 was deleted during dry-run");
+    assert!(
+        uv_cache.join("simple-v16").exists(),
+        "simple-v16 was deleted during dry-run"
+    );
+    assert!(
+        uv_cache.join("simple-v21").exists(),
+        "simple-v21 was deleted during dry-run"
+    );
 }
 
 #[test]
@@ -68,9 +74,18 @@ fn clean_uv_removes_old_simple_indexes() {
         .unwrap();
 
     assert!(output.status.success());
-    assert!(!uv_cache.join("simple-v16").exists(), "simple-v16 should have been deleted");
-    assert!(!uv_cache.join("simple-v17").exists(), "simple-v17 should have been deleted");
-    assert!(uv_cache.join("simple-v21").exists(), "simple-v21 (newest) should remain");
+    assert!(
+        !uv_cache.join("simple-v16").exists(),
+        "simple-v16 should have been deleted"
+    );
+    assert!(
+        !uv_cache.join("simple-v17").exists(),
+        "simple-v17 should have been deleted"
+    );
+    assert!(
+        uv_cache.join("simple-v21").exists(),
+        "simple-v21 (newest) should remain"
+    );
 }
 
 #[test]

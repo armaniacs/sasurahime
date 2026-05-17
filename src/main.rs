@@ -50,8 +50,14 @@ fn home() -> PathBuf {
 
 fn all_cleaners(home: &std::path::Path) -> Vec<Box<dyn cleaner::Cleaner>> {
     vec![
-        Box::new(cleaners::uv::UvCleaner::new(home, Box::new(SystemCommandRunner))),
-        Box::new(cleaners::brew::BrewCleaner::new(home, Box::new(SystemCommandRunner))),
+        Box::new(cleaners::uv::UvCleaner::new(
+            home,
+            Box::new(SystemCommandRunner),
+        )),
+        Box::new(cleaners::brew::BrewCleaner::new(
+            home,
+            Box::new(SystemCommandRunner),
+        )),
     ]
 }
 
@@ -71,7 +77,8 @@ fn main() -> anyhow::Result<()> {
                 println!("Freed: {}", format::format_bytes(result.bytes_freed));
             }
             CleanTarget::Brew { dry_run } => {
-                let cleaner = cleaners::brew::BrewCleaner::new(&home, Box::new(SystemCommandRunner));
+                let cleaner =
+                    cleaners::brew::BrewCleaner::new(&home, Box::new(SystemCommandRunner));
                 let result = cleaner.clean(dry_run)?;
                 println!("Freed: {}", format::format_bytes(result.bytes_freed));
             }

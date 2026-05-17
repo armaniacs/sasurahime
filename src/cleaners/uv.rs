@@ -1,9 +1,9 @@
-use std::fs;
-use std::path::{Path, PathBuf};
-use anyhow::Result;
-use crate::cleaner::{Cleaner, CleanResult, ScanResult, ScanStatus};
+use crate::cleaner::{CleanResult, Cleaner, ScanResult, ScanStatus};
 use crate::command::CommandRunner;
 use crate::format::dir_size;
+use anyhow::Result;
+use std::fs;
+use std::path::{Path, PathBuf};
 
 pub struct UvCleaner {
     cache_dir: PathBuf,
@@ -56,19 +56,29 @@ impl Cleaner for UvCleaner {
 
     fn detect(&self) -> ScanResult {
         if !self.cache_dir.exists() {
-            return ScanResult { name: self.name(), status: ScanStatus::NotFound };
+            return ScanResult {
+                name: self.name(),
+                status: ScanStatus::NotFound,
+            };
         }
         let bytes = dir_size(&self.cache_dir.join("archive-v0"));
         ScanResult {
             name: self.name(),
-            status: if bytes > 0 { ScanStatus::Pruneable(bytes) } else { ScanStatus::Clean },
+            status: if bytes > 0 {
+                ScanStatus::Pruneable(bytes)
+            } else {
+                ScanStatus::Clean
+            },
         }
     }
 
     fn clean(&self, dry_run: bool) -> Result<CleanResult> {
         if !self.runner.exists("uv") {
             println!("uv: not found, skipping");
-            return Ok(CleanResult { name: self.name(), bytes_freed: 0 });
+            return Ok(CleanResult {
+                name: self.name(),
+                bytes_freed: 0,
+            });
         }
 
         let before = dir_size(&self.cache_dir);
@@ -90,10 +100,17 @@ impl Cleaner for UvCleaner {
             self.runner.run("uv", &["cache", "prune", "--force"])?;
         }
 
-        let after = if dry_run { before } else { dir_size(&self.cache_dir) };
+        let after = if dry_run {
+            before
+        } else {
+            dir_size(&self.cache_dir)
+        };
         let freed = before.saturating_sub(after);
 
-        Ok(CleanResult { name: self.name(), bytes_freed: freed })
+        Ok(CleanResult {
+            name: self.name(),
+            bytes_freed: freed,
+        })
     }
 }
 
@@ -107,7 +124,9 @@ mod tests {
         fn run(&self, _: &str, _: &[&str]) -> anyhow::Result<std::process::Output> {
             unimplemented!()
         }
-        fn exists(&self, _: &str) -> bool { false }
+        fn exists(&self, _: &str) -> bool {
+            false
+        }
     }
 
     #[test]
@@ -134,7 +153,10 @@ mod tests {
         let cleaner = UvCleaner::new(tmp.path(), Box::new(NoopRunner));
         let old = cleaner.detect_old_indexes();
         assert_eq!(old.len(), 2);
-        let names: Vec<_> = old.iter().map(|p| p.file_name().unwrap().to_string_lossy().to_string()).collect();
+        let names: Vec<_> = old
+            .iter()
+            .map(|p| p.file_name().unwrap().to_string_lossy().to_string())
+            .collect();
         assert!(names.contains(&"simple-v16".to_string()));
         assert!(names.contains(&"simple-v17".to_string()));
     }
