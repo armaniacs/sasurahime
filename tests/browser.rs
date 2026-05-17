@@ -25,9 +25,19 @@ fn clean_browsers_removes_old_puppeteer_chrome() {
         .output()
         .unwrap();
 
-    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
-    assert!(!chrome.join("mac_arm-131.0.6778.204").exists(), "old version should be deleted");
-    assert!(chrome.join("mac_arm-140.0.7339.80").exists(), "latest version must remain");
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        !chrome.join("mac_arm-131.0.6778.204").exists(),
+        "old version should be deleted"
+    );
+    assert!(
+        chrome.join("mac_arm-140.0.7339.80").exists(),
+        "latest version must remain"
+    );
 }
 
 #[test]
@@ -43,8 +53,14 @@ fn clean_browsers_removes_old_playwright_build() {
         .unwrap();
 
     assert!(output.status.success());
-    assert!(!playwright.join("chromium-1208").exists(), "old build should be deleted");
-    assert!(playwright.join("chromium-1217").exists(), "newest build must remain");
+    assert!(
+        !playwright.join("chromium-1208").exists(),
+        "old build should be deleted"
+    );
+    assert!(
+        playwright.join("chromium-1217").exists(),
+        "newest build must remain"
+    );
 }
 
 #[test]
@@ -60,8 +76,14 @@ fn clean_browsers_dry_run_deletes_nothing() {
         .unwrap();
 
     assert!(output.status.success());
-    assert!(chrome.join("mac_arm-131.0.6778.204").exists(), "must not delete in dry-run");
-    assert!(chrome.join("mac_arm-140.0.7339.80").exists(), "must not delete in dry-run");
+    assert!(
+        chrome.join("mac_arm-131.0.6778.204").exists(),
+        "must not delete in dry-run"
+    );
+    assert!(
+        chrome.join("mac_arm-140.0.7339.80").exists(),
+        "must not delete in dry-run"
+    );
 }
 
 #[test]
@@ -92,5 +114,8 @@ fn clean_browsers_single_version_is_kept() {
         .unwrap();
 
     assert!(output.status.success());
-    assert!(chrome.join("mac_arm-140.0.7339.80").exists(), "sole version must never be deleted");
+    assert!(
+        chrome.join("mac_arm-140.0.7339.80").exists(),
+        "sole version must never be deleted"
+    );
 }

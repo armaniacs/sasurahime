@@ -63,7 +63,12 @@ impl BrowserCleaner {
         let mut versions: Vec<(Vec<u32>, PathBuf)> = entries
             .filter_map(|e| e.ok())
             .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
-            .map(|e| (Self::version_key(&e.file_name().to_string_lossy()), e.path()))
+            .map(|e| {
+                (
+                    Self::version_key(&e.file_name().to_string_lossy()),
+                    e.path(),
+                )
+            })
             .collect();
 
         if versions.len() <= 1 {
@@ -84,7 +89,10 @@ impl Cleaner for BrowserCleaner {
     fn detect(&self) -> ScanResult {
         let any_found = self.groups.iter().any(|g| g.parent.exists());
         if !any_found {
-            return ScanResult { name: self.name(), status: ScanStatus::NotFound };
+            return ScanResult {
+                name: self.name(),
+                status: ScanStatus::NotFound,
+            };
         }
         let bytes: u64 = self
             .groups
@@ -94,7 +102,11 @@ impl Cleaner for BrowserCleaner {
             .sum();
         ScanResult {
             name: self.name(),
-            status: if bytes > 0 { ScanStatus::Pruneable(bytes) } else { ScanStatus::Clean },
+            status: if bytes > 0 {
+                ScanStatus::Pruneable(bytes)
+            } else {
+                ScanStatus::Clean
+            },
         }
     }
 
@@ -102,7 +114,10 @@ impl Cleaner for BrowserCleaner {
         let any_found = self.groups.iter().any(|g| g.parent.exists());
         if !any_found {
             println!("browsers: not found, skipping");
-            return Ok(CleanResult { name: self.name(), bytes_freed: 0 });
+            return Ok(CleanResult {
+                name: self.name(),
+                bytes_freed: 0,
+            });
         }
 
         let mut freed: u64 = 0;
@@ -111,8 +126,11 @@ impl Cleaner for BrowserCleaner {
                 let size = dir_size(&path);
                 let entry_name = path.file_name().unwrap_or_default().to_string_lossy();
                 if dry_run {
-                    println!("[dry-run] would remove: {}/{entry_name} ({})",
-                        group.label, crate::format::format_bytes(size));
+                    println!(
+                        "[dry-run] would remove: {}/{entry_name} ({})",
+                        group.label,
+                        crate::format::format_bytes(size)
+                    );
                 } else {
                     fs::remove_dir_all(&path)
                         .map_err(|e| anyhow::anyhow!("remove_dir_all {:?}: {}", path, e))?;
@@ -121,7 +139,10 @@ impl Cleaner for BrowserCleaner {
                 }
             }
         }
-        Ok(CleanResult { name: self.name(), bytes_freed: freed })
+        Ok(CleanResult {
+            name: self.name(),
+            bytes_freed: freed,
+        })
     }
 }
 
@@ -160,7 +181,8 @@ mod tests {
 
         let old = BrowserCleaner::find_old_versions(tmp.path());
         assert_eq!(old.len(), 2);
-        let names: Vec<_> = old.iter()
+        let names: Vec<_> = old
+            .iter()
             .map(|p| p.file_name().unwrap().to_string_lossy().to_string())
             .collect();
         assert!(names.contains(&"mac_arm-131.0.6778.204".to_string()));

@@ -101,12 +101,14 @@ fn main() -> anyhow::Result<()> {
                 println!("Freed: {}", format::format_bytes(result.bytes_freed));
             }
             CleanTarget::Mise { dry_run } => {
-                let cleaner = cleaners::mise::MiseCleaner::new(&home, Box::new(SystemCommandRunner));
+                let cleaner =
+                    cleaners::mise::MiseCleaner::new(&home, Box::new(SystemCommandRunner));
                 let result = cleaner.clean(dry_run)?;
                 println!("Freed: {}", format::format_bytes(result.bytes_freed));
             }
             CleanTarget::Browsers { dry_run } => {
-                let cleaner = cleaners::browser::BrowserCleaner::new(&home, Box::new(SystemCommandRunner));
+                let cleaner =
+                    cleaners::browser::BrowserCleaner::new(&home, Box::new(SystemCommandRunner));
                 let result = cleaner.clean(dry_run)?;
                 println!("Freed: {}", format::format_bytes(result.bytes_freed));
             }

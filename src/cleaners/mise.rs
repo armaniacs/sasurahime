@@ -36,7 +36,10 @@ impl MiseCleaner {
     }
 
     /// Returns (tool, version, path) triples for installed versions not in `active`.
-    fn unused_versions(&self, active: &HashSet<(String, String)>) -> Vec<(String, String, PathBuf)> {
+    fn unused_versions(
+        &self,
+        active: &HashSet<(String, String)>,
+    ) -> Vec<(String, String, PathBuf)> {
         let tools = match fs::read_dir(&self.installs_dir) {
             Ok(d) => d,
             Err(_) => return vec![],
@@ -63,8 +66,7 @@ impl MiseCleaner {
     fn remove_with_uchg(path: &Path, runner: &dyn CommandRunner) -> Result<()> {
         let path_str = path.to_string_lossy();
         let _ = runner.run("chflags", &["-R", "nouchg", &path_str]);
-        fs::remove_dir_all(path)
-            .map_err(|e| anyhow::anyhow!("remove_dir_all {:?}: {}", path, e))
+        fs::remove_dir_all(path).map_err(|e| anyhow::anyhow!("remove_dir_all {:?}: {}", path, e))
     }
 }
 
@@ -75,11 +77,19 @@ impl Cleaner for MiseCleaner {
 
     fn detect(&self) -> ScanResult {
         if !self.runner.exists("mise") {
-            return ScanResult { name: self.name(), status: ScanStatus::NotFound };
+            return ScanResult {
+                name: self.name(),
+                status: ScanStatus::NotFound,
+            };
         }
         let output = match self.runner.run("mise", &["ls", "--current"]) {
             Ok(o) => o,
-            Err(_) => return ScanResult { name: self.name(), status: ScanStatus::NotFound },
+            Err(_) => {
+                return ScanResult {
+                    name: self.name(),
+                    status: ScanStatus::NotFound,
+                }
+            }
         };
         let stdout = String::from_utf8_lossy(&output.stdout);
         let active = Self::parse_active_versions(&stdout);
@@ -87,14 +97,21 @@ impl Cleaner for MiseCleaner {
         let bytes: u64 = unused.iter().map(|(_, _, p)| dir_size(p)).sum();
         ScanResult {
             name: self.name(),
-            status: if bytes > 0 { ScanStatus::Pruneable(bytes) } else { ScanStatus::Clean },
+            status: if bytes > 0 {
+                ScanStatus::Pruneable(bytes)
+            } else {
+                ScanStatus::Clean
+            },
         }
     }
 
     fn clean(&self, dry_run: bool) -> Result<CleanResult> {
         if !self.runner.exists("mise") {
             println!("mise: not found, skipping");
-            return Ok(CleanResult { name: self.name(), bytes_freed: 0 });
+            return Ok(CleanResult {
+                name: self.name(),
+                bytes_freed: 0,
+            });
         }
         let output = self.runner.run("mise", &["ls", "--current"])?;
         let stdout = String::from_utf8_lossy(&output.stdout);
@@ -105,14 +122,20 @@ impl Cleaner for MiseCleaner {
         for (tool, version, path) in &unused {
             let size = dir_size(path);
             if dry_run {
-                println!("[dry-run] would remove: {tool} {version} ({})", crate::format::format_bytes(size));
+                println!(
+                    "[dry-run] would remove: {tool} {version} ({})",
+                    crate::format::format_bytes(size)
+                );
             } else {
                 Self::remove_with_uchg(path, self.runner.as_ref())?;
                 freed += size;
                 println!("Removed: {tool} {version}");
             }
         }
-        Ok(CleanResult { name: self.name(), bytes_freed: freed })
+        Ok(CleanResult {
+            name: self.name(),
+            bytes_freed: freed,
+        })
     }
 }
 
