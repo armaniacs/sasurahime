@@ -1,10 +1,9 @@
-#![allow(dead_code)]
-
+use std::fs;
 use std::path::{Path, PathBuf};
+use anyhow::Result;
 use crate::cleaner::{Cleaner, CleanResult, ScanResult, ScanStatus};
 use crate::command::CommandRunner;
 use crate::format::dir_size;
-use anyhow::Result;
 
 pub struct UvCleaner {
     cache_dir: PathBuf,
@@ -18,6 +17,36 @@ impl UvCleaner {
             runner,
         }
     }
+
+    /// Parses "simple-v16" → Some(16), anything else → None.
+    pub fn parse_simple_version(name: &str) -> Option<u32> {
+        name.strip_prefix("simple-v")?.parse().ok()
+    }
+
+    /// Returns paths of simple-vN directories that are older than the highest N found.
+    pub fn detect_old_indexes(&self) -> Vec<PathBuf> {
+        let entries = match fs::read_dir(&self.cache_dir) {
+            Ok(e) => e,
+            Err(_) => return vec![],
+        };
+
+        let mut versions: Vec<(u32, PathBuf)> = entries
+            .filter_map(|e| e.ok())
+            .filter_map(|e| {
+                let name = e.file_name();
+                let n = Self::parse_simple_version(&name.to_string_lossy())?;
+                Some((n, e.path()))
+            })
+            .collect();
+
+        if versions.len() <= 1 {
+            return vec![];
+        }
+
+        let max = versions.iter().map(|(n, _)| *n).max().unwrap();
+        versions.retain(|(n, _)| *n < max);
+        versions.into_iter().map(|(_, p)| p).collect()
+    }
 }
 
 impl Cleaner for UvCleaner {
@@ -26,19 +55,97 @@ impl Cleaner for UvCleaner {
     }
 
     fn detect(&self) -> ScanResult {
-        let archive = self.cache_dir.join("archive-v0");
         if !self.cache_dir.exists() {
             return ScanResult { name: self.name(), status: ScanStatus::NotFound };
         }
-        let bytes = dir_size(&archive);
+        let bytes = dir_size(&self.cache_dir.join("archive-v0"));
         ScanResult {
             name: self.name(),
             status: if bytes > 0 { ScanStatus::Pruneable(bytes) } else { ScanStatus::Clean },
         }
     }
 
-    fn clean(&self, _dry_run: bool) -> Result<CleanResult> {
-        // Full implementation in Task 3
-        todo!("UvCleaner::clean not yet implemented")
+    fn clean(&self, dry_run: bool) -> Result<CleanResult> {
+        if !self.runner.exists("uv") {
+            println!("uv: not found, skipping");
+            return Ok(CleanResult { name: self.name(), bytes_freed: 0 });
+        }
+
+        let before = dir_size(&self.cache_dir);
+
+        // Remove old simple-vN index caches
+        for old in self.detect_old_indexes() {
+            if dry_run {
+                println!("[dry-run] would remove: {}", old.display());
+            } else {
+                fs::remove_dir_all(&old)?;
+                println!("Removed: {}", old.display());
+            }
+        }
+
+        // Prune unused package archives via uv itself
+        if dry_run {
+            println!("[dry-run] would run: uv cache prune --force");
+        } else {
+            self.runner.run("uv", &["cache", "prune", "--force"])?;
+        }
+
+        let after = if dry_run { before } else { dir_size(&self.cache_dir) };
+        let freed = before.saturating_sub(after);
+
+        Ok(CleanResult { name: self.name(), bytes_freed: freed })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    struct NoopRunner;
+    impl CommandRunner for NoopRunner {
+        fn run(&self, _: &str, _: &[&str]) -> anyhow::Result<std::process::Output> {
+            unimplemented!()
+        }
+        fn exists(&self, _: &str) -> bool { false }
+    }
+
+    #[test]
+    fn parse_simple_version_valid() {
+        assert_eq!(UvCleaner::parse_simple_version("simple-v16"), Some(16));
+        assert_eq!(UvCleaner::parse_simple_version("simple-v21"), Some(21));
+    }
+
+    #[test]
+    fn parse_simple_version_invalid() {
+        assert_eq!(UvCleaner::parse_simple_version("archive-v0"), None);
+        assert_eq!(UvCleaner::parse_simple_version("simple-vabc"), None);
+        assert_eq!(UvCleaner::parse_simple_version(""), None);
+    }
+
+    #[test]
+    fn detect_old_indexes_returns_all_but_highest() {
+        let tmp = TempDir::new().unwrap();
+        let cache = tmp.path().join(".cache/uv");
+        std::fs::create_dir_all(cache.join("simple-v16")).unwrap();
+        std::fs::create_dir_all(cache.join("simple-v17")).unwrap();
+        std::fs::create_dir_all(cache.join("simple-v21")).unwrap();
+
+        let cleaner = UvCleaner::new(tmp.path(), Box::new(NoopRunner));
+        let old = cleaner.detect_old_indexes();
+        assert_eq!(old.len(), 2);
+        let names: Vec<_> = old.iter().map(|p| p.file_name().unwrap().to_string_lossy().to_string()).collect();
+        assert!(names.contains(&"simple-v16".to_string()));
+        assert!(names.contains(&"simple-v17".to_string()));
+    }
+
+    #[test]
+    fn detect_old_indexes_single_version_returns_empty() {
+        let tmp = TempDir::new().unwrap();
+        let cache = tmp.path().join(".cache/uv");
+        std::fs::create_dir_all(cache.join("simple-v21")).unwrap();
+
+        let cleaner = UvCleaner::new(tmp.path(), Box::new(NoopRunner));
+        assert!(cleaner.detect_old_indexes().is_empty());
     }
 }
