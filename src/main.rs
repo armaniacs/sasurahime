@@ -1,6 +1,7 @@
 mod cleaner;
 mod cleaners;
 mod command;
+mod config;
 mod format;
 mod scanner;
 
@@ -58,8 +59,12 @@ fn home() -> PathBuf {
         .unwrap_or_else(|_| home_dir().expect("cannot determine HOME directory"))
 }
 
-fn all_cleaners(home: &std::path::Path) -> Vec<Box<dyn cleaner::Cleaner>> {
+fn all_cleaners(
+    home: &std::path::Path,
+    _config: &config::Config,
+) -> Vec<Box<dyn cleaner::Cleaner>> {
     vec![
+        // Sprint 1
         Box::new(cleaners::uv::UvCleaner::new(
             home,
             Box::new(SystemCommandRunner),
@@ -68,6 +73,7 @@ fn all_cleaners(home: &std::path::Path) -> Vec<Box<dyn cleaner::Cleaner>> {
             home,
             Box::new(SystemCommandRunner),
         )),
+        // Sprint 2
         Box::new(cleaners::mise::MiseCleaner::new(
             home,
             Box::new(SystemCommandRunner),
@@ -76,6 +82,7 @@ fn all_cleaners(home: &std::path::Path) -> Vec<Box<dyn cleaner::Cleaner>> {
             home,
             Box::new(SystemCommandRunner),
         )),
+        // Sprint 3 — added incrementally by Tasks 2, 3, 4
     ]
 }
 
@@ -83,9 +90,18 @@ fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     let home = home();
 
+    let config_dir = home.join(".config/sasurahime");
+    let config = match config::Config::load(&config_dir) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("Error loading config: {e}");
+            std::process::exit(1);
+        }
+    };
+
     match cli.command {
         Some(Commands::Scan) | None => {
-            let cleaners = all_cleaners(&home);
+            let cleaners = all_cleaners(&home, &config);
             scanner::run_scan(&cleaners);
         }
         Some(Commands::Clean { target }) => match target {
