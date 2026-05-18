@@ -398,14 +398,12 @@ fn main() -> anyhow::Result<()> {
                 )?;
             }
             CleanTarget::Xcode { dry_run } => {
-                run_clean_target(
-                    "xcode",
-                    |dry| {
-                        cleaners::xcode::XcodeCleaner::new(&home, Box::new(SystemCommandRunner))
-                            .clean(dry)
-                    },
-                    dry_run,
-                )?;
+                let cleaner =
+                    cleaners::xcode::XcodeCleaner::new(&home, Box::new(SystemCommandRunner));
+                if cli.yes && cleaner.is_xcode_running() {
+                    eprintln!("Note: Xcode is running. Proceeding with --yes anyway.");
+                }
+                run_clean_target("xcode", |dry| cleaner.clean(dry), dry_run)?;
             }
         },
     }

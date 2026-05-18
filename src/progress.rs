@@ -18,7 +18,7 @@ pub fn with_spinner<R>(msg: &str, f: impl FnOnce() -> R) -> R {
     pb.enable_steady_tick(Duration::from_millis(100));
     let result = f();
     pb.finish_and_clear();
-    eprintln!("{msg} ✓");
+    eprintln!("{msg} [OK]");
     result
 }
 
