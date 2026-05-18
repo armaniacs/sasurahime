@@ -130,6 +130,12 @@ mod tests {
     }
 
     #[test]
+    fn expand_tilde_tilde_alone() {
+        let expanded = Config::expand_tilde("~", Path::new("/Users/test"));
+        assert_eq!(expanded, PathBuf::from("/Users/test"));
+    }
+
+    #[test]
     fn expand_tilde_absolute_unchanged() {
         let expanded = Config::expand_tilde("/absolute/path", Path::new("/Users/test"));
         assert_eq!(expanded, PathBuf::from("/absolute/path"));

@@ -17,16 +17,31 @@ impl BrewCleaner {
         }
     }
 
-    /// Parses a size string like "16.6GB" or "194.3MB" into bytes.
+    /// Parses a size string like "16.6GB", "194.3MB", "1 GB", or "512kb"
+    /// (case-insensitive, space-separated or joined) into bytes.
     pub fn parse_size_str(s: &str) -> Option<u64> {
-        if let Some(n) = s.strip_suffix("GB") {
-            let v: f64 = n.trim().parse().ok()?;
+        // Space-separated form: "194.3 MB" → ("194.3", "MB")
+        if let Some((num, unit)) = s.split_once(' ') {
+            let v: f64 = num.trim().parse().ok()?;
+            let u = unit.trim().to_ascii_uppercase();
+            return Some(match u.as_str() {
+                "GB" => (v * 1_073_741_824.0) as u64,
+                "MB" => (v * 1_048_576.0) as u64,
+                "KB" => (v * 1_024.0) as u64,
+                _ => return None,
+            });
+        }
+
+        // Joined form: "16.6GB" / "512kb" / "1.0Gb"
+        let upper = s.to_ascii_uppercase();
+        if let Some(n) = upper.strip_suffix("GB") {
+            let v: f64 = n.parse().ok()?;
             Some((v * 1_073_741_824.0) as u64)
-        } else if let Some(n) = s.strip_suffix("MB") {
-            let v: f64 = n.trim().parse().ok()?;
+        } else if let Some(n) = upper.strip_suffix("MB") {
+            let v: f64 = n.parse().ok()?;
             Some((v * 1_048_576.0) as u64)
-        } else if let Some(n) = s.strip_suffix("KB") {
-            let v: f64 = n.trim().parse().ok()?;
+        } else if let Some(n) = upper.strip_suffix("KB") {
+            let v: f64 = n.parse().ok()?;
             Some((v * 1_024.0) as u64)
         } else {
             None
@@ -134,5 +149,35 @@ mod tests {
     #[test]
     fn parse_brew_freed_bytes_no_match_returns_zero() {
         assert_eq!(BrewCleaner::parse_brew_freed_bytes("no freed here"), 0);
+    }
+
+    // ── GAP-003: lowercase / space-separated / edge-case unit forms ─────────
+    #[test]
+    fn parse_size_str_lowercase_gb() {
+        let bytes = BrewCleaner::parse_size_str("16.6gb").unwrap();
+        assert_eq!(bytes, (16.6_f64 * 1_073_741_824.0) as u64);
+    }
+
+    #[test]
+    fn parse_size_str_space_separated_mb() {
+        let bytes = BrewCleaner::parse_size_str("194.3 MB").unwrap();
+        assert_eq!(bytes, (194.3_f64 * 1_048_576.0) as u64);
+    }
+
+    #[test]
+    fn parse_size_str_kb_lowercase() {
+        let bytes = BrewCleaner::parse_size_str("512kb").unwrap();
+        assert_eq!(bytes, 512 * 1_024);
+    }
+
+    #[test]
+    fn parse_size_str_zero_gb() {
+        assert_eq!(BrewCleaner::parse_size_str("0GB"), Some(0));
+    }
+
+    #[test]
+    fn parse_size_str_is_case_insensitive() {
+        assert_eq!(BrewCleaner::parse_size_str("1.0Gb"), Some(1_073_741_824));
+        assert_eq!(BrewCleaner::parse_size_str("2.0mB"), Some(2 * 1_048_576));
     }
 }
