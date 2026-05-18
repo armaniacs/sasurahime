@@ -114,6 +114,51 @@ fn startup_version_display_yes() {
     );
 }
 
+#[test]
+fn version_display_on_scan() {
+    let tmp = TempDir::new().unwrap();
+    let output = sasurahime(tmp.path())
+        .args(["scan"])
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.starts_with("sasurahime v0.1.2"),
+        "scan output must start with version, got: {stdout}"
+    );
+}
+
+#[test]
+fn version_display_on_targets() {
+    let tmp = TempDir::new().unwrap();
+    let output = sasurahime(tmp.path())
+        .args(["targets"])
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.starts_with("sasurahime v0.1.2"),
+        "targets output must start with version, got: {stdout}"
+    );
+}
+
+#[test]
+fn version_display_on_clean_dry_run() {
+    let tmp = TempDir::new().unwrap();
+    let output = sasurahime(tmp.path())
+        .args(["clean", "uv", "--dry-run"])
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.starts_with("sasurahime v0.1.2"),
+        "clean output must start with version, got: {stdout}"
+    );
+}
+
 // ── GAP-007: --yes bypasses Xcode interactive prompt ──────────────────────
 #[test]
 fn yes_flag_cleans_xcode_without_interactive_prompt() {

@@ -187,6 +187,7 @@ fn all_cleaners(home: &std::path::Path, config: &config::Config) -> Vec<Box<dyn 
 
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
+    println!("sasurahime v{}", env!("CARGO_PKG_VERSION"));
     let home = home();
 
     let config_dir = home.join(".config/sasurahime");
@@ -209,7 +210,6 @@ fn main() -> anyhow::Result<()> {
             }
         }
         None => {
-            println!("sasurahime v{}", env!("CARGO_PKG_VERSION"));
             let cleaners = all_cleaners(&home, &config);
             if cli.yes {
                 interactive::run_auto(&cleaners)?;
