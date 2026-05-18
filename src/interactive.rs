@@ -22,9 +22,13 @@ pub fn run_auto(cleaners: &[Box<dyn Cleaner>]) -> Result<()> {
 
     let mut total_freed: u64 = 0;
     for i in pruneable_indices {
-        match cleaners[i].clean(false) {
+        let name = cleaners[i].name();
+        let result = crate::progress::with_spinner(&format!("Cleaning {}...", name), || {
+            cleaners[i].clean(false)
+        });
+        match result {
             Ok(r) => total_freed += r.bytes_freed,
-            Err(e) => eprintln!("Error cleaning {}: {e}", cleaners[i].name()),
+            Err(e) => eprintln!("Error cleaning {name}: {e}"),
         }
     }
 
@@ -105,7 +109,11 @@ pub fn run_interactive(cleaners: &[Box<dyn Cleaner>]) -> Result<()> {
     let mut freed: u64 = 0;
     for &si in &selected {
         let cleaner_idx = pruneable_indices[si];
-        match cleaners[cleaner_idx].clean(false) {
+        let name = cleaners[cleaner_idx].name();
+        let result = crate::progress::with_spinner(&format!("Cleaning {}...", name), || {
+            cleaners[cleaner_idx].clean(false)
+        });
+        match result {
             Ok(r) => freed += r.bytes_freed,
             Err(e) => eprintln!("Error: {e}"),
         }

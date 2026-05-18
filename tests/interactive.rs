@@ -117,10 +117,7 @@ fn startup_version_display_yes() {
 #[test]
 fn version_display_on_scan() {
     let tmp = TempDir::new().unwrap();
-    let output = sasurahime(tmp.path())
-        .args(["scan"])
-        .output()
-        .unwrap();
+    let output = sasurahime(tmp.path()).args(["scan"]).output().unwrap();
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
@@ -132,10 +129,7 @@ fn version_display_on_scan() {
 #[test]
 fn version_display_on_targets() {
     let tmp = TempDir::new().unwrap();
-    let output = sasurahime(tmp.path())
-        .args(["targets"])
-        .output()
-        .unwrap();
+    let output = sasurahime(tmp.path()).args(["targets"]).output().unwrap();
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
@@ -200,12 +194,46 @@ fn targets_subcommand_output() {
 }
 
 #[test]
-fn scan_shows_progress_spinner() {
+fn yes_flag_shows_progress_spinner() {
     let tmp = TempDir::new().unwrap();
+    let bin_dir = tmp.path().join("bin");
+    fs::create_dir_all(&bin_dir).unwrap();
+
+    // Create a minimal uv cache so at least one cleaner is pruneable
+    let uv_cache = tmp.path().join(".cache/uv/archive-v0");
+    fs::create_dir_all(&uv_cache).unwrap();
+    fs::write(uv_cache.join("dummy"), b"x".repeat(1024)).unwrap();
+
+    // Install fake tools so the binary doesn't error on missing PATH entries
+    for tool in &[
+        "uv", "brew", "mise", "bun", "go", "pip", "npm", "yarn", "pnpm",
+    ] {
+        install_fake_tool(&bin_dir, tool);
+    }
+
+    let original_path = std::env::var("PATH").unwrap_or_default();
     let output = sasurahime(tmp.path())
-        .args(["scan"])
+        .env("PATH", format!("{}:{original_path}", bin_dir.display()))
+        .arg("--yes")
         .output()
         .unwrap();
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let combined = format!("{stdout}{stderr}");
+    // Must start with version
+    assert!(stdout.starts_with("sasurahime v0.1.2"), "stdout: {stdout}");
+    // Must contain spinner messages (will be on stderr for the --yes path)
+    assert!(
+        combined.contains("Cleaning"),
+        "combined stdout+stderr: {combined}"
+    );
+}
+
+#[test]
+fn scan_shows_progress_spinner() {
+    let tmp = TempDir::new().unwrap();
+    let output = sasurahime(tmp.path()).args(["scan"]).output().unwrap();
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
