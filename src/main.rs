@@ -12,8 +12,32 @@ use command::SystemCommandRunner;
 use dirs::home_dir;
 use std::path::PathBuf;
 
+const SUPPORTED_TARGETS: &[(&str, &str)] = &[
+    ("uv", "Stale simple-vN index directories + uv cache prune"),
+    ("brew", "Homebrew download cache"),
+    ("mise", "Unused runtime versions"),
+    ("browsers", "Old Puppeteer / Playwright builds"),
+    ("bun", "Bun package cache"),
+    ("go", "Go build cache"),
+    ("pip", "pip package cache"),
+    ("node-gyp", "node-gyp build cache directories"),
+    ("npm", "npm package cache"),
+    ("yarn", "yarn cache"),
+    ("pnpm", "pnpm store"),
+    (
+        "caches",
+        "All generic caches (bun/go/pip/node-gyp/npm/yarn/pnpm)",
+    ),
+    ("logs", "Log files older than N days"),
+    ("xcode", "Xcode DerivedData project directories"),
+];
+
 #[derive(Parser)]
-#[command(name = "sasurahime", about = "macOS developer cache cleaner")]
+#[command(
+    name = "sasurahime",
+    version = env!("CARGO_PKG_VERSION"),
+    about = "macOS developer cache cleaner"
+)]
 struct Cli {
     /// Non-interactive: clean all pruneable caches without prompting
     #[arg(long)]
@@ -32,6 +56,8 @@ enum Commands {
         #[command(subcommand)]
         target: CleanTarget,
     },
+    /// List supported cache targets
+    Targets,
 }
 
 #[derive(Subcommand)]
@@ -177,7 +203,13 @@ fn main() -> anyhow::Result<()> {
             let cleaners = all_cleaners(&home, &config);
             scanner::run_scan(&cleaners);
         }
+        Some(Commands::Targets) => {
+            for (name, desc) in SUPPORTED_TARGETS {
+                println!("{:<12} {}", name, desc);
+            }
+        }
         None => {
+            println!("sasurahime v{}", env!("CARGO_PKG_VERSION"));
             let cleaners = all_cleaners(&home, &config);
             if cli.yes {
                 interactive::run_auto(&cleaners)?;
