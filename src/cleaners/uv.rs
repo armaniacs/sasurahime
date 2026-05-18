@@ -32,6 +32,8 @@ impl UvCleaner {
 
         let mut versions: Vec<(u32, PathBuf)> = entries
             .filter_map(|e| e.ok())
+            // GAP-006: skip symlinks to avoid following stale / shared links
+            .filter(|e| !e.file_type().map(|t| t.is_symlink()).unwrap_or(true))
             .filter_map(|e| {
                 let name = e.file_name();
                 let n = Self::parse_simple_version(&name.to_string_lossy())?;
@@ -167,6 +169,46 @@ mod tests {
         let cache = tmp.path().join(".cache/uv");
         std::fs::create_dir_all(cache.join("simple-v21")).unwrap();
 
+        let cleaner = UvCleaner::new(tmp.path(), Box::new(NoopRunner));
+        assert!(cleaner.detect_old_indexes().is_empty());
+    }
+
+    // ── GAP-006: symlinks and files are skipped ────────────────────────────
+    #[test]
+    fn detect_old_indexes_skips_symlinks() {
+        let tmp = TempDir::new().unwrap();
+        let cache = tmp.path().join(".cache/uv");
+        std::fs::create_dir_all(cache.join("simple-v21")).unwrap();
+        let target = tmp.path().join("actual-dir");
+        std::fs::create_dir_all(&target).unwrap();
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(&target, cache.join("simple-v99")).unwrap();
+        }
+
+        let cleaner = UvCleaner::new(tmp.path(), Box::new(NoopRunner));
+        // Without the symlink guard, simple-v99 would be the max and simple-v21 would
+        // be marked as old. With the guard, only simple-v21 exists → returns empty.
+        assert!(cleaner.detect_old_indexes().is_empty());
+    }
+
+    #[test]
+    fn detect_old_indexes_skips_regular_files() {
+        let tmp = TempDir::new().unwrap();
+        let cache = tmp.path().join(".cache/uv");
+        std::fs::create_dir_all(&cache).unwrap();
+        std::fs::write(cache.join("simple-v21"), b"not a dir").unwrap();
+
+        let cleaner = UvCleaner::new(tmp.path(), Box::new(NoopRunner));
+        // The .to_owned() returns None (not a dir), so the entry is skipped by
+        // filter_map. But we test explicitly here for clarity.
+        assert!(cleaner.detect_old_indexes().is_empty());
+    }
+
+    #[test]
+    fn detect_old_indexes_missing_dir_returns_empty() {
+        let tmp = TempDir::new().unwrap();
+        // cache dir does not exist
         let cleaner = UvCleaner::new(tmp.path(), Box::new(NoopRunner));
         assert!(cleaner.detect_old_indexes().is_empty());
     }

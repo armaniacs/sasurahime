@@ -90,3 +90,27 @@ fn no_args_without_tty_exits_with_hint() {
         "expected non-zero exit or hint, got stdout={stdout} stderr={stderr}"
     );
 }
+
+// ── GAP-007: --yes bypasses Xcode interactive prompt ──────────────────────
+#[test]
+fn yes_flag_cleans_xcode_without_interactive_prompt() {
+    let tmp = TempDir::new().unwrap();
+    let derived = tmp.path().join("Library/Developer/Xcode/DerivedData");
+    fs::create_dir_all(derived.join("ProjectA-abcdef")).unwrap();
+    fs::write(derived.join("ProjectA-abcdef/dummy"), b"x").unwrap();
+
+    let output = sasurahime(tmp.path()).arg("--yes").output().unwrap();
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    // ProjectA should have been deleted (--yes bypasses the xcode-running prompt)
+    assert!(
+        !derived.join("ProjectA-abcdef").exists(),
+        "ProjectA must be deleted in --yes mode"
+    );
+    // DerivedData root must remain
+    assert!(derived.exists(), "DerivedData root must remain");
+}
