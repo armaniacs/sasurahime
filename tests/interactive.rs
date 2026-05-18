@@ -20,10 +20,7 @@ fn install_fake_tool(bin_dir: &std::path::Path, name: &str) {
 #[test]
 fn version_flag_output() {
     let tmp = TempDir::new().unwrap();
-    let output = sasurahime(tmp.path())
-        .arg("--version")
-        .output()
-        .unwrap();
+    let output = sasurahime(tmp.path()).arg("--version").output().unwrap();
 
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -108,10 +105,7 @@ fn no_args_without_tty_exits_with_hint() {
 #[test]
 fn startup_version_display_yes() {
     let tmp = TempDir::new().unwrap();
-    let output = sasurahime(tmp.path())
-        .arg("--yes")
-        .output()
-        .unwrap();
+    let output = sasurahime(tmp.path()).arg("--yes").output().unwrap();
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
@@ -142,4 +136,20 @@ fn yes_flag_cleans_xcode_without_interactive_prompt() {
     );
     // DerivedData root must remain
     assert!(derived.exists(), "DerivedData root must remain");
+}
+
+#[test]
+fn targets_subcommand_output() {
+    let tmp = TempDir::new().unwrap();
+    let output = sasurahime(tmp.path()).arg("targets").output().unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    // Should contain a selection of targets
+    assert!(stdout.contains("uv"), "stdout: {stdout}");
+    assert!(stdout.contains("brew"), "stdout: {stdout}");
+    assert!(stdout.contains("logs"), "stdout: {stdout}");
+    assert!(stdout.contains("xcode"), "stdout: {stdout}");
+    // Should have descriptions
+    assert!(stdout.contains("Stale"), "stdout: {stdout}");
 }
