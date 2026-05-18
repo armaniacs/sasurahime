@@ -18,6 +18,20 @@ fn install_fake_tool(bin_dir: &std::path::Path, name: &str) {
 }
 
 #[test]
+fn version_flag_output() {
+    let tmp = TempDir::new().unwrap();
+    let output = sasurahime(tmp.path())
+        .arg("--version")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("sasurahime"), "stdout: {stdout}");
+    assert!(stdout.contains("0.1.2"), "stdout: {stdout}");
+}
+
+#[test]
 fn yes_flag_exits_zero_and_skips_tui() {
     let tmp = TempDir::new().unwrap();
     let bin_dir = tmp.path().join("bin");

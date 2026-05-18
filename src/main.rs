@@ -13,7 +13,11 @@ use dirs::home_dir;
 use std::path::PathBuf;
 
 #[derive(Parser)]
-#[command(name = "sasurahime", about = "macOS developer cache cleaner")]
+#[command(
+    name = "sasurahime",
+    version = env!("CARGO_PKG_VERSION"),
+    about = "macOS developer cache cleaner"
+)]
 struct Cli {
     /// Non-interactive: clean all pruneable caches without prompting
     #[arg(long)]
