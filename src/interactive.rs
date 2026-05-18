@@ -6,7 +6,13 @@ use std::io::IsTerminal;
 /// Non-interactive: clean every pruneable cleaner without prompting.
 /// Used by `--yes` flag.
 pub fn run_auto(cleaners: &[Box<dyn Cleaner>]) -> Result<()> {
-    let results: Vec<_> = cleaners.iter().map(|c| c.detect()).collect();
+    let results: Vec<_> = cleaners
+        .iter()
+        .map(|c| {
+            let name = c.name();
+            crate::progress::with_spinner(&format!("Scanning {name}..."), || c.detect())
+        })
+        .collect();
 
     let pruneable_indices: Vec<usize> = results
         .iter()
@@ -22,9 +28,13 @@ pub fn run_auto(cleaners: &[Box<dyn Cleaner>]) -> Result<()> {
 
     let mut total_freed: u64 = 0;
     for i in pruneable_indices {
-        match cleaners[i].clean(false) {
+        let name = cleaners[i].name();
+        let result = crate::progress::with_spinner(&format!("Cleaning {}...", name), || {
+            cleaners[i].clean(false)
+        });
+        match result {
             Ok(r) => total_freed += r.bytes_freed,
-            Err(e) => eprintln!("Error cleaning {}: {e}", cleaners[i].name()),
+            Err(e) => eprintln!("Error cleaning {name}: {e}"),
         }
     }
 
@@ -40,7 +50,13 @@ pub fn run_interactive(cleaners: &[Box<dyn Cleaner>]) -> Result<()> {
         std::process::exit(1);
     }
 
-    let results: Vec<_> = cleaners.iter().map(|c| c.detect()).collect();
+    let results: Vec<_> = cleaners
+        .iter()
+        .map(|c| {
+            let name = c.name();
+            crate::progress::with_spinner(&format!("Scanning {name}..."), || c.detect())
+        })
+        .collect();
 
     // Collect indices of pruneable cleaners only — nothing to select otherwise.
     let pruneable_indices: Vec<usize> = results
@@ -105,7 +121,11 @@ pub fn run_interactive(cleaners: &[Box<dyn Cleaner>]) -> Result<()> {
     let mut freed: u64 = 0;
     for &si in &selected {
         let cleaner_idx = pruneable_indices[si];
-        match cleaners[cleaner_idx].clean(false) {
+        let name = cleaners[cleaner_idx].name();
+        let result = crate::progress::with_spinner(&format!("Cleaning {}...", name), || {
+            cleaners[cleaner_idx].clean(false)
+        });
+        match result {
             Ok(r) => freed += r.bytes_freed,
             Err(e) => eprintln!("Error: {e}"),
         }

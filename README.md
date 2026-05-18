@@ -27,6 +27,12 @@ Total reclaimable    44.2 GB
 # Scan and report (no deletion)
 sasurahime scan
 
+# List all supported clean targets
+sasurahime targets
+
+# Show version
+sasurahime --version
+
 # Clean everything interactively
 sasurahime
 
@@ -35,12 +41,12 @@ sasurahime clean uv
 sasurahime clean brew
 sasurahime clean mise
 sasurahime clean browsers
-sasurahime clean caches          # bun / go / pip / node-gyp
+sasurahime clean xcode
+sasurahime clean caches          # bun / go / pip / node-gyp / npm / yarn / pnpm
 sasurahime clean logs
 
 # Preview without deleting
 sasurahime clean uv --dry-run
-sasurahime scan --dry-run
 
 # Non-interactive (CI / scripting)
 sasurahime --yes
