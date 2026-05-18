@@ -4,6 +4,21 @@ All notable changes to sasurahime will be documented in this file. The format is
 
 ---
 
+## [Unreleased]
+
+### Changed
+
+- Reformatted multi-line struct initializations and assertions across `src/cleaners/generic.rs`, `tests/generic.rs`, and `tests/npm.rs` for improved readability.
+- `filetime` dependency added to `Cargo.lock`.
+
+---
+
+## [0.1.1] — YYYY-MM-DD
+
+_No changes since 0.1.0 yet._
+
+---
+
 ## [0.1.0] — 2026-05-18
 
 ### Added
