@@ -56,6 +56,14 @@ impl MiseCleaner {
                 Err(_) => continue,
             };
             for version_entry in versions.filter_map(|e| e.ok()) {
+                // Skip non-directory entries (e.g. .DS_Store, .mise.backend)
+                if !version_entry
+                    .file_type()
+                    .map(|t| t.is_dir())
+                    .unwrap_or(false)
+                {
+                    continue;
+                }
                 let version = version_entry.file_name().to_string_lossy().to_string();
                 let pair = (tool_name.clone(), version.clone());
                 if !active.contains(&pair) && !pinned.contains(&pair) {
@@ -210,9 +218,16 @@ impl Cleaner for MiseCleaner {
                     crate::format::format_bytes(size)
                 );
             } else {
-                Self::remove_with_uchg(path, self.runner.as_ref())?;
-                freed += size;
-                println!("Removed: {tool} {version}");
+                match Self::remove_with_uchg(path, self.runner.as_ref()) {
+                    Ok(()) => {
+                        freed += size;
+                        println!("Removed: {tool} {version}");
+                    }
+                    Err(e) => {
+                        eprintln!("Error removing {tool} {version}: {e}");
+                        // Continue with remaining items on error
+                    }
+                }
             }
         }
         Ok(CleanResult {
@@ -321,4 +336,24 @@ mod tests {
     // NOTE: scan_pinned_versions / parse_tools_section / parse_toml_kv are
     // covered by the E2E test `clean_mise_pinned_version_not_deleted` in
     // tests/mise.rs because integration tests cannot access private functions.
+
+    #[test]
+    fn unused_versions_skips_non_directories() {
+        use tempfile::TempDir;
+        let tmp = TempDir::new().unwrap();
+        let installs = tmp.path().join(".local/share/mise/installs/python");
+        fs::create_dir_all(installs.join("3.12.0")).unwrap();
+        // Non-directory entries that should be skipped
+        fs::write(installs.join(".DS_Store"), b"").unwrap();
+        fs::write(installs.join(".mise.backend"), b"").unwrap();
+
+        let cleaner = MiseCleaner::new(tmp.path(), Box::new(NoopRunner));
+        let active = std::collections::HashSet::new();
+        let pinned = std::collections::HashSet::new();
+        let unused = cleaner.unused_versions(&active, &pinned);
+        // Only 3.12.0 should be in the result, .DS_Store and .mise.backend skipped
+        assert_eq!(unused.len(), 1);
+        assert_eq!(unused[0].0, "python");
+        assert_eq!(unused[0].1, "3.12.0");
+    }
 }
