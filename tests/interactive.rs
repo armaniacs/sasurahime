@@ -231,6 +231,38 @@ fn yes_flag_shows_progress_spinner() {
 }
 
 #[test]
+fn yes_flag_shows_detect_spinner() {
+    let tmp = TempDir::new().unwrap();
+    let bin_dir = tmp.path().join("bin");
+    fs::create_dir_all(&bin_dir).unwrap();
+
+    let uv_cache = tmp.path().join(".cache/uv/archive-v0");
+    fs::create_dir_all(&uv_cache).unwrap();
+    fs::write(uv_cache.join("dummy"), b"x".repeat(1024)).unwrap();
+
+    for tool in &[
+        "uv", "brew", "mise", "bun", "go", "pip", "npm", "yarn", "pnpm",
+    ] {
+        install_fake_tool(&bin_dir, tool);
+    }
+
+    let original_path = std::env::var("PATH").unwrap_or_default();
+    let output = sasurahime(tmp.path())
+        .env("PATH", format!("{}:{original_path}", bin_dir.display()))
+        .arg("--yes")
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let combined = format!("{stdout}{stderr}");
+    assert!(
+        combined.contains("Scanning"),
+        "detect spinner must appear in --yes output, got combined: {combined}"
+    );
+}
+
+#[test]
 fn scan_shows_progress_spinner() {
     let tmp = TempDir::new().unwrap();
     let output = sasurahime(tmp.path()).args(["scan"]).output().unwrap();
