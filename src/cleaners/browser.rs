@@ -54,6 +54,7 @@ impl BrowserCleaner {
 
     /// Returns paths of all version subdirectories except the one with the highest key.
     /// Returns empty if directory is missing or contains zero or one entries.
+    /// Symlinks and directories whose name contains no digits are both skipped.
     pub fn find_old_versions(parent: &Path) -> Vec<PathBuf> {
         let entries = match fs::read_dir(parent) {
             Ok(e) => e,
@@ -62,13 +63,14 @@ impl BrowserCleaner {
 
         let mut versions: Vec<(Vec<u32>, PathBuf)> = entries
             .filter_map(|e| e.ok())
+            // Skip symlinks to avoid following stale / shared links
+            .filter(|e| !e.file_type().map(|t| t.is_symlink()).unwrap_or(true))
             .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
             .map(|e| {
-                (
-                    Self::version_key(&e.file_name().to_string_lossy()),
-                    e.path(),
-                )
+                let key = Self::version_key(&e.file_name().to_string_lossy());
+                (key, e.path())
             })
+            .filter(|(k, _)| !k.is_empty()) // skip unparseable directory names
             .collect();
 
         if versions.len() <= 1 {
@@ -200,5 +202,41 @@ mod tests {
     #[test]
     fn find_old_versions_missing_dir_returns_empty() {
         assert!(BrowserCleaner::find_old_versions(Path::new("/does/not/exist")).is_empty());
+    }
+
+    // ── GAP-004 / GAP-005: edge cases ──────────────────────────────────────
+    #[test]
+    fn version_key_empty_string_returns_empty() {
+        let key = BrowserCleaner::version_key("");
+        assert!(
+            key.is_empty(),
+            "empty dir name must produce no version components"
+        );
+    }
+
+    #[test]
+    fn find_old_versions_skips_unparseable_dir_name() {
+        use tempfile::TempDir;
+        let tmp = TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join("chromium-1217")).unwrap();
+        // A directory name with zero digits — should not cause panic
+        fs::create_dir_all(tmp.path().join("nightly")).unwrap();
+        // Should only see chromium-1217 (one entry → returns empty = nothing to remove)
+        let old = BrowserCleaner::find_old_versions(tmp.path());
+        assert!(old.is_empty());
+    }
+
+    #[test]
+    fn find_old_versions_skips_symlinks() {
+        use tempfile::TempDir;
+        let tmp = TempDir::new().unwrap();
+        let target = tmp.path().join("chromium-140-safe");
+        fs::create_dir_all(&target).unwrap();
+        let link = tmp.path().join("chromium-120-symlink");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        // Without the symlink guard, the link would be followed; with the guard it is skipped.
+        let old = BrowserCleaner::find_old_versions(tmp.path());
+        assert_eq!(old.len(), 0, "symlinked dir must be skipped");
     }
 }

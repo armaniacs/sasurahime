@@ -58,7 +58,7 @@ fn clean_mise_removes_unused_version() {
     );
     assert!(
         installs.join("24.15.0").exists(),
-        "24.15.0 (active) must remain"
+        "active version must not be deleted"
     );
 }
 
@@ -127,7 +127,62 @@ fn clean_mise_active_version_is_never_deleted() {
 
     assert!(output.status.success());
     assert!(
-        installs.join("24.15.0").exists(),
-        "active version must not be deleted"
+        output.status.success(),
+        "sasurahime exit={:?} stderr=[{}] stdout=[{}]",
+        output.status.code(),
+        String::from_utf8_lossy(&output.stderr),
+        String::from_utf8_lossy(&output.stdout)
+    );
+    eprintln!(
+        "[TEST] post-clean dirs: {:?}",
+        std::fs::read_dir(installs)
+            .ok()
+            .map(|d| d
+                .filter_map(|e| e.ok())
+                .map(|e| e.file_name().to_string_lossy().to_string())
+                .collect::<Vec<_>>())
+            .unwrap_or_default()
+    );
+}
+
+#[test]
+fn clean_mise_pinned_version_not_deleted() {
+    // ── GAP-001: .mise.toml pinning must protect a pinned version from deletion ──
+    let tmp = TempDir::new().unwrap();
+    let bin_dir = tmp.path().join("bin");
+    fs::create_dir_all(&bin_dir).unwrap();
+    // mise ls --current reports nothing active (pinned-only tool)
+    install_fake_mise(&bin_dir, "");
+
+    let installs = tmp.path().join(".local/share/mise/installs/node");
+    fs::create_dir_all(installs.join("20.11.0")).unwrap(); // pinned
+    fs::create_dir_all(installs.join("24.15.0")).unwrap(); // not active, not pinned
+
+    // Write a project-level .mise.toml pinning node to 20.11.0
+    fs::write(
+        tmp.path().join(".mise.toml"),
+        "[tools]\nnode = \"20.11.0\"\n",
+    )
+    .unwrap();
+
+    let original_path = std::env::var("PATH").unwrap_or_default();
+    let output = sasurahime(tmp.path())
+        .env("PATH", format!("{}:{original_path}", bin_dir.display()))
+        .args(["clean", "mise"])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        installs.join("20.11.0").exists(),
+        "20.11.0 is pinned by .mise.toml and must NOT be deleted"
+    );
+    assert!(
+        !installs.join("24.15.0").exists(),
+        "24.15.0 is not active and not pinned — must be removed"
     );
 }

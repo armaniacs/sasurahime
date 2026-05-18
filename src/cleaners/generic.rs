@@ -143,6 +143,9 @@ impl Cleaner for GenericCleaner {
                     if dry_run {
                         println!("[dry-run] would remove: {}", dir.display());
                     } else {
+                        // GAP-010: clear uchg flag before removal (macOS safety rule)
+                        let path_str = dir.to_string_lossy();
+                        let _ = self.runner.run("chmod", &["-R", "nouchg", &path_str]);
                         fs::remove_dir_all(dir)
                             .map_err(|e| anyhow::anyhow!("remove_dir_all {:?}: {}", dir, e))?;
                         freed += size;
