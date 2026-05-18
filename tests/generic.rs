@@ -44,7 +44,10 @@ fn clean_bun_calls_pm_cache_rm() {
 
     assert!(output.status.success());
     let calls = recorded_calls(&bin_dir, "bun");
-    assert!(calls.contains("pm cache rm"), "expected 'pm cache rm', got: {calls}");
+    assert!(
+        calls.contains("pm cache rm"),
+        "expected 'pm cache rm', got: {calls}"
+    );
 }
 
 #[test]
@@ -63,7 +66,10 @@ fn clean_go_calls_clean_cache() {
 
     assert!(output.status.success());
     let calls = recorded_calls(&bin_dir, "go");
-    assert!(calls.contains("clean -cache"), "expected 'clean -cache', got: {calls}");
+    assert!(
+        calls.contains("clean -cache"),
+        "expected 'clean -cache', got: {calls}"
+    );
 }
 
 #[test]
@@ -82,7 +88,10 @@ fn clean_pip_calls_cache_purge() {
 
     assert!(output.status.success());
     let calls = recorded_calls(&bin_dir, "pip");
-    assert!(calls.contains("cache purge"), "expected 'cache purge', got: {calls}");
+    assert!(
+        calls.contains("cache purge"),
+        "expected 'cache purge', got: {calls}"
+    );
 }
 
 #[test]

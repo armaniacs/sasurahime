@@ -43,8 +43,14 @@ fn clean_npm_calls_cache_clean_force() {
 
     assert!(output.status.success());
     let calls = recorded_calls(&bin_dir, "npm");
-    assert!(calls.contains("cache clean"), "expected 'cache clean', got: {calls}");
-    assert!(calls.contains("--force"), "expected '--force', got: {calls}");
+    assert!(
+        calls.contains("cache clean"),
+        "expected 'cache clean', got: {calls}"
+    );
+    assert!(
+        calls.contains("--force"),
+        "expected '--force', got: {calls}"
+    );
 }
 
 #[test]
@@ -63,7 +69,10 @@ fn clean_yarn_calls_cache_clean() {
 
     assert!(output.status.success());
     let calls = recorded_calls(&bin_dir, "yarn");
-    assert!(calls.contains("cache clean"), "expected 'cache clean', got: {calls}");
+    assert!(
+        calls.contains("cache clean"),
+        "expected 'cache clean', got: {calls}"
+    );
 }
 
 #[test]
@@ -82,7 +91,10 @@ fn clean_pnpm_calls_store_prune() {
 
     assert!(output.status.success());
     let calls = recorded_calls(&bin_dir, "pnpm");
-    assert!(calls.contains("store prune"), "expected 'store prune', got: {calls}");
+    assert!(
+        calls.contains("store prune"),
+        "expected 'store prune', got: {calls}"
+    );
 }
 
 #[test]

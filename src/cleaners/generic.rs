@@ -26,7 +26,11 @@ impl GenericCleaner {
         args: &'static [&'static str],
         runner: Box<dyn CommandRunner>,
     ) -> Self {
-        Self { display_name, method: CleanMethod::Command { program, args }, runner }
+        Self {
+            display_name,
+            method: CleanMethod::Command { program, args },
+            runner,
+        }
     }
 
     pub fn bun(runner: Box<dyn CommandRunner>) -> Self {
@@ -74,20 +78,33 @@ impl Cleaner for GenericCleaner {
         match &self.method {
             CleanMethod::Command { program, .. } => {
                 if !self.runner.exists(program) {
-                    return ScanResult { name: self.name(), status: ScanStatus::NotFound };
+                    return ScanResult {
+                        name: self.name(),
+                        status: ScanStatus::NotFound,
+                    };
                 }
                 // Size is unknown without running the tool; report as pruneable.
-                ScanResult { name: self.name(), status: ScanStatus::Pruneable(0) }
+                ScanResult {
+                    name: self.name(),
+                    status: ScanStatus::Pruneable(0),
+                }
             }
             CleanMethod::DeleteDirs(dirs) => {
                 let existing: Vec<_> = dirs.iter().filter(|d| d.exists()).collect();
                 if existing.is_empty() {
-                    return ScanResult { name: self.name(), status: ScanStatus::NotFound };
+                    return ScanResult {
+                        name: self.name(),
+                        status: ScanStatus::NotFound,
+                    };
                 }
                 let bytes: u64 = existing.iter().map(|d| dir_size(d)).sum();
                 ScanResult {
                     name: self.name(),
-                    status: if bytes > 0 { ScanStatus::Pruneable(bytes) } else { ScanStatus::Clean },
+                    status: if bytes > 0 {
+                        ScanStatus::Pruneable(bytes)
+                    } else {
+                        ScanStatus::Clean
+                    },
                 }
             }
         }
@@ -98,14 +115,23 @@ impl Cleaner for GenericCleaner {
             CleanMethod::Command { program, args } => {
                 if !self.runner.exists(program) {
                     println!("{}: not found, skipping", self.display_name);
-                    return Ok(CleanResult { name: self.name(), bytes_freed: 0 });
+                    return Ok(CleanResult {
+                        name: self.name(),
+                        bytes_freed: 0,
+                    });
                 }
                 if dry_run {
                     println!("[dry-run] would run: {program} {}", args.join(" "));
-                    return Ok(CleanResult { name: self.name(), bytes_freed: 0 });
+                    return Ok(CleanResult {
+                        name: self.name(),
+                        bytes_freed: 0,
+                    });
                 }
                 self.runner.run(program, args)?;
-                Ok(CleanResult { name: self.name(), bytes_freed: 0 })
+                Ok(CleanResult {
+                    name: self.name(),
+                    bytes_freed: 0,
+                })
             }
             CleanMethod::DeleteDirs(dirs) => {
                 let mut freed: u64 = 0;
@@ -123,7 +149,10 @@ impl Cleaner for GenericCleaner {
                         println!("Removed: {}", dir.display());
                     }
                 }
-                Ok(CleanResult { name: self.name(), bytes_freed: freed })
+                Ok(CleanResult {
+                    name: self.name(),
+                    bytes_freed: freed,
+                })
             }
         }
     }
