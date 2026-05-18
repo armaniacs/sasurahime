@@ -4,6 +4,7 @@ mod command;
 mod config;
 mod format;
 mod interactive;
+mod progress;
 mod scanner;
 
 use clap::{Parser, Subcommand};
