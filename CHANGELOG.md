@@ -4,7 +4,42 @@ All notable changes to sasurahime will be documented in this file. The format is
 
 ---
 
-## [0.1.2] 2026-05-18
+## [Unreleased]
+
+### Added
+
+- Version banner now visible in `sasurahime -h` / `--help` output (via clap `help_template`).
+- `sasurahime targets` subcommand listing all 14 supported clean targets.
+
+### Changed
+
+- **Version banner moved from stdout to stderr.** All commands now print
+  `sasurahime v0.1.2` on stderr at startup. Scripts using `sasurahime scan | grep`
+  or similar no longer see the version string in their piped output.
+- **CleanTarget match arms refactored.** 14 duplicated arms extracted into
+  `run_clean_target()` helper. New target additions now need only 1 line per arm.
+- **ProgressStyle cached** via `OnceLock`. Template parsing happens once, not
+  per spinner instance. `.unwrap()` replaced with `.expect()` for clear panic
+  reason.
+- **Release profile tuned:** `opt-level` changed from `z` to `s` (better CLI
+  speed/size balance), `lto` changed from full to `"thin"` (~90% benefit at
+  ~20% build time).
+- **Spinner completion marker** changed from `✓` to `[OK]` for screen-reader
+  compatibility.
+- **Xcode --yes mode:** a warning is now printed to stderr when Xcode is running
+  and cleanup proceeds anyway.
+- **MiseCleaner non-directory entries** (`.DS_Store`, `.mise.backend`) are now
+  skipped. `remove_with_uchg` errors are logged and skipped instead of stopping
+  the entire clean.
+- `Cargo.toml` `license = "MIT"` added.
+
+### Dependencies
+
+- `windows-sys` versions deduplicated via `cargo update`.
+
+---
+
+## [0.1.2] — 2026-05-18
 
 ### Added
 
