@@ -6,16 +6,42 @@ All notable changes to sasurahime will be documented in this file. The format is
 
 ## [Unreleased]
 
+### Added
+
+- Test coverage gap audit plan (`docs/coverage-gap-plan.md`, `docs/coverage-gap-summary.json`).
+- **MiseCleaner (GAP-001):** `.mise.toml` pinning cross-check — versions pinned in
+  `~/.config/mise/config.toml` or any `.mise.toml` under HOME (max depth 5) are
+  protected from deletion. Added `MiseCleaner::scan_pinned_versions` with TOML
+  parser (`parse_tools_section`, `parse_toml_kv`). (`MiseCleaner` now stores a
+  `home` field for robust path resolution.)
+- **E2E test:** `clean_mise_pinned_version_not_deleted` — validates that a
+  `.mise.toml`-pinned version is preserved and an unpinned version is removed.
+- **Unit tests:** `unused_versions_pinned_is_protected` for the `pinned` set
+  intersection. `expand_tilde_tilde_alone` for `Config::expand_tilde("~")`.
+  `version_key_empty_string_returns_empty` and
+  `find_old_versions_skips_unparseable_dir_name` for `BrowserCleaner`.
+  `find_old_versions_skips_symlinks` for browser symlink guard.
+- Uv, Xcode, Log edge-case unit tests (symlink guard, `--yes` bypass E2E,
+  DST/time boundaries, missing metadata).
+
 ### Changed
 
-- Reformatted multi-line struct initializations and assertions across `src/cleaners/generic.rs`, `tests/generic.rs`, and `tests/npm.rs` for improved readability.
-- `filetime` dependency added to `Cargo.lock`.
+- **Critical** `MiseCleaner::remove_with_uchg` (GAP-002): chflags errors are now
+  propagated via `?` instead of being silently ignored with `let _ = ...`.
+- **Medium** `BrewCleaner::parse_size_str` (GAP-003): now accepts lowercase units
+  (`gb`, `mb`, `kb`) and space-separated forms (`194.3 MB`).
+- **High** `BrowserCleaner::find_old_versions` (GAP-004 / GAP-005): filters out
+  empty version keys (panics guard) and symlinks before processing entries.
+- **Medium** `GenericCleaner::clean` (GAP-010): `DeleteDirs` path now calls
+  `chmod -R nouchg` before `remove_dir_all`.
+- **Low** `UvCleaner::detect_old_indexes` (GAP-006): skips symlink entries.
+- Reformatted multi-line struct initializations and assertions across
+  `src/cleaners/generic.rs`, `tests/generic.rs`, and `tests/npm.rs` for improved
+  readability.
 
----
+### Dependencies
 
-## [0.1.1] — YYYY-MM-DD
-
-_No changes since 0.1.0 yet._
+- `filetime` added to `Cargo.lock` (dev-dependency, used in `tests/log.rs`).
 
 ---
 
