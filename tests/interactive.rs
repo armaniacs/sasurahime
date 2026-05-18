@@ -29,6 +29,19 @@ fn version_flag_output() {
 }
 
 #[test]
+fn help_output_shows_version() {
+    let tmp = TempDir::new().unwrap();
+    let output = sasurahime(tmp.path()).arg("-h").output().unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    // -h (short help) should show version in the header
+    assert!(stdout.contains("sasurahime"), "stdout: {stdout}");
+    assert!(stdout.contains("0.1.2"), "stdout: {stdout}");
+    assert!(stdout.contains("scan"), "stdout: {stdout}");
+}
+
+#[test]
 fn yes_flag_exits_zero_and_skips_tui() {
     let tmp = TempDir::new().unwrap();
     let bin_dir = tmp.path().join("bin");
