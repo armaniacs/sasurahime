@@ -105,6 +105,21 @@ fn no_args_without_tty_exits_with_hint() {
     );
 }
 
+#[test]
+fn startup_version_display_yes() {
+    let tmp = TempDir::new().unwrap();
+    let output = sasurahime(tmp.path())
+        .arg("--yes")
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.starts_with("sasurahime v0.1.2"),
+        "stdout must start with version, got: {stdout}"
+    );
+}
+
 // ── GAP-007: --yes bypasses Xcode interactive prompt ──────────────────────
 #[test]
 fn yes_flag_cleans_xcode_without_interactive_prompt() {

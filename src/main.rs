@@ -182,6 +182,7 @@ fn main() -> anyhow::Result<()> {
             scanner::run_scan(&cleaners);
         }
         None => {
+            println!("sasurahime v{}", env!("CARGO_PKG_VERSION"));
             let cleaners = all_cleaners(&home, &config);
             if cli.yes {
                 interactive::run_auto(&cleaners)?;
