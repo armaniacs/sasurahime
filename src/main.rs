@@ -3,6 +3,7 @@ mod cleaners;
 mod command;
 mod config;
 mod format;
+mod interactive;
 mod scanner;
 
 use clap::{Parser, Subcommand};
@@ -14,6 +15,10 @@ use std::path::PathBuf;
 #[derive(Parser)]
 #[command(name = "sasurahime", about = "macOS developer cache cleaner")]
 struct Cli {
+    /// Non-interactive: clean all pruneable caches without prompting
+    #[arg(long)]
+    yes: bool,
+
     #[command(subcommand)]
     command: Option<Commands>,
 }
@@ -168,9 +173,17 @@ fn main() -> anyhow::Result<()> {
     };
 
     match cli.command {
-        Some(Commands::Scan) | None => {
+        Some(Commands::Scan) => {
             let cleaners = all_cleaners(&home, &config);
             scanner::run_scan(&cleaners);
+        }
+        None => {
+            let cleaners = all_cleaners(&home, &config);
+            if cli.yes {
+                interactive::run_auto(&cleaners)?;
+            } else {
+                interactive::run_interactive(&cleaners)?;
+            }
         }
         Some(Commands::Clean { target }) => match target {
             CleanTarget::Uv { dry_run } => {
