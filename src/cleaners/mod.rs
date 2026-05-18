@@ -4,3 +4,4 @@ pub mod generic;
 pub mod log;
 pub mod mise;
 pub mod uv;
+pub mod xcode;

@@ -100,6 +100,11 @@ enum CleanTarget {
         #[arg(long)]
         keep_days: Option<u32>,
     },
+    /// Remove Xcode DerivedData build cache
+    Xcode {
+        #[arg(long)]
+        dry_run: bool,
+    },
 }
 
 fn home() -> PathBuf {
@@ -128,30 +133,11 @@ fn all_cleaners(home: &std::path::Path, config: &config::Config) -> Vec<Box<dyn 
             home,
             Box::new(SystemCommandRunner),
         )),
-        // Sprint 3 — generic caches
-        Box::new(cleaners::generic::GenericCleaner::bun(Box::new(
-            SystemCommandRunner,
-        ))),
-        Box::new(cleaners::generic::GenericCleaner::go(Box::new(
-            SystemCommandRunner,
-        ))),
-        Box::new(cleaners::generic::GenericCleaner::pip(Box::new(
-            SystemCommandRunner,
-        ))),
-        Box::new(cleaners::generic::GenericCleaner::node_gyp(
+        // Sprint 3 — logs / xcode (added by Tasks 3 and 4)
+        Box::new(cleaners::xcode::XcodeCleaner::new(
             home,
             Box::new(SystemCommandRunner),
         )),
-        Box::new(cleaners::generic::GenericCleaner::npm(Box::new(
-            SystemCommandRunner,
-        ))),
-        Box::new(cleaners::generic::GenericCleaner::yarn(Box::new(
-            SystemCommandRunner,
-        ))),
-        Box::new(cleaners::generic::GenericCleaner::pnpm(Box::new(
-            SystemCommandRunner,
-        ))),
-        // Sprint 3 — logs / xcode (added by Tasks 3 and 4)
         Box::new(cleaners::log::LogCleaner::new_with_extra(
             home,
             config.logs_keep_days,
@@ -295,6 +281,12 @@ fn main() -> anyhow::Result<()> {
                     })
                     .collect();
                 let cleaner = cleaners::log::LogCleaner::new_with_extra(&home, days, extra);
+                let result = cleaner.clean(dry_run)?;
+                println!("Freed: {}", format::format_bytes(result.bytes_freed));
+            }
+            CleanTarget::Xcode { dry_run } => {
+                let cleaner =
+                    cleaners::xcode::XcodeCleaner::new(&home, Box::new(SystemCommandRunner));
                 let result = cleaner.clean(dry_run)?;
                 println!("Freed: {}", format::format_bytes(result.bytes_freed));
             }
