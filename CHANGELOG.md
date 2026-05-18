@@ -4,10 +4,13 @@ All notable changes to sasurahime will be documented in this file. The format is
 
 ---
 
-## [Unreleased]
+## [0.1.2] 2026-05-18
 
 ### Added
 
+- `sasurahime --version` / `sasurahime -V` — prints version number.
+- `sasurahime targets` — lists all 14 supported clean targets with descriptions.
+- Version banner displayed on interactive (`sasurahime`) and auto (`sasurahime --yes`) startup.
 - Test coverage gap audit plan (`docs/coverage-gap-plan.md`, `docs/coverage-gap-summary.json`).
 - **MiseCleaner (GAP-001):** `.mise.toml` pinning cross-check — versions pinned in
   `~/.config/mise/config.toml` or any `.mise.toml` under HOME (max depth 5) are
