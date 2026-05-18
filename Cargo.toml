@@ -20,10 +20,10 @@ toml        = "0.8"
 serde       = { version = "1", features = ["derive"] }
 
 [profile.release]
-opt-level      = "z"    # Optimize for size
-strip          = true   # Strip symbols
-lto            = true   # Cross-crate LTO
-codegen-units  = 1      # Single-codegen unit for more optimization opportunities
+opt-level      = "s"      # Balance size and speed for CLI
+strip          = true     # Strip symbols
+lto            = "thin"   # Thin LTO: ~90% benefit, ~20% time
+codegen-units  = 1        # Single codegen unit
 
 [dev-dependencies]
 assert_cmd = "2"
