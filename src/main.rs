@@ -51,6 +51,47 @@ enum CleanTarget {
         #[arg(long)]
         dry_run: bool,
     },
+    /// Clean bun package cache
+    Bun {
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Clean Go build cache
+    Go {
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Clean pip package cache
+    Pip {
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Remove node-gyp build cache directories
+    #[command(name = "node-gyp")]
+    NodeGyp {
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Clean npm package cache
+    Npm {
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Clean yarn package cache
+    Yarn {
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Prune pnpm store
+    Pnpm {
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Clean all generic caches (bun, go, pip, node-gyp, npm, yarn, pnpm)
+    Caches {
+        #[arg(long)]
+        dry_run: bool,
+    },
 }
 
 fn home() -> PathBuf {
@@ -82,7 +123,15 @@ fn all_cleaners(
             home,
             Box::new(SystemCommandRunner),
         )),
-        // Sprint 3 — added incrementally by Tasks 2, 3, 4
+        // Sprint 3 — generic caches
+        Box::new(cleaners::generic::GenericCleaner::bun(Box::new(SystemCommandRunner))),
+        Box::new(cleaners::generic::GenericCleaner::go(Box::new(SystemCommandRunner))),
+        Box::new(cleaners::generic::GenericCleaner::pip(Box::new(SystemCommandRunner))),
+        Box::new(cleaners::generic::GenericCleaner::node_gyp(home, Box::new(SystemCommandRunner))),
+        Box::new(cleaners::generic::GenericCleaner::npm(Box::new(SystemCommandRunner))),
+        Box::new(cleaners::generic::GenericCleaner::yarn(Box::new(SystemCommandRunner))),
+        Box::new(cleaners::generic::GenericCleaner::pnpm(Box::new(SystemCommandRunner))),
+        // Sprint 3 — logs / xcode (added by Tasks 3 and 4)
     ]
 }
 
@@ -127,6 +176,67 @@ fn main() -> anyhow::Result<()> {
                     cleaners::browser::BrowserCleaner::new(&home, Box::new(SystemCommandRunner));
                 let result = cleaner.clean(dry_run)?;
                 println!("Freed: {}", format::format_bytes(result.bytes_freed));
+            }
+            CleanTarget::Bun { dry_run } => {
+                let result =
+                    cleaners::generic::GenericCleaner::bun(Box::new(SystemCommandRunner))
+                        .clean(dry_run)?;
+                println!("Freed: {}", format::format_bytes(result.bytes_freed));
+            }
+            CleanTarget::Go { dry_run } => {
+                let result =
+                    cleaners::generic::GenericCleaner::go(Box::new(SystemCommandRunner))
+                        .clean(dry_run)?;
+                println!("Freed: {}", format::format_bytes(result.bytes_freed));
+            }
+            CleanTarget::Pip { dry_run } => {
+                let result =
+                    cleaners::generic::GenericCleaner::pip(Box::new(SystemCommandRunner))
+                        .clean(dry_run)?;
+                println!("Freed: {}", format::format_bytes(result.bytes_freed));
+            }
+            CleanTarget::NodeGyp { dry_run } => {
+                let result =
+                    cleaners::generic::GenericCleaner::node_gyp(&home, Box::new(SystemCommandRunner))
+                        .clean(dry_run)?;
+                println!("Freed: {}", format::format_bytes(result.bytes_freed));
+            }
+            CleanTarget::Npm { dry_run } => {
+                let result =
+                    cleaners::generic::GenericCleaner::npm(Box::new(SystemCommandRunner))
+                        .clean(dry_run)?;
+                println!("Freed: {}", format::format_bytes(result.bytes_freed));
+            }
+            CleanTarget::Yarn { dry_run } => {
+                let result =
+                    cleaners::generic::GenericCleaner::yarn(Box::new(SystemCommandRunner))
+                        .clean(dry_run)?;
+                println!("Freed: {}", format::format_bytes(result.bytes_freed));
+            }
+            CleanTarget::Pnpm { dry_run } => {
+                let result =
+                    cleaners::generic::GenericCleaner::pnpm(Box::new(SystemCommandRunner))
+                        .clean(dry_run)?;
+                println!("Freed: {}", format::format_bytes(result.bytes_freed));
+            }
+            CleanTarget::Caches { dry_run } => {
+                let caches: Vec<Box<dyn cleaner::Cleaner>> = vec![
+                    Box::new(cleaners::generic::GenericCleaner::bun(Box::new(SystemCommandRunner))),
+                    Box::new(cleaners::generic::GenericCleaner::go(Box::new(SystemCommandRunner))),
+                    Box::new(cleaners::generic::GenericCleaner::pip(Box::new(SystemCommandRunner))),
+                    Box::new(cleaners::generic::GenericCleaner::node_gyp(&home, Box::new(SystemCommandRunner))),
+                    Box::new(cleaners::generic::GenericCleaner::npm(Box::new(SystemCommandRunner))),
+                    Box::new(cleaners::generic::GenericCleaner::yarn(Box::new(SystemCommandRunner))),
+                    Box::new(cleaners::generic::GenericCleaner::pnpm(Box::new(SystemCommandRunner))),
+                ];
+                let mut total: u64 = 0;
+                for c in &caches {
+                    match c.clean(dry_run) {
+                        Ok(r) => total += r.bytes_freed,
+                        Err(e) => eprintln!("Error cleaning {}: {e}", c.name()),
+                    }
+                }
+                println!("Total freed: {}", format::format_bytes(total));
             }
         },
     }
