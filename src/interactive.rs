@@ -6,7 +6,13 @@ use std::io::IsTerminal;
 /// Non-interactive: clean every pruneable cleaner without prompting.
 /// Used by `--yes` flag.
 pub fn run_auto(cleaners: &[Box<dyn Cleaner>]) -> Result<()> {
-    let results: Vec<_> = cleaners.iter().map(|c| c.detect()).collect();
+    let results: Vec<_> = cleaners
+        .iter()
+        .map(|c| {
+            let name = c.name();
+            crate::progress::with_spinner(&format!("Scanning {name}..."), || c.detect())
+        })
+        .collect();
 
     let pruneable_indices: Vec<usize> = results
         .iter()
@@ -44,7 +50,13 @@ pub fn run_interactive(cleaners: &[Box<dyn Cleaner>]) -> Result<()> {
         std::process::exit(1);
     }
 
-    let results: Vec<_> = cleaners.iter().map(|c| c.detect()).collect();
+    let results: Vec<_> = cleaners
+        .iter()
+        .map(|c| {
+            let name = c.name();
+            crate::progress::with_spinner(&format!("Scanning {name}..."), || c.detect())
+        })
+        .collect();
 
     // Collect indices of pruneable cleaners only — nothing to select otherwise.
     let pruneable_indices: Vec<usize> = results
