@@ -242,3 +242,25 @@ fn scan_shows_progress_spinner() {
         "stdout: {stdout}\nstderr: {stderr}"
     );
 }
+
+#[test]
+fn clean_uv_subcommand_shows_spinner() {
+    let tmp = TempDir::new().unwrap();
+    let bin_dir = tmp.path().join("bin");
+    fs::create_dir_all(&bin_dir).unwrap();
+
+    install_fake_tool(&bin_dir, "uv");
+
+    let original_path = std::env::var("PATH").unwrap_or_default();
+    let output = sasurahime(tmp.path())
+        .env("PATH", format!("{}:{original_path}", bin_dir.display()))
+        .args(["clean", "uv", "--dry-run"])
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let combined = format!("{stdout}{stderr}");
+    assert!(combined.contains("Cleaning"), "combined: {combined}");
+    assert!(combined.contains("uv"), "combined: {combined}");
+}
