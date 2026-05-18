@@ -198,3 +198,19 @@ fn targets_subcommand_output() {
     // Should have descriptions
     assert!(stdout.contains("Stale"), "stdout: {stdout}");
 }
+
+#[test]
+fn scan_shows_progress_spinner() {
+    let tmp = TempDir::new().unwrap();
+    let output = sasurahime(tmp.path())
+        .args(["scan"])
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stdout.contains("Scanning") || stderr.contains("Scanning"),
+        "stdout: {stdout}\nstderr: {stderr}"
+    );
+}

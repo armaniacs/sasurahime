@@ -3,7 +3,13 @@ use crate::format::format_bytes;
 use comfy_table::{presets::UTF8_FULL, Table};
 
 pub fn run_scan(cleaners: &[Box<dyn Cleaner>]) {
-    let results: Vec<_> = cleaners.iter().map(|c| c.detect()).collect();
+    let results: Vec<_> = cleaners
+        .iter()
+        .map(|c| {
+            let name = c.name();
+            crate::progress::with_spinner(&format!("Scanning {name}..."), || c.detect())
+        })
+        .collect();
 
     let mut table = Table::new();
     table.load_preset(UTF8_FULL);
