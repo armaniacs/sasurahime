@@ -37,7 +37,8 @@ const SUPPORTED_TARGETS: &[(&str, &str)] = &[
 #[command(
     name = "sasurahime",
     version = env!("CARGO_PKG_VERSION"),
-    about = "macOS developer cache cleaner"
+    about = "macOS developer cache cleaner",
+    help_template = "\n{name} {version}\n{about-with-newline}\n{usage-heading} {usage}\n\n{all-args}\n"
 )]
 struct Cli {
     /// Non-interactive: clean all pruneable caches without prompting
