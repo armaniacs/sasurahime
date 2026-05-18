@@ -18,6 +18,12 @@ dirs        = "5"
 toml        = "0.8"
 serde       = { version = "1", features = ["derive"] }
 
+[profile.release]
+opt-level      = "z"    # Optimize for size
+strip          = true   # Strip symbols
+lto            = true   # Cross-crate LTO
+codegen-units  = 1      # Single-codegen unit for more optimization opportunities
+
 [dev-dependencies]
 assert_cmd = "2"
 filetime   = "0.2"
