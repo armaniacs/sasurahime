@@ -57,6 +57,34 @@ impl GenericCleaner {
         Self::command_cleaner("pnpm", "pnpm", &["store", "prune"], runner)
     }
 
+    pub fn deno(runner: Box<dyn CommandRunner>) -> Self {
+        Self::command_cleaner("deno", "deno", &["cache", "-r"], runner)
+    }
+
+    pub fn pipx(runner: Box<dyn CommandRunner>) -> Self {
+        Self::command_cleaner("pipx", "pipx", &["cache", "purge"], runner)
+    }
+
+    pub fn docker(runner: Box<dyn CommandRunner>) -> Self {
+        Self::command_cleaner("docker", "docker", &["system", "prune", "-af"], runner)
+    }
+
+    pub fn orbstack(runner: Box<dyn CommandRunner>) -> Self {
+        Self::command_cleaner("orbstack", "orb", &["prune"], runner)
+    }
+
+    pub fn cocoapods(runner: Box<dyn CommandRunner>) -> Self {
+        Self::command_cleaner("cocoapods", "pod", &["cache", "clean", "--all"], runner)
+    }
+
+    pub fn conda(runner: Box<dyn CommandRunner>) -> Self {
+        Self::command_cleaner("conda", "conda", &["clean", "--all", "-y"], runner)
+    }
+
+    pub fn poetry(runner: Box<dyn CommandRunner>) -> Self {
+        Self::command_cleaner("poetry", "poetry", &["cache", "clear", "--all"], runner)
+    }
+
     pub fn node_gyp(home: &std::path::Path, runner: Box<dyn CommandRunner>) -> Self {
         Self {
             display_name: "node-gyp",

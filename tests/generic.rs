@@ -146,6 +146,101 @@ fn clean_tool_not_found_exits_zero() {
 }
 
 #[test]
+fn clean_deno_not_found_skips() {
+    let tmp = TempDir::new().unwrap();
+    let output = sasurahime(tmp.path())
+        .env("PATH", "/usr/bin:/bin")
+        .args(["clean", "deno"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("skipping") || stdout.contains("not found"),
+        "stdout: {stdout}");
+}
+
+#[test]
+fn clean_pipx_not_found_skips() {
+    let tmp = TempDir::new().unwrap();
+    let output = sasurahime(tmp.path())
+        .args(["clean", "pipx"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("skipping") || stdout.contains("not found"),
+        "stdout: {stdout}");
+}
+
+#[test]
+fn clean_docker_not_found_skips() {
+    let tmp = TempDir::new().unwrap();
+    let output = sasurahime(tmp.path())
+        .env("PATH", "/usr/bin:/bin")
+        .args(["clean", "docker"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("skipping") || stdout.contains("not found"),
+        "stdout: {stdout}");
+}
+
+#[test]
+fn clean_orbstack_not_found_skips() {
+    let tmp = TempDir::new().unwrap();
+    let output = sasurahime(tmp.path())
+        .args(["clean", "orbstack"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("skipping") || stdout.contains("not found"),
+        "stdout: {stdout}");
+}
+
+#[test]
+fn clean_cocoapods_not_found_skips() {
+    let tmp = TempDir::new().unwrap();
+    let output = sasurahime(tmp.path())
+        .env("PATH", "/usr/bin:/bin")
+        .args(["clean", "cocoa-pods"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("skipping") || stdout.contains("not found"),
+        "stdout: {stdout}");
+}
+
+#[test]
+fn clean_conda_not_found_skips() {
+    let tmp = TempDir::new().unwrap();
+    let output = sasurahime(tmp.path())
+        .args(["clean", "conda"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("skipping") || stdout.contains("not found"),
+        "stdout: {stdout}");
+}
+
+#[test]
+fn clean_poetry_not_found_skips() {
+    let tmp = TempDir::new().unwrap();
+    let output = sasurahime(tmp.path())
+        .env("PATH", "/usr/bin:/bin")
+        .args(["clean", "poetry"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("skipping") || stdout.contains("not found"),
+        "stdout: {stdout}");
+}
+
+#[test]
 fn clean_bun_dry_run_does_not_invoke_tool() {
     let tmp = TempDir::new().unwrap();
     let bin_dir = tmp.path().join("bin");

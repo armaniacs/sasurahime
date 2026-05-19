@@ -491,28 +491,42 @@ fn main() -> anyhow::Result<()> {
                 run_clean_target("cargo", |_dry| { todo!("CargoCleaner") }, dry_run)?;
             }
             CleanTarget::Docker { dry_run } => {
-                run_clean_target("docker", |_dry| { todo!("DockerCleaner") }, dry_run)?;
+                run_clean_target("docker", |dry| {
+                    cleaners::generic::GenericCleaner::docker(Box::new(SystemCommandRunner)).clean(dry)
+                }, dry_run)?;
             }
             CleanTarget::Orbstack { dry_run } => {
-                run_clean_target("orbstack", |_dry| { todo!("OrbstackCleaner") }, dry_run)?;
+                run_clean_target("orbstack", |dry| {
+                    cleaners::generic::GenericCleaner::orbstack(Box::new(SystemCommandRunner)).clean(dry)
+                }, dry_run)?;
             }
             CleanTarget::CocoaPods { dry_run } => {
-                run_clean_target("cocoapods", |_dry| { todo!("CocoaPodsCleaner") }, dry_run)?;
+                run_clean_target("cocoapods", |dry| {
+                    cleaners::generic::GenericCleaner::cocoapods(Box::new(SystemCommandRunner)).clean(dry)
+                }, dry_run)?;
             }
             CleanTarget::SwiftPM { dry_run } => {
                 run_clean_target("spm", |_dry| { todo!("SwiftPMCleaner") }, dry_run)?;
             }
             CleanTarget::Conda { dry_run } => {
-                run_clean_target("conda", |_dry| { todo!("CondaCleaner") }, dry_run)?;
+                run_clean_target("conda", |dry| {
+                    cleaners::generic::GenericCleaner::conda(Box::new(SystemCommandRunner)).clean(dry)
+                }, dry_run)?;
             }
             CleanTarget::Poetry { dry_run } => {
-                run_clean_target("poetry", |_dry| { todo!("PoetryCleaner") }, dry_run)?;
+                run_clean_target("poetry", |dry| {
+                    cleaners::generic::GenericCleaner::poetry(Box::new(SystemCommandRunner)).clean(dry)
+                }, dry_run)?;
             }
             CleanTarget::Pipx { dry_run } => {
-                run_clean_target("pipx", |_dry| { todo!("PipxCleaner") }, dry_run)?;
+                run_clean_target("pipx", |dry| {
+                    cleaners::generic::GenericCleaner::pipx(Box::new(SystemCommandRunner)).clean(dry)
+                }, dry_run)?;
             }
             CleanTarget::Deno { dry_run } => {
-                run_clean_target("deno", |_dry| { todo!("DenoCleaner") }, dry_run)?;
+                run_clean_target("deno", |dry| {
+                    cleaners::generic::GenericCleaner::deno(Box::new(SystemCommandRunner)).clean(dry)
+                }, dry_run)?;
             }
             CleanTarget::Rustup { dry_run } => {
                 run_clean_target("rustup", |_dry| { todo!("RustupCleaner") }, dry_run)?;
