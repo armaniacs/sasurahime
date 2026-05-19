@@ -3,7 +3,7 @@ use crate::command::CommandRunner;
 use crate::format::dir_size;
 use anyhow::Result;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 pub enum CleanMethod {
     Command {
@@ -85,13 +85,31 @@ impl GenericCleaner {
         Self::command_cleaner("poetry", "poetry", &["cache", "clear", "--all"], runner)
     }
 
-    pub fn node_gyp(home: &std::path::Path, runner: Box<dyn CommandRunner>) -> Self {
+    pub fn node_gyp(home: &Path, runner: Box<dyn CommandRunner>) -> Self {
         Self {
             display_name: "node-gyp",
             method: CleanMethod::DeleteDirs(vec![
                 home.join(".cache/node-gyp"),
                 home.join("Library/Caches/node-gyp"),
             ]),
+            runner,
+        }
+    }
+
+    pub fn spm_cache(home: &Path, runner: Box<dyn CommandRunner>) -> Self {
+        let cache = home.join("Library/Caches/org.swift.swiftpm");
+        Self {
+            display_name: "spm",
+            method: CleanMethod::DeleteDirs(vec![cache]),
+            runner,
+        }
+    }
+
+    pub fn cargo_registry(home: &Path, runner: Box<dyn CommandRunner>) -> Self {
+        let cache = home.join(".cargo/registry/cache");
+        Self {
+            display_name: "cargo-registry",
+            method: CleanMethod::DeleteDirs(vec![cache]),
             runner,
         }
     }

@@ -241,6 +241,22 @@ fn clean_poetry_not_found_skips() {
 }
 
 #[test]
+fn clean_spm_cache_dry_run_deletes_nothing() {
+    let tmp = TempDir::new().unwrap();
+    let spm_dir = tmp.path().join("Library/Caches/org.swift.swiftpm");
+    std::fs::create_dir_all(&spm_dir).unwrap();
+    std::fs::write(spm_dir.join("Package.resolved"), b"dummy").unwrap();
+
+    let output = sasurahime(tmp.path())
+        .args(["clean", "spm", "--dry-run"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    assert!(spm_dir.join("Package.resolved").exists(),
+        "dry-run must not delete");
+}
+
+#[test]
 fn clean_bun_dry_run_does_not_invoke_tool() {
     let tmp = TempDir::new().unwrap();
     let bin_dir = tmp.path().join("bin");

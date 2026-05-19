@@ -170,6 +170,7 @@ enum CleanTarget {
         dry_run: bool,
     },
     /// Clean SwiftPM cache
+    #[command(name = "spm")]
     SwiftPM {
         #[arg(long)]
         dry_run: bool,
@@ -506,7 +507,13 @@ fn main() -> anyhow::Result<()> {
                 }, dry_run)?;
             }
             CleanTarget::SwiftPM { dry_run } => {
-                run_clean_target("spm", |_dry| { todo!("SwiftPMCleaner") }, dry_run)?;
+                run_clean_target("spm", |dry| {
+                    cleaners::generic::GenericCleaner::spm_cache(
+                        &home,
+                        Box::new(SystemCommandRunner),
+                    )
+                    .clean(dry)
+                }, dry_run)?;
             }
             CleanTarget::Conda { dry_run } => {
                 run_clean_target("conda", |dry| {
