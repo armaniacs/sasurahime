@@ -37,8 +37,5 @@ fn cargo_dry_run_does_not_delete() {
         .output()
         .unwrap();
     assert!(output.status.success());
-    assert!(
-        reg.join("dummy.crate").exists(),
-        "dry-run must not delete"
-    );
+    assert!(reg.join("dummy.crate").exists(), "dry-run must not delete");
 }

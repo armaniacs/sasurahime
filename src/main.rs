@@ -17,12 +17,18 @@ const SUPPORTED_TARGETS: &[(&str, &str)] = &[
     ("brew", "Homebrew download cache"),
     ("browsers", "Old Puppeteer / Playwright builds"),
     ("bun", "Bun package cache"),
-    ("caches", "All generic caches (bun/go/pip/node-gyp/npm/yarn/pnpm)"),
+    (
+        "caches",
+        "All generic caches (bun/go/pip/node-gyp/npm/yarn/pnpm)",
+    ),
     ("cargo", "Cargo registry cache + target/ directories"),
     ("cocoapods", "CocoaPods cache clean --all"),
     ("conda", "Conda clean --all"),
     ("deno", "Deno cache reload"),
-    ("docker", "Docker system prune (images, containers, build cache)"),
+    (
+        "docker",
+        "Docker system prune (images, containers, build cache)",
+    ),
     ("downloads", "~/Downloads old files"),
     ("go", "Go build cache"),
     ("gradle", "Gradle old version caches"),
@@ -490,72 +496,134 @@ fn main() -> anyhow::Result<()> {
                 run_clean_target("xcode", |dry| cleaner.clean(dry), dry_run)?;
             }
             CleanTarget::Cargo { dry_run } => {
-                run_clean_target("cargo", |dry| {
-                    cleaners::cargo::CargoCleaner::new(&home, Box::new(SystemCommandRunner))
-                        .clean(dry)
-                }, dry_run)?;
+                run_clean_target(
+                    "cargo",
+                    |dry| {
+                        cleaners::cargo::CargoCleaner::new(&home, Box::new(SystemCommandRunner))
+                            .clean(dry)
+                    },
+                    dry_run,
+                )?;
             }
             CleanTarget::Docker { dry_run } => {
-                run_clean_target("docker", |dry| {
-                    cleaners::generic::GenericCleaner::docker(Box::new(SystemCommandRunner)).clean(dry)
-                }, dry_run)?;
+                run_clean_target(
+                    "docker",
+                    |dry| {
+                        cleaners::generic::GenericCleaner::docker(Box::new(SystemCommandRunner))
+                            .clean(dry)
+                    },
+                    dry_run,
+                )?;
             }
             CleanTarget::Orbstack { dry_run } => {
-                run_clean_target("orbstack", |dry| {
-                    cleaners::generic::GenericCleaner::orbstack(Box::new(SystemCommandRunner)).clean(dry)
-                }, dry_run)?;
+                run_clean_target(
+                    "orbstack",
+                    |dry| {
+                        cleaners::generic::GenericCleaner::orbstack(Box::new(SystemCommandRunner))
+                            .clean(dry)
+                    },
+                    dry_run,
+                )?;
             }
             CleanTarget::CocoaPods { dry_run } => {
-                run_clean_target("cocoapods", |dry| {
-                    cleaners::generic::GenericCleaner::cocoapods(Box::new(SystemCommandRunner)).clean(dry)
-                }, dry_run)?;
+                run_clean_target(
+                    "cocoapods",
+                    |dry| {
+                        cleaners::generic::GenericCleaner::cocoapods(Box::new(SystemCommandRunner))
+                            .clean(dry)
+                    },
+                    dry_run,
+                )?;
             }
             CleanTarget::SwiftPM { dry_run } => {
-                run_clean_target("spm", |dry| {
-                    cleaners::generic::GenericCleaner::spm_cache(
-                        &home,
-                        Box::new(SystemCommandRunner),
-                    )
-                    .clean(dry)
-                }, dry_run)?;
+                run_clean_target(
+                    "spm",
+                    |dry| {
+                        cleaners::generic::GenericCleaner::spm_cache(
+                            &home,
+                            Box::new(SystemCommandRunner),
+                        )
+                        .clean(dry)
+                    },
+                    dry_run,
+                )?;
             }
             CleanTarget::Conda { dry_run } => {
-                run_clean_target("conda", |dry| {
-                    cleaners::generic::GenericCleaner::conda(Box::new(SystemCommandRunner)).clean(dry)
-                }, dry_run)?;
+                run_clean_target(
+                    "conda",
+                    |dry| {
+                        cleaners::generic::GenericCleaner::conda(Box::new(SystemCommandRunner))
+                            .clean(dry)
+                    },
+                    dry_run,
+                )?;
             }
             CleanTarget::Poetry { dry_run } => {
-                run_clean_target("poetry", |dry| {
-                    cleaners::generic::GenericCleaner::poetry(Box::new(SystemCommandRunner)).clean(dry)
-                }, dry_run)?;
+                run_clean_target(
+                    "poetry",
+                    |dry| {
+                        cleaners::generic::GenericCleaner::poetry(Box::new(SystemCommandRunner))
+                            .clean(dry)
+                    },
+                    dry_run,
+                )?;
             }
             CleanTarget::Pipx { dry_run } => {
-                run_clean_target("pipx", |dry| {
-                    cleaners::generic::GenericCleaner::pipx(Box::new(SystemCommandRunner)).clean(dry)
-                }, dry_run)?;
+                run_clean_target(
+                    "pipx",
+                    |dry| {
+                        cleaners::generic::GenericCleaner::pipx(Box::new(SystemCommandRunner))
+                            .clean(dry)
+                    },
+                    dry_run,
+                )?;
             }
             CleanTarget::Deno { dry_run } => {
-                run_clean_target("deno", |dry| {
-                    cleaners::generic::GenericCleaner::deno(Box::new(SystemCommandRunner)).clean(dry)
-                }, dry_run)?;
+                run_clean_target(
+                    "deno",
+                    |dry| {
+                        cleaners::generic::GenericCleaner::deno(Box::new(SystemCommandRunner))
+                            .clean(dry)
+                    },
+                    dry_run,
+                )?;
             }
             CleanTarget::Rustup { dry_run } => {
-                run_clean_target("rustup", |dry| {
-                    cleaners::rustup::RustupCleaner::new(&home, Box::new(SystemCommandRunner)).clean(dry)
-                }, dry_run)?;
+                run_clean_target(
+                    "rustup",
+                    |dry| {
+                        cleaners::rustup::RustupCleaner::new(&home, Box::new(SystemCommandRunner))
+                            .clean(dry)
+                    },
+                    dry_run,
+                )?;
             }
             CleanTarget::Gradle { dry_run } => {
-                run_clean_target("gradle", |dry| {
-                    cleaners::gradle::GradleCleaner::new(&home, Box::new(SystemCommandRunner)).clean(dry)
-                }, dry_run)?;
+                run_clean_target(
+                    "gradle",
+                    |dry| {
+                        cleaners::gradle::GradleCleaner::new(&home, Box::new(SystemCommandRunner))
+                            .clean(dry)
+                    },
+                    dry_run,
+                )?;
             }
             CleanTarget::JetBrains { dry_run } => {
-                run_clean_target("jetbrains", |dry| {
-                    cleaners::gradle::JetBrainsCleaner::new(&home, Box::new(SystemCommandRunner)).clean(dry)
-                }, dry_run)?;
+                run_clean_target(
+                    "jetbrains",
+                    |dry| {
+                        cleaners::gradle::JetBrainsCleaner::new(
+                            &home,
+                            Box::new(SystemCommandRunner),
+                        )
+                        .clean(dry)
+                    },
+                    dry_run,
+                )?;
             }
             CleanTarget::Trash { dry_run } => {
-                let cleaner = cleaners::generic::GenericCleaner::trash(&home, Box::new(SystemCommandRunner));
+                let cleaner =
+                    cleaners::generic::GenericCleaner::trash(&home, Box::new(SystemCommandRunner));
                 if dry_run {
                     let result = cleaner.clean(true)?;
                     println!("Freed: {}", format::format_bytes(result.bytes_freed));
@@ -565,9 +633,17 @@ fn main() -> anyhow::Result<()> {
                 }
             }
             CleanTarget::Downloads { dry_run } => {
-                run_clean_target("downloads", |dry| {
-                    cleaners::generic::GenericCleaner::downloads(&home, Box::new(SystemCommandRunner)).clean(dry)
-                }, dry_run)?;
+                run_clean_target(
+                    "downloads",
+                    |dry| {
+                        cleaners::generic::GenericCleaner::downloads(
+                            &home,
+                            Box::new(SystemCommandRunner),
+                        )
+                        .clean(dry)
+                    },
+                    dry_run,
+                )?;
             }
         },
     }

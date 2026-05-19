@@ -291,10 +291,7 @@ fn scan_shows_progress_spinner() {
 #[test]
 fn targets_subcommand_includes_new_targets() {
     let tmp = TempDir::new().unwrap();
-    let output = sasurahime(tmp.path())
-        .arg("targets")
-        .output()
-        .unwrap();
+    let output = sasurahime(tmp.path()).arg("targets").output().unwrap();
 
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);

@@ -49,10 +49,7 @@ impl Cleaner for CargoCleaner {
         let reg = self.home.join(".cargo/registry/cache");
         let reg_size = if reg.exists() {
             let s = dir_size(&reg);
-            println!(
-                "[cargo] registry cache: {}",
-                crate::format::format_bytes(s)
-            );
+            println!("[cargo] registry cache: {}", crate::format::format_bytes(s));
             s
         } else {
             0

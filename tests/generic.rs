@@ -155,8 +155,10 @@ fn clean_deno_not_found_skips() {
         .unwrap();
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("skipping") || stdout.contains("not found"),
-        "stdout: {stdout}");
+    assert!(
+        stdout.contains("skipping") || stdout.contains("not found"),
+        "stdout: {stdout}"
+    );
 }
 
 #[test]
@@ -168,8 +170,10 @@ fn clean_pipx_not_found_skips() {
         .unwrap();
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("skipping") || stdout.contains("not found"),
-        "stdout: {stdout}");
+    assert!(
+        stdout.contains("skipping") || stdout.contains("not found"),
+        "stdout: {stdout}"
+    );
 }
 
 #[test]
@@ -182,8 +186,10 @@ fn clean_docker_not_found_skips() {
         .unwrap();
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("skipping") || stdout.contains("not found"),
-        "stdout: {stdout}");
+    assert!(
+        stdout.contains("skipping") || stdout.contains("not found"),
+        "stdout: {stdout}"
+    );
 }
 
 #[test]
@@ -195,8 +201,10 @@ fn clean_orbstack_not_found_skips() {
         .unwrap();
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("skipping") || stdout.contains("not found"),
-        "stdout: {stdout}");
+    assert!(
+        stdout.contains("skipping") || stdout.contains("not found"),
+        "stdout: {stdout}"
+    );
 }
 
 #[test]
@@ -209,8 +217,10 @@ fn clean_cocoapods_not_found_skips() {
         .unwrap();
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("skipping") || stdout.contains("not found"),
-        "stdout: {stdout}");
+    assert!(
+        stdout.contains("skipping") || stdout.contains("not found"),
+        "stdout: {stdout}"
+    );
 }
 
 #[test]
@@ -222,8 +232,10 @@ fn clean_conda_not_found_skips() {
         .unwrap();
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("skipping") || stdout.contains("not found"),
-        "stdout: {stdout}");
+    assert!(
+        stdout.contains("skipping") || stdout.contains("not found"),
+        "stdout: {stdout}"
+    );
 }
 
 #[test]
@@ -236,8 +248,10 @@ fn clean_poetry_not_found_skips() {
         .unwrap();
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("skipping") || stdout.contains("not found"),
-        "stdout: {stdout}");
+    assert!(
+        stdout.contains("skipping") || stdout.contains("not found"),
+        "stdout: {stdout}"
+    );
 }
 
 #[test]
@@ -252,8 +266,10 @@ fn clean_spm_cache_dry_run_deletes_nothing() {
         .output()
         .unwrap();
     assert!(output.status.success());
-    assert!(spm_dir.join("Package.resolved").exists(),
-        "dry-run must not delete");
+    assert!(
+        spm_dir.join("Package.resolved").exists(),
+        "dry-run must not delete"
+    );
 }
 
 #[test]

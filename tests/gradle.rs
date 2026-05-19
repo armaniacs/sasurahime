@@ -33,8 +33,10 @@ fn gradle_keeps_highest_version() {
         .unwrap();
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("8.10.1") || stdout.contains("8.8.0"),
-        "must show old versions: {stdout}");
+    assert!(
+        stdout.contains("8.10.1") || stdout.contains("8.8.0"),
+        "must show old versions: {stdout}"
+    );
 }
 
 #[test]
@@ -51,5 +53,8 @@ fn jetbrains_keeps_highest_per_ide() {
         .unwrap();
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("GoLand2024.2"), "old GoLand must be removed: {stdout}");
+    assert!(
+        stdout.contains("GoLand2024.2"),
+        "old GoLand must be removed: {stdout}"
+    );
 }
