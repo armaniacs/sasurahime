@@ -389,6 +389,7 @@ fn clean_simulator_not_found_exits_zero() {
     assert!(stdout.contains("not found") || stdout.contains("skipping"));
 }
 
+#[test]
 fn scan_shows_colima_for_existing_dir() {
     let tmp = TempDir::new().unwrap();
     fs::create_dir_all(tmp.path().join(".colima/_lima/colima")).unwrap();
@@ -402,4 +403,48 @@ fn scan_shows_colima_for_existing_dir() {
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("colima"), "scan output should include colima:\n{stdout}");
+}
+
+#[test]
+fn clean_vscode_extensions_not_found_exits_zero() {
+    let tmp = TempDir::new().unwrap();
+    let output = sasurahime(tmp.path())
+        .env("PATH", "/usr/bin:/bin")
+        .args(["clean", "vscode-extensions"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+}
+
+#[test]
+fn clean_maven_not_found_exits_zero() {
+    let tmp = TempDir::new().unwrap();
+    let output = sasurahime(tmp.path())
+        .env("PATH", "/usr/bin:/bin")
+        .args(["clean", "maven"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+}
+
+#[test]
+fn clean_terraform_not_found_exits_zero() {
+    let tmp = TempDir::new().unwrap();
+    let output = sasurahime(tmp.path())
+        .env("PATH", "/usr/bin:/bin")
+        .args(["clean", "terraform"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+}
+
+#[test]
+fn clean_flutter_not_found_exits_zero() {
+    let tmp = TempDir::new().unwrap();
+    let output = sasurahime(tmp.path())
+        .env("PATH", "/usr/bin:/bin")
+        .args(["clean", "flutter"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
 }

@@ -162,6 +162,53 @@ impl GenericCleaner {
         }
     }
 
+    pub fn vscode_extensions(home: &Path, runner: Box<dyn CommandRunner>) -> Self {
+        let cache = home.join(".vscode/extensions");
+        Self {
+            display_name: "vscode-extensions",
+            method: CleanMethod::DeleteDirs(vec![cache]),
+            runner,
+        }
+    }
+
+    pub fn maven(home: &Path, runner: Box<dyn CommandRunner>) -> Self {
+        Self {
+            display_name: "maven",
+            method: CleanMethod::CommandWithDetectDir {
+                program: "mvn",
+                args: &["dependency:purge-local-repository"],
+                detect_dir: home.join(".m2/repository"),
+            },
+            runner,
+        }
+    }
+
+    pub fn terraform(home: &Path, runner: Box<dyn CommandRunner>) -> Self {
+        let cache = std::env::var("TF_PLUGIN_CACHE_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| home.join(".terraform.d/plugin-cache"));
+        Self {
+            display_name: "terraform",
+            method: CleanMethod::DeleteDirs(vec![cache]),
+            runner,
+        }
+    }
+
+    pub fn flutter(home: &Path, runner: Box<dyn CommandRunner>) -> Self {
+        let cache = std::env::var("PUB_CACHE")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| home.join(".pub-cache"));
+        Self {
+            display_name: "flutter",
+            method: CleanMethod::CommandWithDetectDir {
+                program: "dart",
+                args: &["pub", "cache", "clean"],
+                detect_dir: cache,
+            },
+            runner,
+        }
+    }
+
     pub fn act(home: &Path, runner: Box<dyn CommandRunner>) -> Self {
         let cache_dir = match std::env::var("ACT_CACHE_DIR") {
             Ok(dir) => {

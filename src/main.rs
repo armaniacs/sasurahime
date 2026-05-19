@@ -117,6 +117,18 @@ macro_rules! cmd_name {
     (Downloads) => {
         "downloads"
     };
+    (VscodeExtensions) => {
+        "vscode-extensions"
+    };
+    (Maven) => {
+        "maven"
+    };
+    (Terraform) => {
+        "terraform"
+    };
+    (Flutter) => {
+        "flutter"
+    };
 }
 
 /// Generate dispatch_clean and dispatch helpers from the same definition table.
@@ -262,6 +274,18 @@ define_cleaners! {
 
     Downloads : "downloads" => "~/Downloads old files";
     (|home, _config| cleaners::generic::GenericCleaner::downloads(home, Box::new(SystemCommandRunner))),
+
+    VscodeExtensions : "vscode-extensions" => "VS Code extensions cache";
+    (|home, _config| cleaners::generic::GenericCleaner::vscode_extensions(home, Box::new(SystemCommandRunner))),
+
+    Maven : "maven" => "Maven local repository (mvn dependency:purge-local-repository)";
+    (|home, _config| cleaners::generic::GenericCleaner::maven(home, Box::new(SystemCommandRunner))),
+
+    Terraform : "terraform" => "Terraform provider plugin cache";
+    (|home, _config| cleaners::generic::GenericCleaner::terraform(home, Box::new(SystemCommandRunner))),
+
+    Flutter : "flutter" => "Flutter/Dart pub cache (dart pub cache clean)";
+    (|home, _config| cleaners::generic::GenericCleaner::flutter(home, Box::new(SystemCommandRunner))),
 
     ;
     /// Clean all generic caches (bun, go, pip, node-gyp, npm, yarn, pnpm)
