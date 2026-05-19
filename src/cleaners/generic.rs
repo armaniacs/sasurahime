@@ -78,6 +78,18 @@ impl GenericCleaner {
         Self::command_cleaner("orbstack", "orb", &["prune"], runner)
     }
 
+    pub fn simulator(home: &Path, runner: Box<dyn CommandRunner>) -> Self {
+        Self {
+            display_name: "simulator",
+            method: CleanMethod::CommandWithDetectDir {
+                program: "xcrun",
+                args: &["simctl", "delete", "unavailable"],
+                detect_dir: home.join("Library/Developer/CoreSimulator"),
+            },
+            runner,
+        }
+    }
+
     pub fn colima_prune(home: &Path, runner: Box<dyn CommandRunner>) -> Self {
         Self {
             display_name: "colima",

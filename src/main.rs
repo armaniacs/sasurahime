@@ -99,6 +99,9 @@ macro_rules! cmd_name {
     (Rustup) => {
         "rustup"
     };
+    (Simulator) => {
+        "simulator"
+    };
     (Gradle) => {
         "gradle"
     };
@@ -241,6 +244,9 @@ define_cleaners! {
 
     Rustup : "rustup" => "Unused Rust toolchains";
     (|home, _config| cleaners::rustup::RustupCleaner::new(home, Box::new(SystemCommandRunner))),
+
+    Simulator : "simulator" => "iOS Simulator cache (xcrun simctl delete unavailable)";
+    (|home, _config| cleaners::generic::GenericCleaner::simulator(home, Box::new(SystemCommandRunner))),
 
     Gradle : "gradle" => "Gradle old version caches";
     (|home, _config| cleaners::gradle::GradleCleaner::new(home, Box::new(SystemCommandRunner))),

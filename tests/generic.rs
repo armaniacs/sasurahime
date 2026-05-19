@@ -377,6 +377,18 @@ fn clean_colima_not_found_exits_zero() {
 }
 
 #[test]
+fn clean_simulator_not_found_exits_zero() {
+    let tmp = TempDir::new().unwrap();
+    let output = sasurahime(tmp.path())
+        .env("PATH", "/tmp")
+        .args(["clean", "simulator"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("not found") || stdout.contains("skipping"));
+}
+
 fn scan_shows_colima_for_existing_dir() {
     let tmp = TempDir::new().unwrap();
     fs::create_dir_all(tmp.path().join(".colima/_lima/colima")).unwrap();
