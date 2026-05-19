@@ -321,3 +321,73 @@ fn downloads_dry_run_deletes_nothing() {
     assert!(output.status.success());
     assert!(dl.join("readme.pdf").exists(), "dry-run must not delete");
 }
+
+#[test]
+fn clean_colima_calls_prune_all() {
+    let tmp = TempDir::new().unwrap();
+    let bin_dir = tmp.path().join("bin");
+    fs::create_dir_all(&bin_dir).unwrap();
+    install_fake_tool(&bin_dir, "colima");
+    fs::create_dir_all(tmp.path().join(".colima/_lima/colima")).unwrap();
+    fs::write(tmp.path().join(".colima/_lima/colima/dummy.img"), b"x").unwrap();
+
+    let original_path = std::env::var("PATH").unwrap_or_default();
+    let output = sasurahime(tmp.path())
+        .env("PATH", format!("{}:{original_path}", bin_dir.display()))
+        .args(["clean", "colima"])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let calls = recorded_calls(&bin_dir, "colima");
+    assert!(calls.contains("prune --all"), "expected 'prune --all', got: {calls}");
+}
+
+#[test]
+fn clean_colima_dry_run_does_not_invoke() {
+    let tmp = TempDir::new().unwrap();
+    let bin_dir = tmp.path().join("bin");
+    fs::create_dir_all(&bin_dir).unwrap();
+    install_fake_tool(&bin_dir, "colima");
+    fs::create_dir_all(tmp.path().join(".colima/_lima/colima")).unwrap();
+
+    let original_path = std::env::var("PATH").unwrap_or_default();
+    let output = sasurahime(tmp.path())
+        .env("PATH", format!("{}:{original_path}", bin_dir.display()))
+        .args(["clean", "colima", "--dry-run"])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    assert!(!bin_dir.join("calls_colima.txt").exists(), "colima must not be invoked in dry-run");
+}
+
+#[test]
+fn clean_colima_not_found_exits_zero() {
+    let tmp = TempDir::new().unwrap();
+    let output = sasurahime(tmp.path())
+        .env("PATH", "/usr/bin:/bin")
+        .args(["clean", "colima"])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("not found") || stdout.contains("skipping"));
+}
+
+#[test]
+fn scan_shows_colima_for_existing_dir() {
+    let tmp = TempDir::new().unwrap();
+    fs::create_dir_all(tmp.path().join(".colima/_lima/colima")).unwrap();
+    fs::write(tmp.path().join(".colima/colima.yaml"), b"config").unwrap();
+
+    let output = sasurahime(tmp.path())
+        .arg("scan")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("colima"), "scan output should include colima:\n{stdout}");
+}

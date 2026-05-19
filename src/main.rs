@@ -7,8 +7,8 @@ mod interactive;
 mod progress;
 mod scanner;
 
-use cleaner::{CleanResult, Cleaner};
 use clap::{Parser, Subcommand};
+use cleaner::{CleanResult, Cleaner};
 use command::SystemCommandRunner;
 use dirs::home_dir;
 use std::path::PathBuf;
@@ -30,33 +30,90 @@ use std::path::PathBuf;
 /// ```
 /// Helper: extract the CLI command name for a standard CleanTarget variant.
 macro_rules! cmd_name {
-    (Act) => { "act" };
-    (Uv) => { "uv" };
-    (Brew) => { "brew" };
-    (Mise) => { "mise" };
-    (Browsers) => { "browsers" };
-    (Bun) => { "bun" };
-    (Go) => { "go" };
-    (Pip) => { "pip" };
-    (NodeGyp) => { "node-gyp" };
-    (Npm) => { "npm" };
-    (Yarn) => { "yarn" };
-    (Pnpm) => { "pnpm" };
-    (Cargo) => { "cargo" };
-    (Docker) => { "docker" };
-    (Orbstack) => { "orbstack" };
-    (CocoaPods) => { "cocoa-pods" };
-    (SwiftPM) => { "spm" };
-    (Conda) => { "conda" };
-    (Poetry) => { "poetry" };
-    (Pipx) => { "pipx" };
-    (Deno) => { "deno" };
-    (Rustup) => { "rustup" };
-    (Gradle) => { "gradle" };
-    (Huggingface) => { "huggingface" };
-    (PreCommit) => { "pre-commit" };
-    (JetBrains) => { "jetbrains" };
-    (Downloads) => { "downloads" };
+    (Act) => {
+        "act"
+    };
+    (Uv) => {
+        "uv"
+    };
+    (Brew) => {
+        "brew"
+    };
+    (Mise) => {
+        "mise"
+    };
+    (Browsers) => {
+        "browsers"
+    };
+    (Bun) => {
+        "bun"
+    };
+    (Go) => {
+        "go"
+    };
+    (Pip) => {
+        "pip"
+    };
+    (NodeGyp) => {
+        "node-gyp"
+    };
+    (Npm) => {
+        "npm"
+    };
+    (Yarn) => {
+        "yarn"
+    };
+    (Pnpm) => {
+        "pnpm"
+    };
+    (Cargo) => {
+        "cargo"
+    };
+    (Docker) => {
+        "docker"
+    };
+    (Orbstack) => {
+        "orbstack"
+    };
+    (CocoaPods) => {
+        "cocoa-pods"
+    };
+    (Colima) => {
+        "colima"
+    };
+    (SwiftPM) => {
+        "spm"
+    };
+    (Conda) => {
+        "conda"
+    };
+    (Poetry) => {
+        "poetry"
+    };
+    (Pipx) => {
+        "pipx"
+    };
+    (Deno) => {
+        "deno"
+    };
+    (Rustup) => {
+        "rustup"
+    };
+    (Gradle) => {
+        "gradle"
+    };
+    (Huggingface) => {
+        "huggingface"
+    };
+    (PreCommit) => {
+        "pre-commit"
+    };
+    (JetBrains) => {
+        "jetbrains"
+    };
+    (Downloads) => {
+        "downloads"
+    };
 }
 
 /// Generate dispatch_clean and dispatch helpers from the same definition table.
@@ -163,6 +220,9 @@ define_cleaners! {
 
     CocoaPods : "cocoa-pods" => "CocoaPods cache clean --all";
     (|_home, _config| cleaners::generic::GenericCleaner::cocoapods(Box::new(SystemCommandRunner))),
+
+    Colima : "colima" => "Colima VM disk cache prune";
+    (|home, _config| cleaners::generic::GenericCleaner::colima_prune(home, Box::new(SystemCommandRunner))),
 
     SwiftPM : "spm" => "SwiftPM cache directory";
     (|home, _config| cleaners::generic::GenericCleaner::spm_cache(home, Box::new(SystemCommandRunner))),
@@ -289,11 +349,17 @@ impl CleanTarget {
 // Manual SUPPORTED_TARGETS entries for special targets not in the macro table.
 fn extra_targets() -> &'static [(&'static str, &'static str)] {
     &[
-        ("caches", "All generic caches (bun/go/pip/node-gyp/npm/yarn/pnpm)"),
+        (
+            "caches",
+            "All generic caches (bun/go/pip/node-gyp/npm/yarn/pnpm)",
+        ),
         ("logs", "Log files older than N days"),
         ("xcode", "Xcode DerivedData project directories"),
         ("trash", "~/.Trash size (scan only)"),
-        ("library-logs", "Analyze and clean ~/Library/Logs/ with heuristic recommendations"),
+        (
+            "library-logs",
+            "Analyze and clean ~/Library/Logs/ with heuristic recommendations",
+        ),
     ]
 }
 
@@ -356,6 +422,10 @@ fn all_cleaners(home: &std::path::Path, config: &config::Config) -> Vec<Box<dyn 
         )),
         // Sprint 5 — library-logs
         Box::new(cleaners::library_logs::LibraryLogsCleaner::new(
+            home,
+            Box::new(SystemCommandRunner),
+        )),
+        Box::new(cleaners::generic::GenericCleaner::colima_prune(
             home,
             Box::new(SystemCommandRunner),
         )),
@@ -502,9 +572,17 @@ fn main() -> anyhow::Result<()> {
                             Box::new(SystemCommandRunner),
                         );
                         if all {
-                            run_clean_target("library-logs", move |dry| cleaner.clean_all(dry), dry_run)?;
+                            run_clean_target(
+                                "library-logs",
+                                move |dry| cleaner.clean_all(dry),
+                                dry_run,
+                            )?;
                         } else {
-                            run_clean_target("library-logs", move |dry| cleaner.clean(dry), dry_run)?;
+                            run_clean_target(
+                                "library-logs",
+                                move |dry| cleaner.clean(dry),
+                                dry_run,
+                            )?;
                         }
                     }
                     _ => unreachable!(),

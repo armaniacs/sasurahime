@@ -11,11 +11,7 @@ fn sasurahime(home: &std::path::Path) -> Command {
 fn create_large_log(home: &std::path::Path) {
     let dir = home.join("Library/Logs/BloatApp");
     fs::create_dir_all(&dir).unwrap();
-    fs::write(
-        dir.join("crash.log"),
-        vec![0u8; (100 * 1024 * 1024) + 1],
-    )
-    .unwrap();
+    fs::write(dir.join("crash.log"), vec![0u8; (100 * 1024 * 1024) + 1]).unwrap();
 }
 
 fn create_small_log(home: &std::path::Path) {
@@ -76,10 +72,7 @@ fn scan_shows_library_logs_in_scan_output() {
     let tmp = TempDir::new().unwrap();
     create_large_log(tmp.path());
 
-    let output = sasurahime(tmp.path())
-        .arg("scan")
-        .output()
-        .unwrap();
+    let output = sasurahime(tmp.path()).arg("scan").output().unwrap();
 
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);

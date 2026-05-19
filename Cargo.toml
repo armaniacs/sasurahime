@@ -18,6 +18,7 @@ comfy-table = "7"
 dirs        = "5"
 toml        = "0.8"
 serde       = { version = "1", features = ["derive"] }
+wait-timeout = "0.2"
 
 [profile.release]
 opt-level      = "s"      # Balance size and speed for CLI

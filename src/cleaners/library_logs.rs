@@ -207,9 +207,7 @@ impl Cleaner for LibraryLogsCleaner {
         let mut total_freed: u64 = 0;
         for entry in &selected {
             let path_str = entry.path.to_string_lossy();
-            let _ = self
-                .runner
-                .run("chflags", &["-R", "nouchg", &path_str]);
+            let _ = self.runner.run("chflags", &["-R", "nouchg", &path_str]);
             if let Err(e) = fs::remove_dir_all(&entry.path) {
                 eprintln!(
                     "[library-logs] error removing {}: {e}",
@@ -310,11 +308,7 @@ impl LibraryLogsCleaner {
         let items: Vec<String> = entries
             .iter()
             .map(|e| {
-                let name = e
-                    .path
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("?");
+                let name = e.path.file_name().and_then(|n| n.to_str()).unwrap_or("?");
                 let tags: Vec<String> = e
                     .reasons
                     .iter()
@@ -435,10 +429,11 @@ mod tests {
 
     #[test]
     fn classify_entry_oversized_only() {
-        let reasons =
-            classify_entry(Path::new("/tmp"), 200, SystemTime::now(), 90, 100);
+        let reasons = classify_entry(Path::new("/tmp"), 200, SystemTime::now(), 90, 100);
         assert!(reasons.contains(&DeleteReason::Oversized { bytes: 200 }));
-        assert!(!reasons.iter().any(|r| matches!(r, DeleteReason::Stale { .. })));
+        assert!(!reasons
+            .iter()
+            .any(|r| matches!(r, DeleteReason::Stale { .. })));
     }
 
     #[test]
@@ -452,8 +447,7 @@ mod tests {
 
     #[test]
     fn classify_entry_no_reasons() {
-        let reasons =
-            classify_entry(Path::new("/tmp"), 1, SystemTime::now(), 90, u64::MAX);
+        let reasons = classify_entry(Path::new("/tmp"), 1, SystemTime::now(), 90, u64::MAX);
         assert!(reasons.is_empty());
     }
 

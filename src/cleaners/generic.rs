@@ -10,6 +10,11 @@ pub enum CleanMethod {
         program: &'static str,
         args: &'static [&'static str],
     },
+    CommandWithDetectDir {
+        program: &'static str,
+        args: &'static [&'static str],
+        detect_dir: PathBuf,
+    },
     DeleteDirs(Vec<PathBuf>),
 }
 
@@ -66,11 +71,23 @@ impl GenericCleaner {
     }
 
     pub fn docker(runner: Box<dyn CommandRunner>) -> Self {
-        Self::command_cleaner("docker", "docker", &["system", "prune", "-af"], runner)
+        Self::command_cleaner("docker", "docker", &["system", "prune", "-f"], runner)
     }
 
     pub fn orbstack(runner: Box<dyn CommandRunner>) -> Self {
         Self::command_cleaner("orbstack", "orb", &["prune"], runner)
+    }
+
+    pub fn colima_prune(home: &Path, runner: Box<dyn CommandRunner>) -> Self {
+        Self {
+            display_name: "colima",
+            method: CleanMethod::CommandWithDetectDir {
+                program: "colima",
+                args: &["prune", "--all"],
+                detect_dir: home.join(".colima"),
+            },
+            runner,
+        }
     }
 
     pub fn cocoapods(runner: Box<dyn CommandRunner>) -> Self {
@@ -132,6 +149,29 @@ impl GenericCleaner {
             runner,
         }
     }
+
+    pub fn act(home: &Path, runner: Box<dyn CommandRunner>) -> Self {
+        let cache_dir = match std::env::var("ACT_CACHE_DIR") {
+            Ok(dir) => {
+                let p = PathBuf::from(&dir);
+                if !is_safe_delete_target(&p) {
+                    eprintln!(
+                        "[act] WARNING: ACT_CACHE_DIR={} points to an unsafe path, using default",
+                        dir
+                    );
+                    home.join(".cache/act")
+                } else {
+                    p
+                }
+            }
+            Err(_) => home.join(".cache/act"),
+        };
+        Self {
+            display_name: "act",
+            method: CleanMethod::DeleteDirs(vec![cache_dir]),
+            runner,
+        }
+    }
 }
 
 impl Cleaner for GenericCleaner {
@@ -148,10 +188,26 @@ impl Cleaner for GenericCleaner {
                         status: ScanStatus::NotFound,
                     };
                 }
-                // Size is unknown without running the tool; report as pruneable.
                 ScanResult {
                     name: self.name(),
                     status: ScanStatus::Pruneable(0),
+                }
+            }
+            CleanMethod::CommandWithDetectDir { detect_dir, .. } => {
+                if !detect_dir.exists() {
+                    return ScanResult {
+                        name: self.name(),
+                        status: ScanStatus::NotFound,
+                    };
+                }
+                let bytes = dir_size(detect_dir);
+                ScanResult {
+                    name: self.name(),
+                    status: if bytes > 0 {
+                        ScanStatus::Pruneable(bytes)
+                    } else {
+                        ScanStatus::Clean
+                    },
                 }
             }
             CleanMethod::DeleteDirs(dirs) => {
@@ -198,6 +254,31 @@ impl Cleaner for GenericCleaner {
                     bytes_freed: 0,
                 })
             }
+            CleanMethod::CommandWithDetectDir { program, args, detect_dir } => {
+                let size_before = if detect_dir.exists() { dir_size(detect_dir) } else { 0 };
+
+                if !self.runner.exists(program) {
+                    println!("{}: not found, skipping", self.display_name);
+                    return Ok(CleanResult { name: self.name(), bytes_freed: 0 });
+                }
+                if dry_run {
+                    println!("[dry-run] would run: {program} {}", args.join(" "));
+                    if size_before > 0 {
+                        println!(
+                            "[dry-run] would free: {}",
+                            crate::format::format_bytes(size_before)
+                        );
+                    }
+                    return Ok(CleanResult { name: self.name(), bytes_freed: 0 });
+                }
+                self.runner.run(program, args)?;
+                let size_after = if detect_dir.exists() { dir_size(detect_dir) } else { 0 };
+                let freed = size_before.saturating_sub(size_after);
+                if freed > 0 {
+                    println!("Freed: {}", crate::format::format_bytes(freed));
+                }
+                Ok(CleanResult { name: self.name(), bytes_freed: freed })
+            }
             CleanMethod::DeleteDirs(dirs) => {
                 let mut freed: u64 = 0;
                 for dir in dirs {
@@ -208,9 +289,14 @@ impl Cleaner for GenericCleaner {
                     if dry_run {
                         println!("[dry-run] would remove: {}", dir.display());
                     } else {
-                        // GAP-010: clear uchg flag before removal (macOS safety rule)
                         let path_str = dir.to_string_lossy();
-                        let _ = self.runner.run("chmod", &["-R", "nouchg", &path_str]);
+                        if let Err(e) = self.runner.run("chflags", &["-R", "nouchg", &path_str]) {
+                            eprintln!(
+                                "[{}] warning: chflags failed for {}: {e}",
+                                self.display_name,
+                                dir.display()
+                            );
+                        }
                         fs::remove_dir_all(dir)
                             .map_err(|e| anyhow::anyhow!("remove_dir_all {:?}: {}", dir, e))?;
                         freed += size;
@@ -223,5 +309,218 @@ impl Cleaner for GenericCleaner {
                 })
             }
         }
+    }
+}
+
+pub fn is_safe_delete_target(path: &Path) -> bool {
+    let check = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let path_str = check.to_string_lossy();
+    if path_str.is_empty() {
+        return false;
+    }
+    if path_str.contains("..") {
+        return false;
+    }
+    check != Path::new("/")
+        && !check.starts_with("/System")
+        && !check.starts_with("/etc")
+        && !check.starts_with("/var")
+        && !check.starts_with("/tmp")
+        && !check.starts_with("/private")
+        && !check.starts_with("/dev")
+        && !check.starts_with("/proc")
+        && !check.starts_with("/Applications")
+        && !check.starts_with("/usr")
+}
+
+/// Configuration for [`clean_cli_or_fallback`].
+pub struct CliFallbackConfig<'a> {
+    pub tool: &'a str,
+    pub args: &'a [&'a str],
+    /// Whether to recreate the cache directory after fallback deletion.
+    pub recreate: bool,
+}
+
+/// Run a CLI tool to clean a cache directory, falling back to direct deletion
+/// when the tool is not installed.
+///
+/// This eliminates the duplicated "CLI first → fallback" pattern between
+/// `huggingface.rs` and `pre_commit.rs`.
+pub fn clean_cli_or_fallback(
+    name: &'static str,
+    dir: &Path,
+    runner: &dyn CommandRunner,
+    config: &CliFallbackConfig,
+    dry_run: bool,
+) -> Result<CleanResult> {
+    if !dir.exists() {
+        return Ok(CleanResult {
+            name,
+            bytes_freed: 0,
+        });
+    }
+
+    // Prefer CLI if available
+    if runner.exists(config.tool) {
+        if dry_run {
+            println!(
+                "[dry-run] [{name}] would run: {} {}",
+                config.tool,
+                config.args.join(" ")
+            );
+            let size = dir_size(dir);
+            println!(
+                "[dry-run] [{name}] would free: {}",
+                crate::format::format_bytes(size)
+            );
+            return Ok(CleanResult {
+                name,
+                bytes_freed: 0,
+            });
+        }
+        let size_before = dir_size(dir);
+        let output = runner.run(config.tool, config.args)?;
+        if !output.status.success() {
+            anyhow::bail!(
+                "{} failed with exit code {:?}",
+                config.tool,
+                output.status.code()
+            );
+        }
+        println!("[{name}] ran {} {}", config.tool, config.args.join(" "));
+        return Ok(CleanResult {
+            name,
+            bytes_freed: size_before,
+        });
+    }
+
+    // Fallback: delete directly
+    let size = dir_size(dir);
+    if dry_run {
+        println!(
+            "[dry-run] [{name}] would remove: {} ({})",
+            dir.display(),
+            crate::format::format_bytes(size)
+        );
+        return Ok(CleanResult {
+            name,
+            bytes_freed: 0,
+        });
+    }
+
+    let path_str = dir.to_string_lossy();
+    if let Err(e) = runner.run("chflags", &["-R", "nouchg", &path_str]) {
+        eprintln!(
+            "[{name}] warning: chflags failed for {}: {e}",
+            dir.display()
+        );
+    }
+    fs::remove_dir_all(dir).map_err(|e| anyhow::anyhow!("remove_dir_all {:?}: {}", dir, e))?;
+    if config.recreate {
+        fs::create_dir_all(dir)?;
+    }
+    println!("[{name}] removed cache: {}", dir.display());
+    Ok(CleanResult {
+        name,
+        bytes_freed: size,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn is_safe_delete_target_rejects_root() {
+        assert!(!is_safe_delete_target(Path::new("/")));
+    }
+
+    #[test]
+    fn is_safe_delete_target_rejects_system_dirs() {
+        assert!(!is_safe_delete_target(Path::new("/System/Library")));
+        assert!(!is_safe_delete_target(Path::new("/etc/hosts")));
+        assert!(!is_safe_delete_target(Path::new("/var/log")));
+        assert!(!is_safe_delete_target(Path::new("/Applications/Xcode.app")));
+    }
+
+    #[test]
+    fn is_safe_delete_target_rejects_empty() {
+        assert!(!is_safe_delete_target(Path::new("")));
+    }
+
+    #[test]
+    fn is_safe_delete_target_allows_home_cache() {
+        assert!(is_safe_delete_target(Path::new("/Users/test/.cache/act")));
+        assert!(is_safe_delete_target(Path::new(
+            "/Users/test/Library/Caches"
+        )));
+    }
+
+    #[test]
+    fn is_safe_delete_target_rejects_tmp() {
+        assert!(!is_safe_delete_target(Path::new("/tmp")));
+        assert!(!is_safe_delete_target(Path::new("/tmp/safe-dir")));
+    }
+
+    #[test]
+    fn is_safe_delete_target_rejects_private_tmp() {
+        assert!(!is_safe_delete_target(Path::new("/private/tmp")));
+        assert!(!is_safe_delete_target(Path::new("/dev/null")));
+        assert!(!is_safe_delete_target(Path::new("/proc/self")));
+    }
+
+    #[test]
+    fn is_safe_delete_target_rejects_usr() {
+        assert!(!is_safe_delete_target(Path::new("/usr/local")));
+        assert!(!is_safe_delete_target(Path::new("/usr/lib")));
+    }
+
+    #[test]
+    fn is_safe_delete_target_rejects_dotdot_traversal() {
+        assert!(!is_safe_delete_target(Path::new(
+            "/Users/foo/../../etc/passwd"
+        )));
+        assert!(!is_safe_delete_target(Path::new("/tmp/../etc")));
+    }
+
+    #[test]
+    fn is_safe_delete_target_canonicalize_follows_symlink() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let target = tmp.path().join("symlink_to_etc");
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink("/etc", &target).unwrap();
+            assert!(
+                !is_safe_delete_target(&target),
+                "symlink to /etc must be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn is_safe_delete_target_rejects_dotdot_redirection() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let sub = tmp.path().join("sub");
+        fs::create_dir_all(&sub).unwrap();
+        let traversed = sub.join("../../etc");
+        assert!(
+            !is_safe_delete_target(&traversed),
+            "path with .. to /etc must be rejected"
+        );
+    }
+
+    #[test]
+    fn act_path_validates_env_var_and_falls_back() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let prev = std::env::var("ACT_CACHE_DIR").ok();
+        std::env::set_var("ACT_CACHE_DIR", "/");
+        let cleaner =
+            GenericCleaner::act(tmp.path(), Box::new(crate::command::SystemCommandRunner));
+        match prev {
+            Some(v) => std::env::set_var("ACT_CACHE_DIR", v),
+            None => std::env::remove_var("ACT_CACHE_DIR"),
+        }
+        let result = cleaner.detect();
+        assert!(matches!(result.status, ScanStatus::NotFound));
     }
 }

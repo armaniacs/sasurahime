@@ -301,6 +301,10 @@ fn targets_subcommand_includes_new_targets() {
     assert!(stdout.contains("rustup"), "stdout: {stdout}");
     assert!(stdout.contains("gradle"), "stdout: {stdout}");
     assert!(stdout.contains("spm"), "stdout: {stdout}");
+    // Sprint 5 targets
+    assert!(stdout.contains("act"), "stdout: {stdout}");
+    assert!(stdout.contains("huggingface"), "stdout: {stdout}");
+    assert!(stdout.contains("pre-commit"), "stdout: {stdout}");
 }
 
 #[test]
