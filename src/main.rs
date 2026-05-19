@@ -206,6 +206,7 @@ enum CleanTarget {
         dry_run: bool,
     },
     /// Clean JetBrains IDE caches
+    #[command(name = "jetbrains")]
     JetBrains {
         #[arg(long)]
         dry_run: bool,
@@ -544,10 +545,14 @@ fn main() -> anyhow::Result<()> {
                 }, dry_run)?;
             }
             CleanTarget::Gradle { dry_run } => {
-                run_clean_target("gradle", |_dry| { todo!("GradleCleaner") }, dry_run)?;
+                run_clean_target("gradle", |dry| {
+                    cleaners::gradle::GradleCleaner::new(&home, Box::new(SystemCommandRunner)).clean(dry)
+                }, dry_run)?;
             }
             CleanTarget::JetBrains { dry_run } => {
-                run_clean_target("jetbrains", |_dry| { todo!("JetBrainsCleaner") }, dry_run)?;
+                run_clean_target("jetbrains", |dry| {
+                    cleaners::gradle::JetBrainsCleaner::new(&home, Box::new(SystemCommandRunner)).clean(dry)
+                }, dry_run)?;
             }
             CleanTarget::Trash { dry_run } => {
                 run_clean_target("trash", |_dry| { todo!("TrashCleaner") }, dry_run)?;
