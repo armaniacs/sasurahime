@@ -38,22 +38,40 @@ Total reclaimable     43.7 GB
 
 Clean a single cache target. Replace `<target>` with one of the names below.
 
-| Target      | What it removes                                           |
-|-------------|-----------------------------------------------------------|
-| `uv`        | Stale `simple-vN` index dirs + `uv cache prune --force`   |
-| `brew`      | `brew cleanup -s --prune=all`                             |
-| `mise`      | Unused runtime versions under `~/.local/share/mise/installs/` |
-| `browsers`  | Old Puppeteer Chrome / Playwright (`ms-playwright*`) builds |
-| `bun`       | `bun pm cache rm`                                         |
-| `go`        | `go clean -cache`                                         |
-| `pip`       | `pip cache purge`                                         |
-| `node-gyp`  | Deletes `~/.cache/node-gyp/`                              |
-| `npm`       | `npm cache clean --force`                                 |
-| `yarn`      | `yarn cache clean`                                        |
-| `pnpm`      | `pnpm store prune`                                        |
-| `caches`    | All of the above (bun, go, pip, node-gyp, npm, yarn, pnpm) |
-| `logs`      | Log files older than N days (see `--keep-days`)           |
-| `xcode`     | Xcode DerivedData project directories                      |
+| Target          | What it removes                                                       |
+|-----------------|-----------------------------------------------------------------------|
+| `act`           | `~/.cache/act/` (GitHub Actions runner)                               |
+| `brew`          | `brew cleanup -s --prune=all`                                         |
+| `browsers`      | Old Puppeteer Chrome / Playwright (`ms-playwright*`) builds            |
+| `bun`           | `bun pm cache rm`                                                     |
+| `cargo`         | Cargo registry cache + `target/` directories                          |
+| `cocoa-pods`    | `pod cache clean --all`                                               |
+| `conda`         | `conda clean --all -y`                                                |
+| `caches`        | All generic caches (bun, go, pip, node-gyp, npm, yarn, pnpm)         |
+| `deno`          | `deno cache -r`                                                       |
+| `docker`        | `docker system prune -f`                                              |
+| `downloads`     | `~/Downloads` old files                                               |
+| `go`            | `go clean -cache`                                                     |
+| `gradle`        | Gradle old version caches                                             |
+| `huggingface`   | Hugging Face model cache (`hub/`) via CLI or fallback                  |
+| `jetbrains`     | JetBrains IDE caches (old versions)                                   |
+| `library-logs`  | `~/Library/Logs/` — interactive heuristic scan (suggested cleanables) |
+| `logs`          | Log files older than N days (see `--keep-days`)                       |
+| `mise`          | Unused runtime versions under `~/.local/share/mise/installs/`          |
+| `node-gyp`      | Deletes `~/.cache/node-gyp/`                                          |
+| `npm`           | `npm cache clean --force`                                             |
+| `orbstack`      | `orb prune`                                                           |
+| `pip`           | `pip cache purge`                                                     |
+| `pipx`          | `pipx cache purge`                                                    |
+| `pnpm`          | `pnpm store prune`                                                    |
+| `poetry`        | `poetry cache clear --all`                                            |
+| `pre-commit`    | Pre-commit hook environment cache (via CLI or fallback)                |
+| `rustup`        | Unused Rust toolchains                                                |
+| `spm`           | SwiftPM cache directory                                               |
+| `trash`         | `~/.Trash` size (scan only — use Finder to empty)                     |
+| `uv`            | Stale `simple-vN` index dirs + `uv cache prune --force`               |
+| `xcode`         | Xcode DerivedData project directories                                  |
+| `yarn`          | `yarn cache clean`                                                    |
 
 **Examples:**
 
@@ -98,6 +116,17 @@ sasurahime clean logs --dry-run
 ```
 
 Supported by every `clean` subcommand. Zero side effects guaranteed.
+
+### `--all` (library-logs only)
+
+Skip interactive prompt and delete all suggested entries.
+
+```bash
+sasurahime clean library-logs --all
+```
+
+Without `--all`, `library-logs` opens an interactive selection showing each
+cleanable entry with reasons (`[large]`, `[stale N days]`).
 
 ### `--keep-days` (logs only)
 
@@ -163,13 +192,20 @@ these files, it will never be removed.
 When a directory has the macOS immutable flag (`uchg`) set — common for
 package managers and system caches — sasurahime automatically runs
 `chflags -R nouchg` before deletion. This applies to all cleaners that
-remove directories (mise, generic node-gyp, and others).
+remove directories.
 
 ### Xcode running detection
 
 If Xcode is currently running when you run `sasurahime clean xcode`,
 you will be prompted to confirm before cleaning DerivedData. In `--yes`
 mode, the prompt is bypassed and the check is skipped.
+
+### `~/Library/Logs/` safety
+
+The `library-logs` cleaner always excludes `CrashReporter` and
+`DiagnosticReports` from scan results. Dot-files (`.DS_Store`, etc.) are
+skipped. Entries that don't trigger any heuristic rule (size > 100 MB or
+last modified > 90 days ago) are hidden.
 
 ---
 
@@ -200,6 +236,12 @@ sasurahime clean browsers
 
 # Clean logs older than 30 days
 sasurahime clean logs --keep-days 30
+
+# Interactive heuristic scan + selection for ~/Library/Logs/
+sasurahime clean library-logs
+
+# Bulk delete all suggested ~/Library/Logs/ entries (skip prompt)
+sasurahime clean library-logs --all
 
 # Full automation (cron)
 sasurahime --yes

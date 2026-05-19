@@ -39,22 +39,40 @@ Total reclaimable     43.7 GB
 
 指定したターゲットのキャッシュを削除します。
 
-| ターゲット    | 削除内容                                                   |
-|------------|----------------------------------------------------------|
-| `uv`       | 古い `simple-vN` インデックス + `uv cache prune --force`      |
-| `brew`     | `brew cleanup -s --prune=all`                             |
-| `mise`     | 未使用のランタイムバージョン（`~/.local/share/mise/installs/` 内） |
-| `browsers` | 古い Puppeteer Chrome / Playwright（`ms-playwright*`）のビルド |
-| `bun`      | `bun pm cache rm`                                         |
-| `go`       | `go clean -cache`                                         |
-| `pip`      | `pip cache purge`                                         |
-| `node-gyp` | `~/.cache/node-gyp/` ディレクトリを削除                       |
-| `npm`      | `npm cache clean --force`                                 |
-| `yarn`     | `yarn cache clean`                                        |
-| `pnpm`     | `pnpm store prune`                                        |
-| `caches`   | 上記全て（bun, go, pip, node-gyp, npm, yarn, pnpm）        |
-| `logs`     | 指定日数より古いログファイル（`--keep-days` 参照）          |
-| `xcode`    | Xcode DerivedData プロジェクトディレクトリ                   |
+| ターゲット        | 削除内容                                                       |
+|----------------|--------------------------------------------------------------|
+| `act`          | `~/.cache/act/`（GitHub Actions ランナー）                      |
+| `brew`         | `brew cleanup -s --prune=all`                                 |
+| `browsers`     | 古い Puppeteer Chrome / Playwright ビルド                       |
+| `bun`          | `bun pm cache rm`                                             |
+| `cargo`        | Cargo registry キャッシュ + `target/` ディレクトリ               |
+| `cocoa-pods`   | `pod cache clean --all`                                       |
+| `conda`        | `conda clean --all -y`                                        |
+| `caches`       | 全ジェネリックキャッシュ（bun, go, pip, node-gyp, npm, yarn, pnpm） |
+| `deno`         | `deno cache -r`                                               |
+| `docker`       | `docker system prune -f`                                      |
+| `downloads`    | `~/Downloads` の古いファイル                                     |
+| `go`           | `go clean -cache`                                             |
+| `gradle`       | 古い Gradle バージョンキャッシュ                                    |
+| `huggingface`  | Hugging Face モデルキャッシュ（CLI 優先、なければ fallback）        |
+| `jetbrains`    | JetBrains IDE キャッシュ（旧バージョン）                            |
+| `library-logs` | `~/Library/Logs/` — ヒューリスティックスキャン＋対話的選択          |
+| `logs`         | 指定日数より古いログファイル（`--keep-days` 参照）                 |
+| `mise`         | 未使用のランタイムバージョン（`~/.local/share/mise/installs/` 内） |
+| `node-gyp`     | `~/.cache/node-gyp/` ディレクトリを削除                           |
+| `npm`          | `npm cache clean --force`                                     |
+| `orbstack`     | `orb prune`                                                   |
+| `pip`          | `pip cache purge`                                             |
+| `pipx`         | `pipx cache purge`                                            |
+| `pnpm`         | `pnpm store prune`                                            |
+| `poetry`       | `poetry cache clear --all`                                    |
+| `pre-commit`   | pre-commit hook 環境キャッシュ（CLI 優先、なければ fallback）      |
+| `rustup`       | 未使用の Rust ツールチェーン                                     |
+| `spm`          | SwiftPM キャッシュディレクトリ                                    |
+| `trash`        | `~/.Trash` の容量表示のみ（削除は Finder で）                    |
+| `uv`           | 古い `simple-vN` インデックス + `uv cache prune --force`         |
+| `xcode`        | Xcode DerivedData プロジェクトディレクトリ                         |
+| `yarn`         | `yarn cache clean`                                            |
 
 **実行例:**
 
@@ -99,6 +117,17 @@ sasurahime clean logs --dry-run
 ```
 
 全ての `clean` サブコマンドで使用可能です。副作用は一切ありません。
+
+### `--all`（library-logs のみ）
+
+対話的選択をスキップし、提案されたエントリを全て削除します。
+
+```bash
+sasurahime clean library-logs --all
+```
+
+`--all` なしの場合は、各エントリに理由（`[large]`、`[stale N days]`）を
+表示して選択式で削除します。
 
 ### `--keep-days`（logs のみ）
 
@@ -164,14 +193,20 @@ mise ランタイムの削除時には、グローバルの
 ディレクトリに macOS のイミュータブルフラグ（`uchg`）が設定されている
 場合 — パッケージマネージャーやシステムキャッシュでよく見られます —
 `sasurahime` は削除前に自動で `chflags -R nouchg` を実行します。
-これはディレクトリを削除する全てのクリーナー（mise, generic node-gyp 等）
-に適用されます。
+これはディレクトリを削除する全てのクリーナーに適用されます。
 
 ### Xcode 実行中検出
 
 `xcode` ターゲット実行時に Xcode が起動している場合、
 DerivedData 削除前に確認を求めます。`--yes` モードでは
 確認はスキップされます。
+
+### `~/Library/Logs/` の安全性
+
+`library-logs` クリーナーは常に `CrashReporter` と `DiagnosticReports`
+をスキャン結果から除外します。ドットファイル（`.DS_Store` 等）もスキップ
+されます。ヒューリスティックルール（サイズ > 100 MB または
+最終更新 > 90 日前）に合致しないエントリは非表示になります。
 
 ---
 
@@ -202,6 +237,12 @@ sasurahime clean browsers
 
 # 30日より古いログを削除
 sasurahime clean logs --keep-days 30
+
+# ~/Library/Logs/ をヒューリスティックスキャン＋対話的選択
+sasurahime clean library-logs
+
+# 提案された ~/Library/Logs/ エントリを一括削除（確認スキップ）
+sasurahime clean library-logs --all
 
 # 完全自動化（cron 向け）
 sasurahime --yes
