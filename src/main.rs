@@ -555,10 +555,19 @@ fn main() -> anyhow::Result<()> {
                 }, dry_run)?;
             }
             CleanTarget::Trash { dry_run } => {
-                run_clean_target("trash", |_dry| { todo!("TrashCleaner") }, dry_run)?;
+                let cleaner = cleaners::generic::GenericCleaner::trash(&home, Box::new(SystemCommandRunner));
+                if dry_run {
+                    let result = cleaner.clean(true)?;
+                    println!("Freed: {}", format::format_bytes(result.bytes_freed));
+                } else {
+                    eprintln!("Warning: Use Finder to empty Trash. sasurahime cannot safely empty ~/.Trash.");
+                    println!("Freed: 0 B");
+                }
             }
             CleanTarget::Downloads { dry_run } => {
-                run_clean_target("downloads", |_dry| { todo!("DownloadsCleaner") }, dry_run)?;
+                run_clean_target("downloads", |dry| {
+                    cleaners::generic::GenericCleaner::downloads(&home, Box::new(SystemCommandRunner)).clean(dry)
+                }, dry_run)?;
             }
         },
     }

@@ -105,6 +105,24 @@ impl GenericCleaner {
         }
     }
 
+    pub fn trash(home: &Path, runner: Box<dyn CommandRunner>) -> Self {
+        let trash_dir = home.join(".Trash");
+        Self {
+            display_name: "trash",
+            method: CleanMethod::DeleteDirs(vec![trash_dir]),
+            runner,
+        }
+    }
+
+    pub fn downloads(home: &Path, runner: Box<dyn CommandRunner>) -> Self {
+        let dl_dir = home.join("Downloads");
+        Self {
+            display_name: "downloads",
+            method: CleanMethod::DeleteDirs(vec![dl_dir]),
+            runner,
+        }
+    }
+
     #[allow(dead_code)]
     pub fn cargo_registry(home: &Path, runner: Box<dyn CommandRunner>) -> Self {
         let cache = home.join(".cargo/registry/cache");

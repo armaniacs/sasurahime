@@ -276,3 +276,32 @@ fn clean_bun_dry_run_does_not_invoke_tool() {
         "bun must not be invoked in dry-run"
     );
 }
+
+#[test]
+fn trash_dry_run_shows_size() {
+    let tmp = TempDir::new().unwrap();
+    let trash = tmp.path().join(".Trash");
+    std::fs::create_dir_all(&trash).unwrap();
+    std::fs::write(trash.join("old-file.txt"), b"x".repeat(1024)).unwrap();
+
+    let output = sasurahime(tmp.path())
+        .args(["clean", "trash", "--dry-run"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+}
+
+#[test]
+fn downloads_dry_run_deletes_nothing() {
+    let tmp = TempDir::new().unwrap();
+    let dl = tmp.path().join("Downloads");
+    std::fs::create_dir_all(&dl).unwrap();
+    std::fs::write(dl.join("readme.pdf"), b"dummy").unwrap();
+
+    let output = sasurahime(tmp.path())
+        .args(["clean", "downloads", "--dry-run"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    assert!(dl.join("readme.pdf").exists(), "dry-run must not delete");
+}
