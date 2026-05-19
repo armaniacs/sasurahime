@@ -539,7 +539,9 @@ fn main() -> anyhow::Result<()> {
                 }, dry_run)?;
             }
             CleanTarget::Rustup { dry_run } => {
-                run_clean_target("rustup", |_dry| { todo!("RustupCleaner") }, dry_run)?;
+                run_clean_target("rustup", |dry| {
+                    cleaners::rustup::RustupCleaner::new(&home, Box::new(SystemCommandRunner)).clean(dry)
+                }, dry_run)?;
             }
             CleanTarget::Gradle { dry_run } => {
                 run_clean_target("gradle", |_dry| { todo!("GradleCleaner") }, dry_run)?;
