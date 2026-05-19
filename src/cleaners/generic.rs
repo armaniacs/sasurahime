@@ -105,6 +105,7 @@ impl GenericCleaner {
         }
     }
 
+    #[allow(dead_code)]
     pub fn cargo_registry(home: &Path, runner: Box<dyn CommandRunner>) -> Self {
         let cache = home.join(".cargo/registry/cache");
         Self {

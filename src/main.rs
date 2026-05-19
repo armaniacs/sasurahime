@@ -489,7 +489,10 @@ fn main() -> anyhow::Result<()> {
                 run_clean_target("xcode", |dry| cleaner.clean(dry), dry_run)?;
             }
             CleanTarget::Cargo { dry_run } => {
-                run_clean_target("cargo", |_dry| { todo!("CargoCleaner") }, dry_run)?;
+                run_clean_target("cargo", |dry| {
+                    cleaners::cargo::CargoCleaner::new(&home, Box::new(SystemCommandRunner))
+                        .clean(dry)
+                }, dry_run)?;
             }
             CleanTarget::Docker { dry_run } => {
                 run_clean_target("docker", |dry| {
