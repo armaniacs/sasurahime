@@ -1,6 +1,7 @@
 pub mod brew;
 pub mod browser;
 pub mod cargo;
+pub mod device_support;
 pub mod generic;
 pub mod gradle;
 pub mod huggingface;

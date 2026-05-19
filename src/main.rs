@@ -301,6 +301,15 @@ define_cleaners! {
         #[arg(long, short = 'a')]
         all: bool,
     },
+    /// Remove old Xcode DeviceSupport directories, keeping recent N versions
+    #[command(name = "device-support")]
+    DeviceSupport {
+        #[arg(long)]
+        dry_run: bool,
+        /// Number of recent versions to keep (default: 2)
+        #[arg(long, default_value = "2")]
+        keep: u32,
+    },
 }
 
 #[derive(Parser)]
@@ -342,6 +351,7 @@ impl CleanTarget {
             CleanTarget::Trash { .. } => "trash",
             CleanTarget::Ollama { .. } => "ollama",
             CleanTarget::LibraryLogs { .. } => "library-logs",
+            CleanTarget::DeviceSupport { .. } => "device-support",
             _ => self.dispatch_command_name(),
         }
     }
@@ -354,6 +364,7 @@ impl CleanTarget {
             | CleanTarget::Ollama { dry_run }
             | CleanTarget::LibraryLogs { dry_run, .. } => *dry_run,
             CleanTarget::Logs { dry_run, .. } => *dry_run,
+            CleanTarget::DeviceSupport { dry_run, .. } => *dry_run,
             _ => self.dispatch_dry_run(),
         }
     }
@@ -373,6 +384,10 @@ fn extra_targets() -> &'static [(&'static str, &'static str)] {
         (
             "library-logs",
             "Analyze and clean ~/Library/Logs/ with heuristic recommendations",
+        ),
+        (
+            "device-support",
+            "Xcode DeviceSupport old version cleanup",
         ),
     ]
 }
@@ -447,6 +462,9 @@ fn all_cleaners(home: &std::path::Path, config: &config::Config) -> Vec<Box<dyn 
             home,
             Box::new(SystemCommandRunner),
         )),
+        Box::new(cleaners::device_support::DeviceSupportCleaner::new(
+            home, 2, Box::new(SystemCommandRunner),
+        )),
     ]
 }
 
@@ -502,6 +520,7 @@ fn main() -> anyhow::Result<()> {
                     | CleanTarget::Trash { .. }
                     | CleanTarget::Ollama { .. }
                     | CleanTarget::LibraryLogs { .. }
+                    | CleanTarget::DeviceSupport { .. }
             ) {
                 // --- Special targets (custom dispatch logic) ---
                 match target {
@@ -607,6 +626,12 @@ fn main() -> anyhow::Result<()> {
                                 dry_run,
                             )?;
                         }
+                    }
+                    CleanTarget::DeviceSupport { dry_run, keep } => {
+                        let cleaner = cleaners::device_support::DeviceSupportCleaner::new(
+                            &home, keep, Box::new(SystemCommandRunner),
+                        );
+                        run_clean_target("device-support", move |dry| cleaner.clean(dry), dry_run)?;
                     }
                     _ => unreachable!(),
                 }
