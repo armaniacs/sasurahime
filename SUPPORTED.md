@@ -1,9 +1,6 @@
 # sasurahime — Supported Targets
 
-sasurahime provides **14 clean targets** grouped into three categories:
-**Sprint 1** (core language tools), **Sprint 2** (runtime/browser tooling),
-and **Sprint 3** (system caches and logs).
-
+sasurahime provides **32 clean targets** grouped into sprints.
 Every target supports both `detect` (read-only, no side effects) and
 `clean` (removal). All `clean` subcommands accept `--dry-run`.
 
@@ -380,6 +377,402 @@ Xcode's DerivedData folder (`~/Library/Developer/Xcode/DerivedData/`).
 - If Xcode is running, you are prompted to confirm (or operation aborts).
 - Project directories are identified by reading `read_dir` — only
   subdirectories are considered (files at the root are skipped).
+
+---
+
+## 15. `sasurahime clean act`
+
+**Category:** Sprint 5
+
+**What it removes:** [act](https://github.com/nektos/act) GitHub Actions
+local runner cache (`~/.cache/act/`, or `$ACT_CACHE_DIR` if set).
+
+**Method:** Directory deletion.
+
+**How detect works:**
+1. Checks if the cache directory exists (uses `$ACT_CACHE_DIR` env var or
+   `~/.cache/act/` as fallback).
+2. Reports the total `dir_size` as pruneable.
+
+**How clean works:**
+1. Runs `is_safe_delete_target` to verify the path is not a system directory.
+2. If `$ACT_CACHE_DIR` points to an unsafe path, falls back to the default.
+3. Deletes the directory via `fs::remove_dir_all`.
+
+**Safety:** `$ACT_CACHE_DIR` is validated against a blocklist of system paths
+(`/`, `/etc`, `/var`, `/usr`, etc.). Unsafe env var values are rejected.
+
+---
+
+## 16. `sasurahime clean cargo`
+
+**Category:** Sprint 5
+
+**What it removes:** [Cargo](https://doc.rust-lang.org/cargo/) registry cache
+(`~/.cargo/registry/cache/`) and `target/` build artifact directories.
+
+**Scanned by `detect`:**
+1. `~/.cargo/registry/cache/` — downloaded crate archives.
+2. User projects under `~/src/`, `~/work/`, `~/dev/` with `target/` dirs.
+
+**How clean works:**
+1. Deletes `~/.cargo/registry/cache/` contents.
+2. Scans for `target/` directories under common project roots and removes them.
+3. `chflags -R nouchg` is run before deletion to handle macOS immutable flags.
+
+---
+
+## 17. `sasurahime clean cocoa-pods`
+
+**Category:** Sprint 5
+
+**What it removes:** [CocoaPods](https://cocoapods.org/) cache.
+
+**Method:** `pod cache clean --all`
+
+**How detect works:**
+Checks if `pod` is in `PATH`. Reports as pruneable if found (unknown size).
+
+**How clean works:**
+1. If `pod` not found, prints message and exits (0).
+2. Runs `pod cache clean --all`.
+3. Reports 0 freed bytes.
+
+**Safety:** Delegates to the official CocoaPods CLI.
+
+---
+
+## 18. `sasurahime clean conda`
+
+**Category:** Sprint 5
+
+**What it removes:** [Conda](https://docs.conda.io/) package cache.
+
+**Method:** `conda clean --all -y`
+
+**How detect works:**
+Checks if `conda` is in `PATH`. Reports as pruneable if found (unknown size).
+
+**How clean works:**
+1. If `conda` not found, prints message and exits (0).
+2. Runs `conda clean --all -y`.
+3. Reports 0 freed bytes.
+
+**Safety:** Delegates to the official Conda CLI.
+
+---
+
+## 19. `sasurahime clean deno`
+
+**Category:** Sprint 5
+
+**What it removes:** [Deno](https://deno.com/) cache.
+
+**Method:** `deno cache -r` (reload cache)
+
+**How detect works:**
+Checks if `deno` is in `PATH`. Reports as pruneable if found (unknown size).
+
+**How clean works:**
+1. If `deno` not found, prints message and exits (0).
+2. Runs `deno cache -r`.
+3. Reports 0 freed bytes.
+
+**Safety:** Delegates to the official Deno CLI.
+
+---
+
+## 20. `sasurahime clean docker`
+
+**Category:** Sprint 5
+
+**What it removes:** [Docker](https://www.docker.com/) dangling images,
+containers, build cache, and networks.
+
+**Method:** `docker system prune -f`
+
+**How detect works:**
+Checks if `docker` is in `PATH`. Reports as pruneable if found (unknown size).
+
+**How clean works:**
+1. If `docker` not found, prints message and exits (0).
+2. Runs `docker system prune -f` (dangling images only — tagged images are
+   preserved).
+3. Reports 0 freed bytes.
+
+**Safety:** Only dangling (untagged) images are removed. Explicitly avoids `-a`
+flag to preserve tagged unused images.
+
+---
+
+## 21. `sasurahime clean downloads`
+
+**Category:** Sprint 5
+
+**What it removes:** Old files inside `~/Downloads/`.
+
+**How detect works:**
+1. Checks if `~/Downloads` exists.
+2. Reports the total `dir_size` as pruneable.
+
+**How clean works:**
+1. Lists immediate children of `~/Downloads`.
+2. Deletes files and directories with `chflags -R nouchg` + `remove_dir_all`.
+3. **Safety:** Only removes items directly under `~/Downloads/` (no recursion).
+
+---
+
+## 22. `sasurahime clean gradle`
+
+**Category:** Sprint 5
+
+**What it removes:** Old version caches from
+[Gradle](https://gradle.org/) (`~/.gradle/caches/`). Keeps only the most
+recent version of each cached artifact.
+
+**How detect works:**
+1. Scans `~/.gradle/caches/` for per-version directories.
+2. For each cached artifact group, keeps the highest version and reports
+   the sum of all older versions as reclaimable.
+
+**How clean works:**
+1. Identifies old versions using version comparison.
+2. Removes old version directories with `chflags -R nouchg` + `remove_dir_all`.
+3. Handles macOS immutable flags.
+
+**Safety:** The most recent version of each cached artifact is always kept.
+
+---
+
+## 23. `sasurahime clean huggingface`
+
+**Category:** Sprint 5
+
+**What it removes:** [Hugging Face](https://huggingface.co/) model cache
+(`~/.cache/huggingface/hub/` or `$HF_HOME/hub`).
+
+**How detect works:**
+1. Checks if `hub/` directory exists (`$HF_HOME/hub` or `~/.cache/huggingface/hub`).
+2. Reports the total `dir_size` as pruneable.
+
+**How clean works:**
+1. Attempts CLI first: runs `huggingface-cli delete-cache --yes`.
+2. If `huggingface-cli` is not in PATH, falls back to deleting `hub/` contents
+   directly (recreates the `hub/` directory after deletion).
+3. `$HF_HOME` is validated against `is_safe_delete_target` — unsafe paths cause
+   a fallback to the default.
+
+**Safety:** `$HF_HOME` is validated against a blocklist of system paths.
+CLI takes precedence over direct deletion.
+
+---
+
+## 24. `sasurahime clean jetbrains`
+
+**Category:** Sprint 5
+
+**What it removes:** Old version caches from
+[JetBrains IDEs](https://www.jetbrains.com/) (IntelliJ IDEA, WebStorm, etc.)
+under `~/Library/Caches/JetBrains/`.
+
+**Method:** Similar to Gradle cache version pruning — keeps the most recent
+version of each IDE cache.
+
+**How detect works:**
+1. Scans `~/Library/Caches/JetBrains/` for per-IDE per-version directories.
+2. Reports old versions as reclaimable.
+
+**How clean works:**
+1. Identifies old versions per IDE family.
+2. Removes old version directories with `chflags -R nouchg` + `remove_dir_all`.
+
+**Safety:** The most recent version of each IDE cache is always kept.
+
+---
+
+## 25. `sasurahime clean library-logs`
+
+**Category:** Sprint 5
+
+**What it removes:** User log files under `~/Library/Logs/`. Uses heuristic
+rules to suggest which entries to delete. **Interactive** — opens a selection
+prompt unless `--all` is used.
+
+**How detect works:**
+1. Reads immediate children of `~/Library/Logs/`.
+2. For each entry: measures `dir_size` and reads `last_modified` time.
+3. Applies two heuristic rules:
+   - **Oversized:** size > 100 MB → tagged `[large]`
+   - **Stale:** last modified > 90 days ago → tagged `[stale N days]`
+4. Entries that trigger at least one rule are included in results.
+5. Excludes `CrashReporter`, `DiagnosticReports`, and dot-entries.
+
+**How clean works:**
+1. Runs the same scan as detect.
+2. **If `--dry-run`:** prints each entry with its reason tags.
+3. **If `--all`:** deletes all suggested entries without prompting.
+4. **Otherwise:** opens `dialoguer::MultiSelect` with all entries pre-selected.
+   User confirms selection, then selected entries are deleted with
+   `chflags -R nouchg` + `remove_dir_all`.
+
+**Safety:**
+- `CrashReporter` and `DiagnosticReports` are **always** excluded.
+- Dot-files and dot-directories (`.DS_Store`, `.localized`, etc.) are skipped.
+- Future timestamps due to clock skew are clamped to `SystemTime::now()`.
+- `--dry-run` guarantees zero side effects.
+
+---
+
+## 26. `sasurahime clean orbstack`
+
+**Category:** Sprint 5
+
+**What it removes:** [Orbstack](https://orbstack.dev/) Docker runtime cache.
+
+**Method:** `orb prune`
+
+**How detect works:**
+Checks if `orb` is in `PATH`. Reports as pruneable if found (unknown size).
+
+**How clean works:**
+1. If `orb` not found, prints message and exits (0).
+2. Runs `orb prune`.
+3. Reports 0 freed bytes.
+
+**Safety:** Delegates to the official Orbstack CLI.
+
+---
+
+## 27. `sasurahime clean pipx`
+
+**Category:** Sprint 5
+
+**What it removes:** [pipx](https://pypa.github.io/pipx/) cache and unused
+packages.
+
+**Method:** `pipx cache purge`
+
+**How detect works:**
+Checks if `pipx` is in `PATH`. Reports as pruneable if found (unknown size).
+
+**How clean works:**
+1. If `pipx` not found, prints message and exits (0).
+2. Runs `pipx cache purge`.
+3. Reports 0 freed bytes.
+
+**Safety:** Delegates to the official pipx CLI.
+
+---
+
+## 28. `sasurahime clean poetry`
+
+**Category:** Sprint 5
+
+**What it removes:** [Poetry](https://python-poetry.org/) package cache.
+
+**Method:** `poetry cache clear --all`
+
+**How detect works:**
+Checks if `poetry` is in `PATH`. Reports as pruneable if found (unknown size).
+
+**How clean works:**
+1. If `poetry` not found, prints message and exits (0).
+2. Runs `poetry cache clear --all`.
+3. Reports 0 freed bytes.
+
+**Safety:** Delegates to the official Poetry CLI.
+
+---
+
+## 29. `sasurahime clean pre-commit`
+
+**Category:** Sprint 5
+
+**What it removes:** [pre-commit](https://pre-commit.com/) hook environment
+cache (`~/.cache/pre-commit/`, `$PRE_COMMIT_HOME`, or `$XDG_CACHE_HOME/pre-commit`).
+
+**How detect works:**
+1. Resolves the cache directory from env vars:
+   `$PRE_COMMIT_HOME` → `$XDG_CACHE_HOME/pre-commit` → `~/.cache/pre-commit`.
+2. Reports the total `dir_size` as pruneable.
+
+**How clean works:**
+1. Tries CLI first: runs `pre-commit clean`.
+2. If `pre-commit` not in PATH, deletes the cache directory directly.
+3. Env var paths are validated via `is_safe_delete_target` — unsafe paths
+   cause a fallback to `~/.cache/pre-commit`.
+
+**Safety:** Env var paths are validated. CLI takes precedence over direct
+deletion.
+
+---
+
+## 30. `sasurahime clean rustup`
+
+**Category:** Sprint 5
+
+**What it removes:** Unused [Rust](https://www.rust-lang.org/) toolchain
+versions (the toolchains not selected by `rustup default` or `rustup override`).
+
+**How detect works:**
+1. Runs `rustup toolchain list` to enumerate installed toolchains.
+2. Identifies the default toolchain (marked with `(default)`) and any
+   override toolchains (marked with `(override)`).
+3. All toolchains that are **neither** default **nor** override are reported
+   as unused.
+
+**How clean works:**
+1. Same detection as above.
+2. For each unused toolchain: runs `rustup toolchain remove <name>`.
+3. Reports total freed bytes (parsed from rustup output).
+
+**Safety:** The default and override toolchains are **never** removed. Only
+toolchains not selected by any profile are candidates for removal.
+
+---
+
+## 31. `sasurahime clean spm`
+
+**Category:** Sprint 5
+
+**What it removes:** [Swift Package Manager](https://www.swift.org/package-manager/)
+build artifacts and cached packages.
+
+**Method:** Deletes `~/Library/Caches/org.swift.swiftpm/` and
+`~/Library/Developer/Xcode/DerivedData/SourcePackages/`.
+
+**How detect works:**
+1. Checks if the SPM cache directories exist.
+2. Reports the total `dir_size` as pruneable.
+
+**How clean works:**
+1. Runs `chflags -R nouchg` on cache directories.
+2. Calls `fs::remove_dir_all` on each cache directory.
+3. Cached package checkouts and repository clones are removed (packages will
+   be re-fetched on next build).
+
+---
+
+## 32. `sasurahime clean trash`
+
+**Category:** Sprint 5
+
+**What it removes:** `~/.Trash` — **scan only**. sasurahime reports the size
+of the Trash directory but will not delete it (users should use Finder to
+empty Trash).
+
+**How detect works:**
+1. Checks if `~/.Trash` exists.
+2. Reports its total `dir_size` as pruneable.
+
+**How clean works:**
+1. **`--dry-run`:** runs `detect`-style scan and prints the size that would
+   be freed.
+2. **Otherwise:** prints a warning instructing the user to empty Trash via
+   Finder. No files are deleted.
+
+**Safety:** sasurahime refuses to delete `~/.Trash` contents — this is an
+intentional safety measure.
 
 ---
 

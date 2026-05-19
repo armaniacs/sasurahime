@@ -1,6 +1,6 @@
 # sasurahime — 対応ターゲット一覧
 
-sasurahime は **14 のクリーンターゲット** を提供します。
+sasurahime は **32 のクリーンターゲット** を提供します。
 全ターゲットは `detect`（読み取り専用、副作用なし）と
 `clean`（削除）の両方をサポートし、全ての `clean` サブコマンドに
 `--dry-run` が使用できます。
@@ -78,7 +78,7 @@ sasurahime は **14 のクリーンターゲット** を提供します。
 
 **安全性（CLAUDE.md §Safety rules 準拠）:**
 - `~/.config/mise/config.toml` と HOME 内の全 `.mise.toml`（深さ 5）を
-  削除前に横断チェック。
+   削除前に横断チェック。
 - ピン留めされたバージョンはアクティブでなくても **絶対に削除しない**。
 - macOS イミュータブルフラグは `chflags -R nouchg` で自動処理。
 
@@ -280,7 +280,7 @@ sasurahime は **14 のクリーンターゲット** を提供します。
 - 除外リストに含まれるファイルは **絶対に削除しない**。
 - 内蔵の `kilo` ターゲットはデフォルトで `dev.log` を除外。
 - 日数比較は `>`（超過）を使用。正確に `N` 日経過したファイルは
-  削除 **されない**。
+   削除 **されない**。
 - メタデータが読めないファイルはスキップ。
 
 ---
@@ -307,6 +307,333 @@ sasurahime は **14 のクリーンターゲット** を提供します。
 - `DerivedData` ルートは **絶対に削除しない**。
 - Xcode 実行中は確認を求める（または中断）。
 - ルート直下のサブディレクトリのみを削除対象とする。
+
+---
+
+## 15. `sasurahime clean act`
+
+**カテゴリ:** Sprint 5
+
+**削除対象:** [act](https://github.com/nektos/act) GitHub Actions ローカル
+ランナーキャッシュ（`~/.cache/act/`、または `$ACT_CACHE_DIR` が設定されていればそのパス）。
+
+**方法:** ディレクトリ削除。
+
+**detect:**
+キャッシュディレクトリが存在すれば合計サイズを報告。
+
+**clean:**
+1. `is_safe_delete_target` でパスが安全か検証。
+2. `$ACT_CACHE_DIR` が安全でない場合はデフォルトにフォールバック。
+3. `fs::remove_dir_all` で削除。
+
+**安全性:** `$ACT_CACHE_DIR` はシステムパスのブロックリストで検証。
+
+---
+
+## 16. `sasurahime clean cargo`
+
+**カテゴリ:** Sprint 5
+
+**削除対象:** [Cargo](https://doc.rust-lang.org/cargo/) レジストリキャッシュ
+（`~/.cargo/registry/cache/`）および `target/` ビルドアーティファクト。
+
+**clean:**
+1. `~/.cargo/registry/cache/` を削除。
+2. プロジェクトの `target/` ディレクトリをスキャンして削除。
+3. `chflags -R nouchg` を実行後に削除。
+
+**安全性:** ダウンロード済みキャッシュのみ削除。ソースコードには影響なし。
+
+---
+
+## 17. `sasurahime clean cocoa-pods`
+
+**カテゴリ:** Sprint 5
+
+**削除対象:** [CocoaPods](https://cocoapods.org/) キャッシュ。
+
+**方法:** `pod cache clean --all`
+
+**detect:** `pod` が `PATH` にあれば pruneable と報告。
+
+**clean:** `pod` がない場合はスキップ。`pod cache clean --all` を実行。
+
+**安全性:** 公式 CocoaPods CLI に委譲。
+
+---
+
+## 18. `sasurahime clean conda`
+
+**カテゴリ:** Sprint 5
+
+**削除対象:** [Conda](https://docs.conda.io/) パッケージキャッシュ。
+
+**方法:** `conda clean --all -y`
+
+**detect:** `conda` が `PATH` にあれば pruneable と報告。
+
+**clean:** `conda` がない場合はスキップ。`conda clean --all -y` を実行。
+
+**安全性:** 公式 Conda CLI に委譲。
+
+---
+
+## 19. `sasurahime clean deno`
+
+**カテゴリ:** Sprint 5
+
+**削除対象:** [Deno](https://deno.com/) キャッシュ。
+
+**方法:** `deno cache -r`
+
+**detect:** `deno` が `PATH` にあれば pruneable と報告。
+
+**clean:** `deno` がない場合はスキップ。`deno cache -r` を実行。
+
+**安全性:** 公式 Deno CLI に委譲。
+
+---
+
+## 20. `sasurahime clean docker`
+
+**カテゴリ:** Sprint 5
+
+**削除対象:** [Docker](https://www.docker.com/) の dangling イメージ、
+コンテナ、ビルドキャッシュ、ネットワーク。
+
+**方法:** `docker system prune -f`
+
+**detect:** `docker` が `PATH` にあれば pruneable と報告。
+
+**clean:** `docker` がない場合はスキップ。`docker system prune -f` を実行。
+
+**安全性:** dangling イメージのみ削除。タグ付きイメージは保持。`-a` は不使用。
+
+---
+
+## 21. `sasurahime clean downloads`
+
+**カテゴリ:** Sprint 5
+
+**削除対象:** `~/Downloads/` 内の古いファイル。
+
+**detect:** `~/Downloads` が存在すれば合計サイズを報告。
+
+**clean:**
+1. `~/Downloads` 直下のアイテムを列挙。
+2. `chflags -R nouchg` 後に `remove_dir_all` で削除。
+3. 直下のアイテムのみが対象（再帰的削除は行わない）。
+
+**安全性:** `~/Downloads` 直下のみ操作。システムファイルには影響なし。
+
+---
+
+## 22. `sasurahime clean gradle`
+
+**カテゴリ:** Sprint 5
+
+**削除対象:** [Gradle](https://gradle.org/) の古いバージョンキャッシュ
+（`~/.gradle/caches/`）。各キャッシュグループの最新版のみ保持。
+
+**detect:**
+`~/.gradle/caches/` をスキャンし、古いバージョンの合計サイズを報告。
+
+**clean:**
+1. バージョン比較で古いバージョンを特定。
+2. `chflags -R nouchg` + `remove_dir_all` で削除。
+
+**安全性:** 各アーティファクトの最新バージョンは常に保持。
+
+---
+
+## 23. `sasurahime clean huggingface`
+
+**カテゴリ:** Sprint 5
+
+**削除対象:** [Hugging Face](https://huggingface.co/) モデルキャッシュ
+（`~/.cache/huggingface/hub/` または `$HF_HOME/hub`）。
+
+**detect:**
+`hub/` ディレクトリが存在すれば合計サイズを報告。
+
+**clean:**
+1. CLI 優先: `huggingface-cli delete-cache --yes` を実行。
+2. CLI がない場合は `hub/` の中身を直接削除後にディレクトリを再作成。
+3. `$HF_HOME` は `is_safe_delete_target` で検証。
+
+**安全性:** 環境変数のパスはブロックリストで検証。CLI 優先で安全。
+
+---
+
+## 24. `sasurahime clean jetbrains`
+
+**カテゴリ:** Sprint 5
+
+**削除対象:** [JetBrains IDE](https://www.jetbrains.com/) の古いキャッシュ
+（IntelliJ IDEA、WebStorm 等、`~/Library/Caches/JetBrains/` 内）。
+
+**detect:**
+`~/Library/Caches/JetBrains/` をスキャンし、古い IDE バージョンの
+キャッシュサイズを報告。
+
+**clean:**
+1. IDE ファミリごとに古いバージョンを特定。
+2. `chflags -R nouchg` + `remove_dir_all` で削除。
+
+**安全性:** 各 IDE の最新キャッシュは常に保持。
+
+---
+
+## 25. `sasurahime clean library-logs`
+
+**カテゴリ:** Sprint 5
+
+**削除対象:** `~/Library/Logs/` 内のユーザーログ。ヒューリスティックルールで
+削除候補を提示し、**対話的に選択**できます（`--all` で確認スキップ）。
+
+**detect:**
+1. `~/Library/Logs/` 直下をスキャン。
+2. 各エントリに 2 つのルールを適用:
+   - **大容量:** サイズ > 100 MB → `[large]` タグ
+   - **経過:** 最終更新 > 90 日前 → `[stale N days]` タグ
+3. 少なくとも 1 つのルールに合致したエントリのみ報告。
+4. `CrashReporter`、`DiagnosticReports`、ドットエントリは除外。
+
+**clean:**
+1. 上記と同じスキャンを実行。
+2. **`--dry-run`:** 各エントリを理由タグ付きで表示。
+3. **`--all`:** 全候補を確認なしで削除。
+4. **デフォルト:** `dialoguer::MultiSelect` で選択式削除。
+
+**安全性:**
+- `CrashReporter` / `DiagnosticReports` は **常に** 除外。
+- ドットファイル（`.DS_Store` 等）はスキップ。
+- 未来のタイムスタンプは現在時刻にクランプ。
+- `--dry-run` は副作用ゼロ。
+
+---
+
+## 26. `sasurahime clean orbstack`
+
+**カテゴリ:** Sprint 5
+
+**削除対象:** [Orbstack](https://orbstack.dev/) Docker ランタイムキャッシュ。
+
+**方法:** `orb prune`
+
+**detect:** `orb` が `PATH` にあれば pruneable と報告。
+
+**clean:** `orb` がない場合はスキップ。`orb prune` を実行。
+
+**安全性:** 公式 Orbstack CLI に委譲。
+
+---
+
+## 27. `sasurahime clean pipx`
+
+**カテゴリ:** Sprint 5
+
+**削除対象:** [pipx](https://pypa.github.io/pipx/) キャッシュと未使用パッケージ。
+
+**方法:** `pipx cache purge`
+
+**detect:** `pipx` が `PATH` にあれば pruneable と報告。
+
+**clean:** `pipx` がない場合はスキップ。`pipx cache purge` を実行。
+
+**安全性:** 公式 pipx CLI に委譲。
+
+---
+
+## 28. `sasurahime clean poetry`
+
+**カテゴリ:** Sprint 5
+
+**削除対象:** [Poetry](https://python-poetry.org/) パッケージキャッシュ。
+
+**方法:** `poetry cache clear --all`
+
+**detect:** `poetry` が `PATH` にあれば pruneable と報告。
+
+**clean:** `poetry` がない場合はスキップ。`poetry cache clear --all` を実行。
+
+**安全性:** 公式 Poetry CLI に委譲。
+
+---
+
+## 29. `sasurahime clean pre-commit`
+
+**カテゴリ:** Sprint 5
+
+**削除対象:** [pre-commit](https://pre-commit.com/) hook 環境キャッシュ
+（`~/.cache/pre-commit/`、`$PRE_COMMIT_HOME`、または `$XDG_CACHE_HOME/pre-commit`）。
+
+**detect:**
+環境変数からキャッシュパスを解決し、合計サイズを報告。
+
+**clean:**
+1. CLI 優先: `pre-commit clean` を実行。
+2. CLI がない場合はキャッシュディレクトリを直接削除。
+3. 環境変数のパスは `is_safe_delete_target` で検証。
+
+**安全性:** 環境変数のパスはブロックリストで検証。CLI 優先。
+
+---
+
+## 30. `sasurahime clean rustup`
+
+**カテゴリ:** Sprint 5
+
+**削除対象:** 未使用の [Rust](https://www.rust-lang.org/) ツールチェーン
+（`rustup default` や `rustup override` で選択されていないもの）。
+
+**detect:**
+1. `rustup toolchain list` を実行。
+2. `(default)` と `(override)` マークのないツールチェーンを未使用と判定。
+
+**clean:**
+1. 各未使用ツールチェーンに対して `rustup toolchain remove <name>` を実行。
+2. 解放サイズを報告。
+
+**安全性:** デフォルトとオーバーライドのツールチェーンは **絶対に削除しない**。
+
+---
+
+## 31. `sasurahime clean spm`
+
+**カテゴリ:** Sprint 5
+
+**削除対象:** [Swift Package Manager](https://www.swift.org/package-manager/)
+のビルドアーティファクトとキャッシュパッケージ。
+
+**削除パス:**
+- `~/Library/Caches/org.swift.swiftpm/`
+- `~/Library/Developer/Xcode/DerivedData/SourcePackages/`
+
+**clean:**
+1. `chflags -R nouchg` 後に `remove_dir_all` を実行。
+2. 次回ビルド時にパッケージは再取得される。
+
+**安全性:** キャッシュのみ削除。ソースコードへの影響なし。
+
+---
+
+## 32. `sasurahime clean trash`
+
+**カテゴリ:** Sprint 5
+
+**削除対象:** `~/.Trash` — **スキャンのみ**。サイズは報告しますが、
+削除は行いません（Finder で空にするよう案内）。
+
+**detect:** `~/.Trash` が存在すれば合計サイズを報告。
+
+**clean:**
+1. **`--dry-run`:** 解放可能なサイズを表示。
+2. **実削除:** Finder で空にするよう警告メッセージを表示。削除は行わない。
+
+**安全性:** sasurahime は `~/.Trash` の削除を拒否します。
+これは意図的な安全措置です。
 
 ---
 
