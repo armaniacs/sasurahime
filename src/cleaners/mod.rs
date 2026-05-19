@@ -7,6 +7,7 @@ pub mod huggingface;
 pub mod library_logs;
 pub mod log;
 pub mod mise;
+pub mod ollama;
 pub mod pre_commit;
 pub mod rustup;
 pub mod uv;

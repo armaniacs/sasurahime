@@ -281,6 +281,11 @@ define_cleaners! {
         #[arg(long)]
         dry_run: bool,
     },
+    /// Analyze and clean Ollama model cache
+    Ollama {
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Analyze and clean ~/Library/Logs/ with heuristic recommendations
     #[command(name = "library-logs")]
     LibraryLogs {
@@ -329,6 +334,7 @@ impl CleanTarget {
             CleanTarget::Logs { .. } => "logs",
             CleanTarget::Xcode { .. } => "xcode",
             CleanTarget::Trash { .. } => "trash",
+            CleanTarget::Ollama { .. } => "ollama",
             CleanTarget::LibraryLogs { .. } => "library-logs",
             _ => self.dispatch_command_name(),
         }
@@ -339,6 +345,7 @@ impl CleanTarget {
             CleanTarget::Caches { dry_run }
             | CleanTarget::Xcode { dry_run }
             | CleanTarget::Trash { dry_run }
+            | CleanTarget::Ollama { dry_run }
             | CleanTarget::LibraryLogs { dry_run, .. } => *dry_run,
             CleanTarget::Logs { dry_run, .. } => *dry_run,
             _ => self.dispatch_dry_run(),
@@ -356,6 +363,7 @@ fn extra_targets() -> &'static [(&'static str, &'static str)] {
         ("logs", "Log files older than N days"),
         ("xcode", "Xcode DerivedData project directories"),
         ("trash", "~/.Trash size (scan only)"),
+        ("ollama", "Ollama model cache"),
         (
             "library-logs",
             "Analyze and clean ~/Library/Logs/ with heuristic recommendations",
@@ -429,6 +437,10 @@ fn all_cleaners(home: &std::path::Path, config: &config::Config) -> Vec<Box<dyn 
             home,
             Box::new(SystemCommandRunner),
         )),
+        Box::new(cleaners::ollama::OllamaCleaner::new(
+            home,
+            Box::new(SystemCommandRunner),
+        )),
     ]
 }
 
@@ -482,6 +494,7 @@ fn main() -> anyhow::Result<()> {
                     | CleanTarget::Logs { .. }
                     | CleanTarget::Xcode { .. }
                     | CleanTarget::Trash { .. }
+                    | CleanTarget::Ollama { .. }
                     | CleanTarget::LibraryLogs { .. }
             ) {
                 // --- Special targets (custom dispatch logic) ---
@@ -565,6 +578,10 @@ fn main() -> anyhow::Result<()> {
                             eprintln!("Warning: Use Finder to empty Trash. sasurahime cannot safely empty ~/.Trash.");
                             println!("Freed: 0 B");
                         }
+                    }
+                    CleanTarget::Ollama { dry_run } => {
+                        let cleaner = cleaners::ollama::OllamaCleaner::new(&home, Box::new(SystemCommandRunner));
+                        run_clean_target("ollama", move |dry| cleaner.clean(dry), dry_run)?;
                     }
                     CleanTarget::LibraryLogs { dry_run, all } => {
                         let cleaner = cleaners::library_logs::LibraryLogsCleaner::new(
