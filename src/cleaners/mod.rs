@@ -1,7 +1,10 @@
 pub mod brew;
 pub mod browser;
+pub mod cargo;
 pub mod generic;
+pub mod gradle;
 pub mod log;
 pub mod mise;
+pub mod rustup;
 pub mod uv;
 pub mod xcode;

@@ -14,23 +14,34 @@ use dirs::home_dir;
 use std::path::PathBuf;
 
 const SUPPORTED_TARGETS: &[(&str, &str)] = &[
-    ("uv", "Stale simple-vN index directories + uv cache prune"),
     ("brew", "Homebrew download cache"),
-    ("mise", "Unused runtime versions"),
     ("browsers", "Old Puppeteer / Playwright builds"),
     ("bun", "Bun package cache"),
+    ("caches", "All generic caches (bun/go/pip/node-gyp/npm/yarn/pnpm)"),
+    ("cargo", "Cargo registry cache + target/ directories"),
+    ("cocoapods", "CocoaPods cache clean --all"),
+    ("conda", "Conda clean --all"),
+    ("deno", "Deno cache reload"),
+    ("docker", "Docker system prune (images, containers, build cache)"),
+    ("downloads", "~/Downloads old files"),
     ("go", "Go build cache"),
-    ("pip", "pip package cache"),
+    ("gradle", "Gradle old version caches"),
+    ("jetbrains", "JetBrains IDE caches (old versions)"),
+    ("logs", "Log files older than N days"),
+    ("mise", "Unused runtime versions"),
     ("node-gyp", "node-gyp build cache directories"),
     ("npm", "npm package cache"),
-    ("yarn", "yarn cache"),
+    ("orbstack", "Orbstack prune"),
+    ("pip", "pip package cache"),
+    ("pipx", "pipx cache and unused packages"),
     ("pnpm", "pnpm store"),
-    (
-        "caches",
-        "All generic caches (bun/go/pip/node-gyp/npm/yarn/pnpm)",
-    ),
-    ("logs", "Log files older than N days"),
+    ("poetry", "Poetry cache clear --all"),
+    ("rustup", "Unused Rust toolchains"),
+    ("spm", "SwiftPM cache directory"),
+    ("trash", "~/.Trash size (scan only)"),
+    ("uv", "Stale simple-vN index directories + uv cache prune"),
     ("xcode", "Xcode DerivedData project directories"),
+    ("yarn", "yarn cache"),
 ];
 
 #[derive(Parser)]
@@ -135,6 +146,76 @@ enum CleanTarget {
     },
     /// Remove Xcode DerivedData build cache
     Xcode {
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Clean Cargo build cache
+    Cargo {
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Clean Docker system cache
+    Docker {
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Clean Orbstack cache
+    Orbstack {
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Clean CocoaPods cache
+    CocoaPods {
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Clean SwiftPM cache
+    SwiftPM {
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Clean Conda package cache
+    Conda {
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Clean Poetry cache
+    Poetry {
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Clean pipx caches
+    Pipx {
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Clean Deno cache
+    Deno {
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Clean Rustup toolchains
+    Rustup {
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Clean Gradle caches
+    Gradle {
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Clean JetBrains IDE caches
+    JetBrains {
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Report Trash size
+    Trash {
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Clean old Downloads
+    Downloads {
         #[arg(long)]
         dry_run: bool,
     },
@@ -405,6 +486,48 @@ fn main() -> anyhow::Result<()> {
                     eprintln!("Note: Xcode is running. Proceeding with --yes anyway.");
                 }
                 run_clean_target("xcode", |dry| cleaner.clean(dry), dry_run)?;
+            }
+            CleanTarget::Cargo { dry_run } => {
+                run_clean_target("cargo", |_dry| { todo!("CargoCleaner") }, dry_run)?;
+            }
+            CleanTarget::Docker { dry_run } => {
+                run_clean_target("docker", |_dry| { todo!("DockerCleaner") }, dry_run)?;
+            }
+            CleanTarget::Orbstack { dry_run } => {
+                run_clean_target("orbstack", |_dry| { todo!("OrbstackCleaner") }, dry_run)?;
+            }
+            CleanTarget::CocoaPods { dry_run } => {
+                run_clean_target("cocoapods", |_dry| { todo!("CocoaPodsCleaner") }, dry_run)?;
+            }
+            CleanTarget::SwiftPM { dry_run } => {
+                run_clean_target("spm", |_dry| { todo!("SwiftPMCleaner") }, dry_run)?;
+            }
+            CleanTarget::Conda { dry_run } => {
+                run_clean_target("conda", |_dry| { todo!("CondaCleaner") }, dry_run)?;
+            }
+            CleanTarget::Poetry { dry_run } => {
+                run_clean_target("poetry", |_dry| { todo!("PoetryCleaner") }, dry_run)?;
+            }
+            CleanTarget::Pipx { dry_run } => {
+                run_clean_target("pipx", |_dry| { todo!("PipxCleaner") }, dry_run)?;
+            }
+            CleanTarget::Deno { dry_run } => {
+                run_clean_target("deno", |_dry| { todo!("DenoCleaner") }, dry_run)?;
+            }
+            CleanTarget::Rustup { dry_run } => {
+                run_clean_target("rustup", |_dry| { todo!("RustupCleaner") }, dry_run)?;
+            }
+            CleanTarget::Gradle { dry_run } => {
+                run_clean_target("gradle", |_dry| { todo!("GradleCleaner") }, dry_run)?;
+            }
+            CleanTarget::JetBrains { dry_run } => {
+                run_clean_target("jetbrains", |_dry| { todo!("JetBrainsCleaner") }, dry_run)?;
+            }
+            CleanTarget::Trash { dry_run } => {
+                run_clean_target("trash", |_dry| { todo!("TrashCleaner") }, dry_run)?;
+            }
+            CleanTarget::Downloads { dry_run } => {
+                run_clean_target("downloads", |_dry| { todo!("DownloadsCleaner") }, dry_run)?;
             }
         },
     }
