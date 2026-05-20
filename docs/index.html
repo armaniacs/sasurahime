@@ -1,0 +1,404 @@
+---
+layout: none
+---
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>sasurahime — macOS Developer Cache Cleaner</title>
+  <meta name="description" content="Scan, choose, and wipe stale caches from 40+ tools — all from a single terminal command." />
+  <style>
+    :root {
+      --bg: #0d1117;
+      --bg2: #161b22;
+      --bg3: #21262d;
+      --border: #30363d;
+      --text: #e6edf3;
+      --text-muted: #8b949e;
+      --accent: #58a6ff;
+      --accent-dim: #1f6feb;
+      --green: #3fb950;
+      --radius: 8px;
+      --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+      --mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: var(--bg); color: var(--text); font-family: var(--font); line-height: 1.6; }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    /* NAV */
+    nav {
+      position: sticky; top: 0; z-index: 100;
+      background: rgba(13,17,23,0.85); backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+      padding: 0 1.5rem;
+      display: flex; align-items: center; justify-content: space-between;
+      height: 60px;
+    }
+    .nav-logo { font-weight: 700; font-size: 1.1rem; color: var(--text); }
+    .nav-logo span { color: var(--accent); }
+    .nav-links { display: flex; align-items: center; gap: 1.5rem; font-size: 0.9rem; }
+    .nav-links a { color: var(--text-muted); }
+    .nav-links a:hover { color: var(--text); text-decoration: none; }
+    .lang-switch { display: flex; gap: 0.4rem; font-size: 0.85rem; }
+    .lang-switch a, .lang-switch span {
+      padding: 2px 8px; border-radius: 4px;
+    }
+    .lang-switch .active { background: var(--bg3); color: var(--text); font-weight: 600; }
+    .lang-switch a { color: var(--text-muted); }
+    .lang-switch a:hover { text-decoration: none; color: var(--text); }
+    .nav-gh {
+      display: inline-flex; align-items: center; gap: 6px;
+      background: var(--bg3); border: 1px solid var(--border);
+      padding: 5px 12px; border-radius: var(--radius);
+      color: var(--text); font-size: 0.85rem;
+    }
+    .nav-gh:hover { background: var(--border); text-decoration: none; }
+
+    /* HERO */
+    .hero {
+      text-align: center;
+      padding: 6rem 1.5rem 4rem;
+      max-width: 760px; margin: 0 auto;
+    }
+    .hero-badge {
+      display: inline-block;
+      background: var(--bg3); border: 1px solid var(--border);
+      border-radius: 20px; padding: 4px 14px;
+      font-size: 0.8rem; color: var(--text-muted);
+      margin-bottom: 1.5rem;
+    }
+    .hero h1 {
+      font-size: clamp(2rem, 5vw, 3.2rem);
+      font-weight: 800; line-height: 1.2;
+      margin-bottom: 1rem;
+    }
+    .hero h1 em { font-style: normal; color: var(--accent); }
+    .hero p {
+      font-size: 1.1rem; color: var(--text-muted);
+      max-width: 560px; margin: 0 auto 2rem;
+    }
+    .hero-cta { display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; margin-bottom: 2.5rem; }
+    .btn-primary {
+      background: var(--accent-dim); color: #fff;
+      padding: 10px 22px; border-radius: var(--radius);
+      font-weight: 600; font-size: 0.95rem;
+      transition: background .15s;
+    }
+    .btn-primary:hover { background: var(--accent); text-decoration: none; }
+    .btn-secondary {
+      background: var(--bg3); border: 1px solid var(--border);
+      color: var(--text); padding: 10px 22px; border-radius: var(--radius);
+      font-weight: 600; font-size: 0.95rem;
+      transition: background .15s;
+    }
+    .btn-secondary:hover { background: var(--border); text-decoration: none; }
+    .hero-code {
+      background: var(--bg2); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 1rem 1.5rem;
+      font-family: var(--mono); font-size: 0.9rem;
+      text-align: left; display: inline-block;
+      color: var(--text-muted); max-width: 100%;
+    }
+    .hero-code .prompt { color: var(--green); margin-right: 0.5rem; }
+    .hero-code .cmd { color: var(--text); }
+
+    /* SECTION */
+    section { padding: 4rem 1.5rem; }
+    .section-inner { max-width: 900px; margin: 0 auto; }
+    .section-label {
+      font-size: 0.75rem; font-weight: 700; letter-spacing: .1em;
+      text-transform: uppercase; color: var(--accent);
+      margin-bottom: 0.5rem;
+    }
+    .section-title {
+      font-size: clamp(1.4rem, 3vw, 2rem);
+      font-weight: 700; margin-bottom: 0.75rem;
+    }
+    .section-sub { color: var(--text-muted); margin-bottom: 2.5rem; max-width: 580px; }
+
+    /* FEATURES GRID */
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+      gap: 1rem;
+    }
+    .feature-card {
+      background: var(--bg2); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 1.25rem;
+    }
+    .feature-icon { font-size: 1.5rem; margin-bottom: 0.6rem; }
+    .feature-card h3 { font-size: 0.95rem; font-weight: 600; margin-bottom: 0.4rem; }
+    .feature-card p { font-size: 0.875rem; color: var(--text-muted); }
+
+    /* TARGETS TABLE */
+    .targets-wrap {
+      background: var(--bg2); border: 1px solid var(--border);
+      border-radius: var(--radius); overflow: hidden;
+    }
+    .targets-wrap table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+    .targets-wrap th {
+      text-align: left; padding: 0.75rem 1rem;
+      background: var(--bg3); color: var(--text-muted);
+      font-weight: 600; font-size: 0.8rem; text-transform: uppercase; letter-spacing: .05em;
+      border-bottom: 1px solid var(--border);
+    }
+    .targets-wrap td { padding: 0.75rem 1rem; border-bottom: 1px solid var(--border); vertical-align: top; }
+    .targets-wrap tr:last-child td { border-bottom: none; }
+    .targets-wrap td:first-child { color: var(--text-muted); white-space: nowrap; }
+    .tag {
+      display: inline-block; background: var(--bg3); border: 1px solid var(--border);
+      border-radius: 4px; padding: 1px 7px; font-family: var(--mono);
+      font-size: 0.78rem; color: var(--accent); margin: 2px 2px 2px 0;
+    }
+
+    /* STEPS */
+    .steps { display: flex; flex-direction: column; gap: 1.25rem; }
+    .step {
+      display: flex; gap: 1rem;
+      background: var(--bg2); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 1.25rem;
+    }
+    .step-num {
+      flex-shrink: 0; width: 2rem; height: 2rem;
+      background: var(--accent-dim); border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-weight: 700; font-size: 0.9rem;
+    }
+    .step h3 { font-size: 0.95rem; font-weight: 600; margin-bottom: 0.3rem; }
+    .step p { font-size: 0.875rem; color: var(--text-muted); }
+    code {
+      background: var(--bg3); border-radius: 4px;
+      padding: 1px 6px; font-family: var(--mono); font-size: 0.875em;
+    }
+
+    /* INSTALL */
+    .install-block {
+      background: var(--bg2); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 1.25rem 1.5rem;
+      font-family: var(--mono); font-size: 0.9rem;
+      color: var(--text-muted);
+    }
+    .install-block .prompt { color: var(--green); }
+    .install-block .cmd { color: var(--text); }
+    .or-divider { text-align: center; color: var(--text-muted); margin: 1rem 0; font-size: 0.85rem; }
+
+    /* FOOTER */
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 2rem 1.5rem;
+      text-align: center;
+      font-size: 0.8rem;
+      color: var(--text-muted);
+    }
+    footer a { color: var(--text-muted); }
+    footer a:hover { color: var(--text); }
+
+    /* DIVIDER */
+    .divider { border: none; border-top: 1px solid var(--border); }
+  </style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav>
+  <span class="nav-logo">sasurahime <span>✦</span></span>
+  <div class="nav-links">
+    <a href="HOWTO-USE">Docs</a>
+    <a href="SUPPORTED">Targets</a>
+    <a href="CHANGELOG">Changelog</a>
+    <div class="lang-switch">
+      <span class="active">EN</span>
+      <a href="ja/">日本語</a>
+    </div>
+    <a class="nav-gh" href="https://github.com/armaniacs/sasurahime" target="_blank" rel="noopener">
+      <svg height="16" width="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+      GitHub
+    </a>
+  </div>
+</nav>
+
+<!-- HERO -->
+<div class="hero">
+  <div class="hero-badge">macOS Developer Cache Cleaner · Written in Rust</div>
+  <h1>Reclaim disk space.<br><em>Effortlessly.</em></h1>
+  <p>Scan, choose, and wipe stale caches from uv, Homebrew, mise, Docker, Cargo, Go, and 35+ other tools — all from a single terminal command.</p>
+  <div class="hero-cta">
+    <a class="btn-primary" href="https://github.com/armaniacs/sasurahime/releases/latest" target="_blank" rel="noopener">Download latest release</a>
+    <a class="btn-secondary" href="HOWTO-USE">Read the docs</a>
+  </div>
+  <div class="hero-code">
+    <span class="prompt">$</span><span class="cmd">cargo install sasurahime</span>
+  </div>
+</div>
+
+<hr class="divider" />
+
+<!-- FEATURES -->
+<section>
+  <div class="section-inner">
+    <div class="section-label">Features</div>
+    <h2 class="section-title">Everything you need, nothing you don't</h2>
+    <p class="section-sub">A focused tool that does one thing well: get your disk space back.</p>
+    <div class="features-grid">
+      <div class="feature-card">
+        <div class="feature-icon">🎯</div>
+        <h3>40+ Clean Targets</h3>
+        <p>uv, brew, mise, browsers, cargo, go, pip, npm, yarn, pnpm, docker, rustup, gradle, ollama, Xcode, and more.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🖥️</div>
+        <h3>Interactive TUI</h3>
+        <p>Pick targets with spacebar, preview estimated freed space, then confirm — all without leaving the terminal.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🗑️</div>
+        <h3>Safe by Default</h3>
+        <p>Deleted files go to macOS Trash (Finder-restorable). Use <code>--permanent</code> to bypass.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🔍</div>
+        <h3>Dry-Run Support</h3>
+        <p>Every clean command supports <code>--dry-run</code> to preview what would be removed before committing.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">📌</div>
+        <h3>mise Pin Protection</h3>
+        <p>Versions pinned in <code>~/.config/mise/config.toml</code> or any <code>.mise.toml</code> are never deleted.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">⚙️</div>
+        <h3>Config File</h3>
+        <p>Set defaults in <code>~/.config/sasurahime/config.toml</code> for a zero-friction daily workflow.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<hr class="divider" />
+
+<!-- TARGETS -->
+<section>
+  <div class="section-inner">
+    <div class="section-label">Supported Targets</div>
+    <h2 class="section-title">Covers your whole stack</h2>
+    <p class="section-sub">Run <code>sasurahime targets</code> for the complete up-to-date list.</p>
+    <div class="targets-wrap">
+      <table>
+        <thead><tr><th>Category</th><th>Targets</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>Language / Package managers</td>
+            <td>
+              <span class="tag">uv</span><span class="tag">brew</span><span class="tag">bun</span><span class="tag">go</span><span class="tag">pip</span><span class="tag">npm</span><span class="tag">yarn</span><span class="tag">pnpm</span><span class="tag">pipx</span><span class="tag">poetry</span><span class="tag">conda</span><span class="tag">cargo</span><span class="tag">rustup</span><span class="tag">deno</span><span class="tag">gradle</span><span class="tag">maven</span><span class="tag">spm</span><span class="tag">cocoa-pods</span><span class="tag">flutter</span>
+            </td>
+          </tr>
+          <tr>
+            <td>Runtimes / Tools</td>
+            <td><span class="tag">mise</span><span class="tag">browsers</span><span class="tag">node-gyp</span></td>
+          </tr>
+          <tr>
+            <td>Docker / VM</td>
+            <td><span class="tag">docker</span><span class="tag">colima</span><span class="tag">orbstack</span></td>
+          </tr>
+          <tr>
+            <td>IDE / Simulator</td>
+            <td><span class="tag">xcode</span><span class="tag">device-support</span><span class="tag">simulator</span><span class="tag">jetbrains</span><span class="tag">vscode-extensions</span></td>
+          </tr>
+          <tr>
+            <td>AI/ML / CI</td>
+            <td><span class="tag">huggingface</span><span class="tag">ollama</span><span class="tag">act</span><span class="tag">pre-commit</span></td>
+          </tr>
+          <tr>
+            <td>Logs / Other</td>
+            <td><span class="tag">logs</span><span class="tag">library-logs</span><span class="tag">downloads</span><span class="tag">trash</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<hr class="divider" />
+
+<!-- HOW IT WORKS -->
+<section>
+  <div class="section-inner">
+    <div class="section-label">How It Works</div>
+    <h2 class="section-title">Simple 3-step workflow</h2>
+    <p class="section-sub">From install to a clean disk in under a minute.</p>
+    <div class="steps">
+      <div class="step">
+        <div class="step-num">1</div>
+        <div>
+          <h3>Install</h3>
+          <p>Run <code>cargo install sasurahime</code> or download a prebuilt binary from the releases page.</p>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">2</div>
+        <div>
+          <h3>Scan</h3>
+          <p>Run <code>sasurahime scan</code> to see a table of all detected caches and their sizes — no deletion happens.</p>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">3</div>
+        <div>
+          <h3>Clean</h3>
+          <p>Run <code>sasurahime</code> to enter interactive mode and pick what to wipe, or <code>sasurahime --yes</code> to clean everything at once.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<hr class="divider" />
+
+<!-- INSTALL -->
+<section>
+  <div class="section-inner">
+    <div class="section-label">Installation</div>
+    <h2 class="section-title">Get started now</h2>
+    <p class="section-sub">Requires macOS (arm64 or x86_64) and Rust toolchain for the cargo install path.</p>
+    <div class="install-block">
+      <span class="prompt"># </span>Via Cargo<br>
+      <span class="prompt">$ </span><span class="cmd">cargo install sasurahime</span>
+    </div>
+    <div class="or-divider">— or —</div>
+    <div style="text-align:center">
+      <a class="btn-primary" href="https://github.com/armaniacs/sasurahime/releases/latest" target="_blank" rel="noopener">Download prebuilt binary</a>
+    </div>
+  </div>
+</section>
+
+<hr class="divider" />
+
+<!-- NAME -->
+<section>
+  <div class="section-inner" style="max-width:680px">
+    <div class="section-label">Name</div>
+    <h2 class="section-title">速佐須良比売 — Hayasasurahi-me</h2>
+    <p style="color:var(--text-muted)">
+      <em>sasurahime</em> is named after a goddess from the <em>Oharae-no-Kotoba</em> (Great Purification Words) of Shinto tradition.
+      She receives impurities carried downstream — from river to sea to the underworld — and makes them vanish without a trace.<br><br>
+      In other words: the ultimate destructor of stale caches.
+    </p>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer>
+  <p>
+    <a href="https://github.com/armaniacs/sasurahime" target="_blank" rel="noopener">GitHub</a> ·
+    <a href="CHANGELOG">Changelog</a> ·
+    <a href="HOWTO-USE">Docs</a> ·
+    MIT License
+  </p>
+  <p style="margin-top:0.5rem">© 2025 sasurahime contributors</p>
+</footer>
+
+</body>
+</html>

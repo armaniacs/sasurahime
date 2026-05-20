@@ -1,0 +1,373 @@
+---
+layout: none
+---
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>sasurahime — macOS 開発者向けキャッシュクリーナー</title>
+  <meta name="description" content="40以上のツールの古いキャッシュを、ひとつのターミナルコマンドからスキャン・選択・削除。" />
+  <style>
+    :root {
+      --bg: #0d1117;
+      --bg2: #161b22;
+      --bg3: #21262d;
+      --border: #30363d;
+      --text: #e6edf3;
+      --text-muted: #8b949e;
+      --accent: #58a6ff;
+      --accent-dim: #1f6feb;
+      --green: #3fb950;
+      --radius: 8px;
+      --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+      --mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: var(--bg); color: var(--text); font-family: var(--font); line-height: 1.6; }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    nav {
+      position: sticky; top: 0; z-index: 100;
+      background: rgba(13,17,23,0.85); backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+      padding: 0 1.5rem;
+      display: flex; align-items: center; justify-content: space-between;
+      height: 60px;
+    }
+    .nav-logo { font-weight: 700; font-size: 1.1rem; color: var(--text); }
+    .nav-logo span { color: var(--accent); }
+    .nav-links { display: flex; align-items: center; gap: 1.5rem; font-size: 0.9rem; }
+    .nav-links a { color: var(--text-muted); }
+    .nav-links a:hover { color: var(--text); text-decoration: none; }
+    .lang-switch { display: flex; gap: 0.4rem; font-size: 0.85rem; }
+    .lang-switch a, .lang-switch span { padding: 2px 8px; border-radius: 4px; }
+    .lang-switch .active { background: var(--bg3); color: var(--text); font-weight: 600; }
+    .lang-switch a { color: var(--text-muted); }
+    .lang-switch a:hover { text-decoration: none; color: var(--text); }
+    .nav-gh {
+      display: inline-flex; align-items: center; gap: 6px;
+      background: var(--bg3); border: 1px solid var(--border);
+      padding: 5px 12px; border-radius: var(--radius);
+      color: var(--text); font-size: 0.85rem;
+    }
+    .nav-gh:hover { background: var(--border); text-decoration: none; }
+
+    .hero {
+      text-align: center;
+      padding: 6rem 1.5rem 4rem;
+      max-width: 760px; margin: 0 auto;
+    }
+    .hero-badge {
+      display: inline-block;
+      background: var(--bg3); border: 1px solid var(--border);
+      border-radius: 20px; padding: 4px 14px;
+      font-size: 0.8rem; color: var(--text-muted);
+      margin-bottom: 1.5rem;
+    }
+    .hero h1 {
+      font-size: clamp(2rem, 5vw, 3.2rem);
+      font-weight: 800; line-height: 1.3;
+      margin-bottom: 1rem;
+    }
+    .hero h1 em { font-style: normal; color: var(--accent); }
+    .hero p { font-size: 1.1rem; color: var(--text-muted); max-width: 560px; margin: 0 auto 2rem; }
+    .hero-cta { display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; margin-bottom: 2.5rem; }
+    .btn-primary {
+      background: var(--accent-dim); color: #fff;
+      padding: 10px 22px; border-radius: var(--radius);
+      font-weight: 600; font-size: 0.95rem; transition: background .15s;
+    }
+    .btn-primary:hover { background: var(--accent); text-decoration: none; }
+    .btn-secondary {
+      background: var(--bg3); border: 1px solid var(--border);
+      color: var(--text); padding: 10px 22px; border-radius: var(--radius);
+      font-weight: 600; font-size: 0.95rem; transition: background .15s;
+    }
+    .btn-secondary:hover { background: var(--border); text-decoration: none; }
+    .hero-code {
+      background: var(--bg2); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 1rem 1.5rem;
+      font-family: var(--mono); font-size: 0.9rem;
+      text-align: left; display: inline-block;
+      color: var(--text-muted); max-width: 100%;
+    }
+    .hero-code .prompt { color: var(--green); margin-right: 0.5rem; }
+    .hero-code .cmd { color: var(--text); }
+
+    section { padding: 4rem 1.5rem; }
+    .section-inner { max-width: 900px; margin: 0 auto; }
+    .section-label {
+      font-size: 0.75rem; font-weight: 700; letter-spacing: .1em;
+      text-transform: uppercase; color: var(--accent); margin-bottom: 0.5rem;
+    }
+    .section-title { font-size: clamp(1.4rem, 3vw, 2rem); font-weight: 700; margin-bottom: 0.75rem; }
+    .section-sub { color: var(--text-muted); margin-bottom: 2.5rem; max-width: 580px; }
+
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+      gap: 1rem;
+    }
+    .feature-card {
+      background: var(--bg2); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 1.25rem;
+    }
+    .feature-icon { font-size: 1.5rem; margin-bottom: 0.6rem; }
+    .feature-card h3 { font-size: 0.95rem; font-weight: 600; margin-bottom: 0.4rem; }
+    .feature-card p { font-size: 0.875rem; color: var(--text-muted); }
+
+    .targets-wrap {
+      background: var(--bg2); border: 1px solid var(--border);
+      border-radius: var(--radius); overflow: hidden;
+    }
+    .targets-wrap table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+    .targets-wrap th {
+      text-align: left; padding: 0.75rem 1rem;
+      background: var(--bg3); color: var(--text-muted);
+      font-weight: 600; font-size: 0.8rem; text-transform: uppercase; letter-spacing: .05em;
+      border-bottom: 1px solid var(--border);
+    }
+    .targets-wrap td { padding: 0.75rem 1rem; border-bottom: 1px solid var(--border); vertical-align: top; }
+    .targets-wrap tr:last-child td { border-bottom: none; }
+    .targets-wrap td:first-child { color: var(--text-muted); white-space: nowrap; }
+    .tag {
+      display: inline-block; background: var(--bg3); border: 1px solid var(--border);
+      border-radius: 4px; padding: 1px 7px; font-family: var(--mono);
+      font-size: 0.78rem; color: var(--accent); margin: 2px 2px 2px 0;
+    }
+
+    .steps { display: flex; flex-direction: column; gap: 1.25rem; }
+    .step {
+      display: flex; gap: 1rem;
+      background: var(--bg2); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 1.25rem;
+    }
+    .step-num {
+      flex-shrink: 0; width: 2rem; height: 2rem;
+      background: var(--accent-dim); border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-weight: 700; font-size: 0.9rem;
+    }
+    .step h3 { font-size: 0.95rem; font-weight: 600; margin-bottom: 0.3rem; }
+    .step p { font-size: 0.875rem; color: var(--text-muted); }
+    code {
+      background: var(--bg3); border-radius: 4px;
+      padding: 1px 6px; font-family: var(--mono); font-size: 0.875em;
+    }
+
+    .install-block {
+      background: var(--bg2); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 1.25rem 1.5rem;
+      font-family: var(--mono); font-size: 0.9rem; color: var(--text-muted);
+    }
+    .install-block .prompt { color: var(--green); }
+    .install-block .cmd { color: var(--text); }
+    .or-divider { text-align: center; color: var(--text-muted); margin: 1rem 0; font-size: 0.85rem; }
+
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 2rem 1.5rem; text-align: center;
+      font-size: 0.8rem; color: var(--text-muted);
+    }
+    footer a { color: var(--text-muted); }
+    footer a:hover { color: var(--text); }
+
+    .divider { border: none; border-top: 1px solid var(--border); }
+  </style>
+</head>
+<body>
+
+<nav>
+  <span class="nav-logo">sasurahime <span>✦</span></span>
+  <div class="nav-links">
+    <a href="../HOWTO-USE">ドキュメント</a>
+    <a href="../SUPPORTED">ターゲット一覧</a>
+    <a href="../CHANGELOG">変更履歴</a>
+    <div class="lang-switch">
+      <a href="../">English</a>
+      <span class="active">日本語</span>
+    </div>
+    <a class="nav-gh" href="https://github.com/armaniacs/sasurahime" target="_blank" rel="noopener">
+      <svg height="16" width="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+      GitHub
+    </a>
+  </div>
+</nav>
+
+<div class="hero">
+  <div class="hero-badge">macOS 開発者向けキャッシュクリーナー · Rust 製</div>
+  <h1>ディスクを取り戻す。<br><em>ひとコマンドで。</em></h1>
+  <p>uv、Homebrew、mise、Docker、Cargo、Go など 35 以上のツールの古いキャッシュを、スキャン・選択・削除。</p>
+  <div class="hero-cta">
+    <a class="btn-primary" href="https://github.com/armaniacs/sasurahime/releases/latest" target="_blank" rel="noopener">最新リリースをダウンロード</a>
+    <a class="btn-secondary" href="../HOWTO-USE">ドキュメントを読む</a>
+  </div>
+  <div class="hero-code">
+    <span class="prompt">$</span><span class="cmd">cargo install sasurahime</span>
+  </div>
+</div>
+
+<hr class="divider" />
+
+<section>
+  <div class="section-inner">
+    <div class="section-label">Features</div>
+    <h2 class="section-title">必要な機能が、すべて揃っています</h2>
+    <p class="section-sub">ディスク領域を取り戻すことだけに集中した、無駄のないツールです。</p>
+    <div class="features-grid">
+      <div class="feature-card">
+        <div class="feature-icon">🎯</div>
+        <h3>40 以上のクリーンターゲット</h3>
+        <p>uv、brew、mise、ブラウザ、cargo、go、pip、npm、yarn、pnpm、docker、rustup、gradle、ollama、Xcode など。</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🖥️</div>
+        <h3>インタラクティブ TUI</h3>
+        <p>スペースキーでターゲットを選択し、解放容量を確認してからクリーン。ターミナルを離れずに完結。</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🗑️</div>
+        <h3>デフォルトで安全</h3>
+        <p>削除ファイルは macOS のゴミ箱へ（Finder から復元可能）。<code>--permanent</code> で完全削除。</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">🔍</div>
+        <h3>ドライラン対応</h3>
+        <p>すべての clean コマンドで <code>--dry-run</code> を使えば、実際に削除する前に結果をプレビューできます。</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">📌</div>
+        <h3>mise ピン保護</h3>
+        <p><code>~/.config/mise/config.toml</code> や <code>.mise.toml</code> にピン留めされたバージョンは削除しません。</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">⚙️</div>
+        <h3>設定ファイル</h3>
+        <p><code>~/.config/sasurahime/config.toml</code> でデフォルト値を設定し、毎日のワークフローをゼロ摩擦に。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<hr class="divider" />
+
+<section>
+  <div class="section-inner">
+    <div class="section-label">Supported Targets</div>
+    <h2 class="section-title">スタック全体をカバー</h2>
+    <p class="section-sub">完全なリストは <code>sasurahime targets</code> で確認できます。</p>
+    <div class="targets-wrap">
+      <table>
+        <thead><tr><th>カテゴリ</th><th>ターゲット</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>言語 / パッケージマネージャー</td>
+            <td>
+              <span class="tag">uv</span><span class="tag">brew</span><span class="tag">bun</span><span class="tag">go</span><span class="tag">pip</span><span class="tag">npm</span><span class="tag">yarn</span><span class="tag">pnpm</span><span class="tag">pipx</span><span class="tag">poetry</span><span class="tag">conda</span><span class="tag">cargo</span><span class="tag">rustup</span><span class="tag">deno</span><span class="tag">gradle</span><span class="tag">maven</span><span class="tag">spm</span><span class="tag">cocoa-pods</span><span class="tag">flutter</span>
+            </td>
+          </tr>
+          <tr>
+            <td>ランタイム / ツール</td>
+            <td><span class="tag">mise</span><span class="tag">browsers</span><span class="tag">node-gyp</span></td>
+          </tr>
+          <tr>
+            <td>Docker / VM</td>
+            <td><span class="tag">docker</span><span class="tag">colima</span><span class="tag">orbstack</span></td>
+          </tr>
+          <tr>
+            <td>IDE / シミュレーター</td>
+            <td><span class="tag">xcode</span><span class="tag">device-support</span><span class="tag">simulator</span><span class="tag">jetbrains</span><span class="tag">vscode-extensions</span></td>
+          </tr>
+          <tr>
+            <td>AI/ML / CI</td>
+            <td><span class="tag">huggingface</span><span class="tag">ollama</span><span class="tag">act</span><span class="tag">pre-commit</span></td>
+          </tr>
+          <tr>
+            <td>ログ / その他</td>
+            <td><span class="tag">logs</span><span class="tag">library-logs</span><span class="tag">downloads</span><span class="tag">trash</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<hr class="divider" />
+
+<section>
+  <div class="section-inner">
+    <div class="section-label">How It Works</div>
+    <h2 class="section-title">シンプルな 3 ステップ</h2>
+    <p class="section-sub">インストールからクリーンまで、1 分以内に完了します。</p>
+    <div class="steps">
+      <div class="step">
+        <div class="step-num">1</div>
+        <div>
+          <h3>インストール</h3>
+          <p><code>cargo install sasurahime</code> を実行するか、リリースページからビルド済みバイナリをダウンロードします。</p>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">2</div>
+        <div>
+          <h3>スキャン</h3>
+          <p><code>sasurahime scan</code> で検出したキャッシュとサイズの一覧を確認。この時点では何も削除されません。</p>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">3</div>
+        <div>
+          <h3>クリーン</h3>
+          <p><code>sasurahime</code> でインタラクティブモードに入り削除対象を選択するか、<code>sasurahime --yes</code> で一括クリーン。</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<hr class="divider" />
+
+<section>
+  <div class="section-inner">
+    <div class="section-label">Installation</div>
+    <h2 class="section-title">今すぐ始める</h2>
+    <p class="section-sub">macOS (arm64 または x86_64) が必要です。cargo install には Rust ツールチェインが必要です。</p>
+    <div class="install-block">
+      <span class="prompt"># </span>Cargo 経由<br>
+      <span class="prompt">$ </span><span class="cmd">cargo install sasurahime</span>
+    </div>
+    <div class="or-divider">— または —</div>
+    <div style="text-align:center">
+      <a class="btn-primary" href="https://github.com/armaniacs/sasurahime/releases/latest" target="_blank" rel="noopener">ビルド済みバイナリをダウンロード</a>
+    </div>
+  </div>
+</section>
+
+<hr class="divider" />
+
+<section>
+  <div class="section-inner" style="max-width:680px">
+    <div class="section-label">Name</div>
+    <h2 class="section-title">速佐須良比売</h2>
+    <p style="color:var(--text-muted)">
+      <em>sasurahime</em> は、神道の大祓詞（おおはらえのことば）に登場する女神、<strong>速佐須良比売（はやさすらひめ）</strong>にちなんでいます。
+      川から海、そして根の国へと穢れを流し、跡形もなく消し去る神です。<br><br>
+      つまり、古いキャッシュの究極の消滅者です。
+    </p>
+  </div>
+</section>
+
+<footer>
+  <p>
+    <a href="https://github.com/armaniacs/sasurahime" target="_blank" rel="noopener">GitHub</a> ·
+    <a href="../CHANGELOG">変更履歴</a> ·
+    <a href="../HOWTO-USE">ドキュメント</a> ·
+    MIT License
+  </p>
+  <p style="margin-top:0.5rem">© 2025 sasurahime contributors</p>
+</footer>
+
+</body>
+</html>
