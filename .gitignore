@@ -29,5 +29,8 @@ __pycache__/
 .plan/
 .playwright-mcp/
 
+# Jekyll build output
+docs/_site/
+
 # Brainstorming visual companion artifacts
 .superpowers/
