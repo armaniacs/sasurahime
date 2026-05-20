@@ -1,6 +1,6 @@
 [package]
 name = "sasurahime"
-version = "0.1.3"
+version = "0.1.4"
 edition = "2021"
 license = "MIT"
 
@@ -22,10 +22,11 @@ wait-timeout = "0.2"
 trash = "5"
 
 [profile.release]
-opt-level      = "s"      # Balance size and speed for CLI
+opt-level      = "z"      # Aggressive size optimization (s proved larger)
 strip          = true     # Strip symbols
-lto            = "thin"   # Thin LTO: ~90% benefit, ~20% time
-codegen-units  = 1        # Single codegen unit
+lto            = true     # Full LTO for max size reduction
+codegen-units  = 1        # Single codegen unit enables more optimizations
+panic          = "abort"  # Abort on panic removes unwinding code
 
 [dev-dependencies]
 assert_cmd = "2"
