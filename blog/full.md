@@ -130,7 +130,7 @@ sasurahime
 実際の動作はこんな感じです。
 
 ```
-sasurahime v0.1.5
+sasurahime v0.1.6
 Scanning uv... [OK]
 Scanning brew... [OK]
 Scanning mise... [OK]
@@ -250,7 +250,7 @@ node = "18"
 プリビルドバイナリをダウンロードして配置するだけです。
 
 ```bash
-curl -LO https://github.com/armaniacs/sasurahime/releases/download/v0.1.5/sasurahime-aarch64-apple-darwin.tar.gz
+curl -LO https://github.com/armaniacs/sasurahime/releases/download/v0.1.6/sasurahime-aarch64-apple-darwin.tar.gz
 tar xzf sasurahime-x86_64-apple-darwin.tar.gz
 sudo mv sasurahime /usr/local/bin/
 ```
@@ -286,7 +286,7 @@ panic          = "abort"
 
 ## さいごに
 
-sasurahime はまだ v0.1.5 のプロジェクトです。「このキャッシュも掃除したい」「こういう機能がほしい」という要望があれば、Issue や PR を歓迎しています。
+sasurahime はまだ v0.1.6 のプロジェクトです。「このキャッシュも掃除したい」「こういう機能がほしい」という要望があれば、Issue や PR を歓迎しています。
 
 すぐに試したい方はこちらから：
 
