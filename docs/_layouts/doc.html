@@ -105,23 +105,6 @@
     .doc-body a { color: var(--accent); }
     .doc-body em { color: var(--text-muted); font-style: italic; }
     .doc-body hr { border: none; border-top: 1px solid var(--border); margin: 1.5rem 0; }
-    /* lang switcher buttons */
-    .lang-btn {
-      background: var(--bg3);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      color: var(--text-muted);
-      cursor: pointer;
-      font-size: 0.8rem;
-      font-weight: 600;
-      padding: 3px 10px;
-    }
-    .lang-btn.active {
-      background: var(--accent-dim);
-      border-color: var(--accent);
-      color: #fff;
-    }
-    .lang-btn:hover:not(.active) { background: var(--border); color: var(--text); }
     /* content area inside <details> */
     details > .doc-body {
       background: var(--bg2);
@@ -158,6 +141,7 @@
 
 <footer>
   <p>
+    <a href="{{ '/' | relative_url }}">Top</a> ·
     <a href="https://github.com/armaniacs/sasurahime" target="_blank" rel="noopener">GitHub</a> ·
     <a href="{{ '/HOWTO-USE' | relative_url }}">Documentation</a> ·
     Apache-2.0 License
@@ -189,6 +173,17 @@
         d.open = text.indexOf('日本語') !== -1;
       }
     });
+    /* Update nav link labels */
+    var navLinks = document.querySelectorAll('.nav-links a:not(.nav-gh)');
+    if (navLinks.length >= 2) {
+      if (lang === 'ja') {
+        navLinks[0].textContent = '使い方';
+        navLinks[1].textContent = 'ターゲット一覧';
+      } else {
+        navLinks[0].textContent = 'HOW TO USE';
+        navLinks[1].textContent = 'Targets';
+      }
+    }
     document.getElementById('btn-en').classList.toggle('active', lang === 'en');
     document.getElementById('btn-ja').classList.toggle('active', lang === 'ja');
   }
