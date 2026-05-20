@@ -5,6 +5,7 @@ edition = "2021"
 description = "macOS developer cache cleaner — scan and wipe stale caches from 40+ tools"
 repository = "https://github.com/armaniacs/sasurahime"
 license = "Apache-2.0"
+authors = ["ARAKI Yasuhiro <iron@araki.net>"]
 
 [[bin]]
 name = "sasurahime"
