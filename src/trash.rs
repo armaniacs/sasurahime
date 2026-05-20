@@ -31,6 +31,7 @@ mod tests {
 
     #[test]
     fn delete_path_defaults_to_normal_mode() {
+        set_trash_mode(false);
         let tmp = TempDir::new().unwrap();
         let d = tmp.path().join("default_dir");
         fs::create_dir_all(&d).unwrap();
@@ -63,5 +64,31 @@ mod tests {
         set_trash_mode(true);
         let result = delete_path(Path::new("/nonexistent/path/that/cannot/be/trashed"));
         assert!(result.is_err(), "trash of nonexistent path must return Err");
+        let err = format!("{}", result.unwrap_err());
+        assert!(err.contains("trash"), "error must mention trash, got: {err}");
+    }
+
+    #[test]
+    fn is_trash_mode_defaults_to_false() {
+        set_trash_mode(false);
+        assert!(!is_trash_mode(), "default must be false");
+    }
+
+    #[test]
+    fn is_trash_mode_reflects_set_trash_mode() {
+        set_trash_mode(true);
+        assert!(is_trash_mode(), "must be true after set(true)");
+        set_trash_mode(false);
+        assert!(!is_trash_mode(), "must be false after set(false)");
+    }
+
+    #[test]
+    fn delete_path_in_normal_mode_removes_file() {
+        set_trash_mode(false);
+        let tmp = TempDir::new().unwrap();
+        let f = tmp.path().join("test.txt");
+        fs::write(&f, b"hello").unwrap();
+        delete_path(&f).unwrap();
+        assert!(!f.exists(), "file must be removed in normal mode");
     }
 }

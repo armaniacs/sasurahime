@@ -26,6 +26,35 @@ pub fn run_auto(cleaners: &[Box<dyn Cleaner>]) -> Result<()> {
         return Ok(());
     }
 
+    if crate::trash::is_trash_mode() {
+        let total_reclaimable: u64 = pruneable_indices
+            .iter()
+            .filter_map(|&i| {
+                if let ScanStatus::Pruneable(b) = &results[i].status {
+                    Some(*b)
+                } else {
+                    None
+                }
+            })
+            .sum();
+        println!(
+            "Scan complete. Found {} item(s), ~{} will be moved to Trash.",
+            pruneable_indices.len(),
+            format_bytes(total_reclaimable),
+        );
+        print!("Proceed? [y/N] ");
+        {
+            use std::io::Write;
+            std::io::stdout().flush()?;
+        }
+        let mut input = String::new();
+        std::io::stdin().read_line(&mut input)?;
+        if !input.trim().eq_ignore_ascii_case("y") {
+            println!("Aborted.");
+            return Ok(());
+        }
+    }
+
     let mut total_freed: u64 = 0;
     for i in pruneable_indices {
         let name = cleaners[i].name();
