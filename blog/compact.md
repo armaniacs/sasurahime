@@ -19,7 +19,7 @@ published: false
 GitHub Releases からプリビルドバイナリをダウンロードします。
 
 ```bash
-curl -LO https://github.com/<user>/sasurahime/releases/download/v0.1.4/sasurahime-x86_64-apple-darwin.tar.gz
+curl -LO https://github.com/armaniacs/sasurahime/releases/download/v0.1.4/sasurahime-aarch64-apple-darwin.tar.gz
 tar xzf sasurahime-x86_64-apple-darwin.tar.gz
 sudo mv sasurahime /usr/local/bin/
 ```
