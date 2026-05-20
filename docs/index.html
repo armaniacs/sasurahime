@@ -8,197 +8,11 @@ layout: none
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>sasurahime — macOS Developer Cache Cleaner</title>
   <meta name="description" content="Scan, choose, and wipe stale caches from 40+ tools — all from a single terminal command." />
-  <style>
-    :root {
-      --bg: #0d1117;
-      --bg2: #161b22;
-      --bg3: #21262d;
-      --border: #30363d;
-      --text: #e6edf3;
-      --text-muted: #8b949e;
-      --accent: #58a6ff;
-      --accent-dim: #1f6feb;
-      --green: #3fb950;
-      --radius: 8px;
-      --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-      --mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-    }
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    body { background: var(--bg); color: var(--text); font-family: var(--font); line-height: 1.6; }
-    a { color: var(--accent); text-decoration: none; }
-    a:hover { text-decoration: underline; }
-
-    /* NAV */
-    nav {
-      position: sticky; top: 0; z-index: 100;
-      background: rgba(13,17,23,0.85); backdrop-filter: blur(12px);
-      border-bottom: 1px solid var(--border);
-      padding: 0 1.5rem;
-      display: flex; align-items: center; justify-content: space-between;
-      height: 60px;
-    }
-    .nav-logo { font-weight: 700; font-size: 1.1rem; color: var(--text); }
-    .nav-logo span { color: var(--accent); }
-    .nav-links { display: flex; align-items: center; gap: 1.5rem; font-size: 0.9rem; }
-    .nav-links a { color: var(--text-muted); }
-    .nav-links a:hover { color: var(--text); text-decoration: none; }
-    .lang-switch { display: flex; gap: 0.4rem; font-size: 0.85rem; }
-    .lang-switch a, .lang-switch span {
-      padding: 2px 8px; border-radius: 4px;
-    }
-    .lang-switch .active { background: var(--bg3); color: var(--text); font-weight: 600; }
-    .lang-switch a { color: var(--text-muted); }
-    .lang-switch a:hover { text-decoration: none; color: var(--text); }
-    .nav-gh {
-      display: inline-flex; align-items: center; gap: 6px;
-      background: var(--bg3); border: 1px solid var(--border);
-      padding: 5px 12px; border-radius: var(--radius);
-      color: var(--text); font-size: 0.85rem;
-    }
-    .nav-gh:hover { background: var(--border); text-decoration: none; }
-
-    /* HERO */
-    .hero {
-      text-align: center;
-      padding: 6rem 1.5rem 4rem;
-      max-width: 760px; margin: 0 auto;
-    }
-    .hero-badge {
-      display: inline-block;
-      background: var(--bg3); border: 1px solid var(--border);
-      border-radius: 20px; padding: 4px 14px;
-      font-size: 0.8rem; color: var(--text-muted);
-      margin-bottom: 1.5rem;
-    }
-    .hero h1 {
-      font-size: clamp(2rem, 5vw, 3.2rem);
-      font-weight: 800; line-height: 1.2;
-      margin-bottom: 1rem;
-    }
-    .hero h1 em { font-style: normal; color: var(--accent); }
-    .hero p {
-      font-size: 1.1rem; color: var(--text-muted);
-      max-width: 560px; margin: 0 auto 2rem;
-    }
-    .hero-cta { display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; margin-bottom: 2.5rem; }
-    .btn-primary {
-      background: var(--accent-dim); color: #fff;
-      padding: 10px 22px; border-radius: var(--radius);
-      font-weight: 600; font-size: 0.95rem;
-      transition: background .15s;
-    }
-    .btn-primary:hover { background: var(--accent); text-decoration: none; }
-    .btn-secondary {
-      background: var(--bg3); border: 1px solid var(--border);
-      color: var(--text); padding: 10px 22px; border-radius: var(--radius);
-      font-weight: 600; font-size: 0.95rem;
-      transition: background .15s;
-    }
-    .btn-secondary:hover { background: var(--border); text-decoration: none; }
-    .hero-code {
-      background: var(--bg2); border: 1px solid var(--border);
-      border-radius: var(--radius); padding: 1rem 1.5rem;
-      font-family: var(--mono); font-size: 0.9rem;
-      text-align: left; display: inline-block;
-      color: var(--text-muted); max-width: 100%;
-    }
-    .hero-code .prompt { color: var(--green); margin-right: 0.5rem; }
-    .hero-code .cmd { color: var(--text); }
-
-    /* SECTION */
-    section { padding: 4rem 1.5rem; }
-    .section-inner { max-width: 900px; margin: 0 auto; }
-    .section-label {
-      font-size: 0.75rem; font-weight: 700; letter-spacing: .1em;
-      text-transform: uppercase; color: var(--accent);
-      margin-bottom: 0.5rem;
-    }
-    .section-title {
-      font-size: clamp(1.4rem, 3vw, 2rem);
-      font-weight: 700; margin-bottom: 0.75rem;
-    }
-    .section-sub { color: var(--text-muted); margin-bottom: 2.5rem; max-width: 580px; }
-
-    /* FEATURES GRID */
-    .features-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
-      gap: 1rem;
-    }
-    .feature-card {
-      background: var(--bg2); border: 1px solid var(--border);
-      border-radius: var(--radius); padding: 1.25rem;
-    }
-    .feature-icon { font-size: 1.5rem; margin-bottom: 0.6rem; }
-    .feature-card h3 { font-size: 0.95rem; font-weight: 600; margin-bottom: 0.4rem; }
-    .feature-card p { font-size: 0.875rem; color: var(--text-muted); }
-
-    /* TARGETS TABLE */
-    .targets-wrap {
-      background: var(--bg2); border: 1px solid var(--border);
-      border-radius: var(--radius); overflow: hidden;
-    }
-    .targets-wrap table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
-    .targets-wrap th {
-      text-align: left; padding: 0.75rem 1rem;
-      background: var(--bg3); color: var(--text-muted);
-      font-weight: 600; font-size: 0.8rem; text-transform: uppercase; letter-spacing: .05em;
-      border-bottom: 1px solid var(--border);
-    }
-    .targets-wrap td { padding: 0.75rem 1rem; border-bottom: 1px solid var(--border); vertical-align: top; }
-    .targets-wrap tr:last-child td { border-bottom: none; }
-    .targets-wrap td:first-child { color: var(--text-muted); white-space: nowrap; }
-    .tag {
-      display: inline-block; background: var(--bg3); border: 1px solid var(--border);
-      border-radius: 4px; padding: 1px 7px; font-family: var(--mono);
-      font-size: 0.78rem; color: var(--accent); margin: 2px 2px 2px 0;
-    }
-
-    /* STEPS */
-    .steps { display: flex; flex-direction: column; gap: 1.25rem; }
-    .step {
-      display: flex; gap: 1rem;
-      background: var(--bg2); border: 1px solid var(--border);
-      border-radius: var(--radius); padding: 1.25rem;
-    }
-    .step-num {
-      flex-shrink: 0; width: 2rem; height: 2rem;
-      background: var(--accent-dim); border-radius: 50%;
-      display: flex; align-items: center; justify-content: center;
-      font-weight: 700; font-size: 0.9rem;
-    }
-    .step h3 { font-size: 0.95rem; font-weight: 600; margin-bottom: 0.3rem; }
-    .step p { font-size: 0.875rem; color: var(--text-muted); }
-    code {
-      background: var(--bg3); border-radius: 4px;
-      padding: 1px 6px; font-family: var(--mono); font-size: 0.875em;
-    }
-
-    /* INSTALL */
-    .install-block {
-      background: var(--bg2); border: 1px solid var(--border);
-      border-radius: var(--radius); padding: 1.25rem 1.5rem;
-      font-family: var(--mono); font-size: 0.9rem;
-      color: var(--text-muted);
-    }
-    .install-block .prompt { color: var(--green); }
-    .install-block .cmd { color: var(--text); }
-    .or-divider { text-align: center; color: var(--text-muted); margin: 1rem 0; font-size: 0.85rem; }
-
-    /* FOOTER */
-    footer {
-      border-top: 1px solid var(--border);
-      padding: 2rem 1.5rem;
-      text-align: center;
-      font-size: 0.8rem;
-      color: var(--text-muted);
-    }
-    footer a { color: var(--text-muted); }
-    footer a:hover { color: var(--text); }
-
-    /* DIVIDER */
-    .divider { border: none; border-top: 1px solid var(--border); }
-  </style>
+  <meta property="og:locale" content="en_US" />
+  <link rel="canonical" href="https://armaniacs.github.io/sasurahime/" />
+  <link rel="alternate" hreflang="en" href="https://armaniacs.github.io/sasurahime/" />
+  <link rel="alternate" hreflang="ja" href="https://armaniacs.github.io/sasurahime/ja/" />
+  <link rel="stylesheet" href="/sasurahime/assets/style.css" />
 </head>
 <body>
 
@@ -226,7 +40,7 @@ layout: none
   <p>Scan, choose, and wipe stale caches from uv, Homebrew, mise, Docker, Cargo, Go, and 35+ other tools — all from a single terminal command.</p>
   <div class="hero-cta">
     <a class="btn-primary" href="https://github.com/armaniacs/sasurahime/releases/latest" target="_blank" rel="noopener">Download latest release</a>
-    <a class="btn-secondary" href="HOWTO-USE">Read the docs</a>
+    <a class="btn-secondary" href="HOWTO-USE">View Documentation</a>
   </div>
   <div class="hero-code">
     <span class="prompt">$</span><span class="cmd">cargo install sasurahime</span>
@@ -392,7 +206,7 @@ layout: none
 <footer>
   <p>
     <a href="https://github.com/armaniacs/sasurahime" target="_blank" rel="noopener">GitHub</a> ·
-    <a href="HOWTO-USE">Docs</a> ·
+    <a href="HOWTO-USE">Documentation</a> ·
     Apache-2.0 License
   </p>
   <p style="margin-top:0.5rem">© 2025 sasurahime contributors</p>

@@ -1,10 +1,14 @@
-# sasurahime — HOW TO USE / 使い方
+---
+layout: doc
+title: "HOW TO USE / 使い方"
+permalink: /HOWTO-USE
+---
 
-<details open>
-<summary><strong>🇺🇸 English</strong></summary>
+<details open markdown="1">
+<summary markdown="0"><strong>🇺🇸 English</strong></summary>
 
 **sasurahime** is a macOS developer cache cleaner. It scans known cache
-locations, reports disk usage, and selectively removes stale data.
+locations, reports disk usage, and lets you selectively remove stale data.
 
 ---
 
@@ -88,8 +92,8 @@ sasurahime clean logs
 
 ### `sasurahime` (no arguments)
 
-Opens an interactive TUI with `dialoguer::MultiSelect`. You select which cache
-targets to clean from a checkbox list.
+Opens an interactive TUI with a checkbox list. Select which cache targets to
+clean, then confirm to proceed.
 
 Requires a TTY (terminal). In CI or scripting use `--yes` instead.
 
@@ -219,9 +223,8 @@ from Trash via Finder.
 
 ### `--dry-run` first
 
-Every `clean` subcommand supports `--dry-run`. Make it a habit to preview
-before deleting. The tool is tested on CI to guarantee zero side effects
-when `--dry-run` is active.
+Every `clean` subcommand supports `--dry-run`. Preview before deleting —
+zero side effects are verified on CI.
 
 ### `.mise.toml` pinning
 
@@ -295,8 +298,8 @@ sasurahime
 
 </details>
 
-<details>
-<summary><strong>🇯🇵 日本語</strong></summary>
+<details markdown="1">
+<summary markdown="0"><strong>🇯🇵 日本語</strong></summary>
 
 **sasurahime** は macOS 開発者向けキャッシュクリーナーです。既知のキャッシュ
 ロケーションをスキャンし、ディスク使用量を報告し、古くなったデータを選択して削除します。
@@ -383,7 +386,7 @@ sasurahime clean logs
 
 ### `sasurahime`（引数なし）
 
-`dialoguer::MultiSelect` を使用したインタラクティブ TUI を開きます。チェックボックスリストからクリーンするキャッシュターゲットを選択します。
+チェックボックスリスト付きのインタラクティブ TUI を起動します。クリーンするキャッシュターゲットを選択して確認するだけです。
 
 TTY（ターミナル）が必要です。CI やスクリプトでは代わりに `--yes` を使用してください。
 
@@ -501,11 +504,11 @@ exclude = ["access.log"]
 - `--permanent` フラグを渡す
 - `~/.config/sasurahime/config.toml` で `trash_mode = false` を設定する
 
-これによりセーフティネットが確保されます — 誤って削除したキャッシュは Finder から復元できます。
+これにより安全網が確保されます — 誤って削除したキャッシュは Finder から復元できます。
 
 ### まず `--dry-run`
 
-すべての `clean` サブコマンドは `--dry-run` をサポートしています。削除前にプレビューする習慣をつけましょう。`--dry-run` がアクティブな場合、副作用ゼロが CI でテストされています。
+すべての `clean` サブコマンドは `--dry-run` をサポートしています。削除前に必ずプレビューしましょう。`--dry-run` 使用時の副作用ゼロは CI で検証済みです。
 
 ### `.mise.toml` のピン留め
 

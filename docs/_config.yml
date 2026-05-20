@@ -4,3 +4,9 @@ url: https://armaniacs.github.io/sasurahime
 github_repo: https://github.com/armaniacs/sasurahime
 
 theme: jekyll-theme-cayman
+
+include:
+  - "*.md"
+
+kramdown:
+  parse_block_html: true

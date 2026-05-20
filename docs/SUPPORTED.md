@@ -1,9 +1,13 @@
-# sasurahime — Supported Targets / 対応ターゲット一覧
+---
+layout: doc
+title: "Supported Targets / 対応ターゲット一覧"
+permalink: /SUPPORTED
+---
 
-<details open>
-<summary><strong>🇺🇸 English</strong></summary>
+<details open markdown="1">
+<summary markdown="0"><strong>🇺🇸 English</strong></summary>
 
-sasurahime provides **32 clean targets** grouped into sprints.
+sasurahime provides **32 clean targets** organized by sprint.
 Every target supports both `detect` (read-only, no side effects) and
 `clean` (removal). All `clean` subcommands accept `--dry-run`.
 
@@ -788,21 +792,20 @@ Runs `detect()` on every cleaner and prints a formatted table via
 
 ## Interactive / Auto
 
-| Mode | Behaviour |
-|------|-----------|
-| `sasurahime` (no args, TTY) | Opens `dialoguer::MultiSelect` checkbox list. User selects targets, confirms, and selected targets are cleaned. |
+| Mode | Behavior |
+|------|----------|
+| `sasurahime` (no args, TTY) | Opens an interactive checkbox list. Select targets, confirm, and selected targets are cleaned. |
 | `sasurahime --yes` (no args, any) | Cleans every pruneable target without prompting. Exits with 0 if nothing is found. |
-| `sasurahime scan` (non-TTY) | Prints scan table only. |
+| `sasurahime scan` (non-TTY) | Prints the scan table only. |
 | `sasurahime clean <target>` | Cleans a specific target directly. |
 
 </details>
 
-<details>
-<summary><strong>🇯🇵 日本語</strong></summary>
+<details markdown="1">
+<summary markdown="0"><strong>🇯🇵 日本語</strong></summary>
 
-sasurahime は **32 のクリーンターゲット** をスプリント単位で提供します。
-すべてのターゲットは `detect`（読み取り専用、副作用なし）と
-`clean`（削除）の両方をサポートします。すべての `clean` サブコマンドは `--dry-run` に対応しています。
+sasurahime は **32 のクリーンターゲット** をスプリント単位で提供しています。
+すべてのターゲットは `detect`（読み取り専用、副作用なし）と `clean`（削除）の両方に対応しています。また、すべての `clean` サブコマンドは `--dry-run` をサポートしています。
 
 ---
 
@@ -1487,9 +1490,9 @@ sasurahime は **32 のクリーンターゲット** をスプリント単位で
 
 | モード | 動作 |
 |--------|------|
-| `sasurahime`（引数なし、TTY） | `dialoguer::MultiSelect` チェックボックスリストを開きます。ユーザーがターゲットを選択して確認すると、選択されたターゲットがクリーンされます。 |
+| `sasurahime`（引数なし、TTY） | インタラクティブなチェックボックスリストを起動します。ターゲットを選択して確認すると、選択したターゲットがクリーンされます。 |
 | `sasurahime --yes`（引数なし） | 確認なしですべての削除可能ターゲットをクリーンします。何もなければ 0 で終了します。 |
-| `sasurahime scan`（非 TTY） | スキャンテーブルのみ表示します。 |
+| `sasurahime scan`（非 TTY） | スキャン結果の一覧のみを表示します。 |
 | `sasurahime clean <target>` | 特定のターゲットを直接クリーンします。 |
 
 </details>

@@ -1,7 +1,10 @@
-# HOWTO: Add a new clean target / 新しいクリーンターゲットの追加方法
-
-<details open>
-<summary><strong>🇺🇸 English</strong></summary>
+---
+layout: doc
+title: "Add a new clean target / 新しいクリーンターゲットの追加方法"
+permalink: /HOWTO-ADD-target
+---
+<details open markdown="1">
+<summary markdown="0"><strong>🇺🇸 English</strong></summary>
 
 Steps to add a new cache-cleaning target to sasurahime.
 
@@ -94,14 +97,14 @@ special-dispatch cleaner) for reference.
 
 </details>
 
-<details>
-<summary><strong>🇯🇵 日本語</strong></summary>
+<details markdown="1">
+<summary markdown="0"><strong>🇯🇵 日本語</strong></summary>
 
-sasurahime に新しいキャッシュクリーンターゲットを追加する手順です。
+sasurahime に新しいキャッシュクリーンターゲットを追加する手順を説明します。
 
 ## 1. まず Issue を開く
 
-コードを書く前に **Issue を開いて**（または既存の PR にコメントして）提案を議論してください。以下を確認する必要があります：
+コードを書く前に、**Issue を開いて**（または既存の PR にコメントして）提案を議論してください。以下を確認します：
 
 - 対象ツールが使用するキャッシュ
 - ディスク上のキャッシュ位置
