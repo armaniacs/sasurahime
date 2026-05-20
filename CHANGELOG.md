@@ -8,30 +8,41 @@ All notable changes to sasurahime will be documented in this file. The format is
 
 ### Added
 
-- Version banner now visible in `sasurahime -h` / `--help` output (via clap `help_template`).
-- `sasurahime targets` subcommand listing all 14 supported clean targets.
+_none_
+
+### Changed
+
+_none_
+
+---
+
+## [0.1.5] — 2026-05-20
+
+### Added
+
+- `sasurahime targets` subcommand listing all supported clean targets.
+- Version banner now visible in `sasurahime -h` / `--help` output and at interactive startup.
+- Blog articles for Zenn (`blog/compact.md`, `blog/full.md`) covering usage walkthrough and full feature guide.
 
 ### Changed
 
 - **Version banner moved from stdout to stderr.** All commands now print
-  `sasurahime v0.1.2` on stderr at startup. Scripts using `sasurahime scan | grep`
+  `sasurahime v0.1.5` on stderr at startup. Scripts using `sasurahime scan | grep`
   or similar no longer see the version string in their piped output.
 - **CleanTarget match arms refactored.** 14 duplicated arms extracted into
   `run_clean_target()` helper. New target additions now need only 1 line per arm.
 - **ProgressStyle cached** via `OnceLock`. Template parsing happens once, not
-  per spinner instance. `.unwrap()` replaced with `.expect()` for clear panic
-  reason.
-- **Release profile tuned:** `opt-level` changed from `z` to `s` (better CLI
-  speed/size balance), `lto` changed from full to `"thin"` (~90% benefit at
-  ~20% build time).
+  per spinner instance.
 - **Spinner completion marker** changed from `✓` to `[OK]` for screen-reader
   compatibility.
-- **Xcode --yes mode:** a warning is now printed to stderr when Xcode is running
-  and cleanup proceeds anyway.
+- **Release profile tuned:** `opt-level` changed from `z` to `s` (better CLI
+  speed/size balance), `lto` changed from full to `"thin"`.
+- **Xcode --yes mode:** warning printed to stderr when Xcode is running.
 - **MiseCleaner non-directory entries** (`.DS_Store`, `.mise.backend`) are now
   skipped. `remove_with_uchg` errors are logged and skipped instead of stopping
   the entire clean.
 - `Cargo.toml` `license = "MIT"` added.
+- Repository published at `github.com/armaniacs/sasurahime`.
 
 ### Dependencies
 
