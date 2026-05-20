@@ -152,8 +152,7 @@ impl Cleaner for LogCleaner {
                 if dry_run {
                     println!("[dry-run] [{target_name}] would remove: {}", path.display());
                 } else {
-                    fs::remove_file(path)
-                        .map_err(|e| anyhow::anyhow!("remove_file {:?}: {}", path, e))?;
+                    crate::trash::delete_path(path)?;
                     freed += size;
                     deleted += 1;
                     println!("[{target_name}] Removed: {}", path.display());

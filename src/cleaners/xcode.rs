@@ -98,8 +98,7 @@ impl Cleaner for XcodeCleaner {
                     crate::format::format_bytes(size)
                 );
             } else {
-                fs::remove_dir_all(&dir)
-                    .map_err(|e| anyhow::anyhow!("remove_dir_all {:?}: {}", dir, e))?;
+                crate::trash::delete_path(&dir)?;
                 freed += size;
                 println!("Removed: DerivedData/{entry_name}");
             }

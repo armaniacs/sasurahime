@@ -6,6 +6,7 @@ mod format;
 mod interactive;
 mod progress;
 mod scanner;
+mod trash;
 
 use clap::{Parser, Subcommand};
 use cleaner::{CleanResult, Cleaner};
@@ -347,6 +348,9 @@ struct Cli {
     /// Non-interactive: clean all pruneable caches without prompting
     #[arg(long)]
     yes: bool,
+    /// Move deleted files to Trash instead of permanent removal
+    #[arg(long)]
+    trash: bool,
 
     #[command(subcommand)]
     command: Option<Commands>,
@@ -499,7 +503,14 @@ where
 {
     let result =
         crate::progress::with_spinner(&format!("Cleaning {label}..."), || cleaner_fn(dry_run))?;
-    println!("Freed: {}", format::format_bytes(result.bytes_freed));
+    if crate::trash::is_trash_mode() && result.bytes_freed > 0 {
+        println!(
+            "Freed: 0 B ({} moved to Trash)",
+            crate::format::format_bytes(result.bytes_freed)
+        );
+    } else {
+        println!("Freed: {}", crate::format::format_bytes(result.bytes_freed));
+    }
     Ok(())
 }
 
@@ -516,6 +527,9 @@ fn main() -> anyhow::Result<()> {
             std::process::exit(1);
         }
     };
+
+    let trash_mode = cli.trash || config.trash_mode;
+    crate::trash::set_trash_mode(trash_mode);
 
     match cli.command {
         Some(Commands::Scan) => {

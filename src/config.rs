@@ -25,6 +25,7 @@ struct LogsSection {
 struct RawConfig {
     #[serde(default)]
     logs: LogsSection,
+    trash_mode: Option<bool>,
 }
 
 #[derive(Debug, Clone)]
@@ -33,6 +34,7 @@ struct RawConfig {
 pub struct Config {
     pub logs_keep_days: u32,
     pub logs_extra_targets: Vec<ExtraLogTarget>,
+    pub trash_mode: bool,
 }
 
 impl Default for Config {
@@ -40,6 +42,7 @@ impl Default for Config {
         Self {
             logs_keep_days: 7,
             logs_extra_targets: vec![],
+            trash_mode: false,
         }
     }
 }
@@ -60,6 +63,7 @@ impl Config {
         Ok(Self {
             logs_keep_days: raw.logs.keep_days.unwrap_or(7),
             logs_extra_targets: raw.logs.targets,
+            trash_mode: raw.trash_mode.unwrap_or(false),
         })
     }
 
@@ -139,5 +143,19 @@ mod tests {
     fn expand_tilde_absolute_unchanged() {
         let expanded = Config::expand_tilde("/absolute/path", Path::new("/Users/test"));
         assert_eq!(expanded, PathBuf::from("/absolute/path"));
+    }
+
+    #[test]
+    fn config_default_trash_mode_is_false() {
+        let cfg = Config::default();
+        assert!(!cfg.trash_mode, "default trash_mode must be false");
+    }
+
+    #[test]
+    fn config_loads_trash_mode_true() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::write(tmp.path().join("config.toml"), "trash_mode = true\n").unwrap();
+        let cfg = Config::load(tmp.path()).unwrap();
+        assert!(cfg.trash_mode, "trash_mode from config must be true");
     }
 }

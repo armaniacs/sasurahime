@@ -208,7 +208,7 @@ impl Cleaner for LibraryLogsCleaner {
         for entry in &selected {
             let path_str = entry.path.to_string_lossy();
             let _ = self.runner.run("chflags", &["-R", "nouchg", &path_str]);
-            if let Err(e) = fs::remove_dir_all(&entry.path) {
+            if let Err(e) = crate::trash::delete_path(&entry.path) {
                 eprintln!(
                     "[library-logs] error removing {}: {e}",
                     entry.path.display()
@@ -278,7 +278,7 @@ impl LibraryLogsCleaner {
         for entry in &entries {
             let path_str = entry.path.to_string_lossy();
             let _ = self.runner.run("chflags", &["-R", "nouchg", &path_str]);
-            if let Err(e) = fs::remove_dir_all(&entry.path) {
+            if let Err(e) = crate::trash::delete_path(&entry.path) {
                 eprintln!(
                     "[library-logs] error removing {}: {e}",
                     entry.path.display()

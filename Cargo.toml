@@ -19,6 +19,7 @@ dirs        = "5"
 toml        = "0.8"
 serde       = { version = "1", features = ["derive"] }
 wait-timeout = "0.2"
+trash = "5"
 
 [profile.release]
 opt-level      = "s"      # Balance size and speed for CLI

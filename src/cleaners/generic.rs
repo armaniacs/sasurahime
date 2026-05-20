@@ -356,8 +356,7 @@ impl Cleaner for GenericCleaner {
                                 dir.display()
                             );
                         }
-                        fs::remove_dir_all(dir)
-                            .map_err(|e| anyhow::anyhow!("remove_dir_all {:?}: {}", dir, e))?;
+                        crate::trash::delete_path(dir)?;
                         freed += size;
                         println!("Removed: {}", dir.display());
                     }
@@ -474,7 +473,7 @@ pub fn clean_cli_or_fallback(
             dir.display()
         );
     }
-    fs::remove_dir_all(dir).map_err(|e| anyhow::anyhow!("remove_dir_all {:?}: {}", dir, e))?;
+    crate::trash::delete_path(dir)?;
     if config.recreate {
         fs::create_dir_all(dir)?;
     }

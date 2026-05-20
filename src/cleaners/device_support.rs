@@ -118,7 +118,7 @@ impl Cleaner for DeviceSupportCleaner {
             let size = dir_size(p);
             let path_str = p.to_string_lossy();
             let _ = self.runner.run("chflags", &["-R", "nouchg", &path_str]);
-            if let Err(e) = fs::remove_dir_all(p) {
+            if let Err(e) = crate::trash::delete_path(p) {
                 eprintln!("[device-support] error removing {}: {e}", p.display());
             } else {
                 freed += size;

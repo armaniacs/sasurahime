@@ -148,7 +148,7 @@ impl MiseCleaner {
         runner
             .run("chflags", &["-R", "nouchg", &path_str])
             .map_err(|e| anyhow::anyhow!("chflags -R nouchg {:?}: {}", path, e))?;
-        fs::remove_dir_all(path).map_err(|e| anyhow::anyhow!("remove_dir_all {:?}: {}", path, e))
+        crate::trash::delete_path(path)
     }
 }
 

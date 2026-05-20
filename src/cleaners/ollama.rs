@@ -3,7 +3,6 @@ use crate::command::CommandRunner;
 use crate::format::dir_size;
 use anyhow::Result;
 use std::path::{Path, PathBuf};
-use std::fs;
 
 pub struct OllamaCleaner {
     models_dir: PathBuf,
@@ -142,7 +141,7 @@ impl OllamaCleaner {
         }
         let path_str = dir.to_string_lossy();
         let _ = self.runner.run("chflags", &["-R", "nouchg", &path_str]);
-        fs::remove_dir_all(dir)?;
+        crate::trash::delete_path(dir)?;
         println!("[ollama] removed: {}", dir.display());
         Ok(CleanResult { name: self.name(), bytes_freed: size })
     }

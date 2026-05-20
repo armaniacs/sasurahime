@@ -2,7 +2,6 @@ use crate::cleaner::{CleanResult, Cleaner, ScanResult, ScanStatus};
 use crate::command::CommandRunner;
 use crate::format::dir_size;
 use anyhow::Result;
-use std::fs;
 use std::path::{Path, PathBuf};
 
 pub struct CargoCleaner {
@@ -88,7 +87,7 @@ impl Cleaner for CargoCleaner {
                 self.runner
                     .run("chflags", &["-R", "nouchg", &reg.to_string_lossy()])
                     .ok();
-                fs::remove_dir_all(&reg)?;
+                crate::trash::delete_path(&reg)?;
                 freed += size;
                 println!("[cargo] removed registry cache: {}", reg.display());
             }
@@ -106,7 +105,7 @@ impl Cleaner for CargoCleaner {
                 self.runner
                     .run("chflags", &["-R", "nouchg", &path.to_string_lossy()])
                     .ok();
-                fs::remove_dir_all(path)?;
+                crate::trash::delete_path(path)?;
                 freed += size;
                 println!("[cargo] removed target dir: {}", path.display());
             }

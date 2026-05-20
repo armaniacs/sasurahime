@@ -134,8 +134,7 @@ impl Cleaner for BrowserCleaner {
                         crate::format::format_bytes(size)
                     );
                 } else {
-                    fs::remove_dir_all(&path)
-                        .map_err(|e| anyhow::anyhow!("remove_dir_all {:?}: {}", path, e))?;
+                    crate::trash::delete_path(&path)?;
                     freed += size;
                     println!("Removed: {}/{entry_name}", group.label);
                 }
