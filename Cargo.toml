@@ -2,7 +2,9 @@
 name = "sasurahime"
 version = "0.1.5"
 edition = "2021"
-license = "MIT"
+description = "macOS developer cache cleaner — scan and wipe stale caches from 40+ tools"
+repository = "https://github.com/armaniacs/sasurahime"
+license = "Apache-2.0"
 
 [[bin]]
 name = "sasurahime"

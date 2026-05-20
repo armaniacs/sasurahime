@@ -75,7 +75,7 @@ The name was chosen from the world of the *Kojiki* and *Nihon Shoki* for its rol
 
 ## License
 
-MIT
+Apache-2.0
 
 ## Contributing
 

@@ -1,17 +1,30 @@
+# macOS
 .DS_Store
+*.swp
+*.swo
+*~
 
 # Rust
 target/
 
-# エディタ
+# Editor / IDE
 .vscode/
 .idea/
-*.swp
-*.swo
+.playwright-mcp/
 
+# Generated files
+*.bak
+*.log
+tags
 
-# Added by cargo
+# Python (used in dev scripts)
+__pycache__/
+*.pyc
 
-/target
+# Environment
+.env
+.env.local
 
+# Project-specific
 .plan/
+.playwright-mcp/
