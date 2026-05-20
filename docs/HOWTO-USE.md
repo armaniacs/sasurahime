@@ -296,6 +296,9 @@ sasurahime --yes
 sasurahime
 ```
 
+---
+
+📖 See also: [Supported Targets](/SUPPORTED) · [How to Add a Target](/HOWTO-ADD-target)
 </details>
 
 <details markdown="1">
@@ -569,4 +572,7 @@ sasurahime --yes
 sasurahime
 ```
 
+---
+
+📖 関連ドキュメント: [対応ターゲット一覧](/SUPPORTED) · [ターゲット追加方法](/HOWTO-ADD-target)
 </details>
