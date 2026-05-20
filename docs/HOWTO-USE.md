@@ -1,4 +1,7 @@
-# sasurahime — HOW TO USE
+# sasurahime — HOW TO USE / 使い方
+
+<details open>
+<summary><strong>🇺🇸 English</strong></summary>
 
 **sasurahime** is a macOS developer cache cleaner. It scans known cache
 locations, reports disk usage, and selectively removes stale data.
@@ -289,3 +292,278 @@ sasurahime --yes
 # Interactive pick-and-choose
 sasurahime
 ```
+
+</details>
+
+<details>
+<summary><strong>🇯🇵 日本語</strong></summary>
+
+**sasurahime** は macOS 開発者向けキャッシュクリーナーです。既知のキャッシュ
+ロケーションをスキャンし、ディスク使用量を報告し、古くなったデータを選択して削除します。
+
+---
+
+## インストール
+
+```bash
+cargo install sasurahime
+```
+
+Rust 1.70+ と macOS（arm64 または x86_64）が必要です。Linux/Windows はサポートしていません。
+
+---
+
+## コマンド
+
+### `sasurahime scan`
+
+すべてのキャッシュターゲットをスキャンし、サマリテーブルを表示して、何も削除せずに終了します。
+
+```bash
+$ sasurahime scan
+
+Category               Size       Status
+────────────────────────────────────────
+uv (archive)          18.2 GB    pruneable
+Homebrew downloads    16.6 GB    stale
+bun cache              5.5 GB    clearable
+mise / node (old)      3.4 GB    unused
+────────────────────────────────────────
+Total reclaimable     43.7 GB
+```
+
+### `sasurahime clean <target>`
+
+単一のキャッシュターゲットをクリーンします。`<target>` を以下のいずれかの名前に置き換えてください。
+
+| ターゲット      | 削除対象                                                             |
+|-----------------|----------------------------------------------------------------------|
+| `act`           | `~/.cache/act/`（GitHub Actions ランナー）                             |
+| `brew`          | `brew cleanup -s --prune=all`                                        |
+| `browsers`      | 古い Puppeteer Chrome / Playwright（`ms-playwright*`）ビルド           |
+| `bun`           | `bun pm cache rm`                                                    |
+| `cargo`         | Cargo レジストリキャッシュ + `target/` ディレクトリ                      |
+| `cocoa-pods`    | `pod cache clean --all`                                              |
+| `conda`         | `conda clean --all -y`                                               |
+| `caches`        | すべての汎用キャッシュ（bun, go, pip, node-gyp, npm, yarn, pnpm）     |
+| `deno`          | `deno cache -r`                                                      |
+| `docker`        | `docker system prune -f`                                             |
+| `downloads`     | `~/Downloads` のファイル                                              |
+| `go`            | `go clean -cache`                                                    |
+| `gradle`        | Gradle の古いバージョンキャッシュ                                      |
+| `huggingface`   | Hugging Face モデルキャッシュ（`hub/`）CLI またはフォールバック          |
+| `jetbrains`     | JetBrains IDE キャッシュ（古いバージョン）                              |
+| `library-logs`  | `~/Library/Logs/` — インタラクティブヒューリスティックスキャン         |
+| `logs`          | N 日より古いログファイル（`--keep-days` を参照）                        |
+| `mise`          | `~/.local/share/mise/installs/` 下の未使用ランタイムバージョン          |
+| `node-gyp`      | `~/.cache/node-gyp/` を削除                                          |
+| `npm`           | `npm cache clean --force`                                            |
+| `orbstack`      | `orb prune`                                                          |
+| `pip`           | `pip cache purge`                                                    |
+| `pipx`          | `pipx cache purge`                                                   |
+| `pnpm`          | `pnpm store prune`                                                   |
+| `poetry`        | `poetry cache clear --all`                                           |
+| `pre-commit`    | pre-commit フック環境キャッシュ（CLI またはフォールバック）               |
+| `rustup`        | 未使用の Rust ツールチェーン                                           |
+| `spm`           | SwiftPM キャッシュディレクトリ                                         |
+| `trash`         | `~/.Trash` のサイズ（スキャンのみ — Finder から空にしてください）       |
+| `uv`            | 古い `simple-vN` インデックスディレクトリ + `uv cache prune --force`    |
+| `xcode`         | Xcode DerivedData プロジェクトディレクトリ                              |
+| `yarn`          | `yarn cache clean`                                                   |
+
+**実行例:**
+
+```bash
+sasurahime clean uv
+sasurahime clean brew
+sasurahime clean mise
+sasurahime clean browsers
+sasurahime clean logs
+```
+
+### `sasurahime`（引数なし）
+
+`dialoguer::MultiSelect` を使用したインタラクティブ TUI を開きます。チェックボックスリストからクリーンするキャッシュターゲットを選択します。
+
+TTY（ターミナル）が必要です。CI やスクリプトでは代わりに `--yes` を使用してください。
+
+### `sasurahime --yes`
+
+非インタラクティブモード — 確認なしですべての削除可能ターゲットをクリーンします。
+
+```bash
+# すべてクリーン、確認なし
+sasurahime --yes
+```
+
+ファイルはデフォルトでゴミ箱に移動されます。`--yes` と `--permanent` を組み合わせると、完全削除の前に確認プロンプトが表示されます。
+
+cron ジョブ、CI パイプライン、メンテナンススクリプトに最適です。
+
+---
+
+## 共通フラグ
+
+### `--dry-run`
+
+実際に削除せずに、削除予定の内容をプレビューします。
+
+```bash
+sasurahime clean uv --dry-run
+sasurahime clean brew --dry-run
+sasurahime clean logs --dry-run
+```
+
+すべての `clean` サブコマンドでサポートされています。副作用ゼロを保証します。
+
+### `--all`（library-logs のみ）
+
+インタラクティブプロンプトをスキップし、提案されたすべてのエントリを削除します。
+
+```bash
+sasurahime clean library-logs --all
+```
+
+`--all` なしの場合、`library-logs` は各クリーン可能エントリとその理由（`[large]`、`[stale N days]`）を表示するインタラクティブ選択を開きます。
+
+### `--keep-days`（logs のみ）
+
+ログファイルのデフォルト保持期間を上書きします。
+
+```bash
+# 14 日以内のログを保持、それより古いものを削除
+sasurahime clean logs --keep-days 14
+```
+
+デフォルトは 7 日です（または設定ファイルの値）。
+
+### `--permanent`
+
+ゴミ箱を経由せず、ファイルを完全に削除します。デフォルトではすべてのクリーナーは安全のため削除ファイルを macOS のゴミ箱に送ります。
+
+```bash
+# uv キャッシュを完全に削除（ゴミ箱を経由しない）
+sasurahime clean uv --permanent
+```
+
+`--yes` と組み合わせると、完全削除の前に確認プロンプトが表示されます。
+
+```bash
+# 完全一括削除の前に確認を表示
+sasurahime --yes --permanent
+```
+
+---
+
+## 設定ファイル
+
+sasurahime は `~/.config/sasurahime/config.toml` が存在すれば読み込みます。このファイルはオプションです — デフォルト値は日常的な使用に適しています。
+
+### 例：ログ保持期間を 30 日に変更
+
+```toml
+[logs]
+keep_days = 30
+```
+
+### 例：ゴミ箱を完全に無効化
+
+```toml
+trash_mode = false
+```
+
+### 例：追加ログディレクトリを設定
+
+```toml
+[[logs.targets]]
+name = "my-app"
+path = "~/.local/share/my-app/logs"
+exclude = ["access.log"]
+```
+
+| フィールド       | 型               | デフォルト | 説明                             |
+|------------------|------------------|------------|----------------------------------|
+| `trash_mode`     | boolean          | `true`     | 削除ファイルをデフォルトでゴミ箱へ |
+| `keep_days`      | integer          | `7`        | グローバルログ保持期間            |
+| `targets`        | array of tables  | `[]`       | スキャンする追加ログディレクトリ   |
+| `targets[].name` | string           | 必須       | 表示名                            |
+| `targets[].path` | string           | 必須       | パス（`~` 展開対応）              |
+| `targets[].exclude` | string[]      | `[]`       | 削除しないファイル名              |
+
+---
+
+## 安全性
+
+### ゴミ箱モード（デフォルト）
+
+デフォルトでは、削除されたすべてのファイルは macOS のゴミ箱に送られます。以下を行わない限り、完全に消去されることはありません：
+
+- `--permanent` フラグを渡す
+- `~/.config/sasurahime/config.toml` で `trash_mode = false` を設定する
+
+これによりセーフティネットが確保されます — 誤って削除したキャッシュは Finder から復元できます。
+
+### まず `--dry-run`
+
+すべての `clean` サブコマンドは `--dry-run` をサポートしています。削除前にプレビューする習慣をつけましょう。`--dry-run` がアクティブな場合、副作用ゼロが CI でテストされています。
+
+### `.mise.toml` のピン留め
+
+mise ランタイムの削除は、バージョンを削除する前にグローバルの `~/.config/mise/config.toml` と HOME 下のすべての `.mise.toml`（最大深さ 5）をクロスチェックします。これらのファイルのいずれかに固定 (pinned) されているバージョンは決して削除されません。
+
+### macOS 不変フラグ（`uchg`）
+
+ディレクトリに macOS 不変フラグ（`uchg`）が設定されている場合 — パッケージマネージャやシステムキャッシュで一般的 — sasurahime は削除前に自動的に `chflags -R nouchg` を実行します。これはディレクトリを削除するすべてのクリーナーに適用されます。
+
+### Xcode 実行中検出
+
+`sasurahime clean xcode` 実行時に Xcode が実行中の場合は、DerivedData をクリーンする前に確認を求められます。`--yes` モードではプロンプトはバイパスされ、チェックはスキップされます。
+
+### `~/Library/Logs/` の安全性
+
+`library-logs` クリーナーはスキャン結果から常に `CrashReporter` と `DiagnosticReports` を除外します。ドットファイル（`.DS_Store` など）はスキップされます。ヒューリスティックルール（サイズ > 100 MB または最終変更 > 90 日前）に該当しないエントリは非表示になります。
+
+---
+
+## 終了コード
+
+| コード | 意味                                        |
+|--------|---------------------------------------------|
+| 0      | 成功（または削除するものがない）              |
+| 1      | 設定のパースエラー / ターミナルではない       |
+
+---
+
+## 実行例
+
+```bash
+# 回収可能な容量の概要を表示
+sasurahime scan
+
+# brew キャッシュをクリーン（まずプレビュー）
+sasurahime clean brew --dry-run
+sasurahime clean brew
+
+# すべての汎用キャッシュを一度にクリーン
+sasurahime clean caches
+
+# 古いブラウザビルドを削除
+sasurahime clean browsers
+
+# 30 日より古いログをクリーン
+sasurahime clean logs --keep-days 30
+
+# ~/Library/Logs/ のインタラクティブヒューリスティックスキャン＋選択
+sasurahime clean library-logs
+
+# ~/Library/Logs/ の全候補を一括削除（プロンプトスキップ）
+sasurahime clean library-logs --all
+
+# 完全自動化（cron 用）
+sasurahime --yes
+
+# インタラクティブ選択
+sasurahime
+```
+
+</details>
