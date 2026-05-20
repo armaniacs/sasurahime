@@ -19,7 +19,7 @@ fn install_fake_uv(bin_dir: &std::path::Path) {
 }
 
 #[test]
-fn trash_flag_with_dry_run_deletes_nothing() {
+fn dry_run_with_default_trash_mode_deletes_nothing() {
     let tmp = TempDir::new().unwrap();
     let bin_dir = tmp.path().join("bin");
     fs::create_dir_all(&bin_dir).unwrap();
@@ -31,9 +31,10 @@ fn trash_flag_with_dry_run_deletes_nothing() {
     let original_path = std::env::var("PATH").unwrap_or_default();
     let new_path = format!("{}:{}", bin_dir.display(), original_path);
 
+    // Default: trash mode on. --dry-run must prevent any action.
     let output = sasurahime(tmp.path())
         .env("PATH", &new_path)
-        .args(["--trash", "clean", "uv", "--dry-run"])
+        .args(["clean", "uv", "--dry-run"])
         .output()
         .unwrap();
 
@@ -48,7 +49,7 @@ fn trash_flag_with_dry_run_deletes_nothing() {
 }
 
 #[test]
-fn trash_clean_shows_moved_to_trash_message() {
+fn clean_shows_moved_to_trash_message() {
     let tmp = TempDir::new().unwrap();
     let bin_dir = tmp.path().join("bin");
     fs::create_dir_all(&bin_dir).unwrap();
@@ -64,9 +65,10 @@ fn trash_clean_shows_moved_to_trash_message() {
     let original_path = std::env::var("PATH").unwrap_or_default();
     let new_path = format!("{}:{}", bin_dir.display(), original_path);
 
+    // Default: trash mode on — no --trash flag needed.
     let output = sasurahime(tmp.path())
         .env("PATH", &new_path)
-        .args(["--trash", "clean", "uv"])
+        .args(["clean", "uv"])
         .output()
         .unwrap();
 
@@ -82,18 +84,18 @@ fn trash_clean_shows_moved_to_trash_message() {
 }
 
 #[test]
-fn yes_trash_with_empty_dir_prompts_nothing() {
+fn yes_with_empty_dir_exits_cleanly() {
     let tmp = TempDir::new().unwrap();
     let output = sasurahime(tmp.path())
         .env("PATH", "/usr/bin:/bin")
-        .args(["--trash", "--yes"])
+        .args(["--yes"])
         .output()
         .unwrap();
     assert!(output.status.success());
 }
 
 #[test]
-fn yes_trash_requires_confirmation() {
+fn yes_permanent_requires_confirmation() {
     let tmp = TempDir::new().unwrap();
     let bin_dir = tmp.path().join("bin");
     fs::create_dir_all(&bin_dir).unwrap();
@@ -109,21 +111,52 @@ fn yes_trash_requires_confirmation() {
     let original_path = std::env::var("PATH").unwrap_or_default();
     let output = sasurahime(tmp.path())
         .env("PATH", format!("{}:{}", bin_dir.display(), original_path))
-        .args(["--trash", "--yes"])
+        .args(["--permanent", "--yes"])
         .pipe_stdin(&stdin_file)
         .unwrap()
         .output()
         .unwrap();
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(output.status.success(), "stdout: {stdout}");
+    // With --permanent --yes and empty stdin (no "y"), the confirmation prompt rejects.
+    // The output contains either "Are you sure" or "Aborted".
     assert!(
-        stdout.to_lowercase().contains("scan") || stdout.contains("Nothing") || stdout.contains("Select"),
-        "should show scan info before confirmation:\n{stdout}"
+        stdout.contains("Are you sure") || stdout.contains("Aborted"),
+        "should show confirmation prompt then abort without 'y':\n{stdout}"
     );
 }
 
 #[test]
-fn config_trash_mode_trashes_instead_of_deleting() {
+fn permanent_dry_run_shows_freed_not_trash() {
+    let tmp = TempDir::new().unwrap();
+    let bin_dir = tmp.path().join("bin");
+    fs::create_dir_all(&bin_dir).unwrap();
+    install_fake_uv(&bin_dir);
+
+    let uv_cache = tmp.path().join(".cache/uv");
+    fs::create_dir_all(uv_cache.join("simple-v16")).unwrap();
+    fs::create_dir_all(uv_cache.join("simple-v21")).unwrap();
+    fs::write(uv_cache.join("simple-v16/pack.seq"), [0u8; 100]).unwrap();
+
+    let original_path = std::env::var("PATH").unwrap_or_default();
+    let output = sasurahime(tmp.path())
+        .env("PATH", format!("{}:{}", bin_dir.display(), original_path))
+        .args(["--permanent", "clean", "uv", "--dry-run"])
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        output.status.success(),
+        "stdout: {stdout}\nstderr: {}",
+        String::from_utf8_lossy(&output.stderr),
+    );
+    // --permanent mode: should show "Freed:" not "moved to Trash"
+    assert!(stdout.contains("Freed:"), "stdout:\n{stdout}");
+    assert!(!stdout.contains("Trash"), "--permanent should bypass Trash:\n{stdout}");
+}
+
+#[test]
+fn config_trash_mode_true_still_works() {
     let tmp = TempDir::new().unwrap();
     let config_dir = tmp.path().join(".config/sasurahime");
     fs::create_dir_all(&config_dir).unwrap();
@@ -150,5 +183,41 @@ fn config_trash_mode_trashes_instead_of_deleting() {
     assert!(
         stdout.contains("moved to Trash"),
         "config trash_mode should move to Trash:\n{stdout}"
+    );
+}
+
+#[test]
+fn config_trash_mode_false_disables_trash() {
+    let tmp = TempDir::new().unwrap();
+    let config_dir = tmp.path().join(".config/sasurahime");
+    fs::create_dir_all(&config_dir).unwrap();
+    fs::write(config_dir.join("config.toml"), "trash_mode = false\n").unwrap();
+
+    let bin_dir = tmp.path().join("bin");
+    fs::create_dir_all(&bin_dir).unwrap();
+    install_fake_uv(&bin_dir);
+
+    let uv_cache = tmp.path().join(".cache/uv");
+    fs::create_dir_all(uv_cache.join("simple-v16")).unwrap();
+    fs::create_dir_all(uv_cache.join("simple-v21")).unwrap();
+    fs::write(uv_cache.join("simple-v16/pack.seq"), [0u8; 100]).unwrap();
+
+    let original_path = std::env::var("PATH").unwrap_or_default();
+    let output = sasurahime(tmp.path())
+        .env("PATH", format!("{}:{}", bin_dir.display(), original_path))
+        .args(["clean", "uv"])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    // config trash_mode=false disables Trash → show "Freed:" not "moved to Trash"
+    assert!(
+        stdout.contains("Freed:"),
+        "config trash_mode=false should bypass Trash:\n{stdout}"
+    );
+    assert!(
+        !stdout.contains("moved to Trash"),
+        "config trash_mode=false must not mention Trash:\n{stdout}"
     );
 }

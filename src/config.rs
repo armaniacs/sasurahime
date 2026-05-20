@@ -42,7 +42,7 @@ impl Default for Config {
         Self {
             logs_keep_days: 7,
             logs_extra_targets: vec![],
-            trash_mode: false,
+            trash_mode: true,
         }
     }
 }
@@ -63,7 +63,7 @@ impl Config {
         Ok(Self {
             logs_keep_days: raw.logs.keep_days.unwrap_or(7),
             logs_extra_targets: raw.logs.targets,
-            trash_mode: raw.trash_mode.unwrap_or(false),
+            trash_mode: raw.trash_mode.unwrap_or(true),
         })
     }
 
@@ -146,9 +146,9 @@ mod tests {
     }
 
     #[test]
-    fn config_default_trash_mode_is_false() {
+    fn config_default_trash_mode_is_true() {
         let cfg = Config::default();
-        assert!(!cfg.trash_mode, "default trash_mode must be false");
+        assert!(cfg.trash_mode, "default trash_mode must be true");
     }
 
     #[test]

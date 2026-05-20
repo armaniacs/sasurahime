@@ -3,7 +3,7 @@ use anyhow::Result;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::fs;
 
-static TRASH_MODE: AtomicBool = AtomicBool::new(false);
+static TRASH_MODE: AtomicBool = AtomicBool::new(true);
 
 pub fn set_trash_mode(enabled: bool) {
     TRASH_MODE.store(enabled, Ordering::Relaxed);
@@ -30,13 +30,13 @@ mod tests {
     use tempfile::TempDir;
 
     #[test]
-    fn delete_path_defaults_to_normal_mode() {
-        set_trash_mode(false);
+    fn delete_path_defaults_to_trash_mode() {
+        set_trash_mode(true);
         let tmp = TempDir::new().unwrap();
         let d = tmp.path().join("default_dir");
         fs::create_dir_all(&d).unwrap();
         delete_path(&d).unwrap();
-        assert!(!d.exists(), "default mode must be normal deletion (false)");
+        assert!(!d.exists(), "default mode must be trash (true)");
     }
 
     #[test]
@@ -69,9 +69,9 @@ mod tests {
     }
 
     #[test]
-    fn is_trash_mode_defaults_to_false() {
-        set_trash_mode(false);
-        assert!(!is_trash_mode(), "default must be false");
+    fn is_trash_mode_defaults_to_true() {
+        set_trash_mode(true);
+        assert!(is_trash_mode(), "default must be true");
     }
 
     #[test]

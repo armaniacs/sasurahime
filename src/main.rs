@@ -348,9 +348,9 @@ struct Cli {
     /// Non-interactive: clean all pruneable caches without prompting
     #[arg(long)]
     yes: bool,
-    /// Move deleted files to Trash instead of permanent removal
+    /// Move deleted files to Trash instead of permanent removal (default: enabled)
     #[arg(long)]
-    trash: bool,
+    permanent: bool,
 
     #[command(subcommand)]
     command: Option<Commands>,
@@ -528,7 +528,10 @@ fn main() -> anyhow::Result<()> {
         }
     };
 
-    let trash_mode = cli.trash || config.trash_mode;
+    // Default: trash mode enabled.
+    // --permanent flag overrides to permanent deletion.
+    // Config trash_mode = false also overrides to permanent deletion.
+    let trash_mode = !cli.permanent && config.trash_mode;
     crate::trash::set_trash_mode(trash_mode);
 
     match cli.command {

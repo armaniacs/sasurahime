@@ -26,7 +26,7 @@ pub fn run_auto(cleaners: &[Box<dyn Cleaner>]) -> Result<()> {
         return Ok(());
     }
 
-    if crate::trash::is_trash_mode() {
+    if !crate::trash::is_trash_mode() {
         let total_reclaimable: u64 = pruneable_indices
             .iter()
             .filter_map(|&i| {
@@ -38,11 +38,11 @@ pub fn run_auto(cleaners: &[Box<dyn Cleaner>]) -> Result<()> {
             })
             .sum();
         println!(
-            "Scan complete. Found {} item(s), ~{} will be moved to Trash.",
+            "Scan complete. Found {} item(s), ~{} will be permanently deleted.",
             pruneable_indices.len(),
             format_bytes(total_reclaimable),
         );
-        print!("Proceed? [y/N] ");
+        print!("Are you sure? [y/N] ");
         {
             use std::io::Write;
             std::io::stdout().flush()?;
