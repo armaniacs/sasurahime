@@ -84,15 +84,81 @@ deep_suppress: bool,
 
 Mutually exclusive. If both specified, `deep_suppress` wins.
 
-**Factory function:**
+**Factory function (delegates to testable helper):**
 
 ```rust
-fn build_reporter(cli: &Cli) -> Box<dyn ProgressReporter> {
-    build_reporter_from_flags(cli.suppress, cli.deep_suppress)
+fn build_reporter(cli: &Cli, config: &Config) -> Box<dyn ProgressReporter> {
+    build_reporter_from_flags(
+        cli.suppress || config.suppress,
+        cli.deep_suppress || config.deep_suppress,
+    )
 }
 ```
 
-### 4. `run_clean_target` Changes
+### 4. Config File Support
+
+**`src/config.rs`** — `RawConfig` gets two new optional fields:
+
+```rust
+struct RawConfig {
+    #[serde(default)]
+    logs: LogsSection,
+    trash_mode: Option<bool>,
+    suppress: Option<bool>,       // NEW
+    deep_suppress: Option<bool>,  // NEW
+}
+```
+
+**`Config` struct:**
+
+```rust
+pub struct Config {
+    pub logs_keep_days: u32,
+    pub logs_extra_targets: Vec<ExtraLogTarget>,
+    pub trash_mode: bool,
+    pub suppress: bool,       // NEW
+    pub deep_suppress: bool,  // NEW
+}
+```
+
+**Default:** Both `false` (verbose mode).
+
+**Loading in `Config::load()`:**
+
+```rust
+Ok(Self {
+    logs_keep_days: raw.logs.keep_days.unwrap_or(7),
+    logs_extra_targets: raw.logs.targets,
+    trash_mode: raw.trash_mode.unwrap_or(true),
+    suppress: raw.suppress.unwrap_or(false),           // NEW
+    deep_suppress: raw.deep_suppress.unwrap_or(false),  // NEW
+})
+```
+
+**Example config.toml:**
+
+```toml
+trash_mode = true
+suppress = true
+# deep_suppress = true   # overrides suppress if set
+```
+
+### 5. Priority (CLI > Config > Default)
+
+```
+CLI --deep-suppress   >  config.deep_suppress = true   >  default (false)
+CLI --suppress        >  config.suppress = true         >  default (false)
+```
+
+`deep_suppress` always wins over `suppress` regardless of source.
+
+**Startup logic (`main()`):**
+
+```rust
+let reporter = build_reporter(&cli, &config);
+```
+
+### 6. `run_clean_target` Changes
 
 ```rust
 fn run_clean_target<F>(
@@ -128,7 +194,7 @@ where
 }
 ```
 
-### 5. `Cleaner` Trait Change
+### 7. `Cleaner` Trait Change
 
 ```rust
 pub trait Cleaner: Send + Sync {
@@ -140,7 +206,7 @@ pub trait Cleaner: Send + Sync {
 
 All existing cleaner implementations must update their `clean()` signature to accept `_reporter: &dyn ProgressReporter` (ignored if unused).
 
-### 6. LibraryLogs Verbose Output
+### 8. LibraryLogs Verbose Output
 
 `src/cleaners/library_logs.rs` — both `clean()` and `clean_all()`:
 
@@ -151,7 +217,7 @@ for (i, entry) in selected.iter().enumerate() {
 }
 ```
 
-### 7. `with_spinner` Compatibility
+### 9. `with_spinner` Compatibility
 
 Keep existing `with_spinner()` unchanged. The reporter-aware version is integrated directly into `run_clean_target` via the `show_spinner()` check shown above.
 
@@ -160,7 +226,8 @@ Keep existing `with_spinner()` unchanged. The reporter-aware version is integrat
 | File | Change | Responsibility |
 |------|--------|----------------|
 | `src/progress.rs` | Add `ProgressReporter` trait + 3 impls + `build_reporter_from_flags()` + unit tests | Trait + factory |
-| `src/main.rs` | Add `--suppress` / `--deep-suppress` flags, `build_reporter()` delegates to `build_reporter_from_flags()`, update `run_clean_target`, pass reporter through `--yes` path | CLI + dispatch |
+| `src/main.rs` | Add `--suppress` / `--deep-suppress` flags, `build_reporter()` reads config + CLI, update `run_clean_target`, pass reporter through `--yes` path | CLI + dispatch |
+| `src/config.rs` | Add `suppress` / `deep_suppress` fields to `RawConfig` + `Config` + `load()` + unit tests | Config file |
 | `src/cleaner.rs` | Add `&dyn ProgressReporter` to `clean()` signature | Trait change |
 | `src/cleaners/*.rs` | Mechanical: accept `_reporter` in `clean()` (17 files) | Signature update |
 | `src/cleaners/library_logs.rs` | Call `reporter.report_delete()` in `clean()` and `clean_all()` | Verbose output |
@@ -309,7 +376,79 @@ fn build_reporter_deep_suppress_wins_over_suppress() {
 
 Design change: extract `build_reporter_from_flags(suppress: bool, deep_suppress: bool)` from `build_reporter(cli: &Cli)` so the dispatch logic is testable without constructing a Cli.
 
-### Test 9 (E2E): `--suppress` hides per-entry output
+### Test 9: Config loads `suppress = true` from TOML (unit)
+
+**`src/config.rs`** — extend existing `#[cfg(test)]` block:
+
+```rust
+#[test]
+fn config_loads_suppress_true() {
+    let tmp = TempDir::new().unwrap();
+    std::fs::write(tmp.path().join("config.toml"), "suppress = true\n").unwrap();
+    let cfg = Config::load(tmp.path()).unwrap();
+    assert!(cfg.suppress, "suppress from config must be true");
+}
+```
+
+**Expected failure:** `error[E0609]: no field 'suppress' on type 'Config'` — field doesn't exist yet.
+
+**Minimal GREEN:** Add `suppress: bool` to `RawConfig`, `Config`, and `Config::load()`.
+
+### Test 10: Config defaults `suppress` to `false` (unit)
+
+```rust
+#[test]
+fn config_default_suppress_is_false() {
+    let cfg = Config::default();
+    assert!(!cfg.suppress, "default suppress must be false");
+}
+```
+
+### Test 11: Config loads `deep_suppress = true` from TOML (unit)
+
+Analogous to Test 9 for `deep_suppress` field.
+
+### Test 12: `build_reporter` respects config over default (unit)
+
+```rust
+#[test]
+fn build_reporter_respects_config_suppress() {
+    let r = build_reporter_from_flags(false, false, true, false);
+    // args: suppress_cli, deep_suppress_cli, suppress_cfg, deep_suppress_cfg
+    assert!(!r.show_spinner(), "config suppress should hide spinner? no, only deep does");
+    // suppress still shows spinner, just suppresses per-entry output
+}
+```
+
+Wait — `suppress` shows spinner, `deep_suppress` hides it. The test verifies this. Since `build_reporter_from_flags` signature expands to 4 bools, or takes `cli.suppress`, `cli.deep_suppress`, `config.suppress`, `config.deep_suppress`:
+
+```rust
+#[test]
+fn build_reporter_config_suppress_is_merged_with_cli() {
+    let r = build_reporter_from_flags(false, false, true, false);
+    // CLI suppress=false, deep=false; Config suppress=true, deep=false
+    // Result: suppress mode
+    assert!(r.suppress_mode());  // Need method on trait? No — we test via behavior
+}
+```
+
+Better: keep `build_reporter_from_flags` accepting just a final `suppress` and `deep_suppress` (already merged). Test the merging separately:
+
+```rust
+#[test]
+fn build_reporter_merges_cli_and_config() {
+    // Merge logic: cli.suppress || config.suppress
+    // This lives in main.rs, so test it as a function:
+    let merged_suppress = cli.suppress || config.suppress;
+    let merged_deep = cli.deep_suppress || config.deep_suppress;
+    let r = build_reporter_from_flags(merged_suppress, merged_deep);
+    // ...
+}
+```
+
+Extract `fn merge_suppress_flags(cli: &Cli, config: &Config) -> (bool, bool)` to test.
+
+### Test 13 (E2E): `--suppress` hides per-entry output
 
 **Test file:** `tests/progress.rs`
 
@@ -338,7 +477,7 @@ fn suppress_flag_hides_per_entry_output() {
 }
 ```
 
-### Test 10 (E2E): `--deep-suppress` hides all output
+### Test 14 (E2E): `--deep-suppress` hides all output
 
 ```rust
 #[test]
@@ -361,7 +500,7 @@ fn deep_suppress_flag_hides_all_output() {
 }
 ```
 
-### Test 11 (E2E): Default (no suppress) shows per-entry output
+### Test 15 (E2E): Default (no suppress) shows per-entry output
 
 Ensure the default behavior still works:
 
@@ -386,7 +525,7 @@ fn default_shows_per_entry_output() {
 }
 ```
 
-### Test 12–N: All existing tests must still pass after signature change
+### Test 16–N: All existing tests must still pass after signature change
 
 Every existing test that calls `cleaner.clean(dry_run)` will fail to compile because the trait now requires `cleaner.clean(dry_run, &reporter)`. Each such call site needs:
 
@@ -410,13 +549,14 @@ This is a mechanical change across `tests/*.rs` and `src/cleaners/*.rs` `#[cfg(t
 6. Write Test 6 → fails → GREEN
 7. Write Test 7 → passes (resilient by default) → confirm
 8. Write Test 8 → fails (no factory) → GREEN: add `build_reporter_from_flags`
-9. Update `build_reporter(cli)` to delegate to `build_reporter_from_flags`
-10. E2E Tests 9–11 in `tests/progress.rs` — each RED → GREEN
-11. Mechanical: update all 17+ existing `clean(dry_run)` call sites → compilation failure → fix each
-12. Run full suite: `cargo test` — all pass
+9. Write Tests 9–12 (config) → fails → GREEN: add fields to `RawConfig`, `Config`, `load()`
+10. Extract `merge_suppress_flags()` and test
+11. Update `build_reporter(cli, config)` to merge CLI + config
+12. E2E Tests 13–15 in `tests/progress.rs` — each RED → GREEN
+13. Mechanical: update all 17+ existing `clean(dry_run)` call sites → compilation failure → fix each
+14. Run full suite: `cargo test` — all pass
 
 ## Non-Goals
 
 - No per-entry progress for cleaners other than library-logs (future work)
 - No estimated time remaining or percentage calculation
-- No config file option for suppress mode (CLI-only)
