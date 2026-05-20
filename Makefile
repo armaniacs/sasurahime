@@ -1,7 +1,7 @@
 INSTALL_DIR ?= $(HOME)/.local/bin
 BINARY      := sasurahime
 
-.PHONY: build test lint fmt install clean
+.PHONY: build test lint fmt install uninstall clean publish release
 
 build:
 	cargo build --release
@@ -27,3 +27,8 @@ uninstall:
 
 clean:
 	cargo clean
+
+publish:
+	cargo publish
+
+release: lint test build publish
