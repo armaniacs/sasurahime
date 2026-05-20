@@ -33,12 +33,7 @@ nav {
 .nav-links a { color: var(--text-muted); }
 .nav-links a:hover { color: var(--text); text-decoration: none; }
 .lang-switch { display: flex; gap: 0.4rem; font-size: 0.85rem; }
-.lang-switch a, .lang-switch span {
-  padding: 2px 8px; border-radius: 4px;
-}
-.lang-switch .active { background: var(--bg3); color: var(--text); font-weight: 600; }
-.lang-switch a { color: var(--text-muted); }
-.lang-switch a:hover { text-decoration: none; color: var(--text); }
+.lang-switch a:hover { text-decoration: none; }
 .nav-gh {
   display: inline-flex; align-items: center; gap: 6px;
   background: var(--bg3); border: 1px solid var(--border);

@@ -298,7 +298,7 @@ sasurahime
 
 ---
 
-📖 See also: [Supported Targets](/SUPPORTED) · [How to Add a Target](/HOWTO-ADD-target)
+📖 See also: [Supported Targets]({{ '/SUPPORTED' | relative_url }}) · [How to Add a Target]({{ '/HOWTO-ADD-target' | relative_url }})
 </details>
 
 <details markdown="1">
@@ -574,5 +574,5 @@ sasurahime
 
 ---
 
-📖 関連ドキュメント: [対応ターゲット一覧](/SUPPORTED) · [ターゲット追加方法](/HOWTO-ADD-target)
+📖 関連ドキュメント: [対応ターゲット一覧]({{ '/SUPPORTED' | relative_url }}) · [ターゲット追加方法]({{ '/HOWTO-ADD-target' | relative_url }})
 </details>
