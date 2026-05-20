@@ -16,6 +16,39 @@ _none_
 
 ---
 
+## [0.1.7] — 2026-05-21
+
+### Added
+
+- Docs site navigation integration: language-aware nav labels in doc pages
+  (`switchLang()` JS を拡張、JA表示時に「使い方」「ターゲット一覧」に切替).
+- `.lang-btn` CSS class added to shared stylesheet for unified language switcher
+  appearance across landing pages and doc pages.
+- Top link in doc page footer for quick navigation to the top of the site.
+- Cross-reference links (`See also` / `関連ドキュメント`) added to both EN and
+  JA sections of HOWTO-USE.md.
+- Language switcher visual unified across all pages: landing pages now use
+  the same `.lang-btn` button style as doc pages (labels `EN`/`JA`).
+- Footer expanded on both landing pages to link all 3 documentation pages
+  (How to Use, Supported Targets, Add a Target) in the appropriate language.
+- `<html dir="ltr">` attribute on all pages for explicit text direction.
+- `og:url` meta tags on both landing pages for correct language-specific URLs.
+- Author metadata (`authors`) added to `Cargo.toml`.
+- `docs/_site/` and `.superpowers/` added to `.gitignore`.
+
+### Changed
+
+- Documentation navigation reorganized: bilingual Markdown files consolidated,
+  EN/JA language switcher added to doc pages, dark theme unified across all
+  doc pages and landing pages.
+- Landing page nav links renamed: `Documentation` → `How to Use`, with
+  additional links to `Supported Targets` and `Add a Target`.
+- Redundant `.lang-btn` CSS removed from inline `<style>` in `_layouts/doc.html`
+  (moved to shared `docs/assets/style.css`).
+- Redundant `.lang-switch a/span` CSS rules removed (superseded by `.lang-btn`).
+
+---
+
 ## [0.1.6] — 2026-05-20
 
 ### Added
