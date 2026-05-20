@@ -16,6 +16,21 @@ _none_
 
 ---
 
+## [0.1.6] — 2026-05-20
+
+### Added
+
+- GitHub Pages site at `armaniacs.github.io/sasurahime` with landing page and documentation.
+- `Cargo.toml` `repository` and `description` fields.
+
+### Changed
+
+- License changed from MIT to Apache-2.0.
+- Landing page redesigned with dark theme, Japanese version added.
+- `.gitignore` cleaned up (deduplicated `target/`, added `*.bak`, `*.log`, `tags`, `__pycache__/`, `.env`, `.playwright-mcp/`).
+
+---
+
 ## [0.1.5] — 2026-05-20
 
 ### Added
