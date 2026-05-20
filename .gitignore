@@ -28,3 +28,6 @@ __pycache__/
 # Project-specific
 .plan/
 .playwright-mcp/
+
+# Brainstorming visual companion artifacts
+.superpowers/
