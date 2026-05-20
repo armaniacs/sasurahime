@@ -59,12 +59,6 @@ sasurahime --yes
 
 Run `sasurahime targets` for the complete up-to-date list.
 
-## Blog
-
-- [sasurahime で Mac 開発キャッシュをサッと掃除する](blog/compact) — quick usage guide (日本語)
-- [sasurahime: Rust 製 macOS キャッシュクリーナーの哲学と全機能](blog/full) — deep dive (日本語)
-- [Minimizing Rust binary size](blog/min-sized-rust) — technical deep dive (English)
-
 ## Documentation
 
 - [Usage guide](HOWTO-USE) — detailed command reference
