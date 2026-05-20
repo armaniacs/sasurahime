@@ -26,7 +26,8 @@ nav {
   display: flex; align-items: center; justify-content: space-between;
   height: 60px;
 }
-.nav-logo { font-weight: 700; font-size: 1.1rem; color: var(--text); }
+.nav-logo { font-weight: 700; font-size: 1.1rem; color: var(--text); text-decoration: none; }
+.nav-logo:hover { color: var(--text); text-decoration: none; }
 .nav-logo span { color: var(--accent); }
 .nav-links { display: flex; align-items: center; gap: 1.5rem; font-size: 0.9rem; }
 .nav-links a { color: var(--text-muted); }
