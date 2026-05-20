@@ -44,11 +44,15 @@ sasurahime scan --dry-run
 
 # 確認なしで全削除（CI・スクリプト向け）
 sasurahime --yes
+
+# 完全削除（ゴミ箱を経由しない）
+sasurahime clean uv --permanent
 ```
 
 ## 安全性について
 
 - すべてのクリーナーは `--dry-run` に対応しています。確認するまで何も削除しません。
+- **Trash モードがデフォルトで有効**です。削除したファイルは macOS のゴミ箱に移動されるため、Finder から復元できます。完全に消去したい場合は `--permanent` フラグを使用してください。
 - mise のランタイム削除は、グローバル設定とプロジェクト固有の `.mise.toml` を両方チェックしてから実行します。
 - macOS の immutable フラグ（`uchg`）は自動的に解除してから削除します。
 

@@ -50,11 +50,16 @@ sasurahime clean uv --dry-run
 
 # Non-interactive (CI / scripting)
 sasurahime --yes
+
+# Permanently delete (bypass Trash)
+sasurahime clean uv --permanent
 ```
 
 ## Safety first
 
 - Every cleaner supports `--dry-run` — nothing is deleted until you confirm.
+- **Trash mode is on by default** — removed files go to macOS Trash, so you can
+  restore them from Finder. Use `--permanent` to permanently delete.
 - mise runtime removal checks both global and per-project `.mise.toml` before deleting.
 - macOS immutable flags (`uchg`) are handled automatically.
 

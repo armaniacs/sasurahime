@@ -99,6 +99,10 @@ Non-interactive mode — cleans every pruneable target without prompting.
 sasurahime --yes
 ```
 
+Files are moved to Trash by default (see "Trash mode" below). If you
+combine `--yes` with `--permanent`, a confirmation prompt is shown before
+permanent deletion proceeds.
+
 Ideal for cron jobs, CI pipelines, or maintenance scripts.
 
 ---
@@ -139,6 +143,24 @@ sasurahime clean logs --keep-days 14
 
 The default is 7 days (or the value from the config file).
 
+### `--permanent`
+
+Bypass Trash and permanently delete files instead. By default every
+cleaner sends removed files to the macOS Trash for safety.
+
+```bash
+# Permanently delete uv caches, bypassing Trash
+sasurahime clean uv --permanent
+```
+
+When combined with `--yes`, a confirmation prompt is shown before
+permanently deleting anything.
+
+```bash
+# Show confirmation before permanent bulk deletion
+sasurahime --yes --permanent
+```
+
 ---
 
 ## Configuration File
@@ -153,6 +175,12 @@ The file is optional — all defaults are sensible for day-to-day use.
 keep_days = 30
 ```
 
+### Example: disable Trash permanently
+
+```toml
+trash_mode = false
+```
+
 ### Example: add extra log directories
 
 ```toml
@@ -164,6 +192,7 @@ exclude = ["access.log"]
 
 | Field          | Type            | Default  | Description                              |
 |----------------|-----------------|----------|------------------------------------------|
+| `trash_mode`   | boolean         | `true`   | Send deleted files to Trash by default   |
 | `keep_days`    | integer         | `7`      | Global log retention period              |
 | `targets`      | array of tables | `[]`     | Extra log directories to scan            |
 | `targets[].name` | string        | required | Display name                             |
@@ -173,6 +202,17 @@ exclude = ["access.log"]
 ---
 
 ## Safety
+
+### Trash mode (default)
+
+Every deleted file is sent to the macOS Trash by default. Nothing is
+permanently erased unless you either:
+
+- pass the `--permanent` flag, or
+- set `trash_mode = false` in `~/.config/sasurahime/config.toml`
+
+This gives you a safety net — accidentally removed caches can be restored
+from Trash via Finder.
 
 ### `--dry-run` first
 

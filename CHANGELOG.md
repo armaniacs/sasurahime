@@ -39,6 +39,28 @@ All notable changes to sasurahime will be documented in this file. The format is
 
 ---
 
+## [0.1.4] — 2026-05-20
+
+### Added
+
+- `--permanent` flag: bypass Trash and permanently delete files.
+- `trash_mode` config option in `~/.config/sasurahime/config.toml`.
+
+### Changed
+
+- **Trash mode is now the default.** All deleted files are sent to macOS Trash
+  instead of being permanently removed. Set `trash_mode = false` in config or
+  pass `--permanent` to opt out.
+- **`--yes --permanent` shows a confirmation prompt** before permanently deleting
+  all pruneable targets (moved from `--yes` with old `--trash` flag).
+- `--trash` flag renamed to `--permanent` (inverted semantics).
+- **Release profile further optimized for binary size:** `lto = "thin"` → `true`,
+  `panic = "abort"` added, `opt-level = "s"` → `"z"`. Binary reduced from
+  1,349 KB to 872 KB (35% reduction).
+
+---
+
+
 ## [0.1.2] — 2026-05-18
 
 ### Added
