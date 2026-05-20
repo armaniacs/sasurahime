@@ -186,5 +186,27 @@ footer {
 footer a { color: var(--text-muted); }
 footer a:hover { color: var(--text); }
 
+/* LANGUAGE SWITCHER BUTTON */
+.lang-btn {
+  display: inline-block;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 3px 10px;
+}
+.lang-btn.active {
+  background: var(--accent-dim);
+  border-color: var(--accent);
+  color: #fff;
+}
+.lang-btn:hover:not(.active) {
+  background: var(--border);
+  color: var(--text);
+}
+
 /* DIVIDER */
 .divider { border: none; border-top: 1px solid var(--border); }
