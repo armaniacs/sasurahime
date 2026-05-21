@@ -15,6 +15,10 @@ Add a `ProgressReporter` trait that manages an indicatif-based progress bar with
 **Multi-entry cleaners with progress bar**: LibraryLogs, LogCleaner, GenericCacheCleaner (DeleteDirs), BrowserCleaner, XcodeCleaner, CargoCleaner, DeviceSupportCleaner, OllamaCleaner, MiseCleaner — all get `progress_init()`/`progress_tick()`/`progress_finish()` calls in their delete loops.
 **Single-command cleaners** (Uv, Brew, CocoaPods, Conda, Poetry, Go, Pip, Bun, Colima, Simulator): accept the reporter parameter but do not call progress methods (no iteration to report).
 
+**Dry-run mode**: Per-entry output with tags is shown, same as the existing implementation. No progress bar in dry-run (no work to measure), but each entry is listed with size and reason.
+
+**Per-file speed**: The progress bar message shows the current file name and deletion speed (bytes/second) calculated from `chflags + delete_path` duration divided by entry size. Format: `removing BloatApp (15/23, 45.2 MB/s)`.
+
 ## Design
 
 ### 1. ProgressReporter Trait
@@ -57,7 +61,7 @@ pub struct DeepSuppressReporter;
 
 | Implementation | `show_spinner()` | `progress_init()` | `progress_tick()` | `progress_finish()` |
 |----------------|:---:|:---:|:---:|:---:|
-| `VerboseProgress` | `true` | Creates `ProgressBar::new(total)` with ETA template | Increments bar, sets message to path name | Finishes & clears bar, prints `[OK]` |
+| `VerboseProgress` | `true` | Creates `ProgressBar::new(total)` with ETA template | Increments bar, sets message to `path, I/N, speed` | Finishes & clears bar, prints `[OK]` |
 | `SuppressReporter` | `true` | No-op | No-op | No-op |
 | `DeepSuppressReporter` | `false` | No-op | No-op | No-op |
 
@@ -598,8 +602,3 @@ This is a mechanical change across `tests/*.rs` and `src/cleaners/*.rs` `#[cfg(t
 11. Mechanical: add `progress_init/tick/finish` to 9 multi-entry cleaners
 12. Mechanical: update all 17+ existing `clean(dry_run)` call sites → compilation failure → fix each
 13. Run full suite: `cargo test` — all pass
-
-## Non-Goals
-
-- No per-entry text output for dry-run mode (the existing per-entry listing format is kept)
-- No per-file speed calculation (estimated time remaining is for the batch, not per file)
