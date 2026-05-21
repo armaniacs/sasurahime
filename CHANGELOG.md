@@ -35,9 +35,20 @@ _none_
 - `og:url` meta tags on both landing pages for correct language-specific URLs.
 - Author metadata (`authors`) added to `Cargo.toml`.
 - `docs/_site/` and `.superpowers/` added to `.gitignore`.
+- **Progress bar with ETA and per-file speed** for all multi-entry cleaners:
+  shows `removing BloatApp, 45.2 MB/s (3/15)` during cleanup.
+- `ProgressReporter` trait with three implementations: `VerboseProgress`
+  (indicatif progress bar), `SuppressReporter` (spinner only),
+  `DeepSuppressReporter` (silent).
+- `--suppress` CLI flag: hides progress bar, keeps spinner and freed summary.
+- `--deep-suppress` CLI flag: hides all output (spinner, freed line, progress).
+- `suppress` / `deep_suppress` config options in `~/.config/sasurahime/config.toml`.
+- `format_speed()` helper for per-file MB/s calculation in progress bar.
 
 ### Changed
 
+- `Cleaner` trait `clean()` method now accepts `&dyn ProgressReporter` parameter.
+- `run_clean_target()` updated to conditionally show spinner based on reporter.
 - Documentation navigation reorganized: bilingual Markdown files consolidated,
   EN/JA language switcher added to doc pages, dark theme unified across all
   doc pages and landing pages.
