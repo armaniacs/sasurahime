@@ -79,8 +79,14 @@ fn clean_shows_moved_to_trash_message() {
         "status: {:?}\nstdout: {stdout}\nstderr: {stderr}",
         output.status.code(),
     );
-    assert!(stdout.contains("moved to Trash"), "stdout:\n{stdout}\nstderr:\n{stderr}");
-    assert!(!uv_cache.join("simple-v16").exists(), "source must be removed");
+    assert!(
+        stdout.contains("moved to Trash"),
+        "stdout:\n{stdout}\nstderr:\n{stderr}"
+    );
+    assert!(
+        !uv_cache.join("simple-v16").exists(),
+        "source must be removed"
+    );
 }
 
 #[test]
@@ -152,7 +158,10 @@ fn permanent_dry_run_shows_freed_not_trash() {
     );
     // --permanent mode: should show "Freed:" not "moved to Trash"
     assert!(stdout.contains("Freed:"), "stdout:\n{stdout}");
-    assert!(!stdout.contains("Trash"), "--permanent should bypass Trash:\n{stdout}");
+    assert!(
+        !stdout.contains("Trash"),
+        "--permanent should bypass Trash:\n{stdout}"
+    );
 }
 
 #[test]

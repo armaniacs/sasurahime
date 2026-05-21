@@ -31,10 +31,15 @@ impl DeviceSupportCleaner {
 
         for entry in entries.flatten() {
             let name = entry.file_name().to_string_lossy().to_string();
-            if !name.ends_with(" DeviceSupport") || !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+            if !name.ends_with(" DeviceSupport")
+                || !entry.file_type().map(|t| t.is_dir()).unwrap_or(false)
+            {
                 continue;
             }
-            let platform = name.strip_suffix(" DeviceSupport").unwrap_or(&name).to_string();
+            let platform = name
+                .strip_suffix(" DeviceSupport")
+                .unwrap_or(&name)
+                .to_string();
 
             let versions: Vec<DeviceSupportEntry> = fs::read_dir(entry.path())
                 .into_iter()
@@ -43,7 +48,9 @@ impl DeviceSupportCleaner {
                 .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
                 .filter_map(|e| {
                     let dir_name = e.file_name().to_string_lossy().to_string();
-                    let major = dir_name.split('.').next()
+                    let major = dir_name
+                        .split('.')
+                        .next()
                         .and_then(|s| s.parse::<u32>().ok())?;
                     Some(DeviceSupportEntry {
                         name: dir_name,
@@ -90,7 +97,10 @@ impl Cleaner for DeviceSupportCleaner {
     fn detect(&self) -> ScanResult {
         let to_delete = self.versions_to_delete();
         if to_delete.is_empty() {
-            return ScanResult { name: self.name(), status: ScanStatus::NotFound };
+            return ScanResult {
+                name: self.name(),
+                status: ScanStatus::NotFound,
+            };
         }
         let total: u64 = to_delete.iter().map(|p| dir_size(p)).sum();
         ScanResult {
@@ -103,15 +113,25 @@ impl Cleaner for DeviceSupportCleaner {
         let to_delete = self.versions_to_delete();
         if to_delete.is_empty() {
             println!("[device-support] nothing to clean");
-            return Ok(CleanResult { name: self.name(), bytes_freed: 0 });
+            return Ok(CleanResult {
+                name: self.name(),
+                bytes_freed: 0,
+            });
         }
 
         if dry_run {
             for p in &to_delete {
                 let size = dir_size(p);
-                println!("[dry-run] would remove: {} ({})", p.display(), crate::format::format_bytes(size));
+                println!(
+                    "[dry-run] would remove: {} ({})",
+                    p.display(),
+                    crate::format::format_bytes(size)
+                );
             }
-            return Ok(CleanResult { name: self.name(), bytes_freed: 0 });
+            return Ok(CleanResult {
+                name: self.name(),
+                bytes_freed: 0,
+            });
         }
 
         reporter.progress_init(self.name(), to_delete.len());
@@ -132,7 +152,10 @@ impl Cleaner for DeviceSupportCleaner {
 
         reporter.progress_finish();
 
-        Ok(CleanResult { name: self.name(), bytes_freed: freed })
+        Ok(CleanResult {
+            name: self.name(),
+            bytes_freed: freed,
+        })
     }
 }
 

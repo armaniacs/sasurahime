@@ -46,5 +46,8 @@ fn scan_shows_ollama_in_output() {
     let output = sasurahime(tmp.path()).arg("scan").output().unwrap();
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("ollama"), "scan should include ollama:\n{stdout}");
+    assert!(
+        stdout.contains("ollama"),
+        "scan should include ollama:\n{stdout}"
+    );
 }

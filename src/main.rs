@@ -424,10 +424,7 @@ fn extra_targets() -> &'static [(&'static str, &'static str)] {
             "library-logs",
             "Analyze and clean ~/Library/Logs/ with heuristic recommendations",
         ),
-        (
-            "device-support",
-            "Xcode DeviceSupport old version cleanup",
-        ),
+        ("device-support", "Xcode DeviceSupport old version cleanup"),
     ]
 }
 
@@ -502,7 +499,9 @@ fn all_cleaners(home: &std::path::Path, config: &config::Config) -> Vec<Box<dyn 
             Box::new(SystemCommandRunner),
         )),
         Box::new(cleaners::device_support::DeviceSupportCleaner::new(
-            home, 2, Box::new(SystemCommandRunner),
+            home,
+            2,
+            Box::new(SystemCommandRunner),
         )),
     ]
 }
@@ -518,10 +517,9 @@ where
     F: FnOnce(bool, &dyn ProgressReporter) -> anyhow::Result<CleanResult>,
 {
     let result = if reporter.show_spinner() {
-        crate::progress::with_spinner(
-            &format!("Cleaning {label}..."),
-            || cleaner_fn(dry_run, reporter),
-        )?
+        crate::progress::with_spinner(&format!("Cleaning {label}..."), || {
+            cleaner_fn(dry_run, reporter)
+        })?
     } else {
         cleaner_fn(dry_run, reporter)?
     };
@@ -667,7 +665,12 @@ fn main() -> anyhow::Result<()> {
                         if cli.yes && xcode_cleaner.is_xcode_running() {
                             eprintln!("Note: Xcode is running. Proceeding with --yes anyway.");
                         }
-                        run_clean_target("xcode", |dry, rep| xcode_cleaner.clean(dry, rep), dry_run, reporter.as_ref())?;
+                        run_clean_target(
+                            "xcode",
+                            |dry, rep| xcode_cleaner.clean(dry, rep),
+                            dry_run,
+                            reporter.as_ref(),
+                        )?;
                     }
                     CleanTarget::Trash { dry_run } => {
                         let cleaner = cleaners::generic::GenericCleaner::trash(
@@ -683,8 +686,16 @@ fn main() -> anyhow::Result<()> {
                         }
                     }
                     CleanTarget::Ollama { dry_run } => {
-                        let cleaner = cleaners::ollama::OllamaCleaner::new(&home, Box::new(SystemCommandRunner));
-                        run_clean_target("ollama", move |dry, rep| cleaner.clean(dry, rep), dry_run, reporter.as_ref())?;
+                        let cleaner = cleaners::ollama::OllamaCleaner::new(
+                            &home,
+                            Box::new(SystemCommandRunner),
+                        );
+                        run_clean_target(
+                            "ollama",
+                            move |dry, rep| cleaner.clean(dry, rep),
+                            dry_run,
+                            reporter.as_ref(),
+                        )?;
                     }
                     CleanTarget::LibraryLogs { dry_run, all } => {
                         let cleaner = cleaners::library_logs::LibraryLogsCleaner::new(
@@ -709,9 +720,16 @@ fn main() -> anyhow::Result<()> {
                     }
                     CleanTarget::DeviceSupport { dry_run, keep } => {
                         let cleaner = cleaners::device_support::DeviceSupportCleaner::new(
-                            &home, keep, Box::new(SystemCommandRunner),
+                            &home,
+                            keep,
+                            Box::new(SystemCommandRunner),
                         );
-                        run_clean_target("device-support", move |dry, rep| cleaner.clean(dry, rep), dry_run, reporter.as_ref())?;
+                        run_clean_target(
+                            "device-support",
+                            move |dry, rep| cleaner.clean(dry, rep),
+                            dry_run,
+                            reporter.as_ref(),
+                        )?;
                     }
                     _ => unreachable!(),
                 }

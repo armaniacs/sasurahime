@@ -1,7 +1,7 @@
-use std::path::Path;
 use anyhow::Result;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::fs;
+use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 static TRASH_MODE: AtomicBool = AtomicBool::new(true);
 
@@ -65,7 +65,10 @@ mod tests {
         let result = delete_path(Path::new("/nonexistent/path/that/cannot/be/trashed"));
         assert!(result.is_err(), "trash of nonexistent path must return Err");
         let err = format!("{}", result.unwrap_err());
-        assert!(err.contains("trash"), "error must mention trash, got: {err}");
+        assert!(
+            err.contains("trash"),
+            "error must mention trash, got: {err}"
+        );
     }
 
     #[test]

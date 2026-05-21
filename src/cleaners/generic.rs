@@ -314,12 +314,23 @@ impl Cleaner for GenericCleaner {
                     bytes_freed: 0,
                 })
             }
-            CleanMethod::CommandWithDetectDir { program, args, detect_dir } => {
-                let size_before = if detect_dir.exists() { dir_size(detect_dir) } else { 0 };
+            CleanMethod::CommandWithDetectDir {
+                program,
+                args,
+                detect_dir,
+            } => {
+                let size_before = if detect_dir.exists() {
+                    dir_size(detect_dir)
+                } else {
+                    0
+                };
 
                 if !self.runner.exists(program) {
                     println!("{}: not found, skipping", self.display_name);
-                    return Ok(CleanResult { name: self.name(), bytes_freed: 0 });
+                    return Ok(CleanResult {
+                        name: self.name(),
+                        bytes_freed: 0,
+                    });
                 }
                 if dry_run {
                     println!("[dry-run] would run: {program} {}", args.join(" "));
@@ -329,15 +340,25 @@ impl Cleaner for GenericCleaner {
                             crate::format::format_bytes(size_before)
                         );
                     }
-                    return Ok(CleanResult { name: self.name(), bytes_freed: 0 });
+                    return Ok(CleanResult {
+                        name: self.name(),
+                        bytes_freed: 0,
+                    });
                 }
                 self.runner.run(program, args)?;
-                let size_after = if detect_dir.exists() { dir_size(detect_dir) } else { 0 };
+                let size_after = if detect_dir.exists() {
+                    dir_size(detect_dir)
+                } else {
+                    0
+                };
                 let freed = size_before.saturating_sub(size_after);
                 if freed > 0 {
                     println!("Freed: {}", crate::format::format_bytes(freed));
                 }
-                Ok(CleanResult { name: self.name(), bytes_freed: freed })
+                Ok(CleanResult {
+                    name: self.name(),
+                    bytes_freed: freed,
+                })
             }
             CleanMethod::DeleteDirs(dirs) => {
                 let cleanable: Vec<&PathBuf> = dirs.iter().filter(|d| d.exists()).collect();

@@ -45,9 +45,15 @@ impl OllamaCleaner {
     fn total_size(&self) -> u64 {
         if let Ok(models) = self.list_models() {
             let cli_total: u64 = models.iter().map(|m| m.size).sum();
-            if cli_total > 0 { return cli_total; }
+            if cli_total > 0 {
+                return cli_total;
+            }
         }
-        if self.models_dir.exists() { dir_size(&self.models_dir) } else { 0 }
+        if self.models_dir.exists() {
+            dir_size(&self.models_dir)
+        } else {
+            0
+        }
     }
 }
 
@@ -75,9 +81,15 @@ impl Cleaner for OllamaCleaner {
     fn detect(&self) -> ScanResult {
         let bytes = self.total_size();
         if bytes == 0 {
-            return ScanResult { name: self.name(), status: ScanStatus::NotFound };
+            return ScanResult {
+                name: self.name(),
+                status: ScanStatus::NotFound,
+            };
         }
-        ScanResult { name: self.name(), status: ScanStatus::Pruneable(bytes) }
+        ScanResult {
+            name: self.name(),
+            status: ScanStatus::Pruneable(bytes),
+        }
     }
 
     fn clean(&self, dry_run: bool, reporter: &dyn ProgressReporter) -> Result<CleanResult> {
@@ -88,20 +100,31 @@ impl Cleaner for OllamaCleaner {
                     return self.clean_fallback(dry_run);
                 }
                 println!("[ollama] no models found");
-                return Ok(CleanResult { name: self.name(), bytes_freed: 0 });
+                return Ok(CleanResult {
+                    name: self.name(),
+                    bytes_freed: 0,
+                });
             }
 
             if dry_run {
                 println!("[ollama] dry-run: {} models", models.len());
                 for m in &models {
-                    println!("  would remove: {} ({})", m.name, crate::format::format_bytes(m.size));
+                    println!(
+                        "  would remove: {} ({})",
+                        m.name,
+                        crate::format::format_bytes(m.size)
+                    );
                 }
-                return Ok(CleanResult { name: self.name(), bytes_freed: 0 });
+                return Ok(CleanResult {
+                    name: self.name(),
+                    bytes_freed: 0,
+                });
             }
 
-            let items: Vec<String> = models.iter().map(|m| {
-                format!("{:<24}  {}", m.name, crate::format::format_bytes(m.size))
-            }).collect();
+            let items: Vec<String> = models
+                .iter()
+                .map(|m| format!("{:<24}  {}", m.name, crate::format::format_bytes(m.size)))
+                .collect();
             let defaults: Vec<bool> = vec![true; models.len()];
 
             println!("\nOllama models in ~/.ollama/models/:\n");
@@ -112,7 +135,10 @@ impl Cleaner for OllamaCleaner {
 
             if selections.is_empty() {
                 println!("[ollama] nothing selected");
-                return Ok(CleanResult { name: self.name(), bytes_freed: 0 });
+                return Ok(CleanResult {
+                    name: self.name(),
+                    bytes_freed: 0,
+                });
             }
 
             let mut total: u64 = 0;
@@ -124,12 +150,19 @@ impl Cleaner for OllamaCleaner {
                 reporter.progress_tick(Path::new(&m.name), j + 1, m.size);
                 self.runner.run("ollama", &["rm", &m.name])?;
                 total += m.size;
-                println!("[ollama] removed: {} (freed {})", m.name, crate::format::format_bytes(m.size));
+                println!(
+                    "[ollama] removed: {} (freed {})",
+                    m.name,
+                    crate::format::format_bytes(m.size)
+                );
             }
             if !selections.is_empty() {
                 reporter.progress_finish();
             }
-            return Ok(CleanResult { name: self.name(), bytes_freed: total });
+            return Ok(CleanResult {
+                name: self.name(),
+                bytes_freed: total,
+            });
         }
 
         self.clean_fallback(dry_run)
@@ -140,18 +173,31 @@ impl OllamaCleaner {
     fn clean_fallback(&self, dry_run: bool) -> Result<CleanResult> {
         let dir = &self.models_dir;
         if !dir.exists() {
-            return Ok(CleanResult { name: self.name(), bytes_freed: 0 });
+            return Ok(CleanResult {
+                name: self.name(),
+                bytes_freed: 0,
+            });
         }
         let size = dir_size(dir);
         if dry_run {
-            println!("[ollama] would remove: {} ({})", dir.display(), crate::format::format_bytes(size));
-            return Ok(CleanResult { name: self.name(), bytes_freed: 0 });
+            println!(
+                "[ollama] would remove: {} ({})",
+                dir.display(),
+                crate::format::format_bytes(size)
+            );
+            return Ok(CleanResult {
+                name: self.name(),
+                bytes_freed: 0,
+            });
         }
         let path_str = dir.to_string_lossy();
         let _ = self.runner.run("chflags", &["-R", "nouchg", &path_str]);
         crate::trash::delete_path(dir)?;
         println!("[ollama] removed: {}", dir.display());
-        Ok(CleanResult { name: self.name(), bytes_freed: size })
+        Ok(CleanResult {
+            name: self.name(),
+            bytes_freed: size,
+        })
     }
 }
 
@@ -183,13 +229,17 @@ mod tests {
                 panic!("unexpected args: {args:?}");
             }
         }
-        fn exists(&self, program: &str) -> bool { program == "ollama" }
+        fn exists(&self, program: &str) -> bool {
+            program == "ollama"
+        }
     }
 
     #[test]
     fn list_models_parses_ollama_output() {
         let output = "NAME\tID\tSIZE\tMODIFIED\nllama3.2:3b\tabc123\t2.0GB\t2 days ago\n";
-        let runner = MockOllamaRunner { list_output: output.to_string() };
+        let runner = MockOllamaRunner {
+            list_output: output.to_string(),
+        };
         let tmp = tempfile::TempDir::new().unwrap();
         let cleaner = OllamaCleaner::new(tmp.path(), Box::new(runner));
         let models = cleaner.list_models().unwrap();
@@ -200,7 +250,10 @@ mod tests {
 
     #[test]
     fn parse_model_size_gb() {
-        assert_eq!(parse_model_size("4.7GB"), (4.7_f64 * 1_073_741_824.0) as u64);
+        assert_eq!(
+            parse_model_size("4.7GB"),
+            (4.7_f64 * 1_073_741_824.0) as u64
+        );
     }
 
     #[test]

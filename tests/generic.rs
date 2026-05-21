@@ -340,7 +340,10 @@ fn clean_colima_calls_prune_all() {
 
     assert!(output.status.success());
     let calls = recorded_calls(&bin_dir, "colima");
-    assert!(calls.contains("prune --all"), "expected 'prune --all', got: {calls}");
+    assert!(
+        calls.contains("prune --all"),
+        "expected 'prune --all', got: {calls}"
+    );
 }
 
 #[test]
@@ -359,7 +362,10 @@ fn clean_colima_dry_run_does_not_invoke() {
         .unwrap();
 
     assert!(output.status.success());
-    assert!(!bin_dir.join("calls_colima.txt").exists(), "colima must not be invoked in dry-run");
+    assert!(
+        !bin_dir.join("calls_colima.txt").exists(),
+        "colima must not be invoked in dry-run"
+    );
 }
 
 #[test]
@@ -395,14 +401,14 @@ fn scan_shows_colima_for_existing_dir() {
     fs::create_dir_all(tmp.path().join(".colima/_lima/colima")).unwrap();
     fs::write(tmp.path().join(".colima/colima.yaml"), b"config").unwrap();
 
-    let output = sasurahime(tmp.path())
-        .arg("scan")
-        .output()
-        .unwrap();
+    let output = sasurahime(tmp.path()).arg("scan").output().unwrap();
 
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("colima"), "scan output should include colima:\n{stdout}");
+    assert!(
+        stdout.contains("colima"),
+        "scan output should include colima:\n{stdout}"
+    );
 }
 
 #[test]

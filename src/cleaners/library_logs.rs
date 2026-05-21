@@ -242,7 +242,11 @@ impl Cleaner for LibraryLogsCleaner {
 // ── Clean all (for --all flag, includes chflags) ──
 
 impl LibraryLogsCleaner {
-    pub(crate) fn clean_all(&self, dry_run: bool, reporter: &dyn ProgressReporter) -> Result<CleanResult> {
+    pub(crate) fn clean_all(
+        &self,
+        dry_run: bool,
+        reporter: &dyn ProgressReporter,
+    ) -> Result<CleanResult> {
         let entries = self.scan();
         if entries.is_empty() {
             println!("[library-logs] nothing to clean");
