@@ -82,7 +82,7 @@ Apache-2.0
 
 ## Contributing
 
-Issues and PRs are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for details.
+Issues and PRs are welcome. See [HOWTO-ADD-target.md](docs/HOWTO-ADD-target.md) for details.
 
 For feature proposals, please open an issue first so we can discuss the scope before diving into code.
 
@@ -170,6 +170,6 @@ Apache-2.0
 
 ## コントリビュート
 
-Issue・PR ともに歓迎します。詳細は [CONTRIBUTING.md](CONTRIBUTING.md) をご覧ください。
+Issue・PR ともに歓迎します。詳細は [HOWTO-ADD-target.md](docs/HOWTO-ADD-target.md) をご覧ください。
 
 機能の提案はコードを書く前に Issue を立てて相談してください。</details>
