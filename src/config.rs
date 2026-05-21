@@ -26,6 +26,8 @@ struct RawConfig {
     #[serde(default)]
     logs: LogsSection,
     trash_mode: Option<bool>,
+    suppress: Option<bool>,
+    deep_suppress: Option<bool>,
 }
 
 #[derive(Debug, Clone)]
@@ -35,6 +37,8 @@ pub struct Config {
     pub logs_keep_days: u32,
     pub logs_extra_targets: Vec<ExtraLogTarget>,
     pub trash_mode: bool,
+    pub suppress: bool,
+    pub deep_suppress: bool,
 }
 
 impl Default for Config {
@@ -43,6 +47,8 @@ impl Default for Config {
             logs_keep_days: 7,
             logs_extra_targets: vec![],
             trash_mode: true,
+            suppress: false,
+            deep_suppress: false,
         }
     }
 }
@@ -64,6 +70,8 @@ impl Config {
             logs_keep_days: raw.logs.keep_days.unwrap_or(7),
             logs_extra_targets: raw.logs.targets,
             trash_mode: raw.trash_mode.unwrap_or(true),
+            suppress: raw.suppress.unwrap_or(false),
+            deep_suppress: raw.deep_suppress.unwrap_or(false),
         })
     }
 
@@ -157,5 +165,27 @@ mod tests {
         std::fs::write(tmp.path().join("config.toml"), "trash_mode = true\n").unwrap();
         let cfg = Config::load(tmp.path()).unwrap();
         assert!(cfg.trash_mode, "trash_mode from config must be true");
+    }
+
+    #[test]
+    fn config_loads_suppress_true() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::write(tmp.path().join("config.toml"), "suppress = true\n").unwrap();
+        let cfg = Config::load(tmp.path()).unwrap();
+        assert!(cfg.suppress, "suppress from config must be true");
+    }
+
+    #[test]
+    fn config_default_suppress_is_false() {
+        let cfg = Config::default();
+        assert!(!cfg.suppress, "default suppress must be false");
+    }
+
+    #[test]
+    fn config_loads_deep_suppress_true() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::write(tmp.path().join("config.toml"), "deep_suppress = true\n").unwrap();
+        let cfg = Config::load(tmp.path()).unwrap();
+        assert!(cfg.deep_suppress, "deep_suppress from config must be true");
     }
 }
