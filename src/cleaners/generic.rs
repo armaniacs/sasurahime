@@ -291,7 +291,7 @@ impl Cleaner for GenericCleaner {
         }
     }
 
-    fn clean(&self, dry_run: bool, _reporter: &dyn ProgressReporter) -> Result<CleanResult> {
+    fn clean(&self, dry_run: bool, reporter: &dyn ProgressReporter) -> Result<CleanResult> {
         match &self.method {
             CleanMethod::Command { program, args } => {
                 if !self.runner.exists(program) {
@@ -340,15 +340,17 @@ impl Cleaner for GenericCleaner {
                 Ok(CleanResult { name: self.name(), bytes_freed: freed })
             }
             CleanMethod::DeleteDirs(dirs) => {
+                let cleanable: Vec<&PathBuf> = dirs.iter().filter(|d| d.exists()).collect();
+                if !dry_run && !cleanable.is_empty() {
+                    reporter.progress_init(self.name(), cleanable.len());
+                }
                 let mut freed: u64 = 0;
-                for dir in dirs {
-                    if !dir.exists() {
-                        continue;
-                    }
+                for (i, dir) in cleanable.iter().enumerate() {
                     let size = dir_size(dir);
                     if dry_run {
                         println!("[dry-run] would remove: {}", dir.display());
                     } else {
+                        reporter.progress_tick(dir, i + 1, size);
                         let path_str = dir.to_string_lossy();
                         if let Err(e) = self.runner.run("chflags", &["-R", "nouchg", &path_str]) {
                             eprintln!(
@@ -361,6 +363,9 @@ impl Cleaner for GenericCleaner {
                         freed += size;
                         println!("Removed: {}", dir.display());
                     }
+                }
+                if !dry_run && !cleanable.is_empty() {
+                    reporter.progress_finish();
                 }
                 Ok(CleanResult {
                     name: self.name(),

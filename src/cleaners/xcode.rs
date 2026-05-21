@@ -64,7 +64,7 @@ impl Cleaner for XcodeCleaner {
         }
     }
 
-    fn clean(&self, dry_run: bool, _reporter: &dyn ProgressReporter) -> Result<CleanResult> {
+    fn clean(&self, dry_run: bool, reporter: &dyn ProgressReporter) -> Result<CleanResult> {
         if !self.derived_data.exists() {
             println!("Xcode DerivedData: not found, skipping");
             return Ok(CleanResult {
@@ -89,9 +89,14 @@ impl Cleaner for XcodeCleaner {
             }
         }
 
+        let dirs = self.project_dirs();
+        if !dry_run && !dirs.is_empty() {
+            reporter.progress_init(self.name(), dirs.len());
+        }
+
         let mut freed: u64 = 0;
-        for dir in self.project_dirs() {
-            let size = dir_size(&dir);
+        for (i, dir) in dirs.iter().enumerate() {
+            let size = dir_size(dir);
             let entry_name = dir.file_name().unwrap_or_default().to_string_lossy();
             if dry_run {
                 println!(
@@ -99,11 +104,17 @@ impl Cleaner for XcodeCleaner {
                     crate::format::format_bytes(size)
                 );
             } else {
-                crate::trash::delete_path(&dir)?;
+                reporter.progress_tick(dir, i + 1, size);
+                crate::trash::delete_path(dir)?;
                 freed += size;
                 println!("Removed: DerivedData/{entry_name}");
             }
         }
+
+        if !dry_run && !dirs.is_empty() {
+            reporter.progress_finish();
+        }
+
         Ok(CleanResult {
             name: self.name(),
             bytes_freed: freed,

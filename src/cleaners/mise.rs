@@ -189,7 +189,7 @@ impl Cleaner for MiseCleaner {
         }
     }
 
-    fn clean(&self, dry_run: bool, _reporter: &dyn ProgressReporter) -> Result<CleanResult> {
+    fn clean(&self, dry_run: bool, reporter: &dyn ProgressReporter) -> Result<CleanResult> {
         if !self.runner.exists("mise") {
             println!("mise: not found, skipping");
             return Ok(CleanResult {
@@ -210,8 +210,12 @@ impl Cleaner for MiseCleaner {
             );
         }
 
+        if !dry_run && !unused.is_empty() {
+            reporter.progress_init(self.name(), unused.len());
+        }
+
         let mut freed: u64 = 0;
-        for (tool, version, path) in &unused {
+        for (i, (tool, version, path)) in unused.iter().enumerate() {
             let size = dir_size(path);
             if dry_run {
                 println!(
@@ -219,6 +223,7 @@ impl Cleaner for MiseCleaner {
                     crate::format::format_bytes(size)
                 );
             } else {
+                reporter.progress_tick(path, i + 1, size);
                 match Self::remove_with_uchg(path, self.runner.as_ref()) {
                     Ok(()) => {
                         freed += size;
@@ -230,6 +235,10 @@ impl Cleaner for MiseCleaner {
                     }
                 }
             }
+        }
+
+        if !dry_run && !unused.is_empty() {
+            reporter.progress_finish();
         }
         Ok(CleanResult {
             name: self.name(),

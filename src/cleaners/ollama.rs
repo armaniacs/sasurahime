@@ -80,7 +80,7 @@ impl Cleaner for OllamaCleaner {
         ScanResult { name: self.name(), status: ScanStatus::Pruneable(bytes) }
     }
 
-    fn clean(&self, dry_run: bool, _reporter: &dyn ProgressReporter) -> Result<CleanResult> {
+    fn clean(&self, dry_run: bool, reporter: &dyn ProgressReporter) -> Result<CleanResult> {
         if self.runner.exists("ollama") {
             let models = self.list_models()?;
             if models.is_empty() {
@@ -116,11 +116,18 @@ impl Cleaner for OllamaCleaner {
             }
 
             let mut total: u64 = 0;
-            for &i in &selections {
+            if !selections.is_empty() {
+                reporter.progress_init(self.name(), selections.len());
+            }
+            for (j, &i) in selections.iter().enumerate() {
                 let m = &models[i];
+                reporter.progress_tick(Path::new(&m.name), j + 1, m.size);
                 self.runner.run("ollama", &["rm", &m.name])?;
                 total += m.size;
                 println!("[ollama] removed: {} (freed {})", m.name, crate::format::format_bytes(m.size));
+            }
+            if !selections.is_empty() {
+                reporter.progress_finish();
             }
             return Ok(CleanResult { name: self.name(), bytes_freed: total });
         }

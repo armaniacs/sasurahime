@@ -72,7 +72,7 @@ impl Cleaner for CargoCleaner {
         }
     }
 
-    fn clean(&self, dry_run: bool, _reporter: &dyn ProgressReporter) -> Result<CleanResult> {
+    fn clean(&self, dry_run: bool, reporter: &dyn ProgressReporter) -> Result<CleanResult> {
         let mut freed: u64 = 0;
 
         let reg = self.home.join(".cargo/registry/cache");
@@ -95,7 +95,10 @@ impl Cleaner for CargoCleaner {
         }
 
         let targets = Self::find_target_dirs(&self.home);
-        for (path, size) in &targets {
+        if !dry_run && !targets.is_empty() {
+            reporter.progress_init(self.name(), targets.len());
+        }
+        for (i, (path, size)) in targets.iter().enumerate() {
             if dry_run {
                 println!(
                     "[dry-run] [cargo] would remove target dir: {} ({})",
@@ -103,6 +106,7 @@ impl Cleaner for CargoCleaner {
                     crate::format::format_bytes(*size)
                 );
             } else {
+                reporter.progress_tick(path, i + 1, *size);
                 self.runner
                     .run("chflags", &["-R", "nouchg", &path.to_string_lossy()])
                     .ok();
@@ -110,6 +114,9 @@ impl Cleaner for CargoCleaner {
                 freed += size;
                 println!("[cargo] removed target dir: {}", path.display());
             }
+        }
+        if !dry_run && !targets.is_empty() {
+            reporter.progress_finish();
         }
 
         Ok(CleanResult {

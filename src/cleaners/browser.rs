@@ -7,7 +7,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 struct BrowserGroup {
-    label: &'static str,
     parent: PathBuf,
 }
 
@@ -22,19 +21,15 @@ impl BrowserCleaner {
         Self {
             groups: vec![
                 BrowserGroup {
-                    label: "puppeteer/chrome",
                     parent: home.join(".cache/puppeteer/chrome"),
                 },
                 BrowserGroup {
-                    label: "puppeteer/chrome-headless-shell",
                     parent: home.join(".cache/puppeteer/chrome-headless-shell"),
                 },
                 BrowserGroup {
-                    label: "ms-playwright",
                     parent: home.join("Library/Caches/ms-playwright"),
                 },
                 BrowserGroup {
-                    label: "ms-playwright-go",
                     parent: home.join("Library/Caches/ms-playwright-go"),
                 },
             ],
@@ -113,7 +108,7 @@ impl Cleaner for BrowserCleaner {
         }
     }
 
-    fn clean(&self, dry_run: bool, _reporter: &dyn ProgressReporter) -> Result<CleanResult> {
+    fn clean(&self, dry_run: bool, reporter: &dyn ProgressReporter) -> Result<CleanResult> {
         let any_found = self.groups.iter().any(|g| g.parent.exists());
         if !any_found {
             println!("browsers: not found, skipping");
@@ -123,24 +118,38 @@ impl Cleaner for BrowserCleaner {
             });
         }
 
-        let mut freed: u64 = 0;
+        let mut candidates: Vec<(PathBuf, u64)> = Vec::new();
         for group in &self.groups {
             for path in Self::find_old_versions(&group.parent) {
                 let size = dir_size(&path);
-                let entry_name = path.file_name().unwrap_or_default().to_string_lossy();
-                if dry_run {
-                    println!(
-                        "[dry-run] would remove: {}/{entry_name} ({})",
-                        group.label,
-                        crate::format::format_bytes(size)
-                    );
-                } else {
-                    crate::trash::delete_path(&path)?;
-                    freed += size;
-                    println!("Removed: {}/{entry_name}", group.label);
-                }
+                candidates.push((path, size));
             }
         }
+
+        if !dry_run && !candidates.is_empty() {
+            reporter.progress_init(self.name(), candidates.len());
+        }
+
+        let mut freed: u64 = 0;
+        for (i, (path, size)) in candidates.iter().enumerate() {
+            let entry_name = path.file_name().unwrap_or_default().to_string_lossy();
+            if dry_run {
+                println!(
+                    "[dry-run] would remove: {entry_name} ({})",
+                    crate::format::format_bytes(*size)
+                );
+            } else {
+                reporter.progress_tick(path, i + 1, *size);
+                crate::trash::delete_path(path)?;
+                freed += size;
+                println!("Removed: {entry_name}");
+            }
+        }
+
+        if !dry_run && !candidates.is_empty() {
+            reporter.progress_finish();
+        }
+
         Ok(CleanResult {
             name: self.name(),
             bytes_freed: freed,

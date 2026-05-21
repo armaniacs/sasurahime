@@ -99,7 +99,7 @@ impl Cleaner for DeviceSupportCleaner {
         }
     }
 
-    fn clean(&self, dry_run: bool, _reporter: &dyn ProgressReporter) -> Result<CleanResult> {
+    fn clean(&self, dry_run: bool, reporter: &dyn ProgressReporter) -> Result<CleanResult> {
         let to_delete = self.versions_to_delete();
         if to_delete.is_empty() {
             println!("[device-support] nothing to clean");
@@ -114,9 +114,12 @@ impl Cleaner for DeviceSupportCleaner {
             return Ok(CleanResult { name: self.name(), bytes_freed: 0 });
         }
 
+        reporter.progress_init(self.name(), to_delete.len());
+
         let mut freed: u64 = 0;
-        for p in &to_delete {
+        for (i, p) in to_delete.iter().enumerate() {
             let size = dir_size(p);
+            reporter.progress_tick(p, i + 1, size);
             let path_str = p.to_string_lossy();
             let _ = self.runner.run("chflags", &["-R", "nouchg", &path_str]);
             if let Err(e) = crate::trash::delete_path(p) {
@@ -126,6 +129,9 @@ impl Cleaner for DeviceSupportCleaner {
                 println!("[device-support] removed: {}", p.display());
             }
         }
+
+        reporter.progress_finish();
+
         Ok(CleanResult { name: self.name(), bytes_freed: freed })
     }
 }
