@@ -141,29 +141,40 @@ impl Cleaner for LogCleaner {
         }
     }
 
-    fn clean(&self, dry_run: bool, _reporter: &dyn ProgressReporter) -> Result<CleanResult> {
-        let mut freed: u64 = 0;
-        let mut deleted: u32 = 0;
-
+    fn clean(&self, dry_run: bool, reporter: &dyn ProgressReporter) -> Result<CleanResult> {
+        let mut all_old: Vec<(String, PathBuf)> = Vec::new();
         for target in self.all_targets() {
-            let target_name = target.name;
-            let old = Self::find_old_logs(target.path, self.keep_days, target.exclude);
-            for path in &old {
-                let size = fs::metadata(path).map(|m| m.len()).unwrap_or(0);
-                if dry_run {
-                    println!("[dry-run] [{target_name}] would remove: {}", path.display());
-                } else {
-                    crate::trash::delete_path(path)?;
-                    freed += size;
-                    deleted += 1;
-                    println!("[{target_name}] Removed: {}", path.display());
-                }
+            let target_name = target.name.to_string();
+            for path in Self::find_old_logs(target.path, self.keep_days, target.exclude) {
+                all_old.push((target_name.clone(), path));
             }
         }
 
-        if !dry_run {
-            println!("Removed {deleted} log files");
+        let mut freed: u64 = 0;
+        let mut deleted: u32 = 0;
+
+        if dry_run {
+            for (target_name, path) in &all_old {
+                println!("[dry-run] [{target_name}] would remove: {}", path.display());
+            }
+            return Ok(CleanResult {
+                name: self.name(),
+                bytes_freed: 0,
+            });
         }
+
+        reporter.progress_init(self.name(), all_old.len());
+        for (i, (target_name, path)) in all_old.iter().enumerate() {
+            let size = fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+            reporter.progress_tick(path, i + 1, size);
+            crate::trash::delete_path(path)?;
+            freed += size;
+            deleted += 1;
+            println!("[{target_name}] Removed: {}", path.display());
+        }
+        reporter.progress_finish();
+
+        println!("Removed {deleted} log files");
         Ok(CleanResult {
             name: self.name(),
             bytes_freed: freed,

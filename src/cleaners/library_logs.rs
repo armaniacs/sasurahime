@@ -149,7 +149,7 @@ impl Cleaner for LibraryLogsCleaner {
         }
     }
 
-    fn clean(&self, dry_run: bool, _reporter: &dyn ProgressReporter) -> Result<CleanResult> {
+    fn clean(&self, dry_run: bool, reporter: &dyn ProgressReporter) -> Result<CleanResult> {
         let dir = self.logs_dir();
         if !dir.exists() {
             return Ok(CleanResult {
@@ -206,7 +206,9 @@ impl Cleaner for LibraryLogsCleaner {
         }
 
         let mut total_freed: u64 = 0;
-        for entry in &selected {
+        reporter.progress_init(self.name(), selected.len());
+        for (i, entry) in selected.iter().enumerate() {
+            reporter.progress_tick(&entry.path, i + 1, entry.size);
             let path_str = entry.path.to_string_lossy();
             let _ = self.runner.run("chflags", &["-R", "nouchg", &path_str]);
             if let Err(e) = crate::trash::delete_path(&entry.path) {
@@ -224,6 +226,7 @@ impl Cleaner for LibraryLogsCleaner {
                 );
             }
         }
+        reporter.progress_finish();
 
         println!(
             "[library-logs] total freed: {}",
@@ -239,7 +242,7 @@ impl Cleaner for LibraryLogsCleaner {
 // ── Clean all (for --all flag, includes chflags) ──
 
 impl LibraryLogsCleaner {
-    pub(crate) fn clean_all(&self, dry_run: bool, _reporter: &dyn ProgressReporter) -> Result<CleanResult> {
+    pub(crate) fn clean_all(&self, dry_run: bool, reporter: &dyn ProgressReporter) -> Result<CleanResult> {
         let entries = self.scan();
         if entries.is_empty() {
             println!("[library-logs] nothing to clean");
@@ -276,7 +279,9 @@ impl LibraryLogsCleaner {
             });
         }
         let mut total_freed: u64 = 0;
-        for entry in &entries {
+        reporter.progress_init("library-logs", entries.len());
+        for (i, entry) in entries.iter().enumerate() {
+            reporter.progress_tick(&entry.path, i + 1, entry.size);
             let path_str = entry.path.to_string_lossy();
             let _ = self.runner.run("chflags", &["-R", "nouchg", &path_str]);
             if let Err(e) = crate::trash::delete_path(&entry.path) {
@@ -293,6 +298,7 @@ impl LibraryLogsCleaner {
                 );
             }
         }
+        reporter.progress_finish();
         Ok(CleanResult {
             name: "library-logs",
             bytes_freed: total_freed,
