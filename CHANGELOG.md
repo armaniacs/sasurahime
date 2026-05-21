@@ -4,6 +4,16 @@ All notable changes to sasurahime will be documented in this file. The format is
 
 ---
 
+## [0.1.9] — 2026-05-21
+
+### Fixed
+
+- **rustup test flake:** `rustup_not_found_skips` now restricts PATH to
+  `/usr/bin:/bin` so the test does not accidentally find `rustup` installed
+  on the host machine and proceed to clean real toolchains.
+
+---
+
 ## [0.1.8] — 2026-05-21
 
 ### Added

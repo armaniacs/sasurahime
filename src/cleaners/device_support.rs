@@ -71,7 +71,7 @@ impl DeviceSupportCleaner {
     fn versions_to_delete(&self) -> Vec<PathBuf> {
         let mut to_delete = Vec::new();
         for (_platform, mut versions) in self.scan_platforms() {
-            versions.sort_by(|a, b| b.major_version.cmp(&a.major_version));
+            versions.sort_by_key(|b| std::cmp::Reverse(b.major_version));
             for v in versions.into_iter().skip(self.keep as usize) {
                 to_delete.push(v.path);
             }

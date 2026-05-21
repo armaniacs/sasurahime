@@ -21,13 +21,14 @@ fn fake_rustup(bin_dir: &Path, output: &str) {
 fn rustup_not_found_skips() {
     let tmp = TempDir::new().unwrap();
     let output = sasurahime(tmp.path())
+        .env("PATH", "/usr/bin:/bin")
         .args(["clean", "rustup"])
         .output()
         .unwrap();
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        stdout.contains("skipping") || stdout.contains("not found"),
+        stdout.contains("rustup: not found, skipping"),
         "stdout: {stdout}"
     );
 }
