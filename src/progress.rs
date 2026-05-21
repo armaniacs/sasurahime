@@ -32,6 +32,24 @@ pub fn with_spinner<R>(msg: &str, f: impl FnOnce() -> R) -> R {
     result
 }
 
+pub fn with_spinner_result<T, E: std::fmt::Display>(
+    msg: &str,
+    f: impl FnOnce() -> Result<T, E>,
+) -> Result<T, E> {
+    let pb = ProgressBar::new_spinner();
+    pb.set_style(spinner_style().clone());
+    pb.set_message(msg.to_string());
+    pb.enable_steady_tick(Duration::from_millis(100));
+    let result = f();
+    pb.finish_and_clear();
+    if result.is_ok() {
+        eprintln!("{msg} [OK]");
+    } else {
+        eprintln!("{msg} [FAILED]");
+    }
+    result
+}
+
 pub struct VerboseProgress {
     pb: Mutex<Option<ProgressBar>>,
     last_tick: Mutex<Option<Instant>>,
@@ -270,5 +288,18 @@ mod tests {
     fn format_speed_small_values() {
         let s = format_speed(1_048_576, 10.0);
         assert_eq!(s, ", 0.1 MB/s");
+    }
+
+    #[test]
+    fn with_spinner_result_prints_ok_on_success() {
+        let result: Result<i32, String> = with_spinner_result("test", || Ok(42));
+        assert_eq!(result.unwrap(), 42);
+    }
+
+    #[test]
+    fn with_spinner_result_prints_failed_on_error() {
+        let result: Result<i32, &str> = with_spinner_result("test", || Err("boom"));
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), "boom");
     }
 }
