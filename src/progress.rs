@@ -70,7 +70,10 @@ impl ProgressReporter for VerboseProgress {
         if let Some(ref pb) = *self.pb.lock().unwrap() {
             let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("?");
 
-            let speed_str = self.last_tick.lock().unwrap()
+            let speed_str = self
+                .last_tick
+                .lock()
+                .unwrap()
                 .map(|start| {
                     let elapsed = start.elapsed();
                     let secs = elapsed.as_secs_f64().max(0.001);
@@ -80,7 +83,11 @@ impl ProgressReporter for VerboseProgress {
 
             *self.last_tick.lock().unwrap() = Some(Instant::now());
 
-            pb.set_message(format!("{name}{speed_str} ({}/{})", current, pb.length().unwrap_or(0)));
+            pb.set_message(format!(
+                "{name}{speed_str} ({}/{})",
+                current,
+                pb.length().unwrap_or(0)
+            ));
             pb.set_position(current as u64);
         }
     }

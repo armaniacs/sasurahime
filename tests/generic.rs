@@ -78,7 +78,6 @@ fn clean_tree_sitter_not_found_exits_zero() {
     assert!(output.status.success());
 }
 
-
 #[test]
 fn clean_go_calls_clean_cache() {
     let tmp = TempDir::new().unwrap();
