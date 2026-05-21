@@ -16,8 +16,8 @@ pub trait CommandRunner: Send + Sync {
 
 pub struct SystemCommandRunner;
 
-impl CommandRunner for SystemCommandRunner {
-    fn run(&self, program: &str, args: &[&str]) -> Result<Output> {
+impl SystemCommandRunner {
+    fn run_with_timeout(&self, program: &str, args: &[&str], timeout: Duration) -> Result<Output> {
         let mut child = Command::new(program)
             .args(args)
             .stdout(Stdio::piped())
@@ -25,7 +25,7 @@ impl CommandRunner for SystemCommandRunner {
             .spawn()
             .map_err(|e| anyhow::anyhow!("failed to spawn `{}`: {}", program, e))?;
 
-        match child.wait_timeout(COMMAND_TIMEOUT)? {
+        match child.wait_timeout(timeout)? {
             Some(status) => {
                 // Read remaining piped output.
                 let mut stdout = Vec::new();
@@ -46,13 +46,24 @@ impl CommandRunner for SystemCommandRunner {
                 // Timed out — kill the child process and clean up.
                 let _ = child.kill();
                 let _ = child.wait();
+                let cmd_str = if args.is_empty() {
+                    program.to_string()
+                } else {
+                    format!("{} {}", program, args.join(" "))
+                };
                 anyhow::bail!(
-                    "command `{}` did not complete within {}s and was killed",
-                    program,
-                    COMMAND_TIMEOUT.as_secs()
+                    "command `{cmd_str}` did not complete within {}s and was killed.\n\
+                     You can run this command manually in another terminal:\n  $ {cmd_str}",
+                    timeout.as_secs()
                 );
             }
         }
+    }
+}
+
+impl CommandRunner for SystemCommandRunner {
+    fn run(&self, program: &str, args: &[&str]) -> Result<Output> {
+        self.run_with_timeout(program, args, COMMAND_TIMEOUT)
     }
 
     fn exists(&self, program: &str) -> bool {
@@ -103,6 +114,24 @@ mod tests {
             COMMAND_TIMEOUT >= Duration::from_secs(1),
             "timeout should be at least 1s, got {}s",
             COMMAND_TIMEOUT.as_secs()
+        );
+    }
+
+    #[test]
+    fn timeout_error_includes_manual_command_hint() {
+        let runner = SystemCommandRunner;
+        // Use a 10ms timeout so this test completes instantly.
+        let result = runner.run_with_timeout("sleep", &["60"], Duration::from_millis(10));
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("You can run this command manually"),
+            "expected hint about manual command, got: {err}"
+        );
+        assert!(err.contains("sleep 60"), "expected command name in error, got: {err}");
+        assert!(
+            err.contains("did not complete within"),
+            "expected timeout message, got: {err}"
         );
     }
 }
