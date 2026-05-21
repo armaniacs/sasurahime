@@ -3,7 +3,7 @@ use std::path::Path;
 use std::sync::Mutex;
 use std::sync::OnceLock;
 use std::time::Duration;
-
+use std::time::Instant;
 
 pub trait ProgressReporter: Send + Sync {
     fn show_spinner(&self) -> bool;
@@ -34,12 +34,14 @@ pub fn with_spinner<R>(msg: &str, f: impl FnOnce() -> R) -> R {
 
 pub struct VerboseProgress {
     pb: Mutex<Option<ProgressBar>>,
+    last_tick: Mutex<Option<Instant>>,
 }
 
 impl VerboseProgress {
     pub fn new() -> Self {
         Self {
             pb: Mutex::new(None),
+            last_tick: Mutex::new(None),
         }
     }
 }
@@ -53,7 +55,9 @@ impl ProgressReporter for VerboseProgress {
         let pb = ProgressBar::new(total as u64);
         pb.set_style(
             ProgressStyle::default_bar()
-                .template("{spinner:.green} [{elapsed_precise}] {bar:30.cyan/blue} {pos}/{len} ETA {eta}")
+                .template(
+                    "{spinner:.green} [{elapsed_precise}] {bar:30.cyan/blue} {pos}/{len} ETA {eta}",
+                )
                 .expect("valid indicatif template")
                 .progress_chars("=> "),
         );
@@ -62,10 +66,22 @@ impl ProgressReporter for VerboseProgress {
         *self.pb.lock().unwrap() = Some(pb);
     }
 
-    fn progress_tick(&self, path: &Path, current: usize, _size_bytes: u64) {
+    fn progress_tick(&self, path: &Path, current: usize, size_bytes: u64) {
         if let Some(ref pb) = *self.pb.lock().unwrap() {
             let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("?");
-            pb.set_message(name.to_string());
+
+            let speed_str = self.last_tick.lock().unwrap()
+                .map(|start| {
+                    let elapsed = start.elapsed();
+                    let secs = elapsed.as_secs_f64().max(0.001);
+                    let mb = size_bytes as f64 / 1_048_576.0;
+                    format!(", {:.1} MB/s", mb / secs)
+                })
+                .unwrap_or_default();
+
+            *self.last_tick.lock().unwrap() = Some(Instant::now());
+
+            pb.set_message(format!("{name}{speed_str} ({}/{})", current, pb.length().unwrap_or(0)));
             pb.set_position(current as u64);
         }
     }
@@ -80,7 +96,9 @@ impl ProgressReporter for VerboseProgress {
 pub struct DeepSuppressReporter;
 
 impl ProgressReporter for DeepSuppressReporter {
-    fn show_spinner(&self) -> bool { false }
+    fn show_spinner(&self) -> bool {
+        false
+    }
     fn progress_init(&self, _label: &str, _total: usize) {}
     fn progress_tick(&self, _path: &Path, _current: usize, _size_bytes: u64) {}
     fn progress_finish(&self) {}
@@ -89,7 +107,9 @@ impl ProgressReporter for DeepSuppressReporter {
 pub struct SuppressReporter;
 
 impl ProgressReporter for SuppressReporter {
-    fn show_spinner(&self) -> bool { true }
+    fn show_spinner(&self) -> bool {
+        true
+    }
     fn progress_init(&self, _label: &str, _total: usize) {}
     fn progress_tick(&self, _path: &Path, _current: usize, _size_bytes: u64) {}
     fn progress_finish(&self) {}
