@@ -1,6 +1,7 @@
 use crate::cleaner::{CleanResult, Cleaner, ScanResult, ScanStatus};
 use crate::command::CommandRunner;
 use crate::format::dir_size;
+use crate::progress::ProgressReporter;
 use anyhow::Result;
 use std::collections::HashMap;
 use std::fs;
@@ -76,7 +77,7 @@ impl Cleaner for GradleCleaner {
         }
     }
 
-    fn clean(&self, dry_run: bool) -> Result<CleanResult> {
+    fn clean(&self, dry_run: bool, _reporter: &dyn ProgressReporter) -> Result<CleanResult> {
         let caches = self.home.join(".gradle/caches");
         if !caches.exists() {
             return Ok(CleanResult {
@@ -197,7 +198,7 @@ impl Cleaner for JetBrainsCleaner {
         }
     }
 
-    fn clean(&self, dry_run: bool) -> Result<CleanResult> {
+    fn clean(&self, dry_run: bool, _reporter: &dyn ProgressReporter) -> Result<CleanResult> {
         let dir = self.home.join("Library/Caches/JetBrains");
         if !dir.exists() {
             return Ok(CleanResult {

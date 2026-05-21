@@ -1,6 +1,7 @@
 use crate::cleaner::{CleanResult, Cleaner, ScanResult, ScanStatus};
 use crate::command::CommandRunner;
 use crate::format::dir_size;
+use crate::progress::ProgressReporter;
 use anyhow::Result;
 use std::collections::HashSet;
 use std::fs;
@@ -188,7 +189,7 @@ impl Cleaner for MiseCleaner {
         }
     }
 
-    fn clean(&self, dry_run: bool) -> Result<CleanResult> {
+    fn clean(&self, dry_run: bool, _reporter: &dyn ProgressReporter) -> Result<CleanResult> {
         if !self.runner.exists("mise") {
             println!("mise: not found, skipping");
             return Ok(CleanResult {

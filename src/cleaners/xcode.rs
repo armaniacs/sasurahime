@@ -1,6 +1,7 @@
 use crate::cleaner::{CleanResult, Cleaner, ScanResult, ScanStatus};
 use crate::command::CommandRunner;
 use crate::format::dir_size;
+use crate::progress::ProgressReporter;
 use anyhow::Result;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -63,7 +64,7 @@ impl Cleaner for XcodeCleaner {
         }
     }
 
-    fn clean(&self, dry_run: bool) -> Result<CleanResult> {
+    fn clean(&self, dry_run: bool, _reporter: &dyn ProgressReporter) -> Result<CleanResult> {
         if !self.derived_data.exists() {
             println!("Xcode DerivedData: not found, skipping");
             return Ok(CleanResult {

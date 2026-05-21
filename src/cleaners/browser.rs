@@ -1,6 +1,7 @@
 use crate::cleaner::{CleanResult, Cleaner, ScanResult, ScanStatus};
 use crate::command::CommandRunner;
 use crate::format::dir_size;
+use crate::progress::ProgressReporter;
 use anyhow::Result;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -112,7 +113,7 @@ impl Cleaner for BrowserCleaner {
         }
     }
 
-    fn clean(&self, dry_run: bool) -> Result<CleanResult> {
+    fn clean(&self, dry_run: bool, _reporter: &dyn ProgressReporter) -> Result<CleanResult> {
         let any_found = self.groups.iter().any(|g| g.parent.exists());
         if !any_found {
             println!("browsers: not found, skipping");

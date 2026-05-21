@@ -55,11 +55,12 @@ pub fn run_auto(cleaners: &[Box<dyn Cleaner>]) -> Result<()> {
         }
     }
 
+    let reporter = crate::progress::VerboseProgress::new();
     let mut total_freed: u64 = 0;
     for i in pruneable_indices {
         let name = cleaners[i].name();
         let result = crate::progress::with_spinner(&format!("Cleaning {}...", name), || {
-            cleaners[i].clean(false)
+            cleaners[i].clean(false, &reporter)
         });
         match result {
             Ok(r) => total_freed += r.bytes_freed,
@@ -147,12 +148,13 @@ pub fn run_interactive(cleaners: &[Box<dyn Cleaner>]) -> Result<()> {
         return Ok(());
     }
 
+    let reporter = crate::progress::VerboseProgress::new();
     let mut freed: u64 = 0;
     for &si in &selected {
         let cleaner_idx = pruneable_indices[si];
         let name = cleaners[cleaner_idx].name();
         let result = crate::progress::with_spinner(&format!("Cleaning {}...", name), || {
-            cleaners[cleaner_idx].clean(false)
+            cleaners[cleaner_idx].clean(false, &reporter)
         });
         match result {
             Ok(r) => freed += r.bytes_freed,

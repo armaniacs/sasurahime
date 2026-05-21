@@ -1,6 +1,7 @@
 use crate::cleaner::{CleanResult, Cleaner, ScanResult, ScanStatus};
 use crate::command::CommandRunner;
 use crate::format::dir_size;
+use crate::progress::ProgressReporter;
 use anyhow::Result;
 use std::path::{Path, PathBuf};
 
@@ -79,7 +80,7 @@ impl Cleaner for OllamaCleaner {
         ScanResult { name: self.name(), status: ScanStatus::Pruneable(bytes) }
     }
 
-    fn clean(&self, dry_run: bool) -> Result<CleanResult> {
+    fn clean(&self, dry_run: bool, _reporter: &dyn ProgressReporter) -> Result<CleanResult> {
         if self.runner.exists("ollama") {
             let models = self.list_models()?;
             if models.is_empty() {

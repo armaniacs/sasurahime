@@ -1,6 +1,7 @@
 use crate::cleaner::{CleanResult, Cleaner, ScanResult, ScanStatus};
 use crate::command::CommandRunner;
 use crate::format::dir_size;
+use crate::progress::ProgressReporter;
 use anyhow::Result;
 use std::path::{Path, PathBuf};
 
@@ -60,7 +61,7 @@ impl Cleaner for HuggingFaceCleaner {
         }
     }
 
-    fn clean(&self, dry_run: bool) -> Result<CleanResult> {
+    fn clean(&self, dry_run: bool, _reporter: &dyn ProgressReporter) -> Result<CleanResult> {
         let dir = self.cache_dir();
         let config = super::generic::CliFallbackConfig {
             tool: "huggingface-cli",
@@ -165,12 +166,13 @@ mod tests {
     #[test]
     fn clean_dry_run_does_not_delete() {
         let tmp = TempDir::new().unwrap();
+        let reporter = crate::progress::VerboseProgress::new();
         let hub = tmp.path().join(".cache/huggingface/hub");
         fs::create_dir_all(&hub).unwrap();
         fs::write(hub.join("model.bin"), b"dummy").unwrap();
 
         let cleaner = HuggingFaceCleaner::new(tmp.path(), Box::new(NoToolRunner));
-        cleaner.clean(true).unwrap();
+        cleaner.clean(true, &reporter).unwrap();
         assert!(hub.exists(), "dry-run must not delete");
         assert!(
             hub.join("model.bin").exists(),
@@ -181,12 +183,13 @@ mod tests {
     #[test]
     fn clean_fallback_deletes_dir() {
         let tmp = TempDir::new().unwrap();
+        let reporter = crate::progress::VerboseProgress::new();
         let hub = tmp.path().join(".cache/huggingface/hub");
         fs::create_dir_all(&hub).unwrap();
         fs::write(hub.join("model.bin"), b"dummy").unwrap();
 
         let cleaner = HuggingFaceCleaner::new(tmp.path(), Box::new(NoToolRunner));
-        let result = cleaner.clean(false).unwrap();
+        let result = cleaner.clean(false, &reporter).unwrap();
         assert!(result.bytes_freed > 0);
         // hub/ should be recreated (empty)
         assert!(hub.exists(), "hub/ should be recreated");
@@ -199,24 +202,26 @@ mod tests {
     #[test]
     fn clean_uses_cli_when_tool_available() {
         let tmp = TempDir::new().unwrap();
+        let reporter = crate::progress::VerboseProgress::new();
         let hub = tmp.path().join(".cache/huggingface/hub");
         fs::create_dir_all(&hub).unwrap();
         fs::write(hub.join("model.bin"), b"dummy").unwrap();
 
         let cleaner = HuggingFaceCleaner::new(tmp.path(), Box::new(CliToolRunner));
-        let result = cleaner.clean(false).unwrap();
+        let result = cleaner.clean(false, &reporter).unwrap();
         assert!(result.bytes_freed > 0, "CLI path should report freed bytes");
     }
 
     #[test]
     fn clean_dry_run_uses_cli_when_tool_available() {
         let tmp = TempDir::new().unwrap();
+        let reporter = crate::progress::VerboseProgress::new();
         let hub = tmp.path().join(".cache/huggingface/hub");
         fs::create_dir_all(&hub).unwrap();
         fs::write(hub.join("model.bin"), b"dummy").unwrap();
 
         let cleaner = HuggingFaceCleaner::new(tmp.path(), Box::new(CliToolRunner));
-        let result = cleaner.clean(true).unwrap();
+        let result = cleaner.clean(true, &reporter).unwrap();
         assert_eq!(result.bytes_freed, 0, "dry-run must report 0 freed");
         assert!(
             hub.join("model.bin").exists(),
@@ -263,12 +268,13 @@ mod tests {
     #[test]
     fn clean_returns_error_when_cli_fails() {
         let tmp = TempDir::new().unwrap();
+        let reporter = crate::progress::VerboseProgress::new();
         let hub = tmp.path().join(".cache/huggingface/hub");
         fs::create_dir_all(&hub).unwrap();
         fs::write(hub.join("model.bin"), b"dummy").unwrap();
 
         let cleaner = HuggingFaceCleaner::new(tmp.path(), Box::new(CliToolRunnerFailing));
-        let result = cleaner.clean(false);
+        let result = cleaner.clean(false, &reporter);
         assert!(result.is_err(), "CLI failure should propagate as error");
         let msg = format!("{:#}", result.unwrap_err());
         assert!(

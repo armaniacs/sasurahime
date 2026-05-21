@@ -1,6 +1,7 @@
 use crate::cleaner::{CleanResult, Cleaner, ScanResult, ScanStatus};
 use crate::command::CommandRunner;
 use crate::format::dir_size;
+use crate::progress::ProgressReporter;
 use anyhow::Result;
 use std::path::{Path, PathBuf};
 
@@ -69,7 +70,7 @@ impl Cleaner for PreCommitCleaner {
         }
     }
 
-    fn clean(&self, dry_run: bool) -> Result<CleanResult> {
+    fn clean(&self, dry_run: bool, _reporter: &dyn ProgressReporter) -> Result<CleanResult> {
         let dir = self.cache_dir();
         let config = super::generic::CliFallbackConfig {
             tool: "pre-commit",
@@ -172,12 +173,13 @@ mod tests {
     #[test]
     fn clean_dry_run_does_not_delete() {
         let tmp = TempDir::new().unwrap();
+        let reporter = crate::progress::VerboseProgress::new();
         let cache = tmp.path().join(".cache/pre-commit");
         fs::create_dir_all(&cache).unwrap();
         fs::write(cache.join("hook.pck"), b"dummy").unwrap();
 
         let cleaner = PreCommitCleaner::new(tmp.path(), Box::new(SystemCommandRunner));
-        cleaner.clean(true).unwrap();
+        cleaner.clean(true, &reporter).unwrap();
         assert!(cache.exists(), "dry-run must not delete");
         assert!(
             cache.join("hook.pck").exists(),
@@ -188,12 +190,13 @@ mod tests {
     #[test]
     fn clean_fallback_deletes_dir() {
         let tmp = TempDir::new().unwrap();
+        let reporter = crate::progress::VerboseProgress::new();
         let cache = tmp.path().join(".cache/pre-commit");
         fs::create_dir_all(&cache).unwrap();
         fs::write(cache.join("hook.pck"), b"dummy").unwrap();
 
         let cleaner = PreCommitCleaner::new(tmp.path(), Box::new(NoToolRunner));
-        let result = cleaner.clean(false).unwrap();
+        let result = cleaner.clean(false, &reporter).unwrap();
         assert!(result.bytes_freed > 0);
         assert!(
             !cache.exists(),
@@ -204,24 +207,26 @@ mod tests {
     #[test]
     fn clean_uses_cli_when_tool_available() {
         let tmp = TempDir::new().unwrap();
+        let reporter = crate::progress::VerboseProgress::new();
         let cache = tmp.path().join(".cache/pre-commit");
         fs::create_dir_all(&cache).unwrap();
         fs::write(cache.join("hook.pck"), b"dummy").unwrap();
 
         let cleaner = PreCommitCleaner::new(tmp.path(), Box::new(CliToolRunner));
-        let result = cleaner.clean(false).unwrap();
+        let result = cleaner.clean(false, &reporter).unwrap();
         assert!(result.bytes_freed > 0, "CLI path should report freed bytes");
     }
 
     #[test]
     fn clean_dry_run_uses_cli_when_tool_available() {
         let tmp = TempDir::new().unwrap();
+        let reporter = crate::progress::VerboseProgress::new();
         let cache = tmp.path().join(".cache/pre-commit");
         fs::create_dir_all(&cache).unwrap();
         fs::write(cache.join("hook.pck"), b"dummy").unwrap();
 
         let cleaner = PreCommitCleaner::new(tmp.path(), Box::new(CliToolRunner));
-        let result = cleaner.clean(true).unwrap();
+        let result = cleaner.clean(true, &reporter).unwrap();
         assert_eq!(result.bytes_freed, 0, "dry-run must report 0 freed");
         assert!(
             cache.join("hook.pck").exists(),
@@ -232,12 +237,13 @@ mod tests {
     #[test]
     fn clean_returns_error_when_cli_fails() {
         let tmp = TempDir::new().unwrap();
+        let reporter = crate::progress::VerboseProgress::new();
         let cache = tmp.path().join(".cache/pre-commit");
         fs::create_dir_all(&cache).unwrap();
         fs::write(cache.join("hook.pck"), b"dummy").unwrap();
 
         let cleaner = PreCommitCleaner::new(tmp.path(), Box::new(CliToolRunnerFailing));
-        let result = cleaner.clean(false);
+        let result = cleaner.clean(false, &reporter);
         assert!(result.is_err(), "CLI failure should propagate as error");
         let err = result.unwrap_err();
         let msg = format!("{err:#}");

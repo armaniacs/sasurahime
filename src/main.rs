@@ -11,7 +11,9 @@ mod trash;
 use clap::{Parser, Subcommand};
 use cleaner::{CleanResult, Cleaner};
 use command::SystemCommandRunner;
+use config::Config;
 use dirs::home_dir;
+use progress::{build_reporter_from_flags, merge_suppress_flags, ProgressReporter};
 use std::path::PathBuf;
 
 /// Macro that generates CleanTarget enum, SUPPORTED_TARGETS, dispatch helpers,
@@ -161,10 +163,11 @@ macro_rules! define_cleaners {
             config: &config::Config,
             target: &CleanTarget,
             dry_run: bool,
+            reporter: &dyn ProgressReporter,
         ) -> anyhow::Result<CleanResult> {
             match target {
                 $(
-                    CleanTarget::$variant { .. } => ($factory)(home, config).clean(dry_run),
+                    CleanTarget::$variant { .. } => ($factory)(home, config).clean(dry_run, reporter),
                 )*
                 _ => unreachable!("dispatch_clean: unexpected special variant"),
             }
@@ -352,6 +355,14 @@ struct Cli {
     #[arg(long)]
     permanent: bool,
 
+    /// Suppress per-entry progress output (spinner only)
+    #[arg(long)]
+    suppress: bool,
+
+    /// Suppress all output including spinner
+    #[arg(long)]
+    deep_suppress: bool,
+
     #[command(subcommand)]
     command: Option<Commands>,
 }
@@ -497,21 +508,45 @@ fn all_cleaners(home: &std::path::Path, config: &config::Config) -> Vec<Box<dyn 
 }
 
 /// Runs a single-target clean with spinner and prints freed bytes.
-fn run_clean_target<F>(label: &str, cleaner_fn: F, dry_run: bool) -> anyhow::Result<()>
+fn run_clean_target<F>(
+    label: &str,
+    cleaner_fn: F,
+    dry_run: bool,
+    reporter: &dyn ProgressReporter,
+) -> anyhow::Result<()>
 where
-    F: FnOnce(bool) -> anyhow::Result<CleanResult>,
+    F: FnOnce(bool, &dyn ProgressReporter) -> anyhow::Result<CleanResult>,
 {
-    let result =
-        crate::progress::with_spinner(&format!("Cleaning {label}..."), || cleaner_fn(dry_run))?;
-    if crate::trash::is_trash_mode() && result.bytes_freed > 0 {
-        println!(
-            "Freed: 0 B ({} moved to Trash)",
-            crate::format::format_bytes(result.bytes_freed)
-        );
+    let result = if reporter.show_spinner() {
+        crate::progress::with_spinner(
+            &format!("Cleaning {label}..."),
+            || cleaner_fn(dry_run, reporter),
+        )?
     } else {
-        println!("Freed: {}", crate::format::format_bytes(result.bytes_freed));
+        cleaner_fn(dry_run, reporter)?
+    };
+
+    if reporter.show_spinner() {
+        if crate::trash::is_trash_mode() && result.bytes_freed > 0 {
+            println!(
+                "Freed: 0 B ({} moved to Trash)",
+                crate::format::format_bytes(result.bytes_freed)
+            );
+        } else {
+            println!("Freed: {}", crate::format::format_bytes(result.bytes_freed));
+        }
     }
     Ok(())
+}
+
+fn build_reporter(cli: &Cli, config: &Config) -> Box<dyn ProgressReporter> {
+    let (suppress, deep_suppress) = merge_suppress_flags(
+        cli.suppress,
+        cli.deep_suppress,
+        config.suppress,
+        config.deep_suppress,
+    );
+    build_reporter_from_flags(suppress, deep_suppress)
 }
 
 fn main() -> anyhow::Result<()> {
@@ -527,6 +562,7 @@ fn main() -> anyhow::Result<()> {
             std::process::exit(1);
         }
     };
+    let reporter = build_reporter(&cli, &config);
 
     // Default: trash mode enabled.
     // --permanent flag overrides to permanent deletion.
@@ -594,7 +630,7 @@ fn main() -> anyhow::Result<()> {
                         for c in &caches {
                             match crate::progress::with_spinner(
                                 &format!("Cleaning {}...", c.name()),
-                                || c.clean(dry_run),
+                                || c.clean(dry_run, reporter.as_ref()),
                             ) {
                                 Ok(r) => total += r.bytes_freed,
                                 Err(e) => eprintln!("Error cleaning {}: {e}", c.name()),
@@ -615,11 +651,12 @@ fn main() -> anyhow::Result<()> {
                             .collect();
                         run_clean_target(
                             "logs",
-                            |dry| {
+                            |dry, rep| {
                                 cleaners::log::LogCleaner::new_with_extra(&home, days, extra)
-                                    .clean(dry)
+                                    .clean(dry, rep)
                             },
                             dry_run,
+                            reporter.as_ref(),
                         )?;
                     }
                     CleanTarget::Xcode { dry_run } => {
@@ -630,7 +667,7 @@ fn main() -> anyhow::Result<()> {
                         if cli.yes && xcode_cleaner.is_xcode_running() {
                             eprintln!("Note: Xcode is running. Proceeding with --yes anyway.");
                         }
-                        run_clean_target("xcode", |dry| xcode_cleaner.clean(dry), dry_run)?;
+                        run_clean_target("xcode", |dry, rep| xcode_cleaner.clean(dry, rep), dry_run, reporter.as_ref())?;
                     }
                     CleanTarget::Trash { dry_run } => {
                         let cleaner = cleaners::generic::GenericCleaner::trash(
@@ -638,7 +675,7 @@ fn main() -> anyhow::Result<()> {
                             Box::new(SystemCommandRunner),
                         );
                         if dry_run {
-                            let result = cleaner.clean(true)?;
+                            let result = cleaner.clean(true, reporter.as_ref())?;
                             println!("Freed: {}", format::format_bytes(result.bytes_freed));
                         } else {
                             eprintln!("Warning: Use Finder to empty Trash. sasurahime cannot safely empty ~/.Trash.");
@@ -647,7 +684,7 @@ fn main() -> anyhow::Result<()> {
                     }
                     CleanTarget::Ollama { dry_run } => {
                         let cleaner = cleaners::ollama::OllamaCleaner::new(&home, Box::new(SystemCommandRunner));
-                        run_clean_target("ollama", move |dry| cleaner.clean(dry), dry_run)?;
+                        run_clean_target("ollama", move |dry, rep| cleaner.clean(dry, rep), dry_run, reporter.as_ref())?;
                     }
                     CleanTarget::LibraryLogs { dry_run, all } => {
                         let cleaner = cleaners::library_logs::LibraryLogsCleaner::new(
@@ -657,14 +694,16 @@ fn main() -> anyhow::Result<()> {
                         if all {
                             run_clean_target(
                                 "library-logs",
-                                move |dry| cleaner.clean_all(dry),
+                                move |dry, rep| cleaner.clean_all(dry, rep),
                                 dry_run,
+                                reporter.as_ref(),
                             )?;
                         } else {
                             run_clean_target(
                                 "library-logs",
-                                move |dry| cleaner.clean(dry),
+                                move |dry, rep| cleaner.clean(dry, rep),
                                 dry_run,
+                                reporter.as_ref(),
                             )?;
                         }
                     }
@@ -672,7 +711,7 @@ fn main() -> anyhow::Result<()> {
                         let cleaner = cleaners::device_support::DeviceSupportCleaner::new(
                             &home, keep, Box::new(SystemCommandRunner),
                         );
-                        run_clean_target("device-support", move |dry| cleaner.clean(dry), dry_run)?;
+                        run_clean_target("device-support", move |dry, rep| cleaner.clean(dry, rep), dry_run, reporter.as_ref())?;
                     }
                     _ => unreachable!(),
                 }
@@ -680,8 +719,9 @@ fn main() -> anyhow::Result<()> {
                 // --- Standard targets: dispatch through macro-generated handler ---
                 run_clean_target(
                     target.command_name(),
-                    |dry| dispatch_clean(&home, &config, &target, dry),
+                    |dry, rep| dispatch_clean(&home, &config, &target, dry, rep),
                     target.dry_run(),
+                    reporter.as_ref(),
                 )?;
             }
         }

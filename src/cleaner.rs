@@ -1,3 +1,4 @@
+use crate::progress::ProgressReporter;
 use anyhow::Result;
 
 #[derive(Debug, Clone)]
@@ -28,5 +29,5 @@ pub trait Cleaner: Send + Sync {
     /// Read-only. Never deletes anything.
     fn detect(&self) -> ScanResult;
     /// Performs cleanup. When `dry_run` is true, must not delete anything.
-    fn clean(&self, dry_run: bool) -> Result<CleanResult>;
+    fn clean(&self, dry_run: bool, reporter: &dyn ProgressReporter) -> Result<CleanResult>;
 }
