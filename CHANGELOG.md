@@ -4,6 +4,24 @@ All notable changes to sasurahime will be documented in this file. The format is
 
 ---
 
+## [0.1.14] — 2026-05-22
+
+### Added
+
+- **Command timeout hint:** When a command-based cleaner (colima, docker, brew,
+  etc.) times out (>30s), the error message now includes the full command and a
+  hint to run it manually: `You can run this command manually in another terminal:
+  $ colima prune --all`. Applies to all 20+ cleaners that delegate to external
+  CLIs.
+- **`with_spinner_result()`:** New progress helper that prints `[FAILED]` instead
+  of the misleading `[OK]` when a clean operation fails (e.g. due to timeout).
+
+### Fixed
+
+- **Misleading `[OK]` on timeout:** Previously `Cleaning colima... [OK]` was
+  printed even when the command timed out and was killed. Now shows
+  `[FAILED]` with the error details.
+
 ## [0.1.13] — 2026-05-21
 
 ### Fixed
