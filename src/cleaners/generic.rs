@@ -542,6 +542,41 @@ pub fn clean_cli_or_fallback(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::command::CommandRunner;
+
+    struct MissingToolRunner;
+    impl CommandRunner for MissingToolRunner {
+        fn run(&self, _: &str, _: &[&str]) -> anyhow::Result<std::process::Output> {
+            unreachable!()
+        }
+        fn exists(&self, _: &str) -> bool {
+            false
+        }
+    }
+
+    #[test]
+    fn command_with_detect_dir_returns_not_found_when_tool_missing() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        // Directory exists but the cleaning tool is not installed
+        fs::create_dir_all(tmp.path().join(".colima/_lima/colima")).unwrap();
+        fs::write(tmp.path().join(".colima/_lima/colima/dummy.img"), b"x").unwrap();
+
+        let cleaner = GenericCleaner {
+            display_name: "colima",
+            method: CleanMethod::CommandWithDetectDir {
+                program: "colima",
+                args: &["prune", "--all"],
+                detect_dir: tmp.path().join(".colima"),
+            },
+            runner: Box::new(MissingToolRunner),
+        };
+        let result = cleaner.detect();
+        assert!(
+            matches!(result.status, ScanStatus::NotFound),
+            "expected NotFound when tool missing, got {:#?}",
+            result.status
+        );
+    }
 
     #[test]
     fn is_safe_delete_target_rejects_root() {

@@ -138,6 +138,90 @@ impl Cleaner for RustupCleaner {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::command::CommandRunner;
+    use std::fs;
+    use std::process::Output;
+    use tempfile::TempDir;
+
+    /// Runner that records calls and returns controlled output.
+    struct FakeRunner {
+        toolchain_list: &'static str,
+    }
+    impl CommandRunner for FakeRunner {
+        fn run(&self, _program: &str, args: &[&str]) -> anyhow::Result<Output> {
+            assert_eq!(args, &["toolchain", "list"]);
+            Ok(Output {
+                status: std::process::ExitStatus::default(),
+                stdout: self.toolchain_list.as_bytes().to_vec(),
+                stderr: vec![],
+            })
+        }
+        fn exists(&self, _program: &str) -> bool {
+            true
+        }
+    }
+
+    #[test]
+    fn detect_measures_actual_toolchain_dirs() {
+        let tmp = TempDir::new().unwrap();
+        let toolchains = tmp.path().join(".rustup/toolchains");
+        // Active toolchain — has a dir with files
+        fs::create_dir_all(toolchains.join("stable-aarch64-apple-darwin")).unwrap();
+        fs::write(
+            toolchains.join("stable-aarch64-apple-darwin/rustc"), &[0u8; 2048],
+        )
+        .unwrap();
+        // Unused toolchain — has a dir with files
+        fs::create_dir_all(toolchains.join("nightly-2026-05-01-aarch64-apple-darwin")).unwrap();
+        fs::write(
+            toolchains
+                .join("nightly-2026-05-01-aarch64-apple-darwin/rustc"), &[0u8; 4096],
+        )
+        .unwrap();
+
+        let runner = FakeRunner {
+            toolchain_list:
+                "stable-aarch64-apple-darwin (default)\nnightly-2026-05-01-aarch64-apple-darwin\n",
+        };
+        let cleaner = RustupCleaner {
+            home: tmp.path().to_path_buf(),
+            runner: Box::new(runner),
+        };
+        let result = cleaner.detect();
+
+        let expected = crate::format::dir_size(
+            &toolchains.join("nightly-2026-05-01-aarch64-apple-darwin"),
+        );
+        match result.status {
+            ScanStatus::Pruneable(bytes) => assert_eq!(
+                bytes, expected,
+                "detect must report actual dir_size of unused toolchain, not a fixed estimate"
+            ),
+            other => panic!("expected Pruneable, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn detect_returns_clean_when_all_active() {
+        let tmp = TempDir::new().unwrap();
+        let toolchains = tmp.path().join(".rustup/toolchains");
+        fs::create_dir_all(toolchains.join("stable-aarch64-apple-darwin")).unwrap();
+        fs::write(toolchains.join("stable-aarch64-apple-darwin/rustc"), &[0u8; 64]).unwrap();
+
+        let runner = FakeRunner {
+            toolchain_list: "stable-aarch64-apple-darwin (default)\n",
+        };
+        let cleaner = RustupCleaner {
+            home: tmp.path().to_path_buf(),
+            runner: Box::new(runner),
+        };
+        let result = cleaner.detect();
+        assert!(
+            matches!(result.status, ScanStatus::Clean),
+            "expected Clean, got {:#?}",
+            result.status
+        );
+    }
 
     #[test]
     fn parse_toolchains_active_only() {

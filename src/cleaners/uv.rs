@@ -215,4 +215,40 @@ mod tests {
         let cleaner = UvCleaner::new(tmp.path(), Box::new(NoopRunner));
         assert!(cleaner.detect_old_indexes().is_empty());
     }
+
+    // ── detect() size coverage ──────────────────────────────────────────────
+
+    #[test]
+    fn detect_measures_full_cache_dir() {
+        let tmp = TempDir::new().unwrap();
+        let cache = tmp.path().join(".cache/uv");
+        // archive-v0 — previously the only thing detect() measured
+        std::fs::create_dir_all(cache.join("archive-v0")).unwrap();
+        std::fs::write(cache.join("archive-v0/pkg.tar.gz"), &[0u8; 4096]).unwrap();
+        // simple-vN index — was missed before the fix
+        std::fs::create_dir_all(cache.join("simple-v17")).unwrap();
+        std::fs::write(cache.join("simple-v17/index.html"), &[0u8; 1024]).unwrap();
+
+        let cleaner = UvCleaner::new(tmp.path(), Box::new(NoopRunner));
+        let result = cleaner.detect();
+
+        let expected = crate::format::dir_size(&cache);
+        match result.status {
+            ScanStatus::Pruneable(bytes) => assert_eq!(bytes, expected),
+            other => panic!("expected Pruneable, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn detect_returns_not_found_when_cache_missing() {
+        let tmp = TempDir::new().unwrap();
+        // cache dir does not exist
+        let cleaner = UvCleaner::new(tmp.path(), Box::new(NoopRunner));
+        let result = cleaner.detect();
+        assert!(
+            matches!(result.status, ScanStatus::NotFound),
+            "expected NotFound, got {:#?}",
+            result.status
+        );
+    }
 }

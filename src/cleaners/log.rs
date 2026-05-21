@@ -278,6 +278,56 @@ mod tests {
     /// Creates a symlink to /dev/null and confirms is_older_than still returns
     /// false gracefully (no panic on unusual file types).
     #[test]
+    fn detect_uses_physical_blocks() {
+        let tmp = TempDir::new().unwrap();
+        let log_dir = tmp.path().join("test-logs");
+        fs::create_dir_all(&log_dir).unwrap();
+        let f = log_dir.join("old.log");
+        write_aged(&f, 30 * 86_400); // 30 days old → pruneable
+
+        let extra = vec![OwnedLogTarget {
+            name: "test".to_string(),
+            path: log_dir.clone(),
+            exclude: vec![],
+        }];
+        // keep_days=7 so the 30-day-old file is stale
+        let cleaner = LogCleaner::new_with_extra(tmp.path(), 7, extra);
+        let result = cleaner.detect();
+        match result.status {
+            ScanStatus::Pruneable(bytes) => {
+                let expected = fs::metadata(&f).map(|m| m.blocks() * 512).unwrap_or(0);
+                assert_eq!(
+                    bytes, expected,
+                    "detect must report physical block size, not logical len"
+                );
+            }
+            other => panic!("expected Pruneable, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn detect_returns_clean_when_no_old_logs() {
+        let tmp = TempDir::new().unwrap();
+        let log_dir = tmp.path().join("test-logs");
+        fs::create_dir_all(&log_dir).unwrap();
+        let f = log_dir.join("recent.log");
+        write_aged(&f, 1); // 1 second old → not stale
+
+        let extra = vec![OwnedLogTarget {
+            name: "test".to_string(),
+            path: log_dir.clone(),
+            exclude: vec![],
+        }];
+        let cleaner = LogCleaner::new_with_extra(tmp.path(), 7, extra);
+        let result = cleaner.detect();
+        assert!(
+            matches!(result.status, ScanStatus::Clean),
+            "expected Clean, got {:#?}",
+            result.status
+        );
+    }
+
+    #[test]
     fn is_older_than_symlink_does_not_panic() {
         let tmp = TempDir::new().unwrap();
         let p = tmp.path().join("link.log");
