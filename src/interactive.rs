@@ -59,7 +59,7 @@ pub fn run_auto(cleaners: &[Box<dyn Cleaner>]) -> Result<()> {
     let mut total_freed: u64 = 0;
     for i in pruneable_indices {
         let name = cleaners[i].name();
-        let result = crate::progress::with_spinner(&format!("Cleaning {}...", name), || {
+        let result = crate::progress::with_spinner_result(&format!("Cleaning {}...", name), || {
             cleaners[i].clean(false, &reporter)
         });
         match result {
@@ -153,7 +153,7 @@ pub fn run_interactive(cleaners: &[Box<dyn Cleaner>]) -> Result<()> {
     for &si in &selected {
         let cleaner_idx = pruneable_indices[si];
         let name = cleaners[cleaner_idx].name();
-        let result = crate::progress::with_spinner(&format!("Cleaning {}...", name), || {
+        let result = crate::progress::with_spinner_result(&format!("Cleaning {}...", name), || {
             cleaners[cleaner_idx].clean(false, &reporter)
         });
         match result {
