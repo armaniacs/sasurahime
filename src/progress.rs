@@ -74,8 +74,7 @@ impl ProgressReporter for VerboseProgress {
                 .map(|start| {
                     let elapsed = start.elapsed();
                     let secs = elapsed.as_secs_f64().max(0.001);
-                    let mb = size_bytes as f64 / 1_048_576.0;
-                    format!(", {:.1} MB/s", mb / secs)
+                    format_speed(size_bytes, secs)
                 })
                 .unwrap_or_default();
 
@@ -138,6 +137,15 @@ pub fn merge_suppress_flags(
     } else {
         (suppress, false)
     }
+}
+
+fn format_speed(size_bytes: u64, elapsed_secs: f64) -> String {
+    if size_bytes == 0 || elapsed_secs <= 0.0 {
+        return String::new();
+    }
+    let mb = size_bytes as f64 / 1_048_576.0;
+    let secs = elapsed_secs.max(0.001);
+    format!(", {:.1} MB/s", mb / secs)
 }
 
 #[cfg(test)]
@@ -231,5 +239,29 @@ mod tests {
     fn merge_flags_deep_wins_over_suppress() {
         let (_s, d) = merge_suppress_flags(true, true, false, false);
         assert!(d);
+    }
+
+    #[test]
+    fn format_speed_shows_mb_per_sec() {
+        let s = format_speed(10_485_760, 2.0);
+        assert_eq!(s, ", 5.0 MB/s");
+    }
+
+    #[test]
+    fn format_speed_zero_bytes_returns_empty() {
+        let s = format_speed(0, 2.0);
+        assert_eq!(s, "");
+    }
+
+    #[test]
+    fn format_speed_zero_elapsed_returns_empty() {
+        let s = format_speed(1024, 0.0);
+        assert_eq!(s, "");
+    }
+
+    #[test]
+    fn format_speed_small_values() {
+        let s = format_speed(1_048_576, 10.0);
+        assert_eq!(s, ", 0.1 MB/s");
     }
 }
