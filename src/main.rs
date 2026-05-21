@@ -676,10 +676,10 @@ fn main() -> anyhow::Result<()> {
                         ];
                         let mut total: u64 = 0;
                         for c in &caches {
-                    match crate::progress::with_spinner_result(
-                        &format!("Cleaning {}...", c.name()),
-                        || c.clean(dry_run, reporter.as_ref()),
-                    ) {
+                            match crate::progress::with_spinner_result(
+                                &format!("Cleaning {}...", c.name()),
+                                || c.clean(dry_run, reporter.as_ref()),
+                            ) {
                                 Ok(r) => total += r.bytes_freed,
                                 Err(e) => eprintln!("Error cleaning {}: {e}", c.name()),
                             }

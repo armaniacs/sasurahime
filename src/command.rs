@@ -128,7 +128,10 @@ mod tests {
             err.contains("You can run this command manually"),
             "expected hint about manual command, got: {err}"
         );
-        assert!(err.contains("sleep 60"), "expected command name in error, got: {err}");
+        assert!(
+            err.contains("sleep 60"),
+            "expected command name in error, got: {err}"
+        );
         assert!(
             err.contains("did not complete within"),
             "expected timeout message, got: {err}"
