@@ -169,14 +169,14 @@ mod tests {
         fs::create_dir_all(toolchains.join("stable-aarch64-apple-darwin")).unwrap();
         fs::write(
             toolchains.join("stable-aarch64-apple-darwin/rustc"),
-            &[0u8; 2048],
+            [0u8; 2048],
         )
         .unwrap();
         // Unused toolchain — has a dir with files
         fs::create_dir_all(toolchains.join("nightly-2026-05-01-aarch64-apple-darwin")).unwrap();
         fs::write(
             toolchains.join("nightly-2026-05-01-aarch64-apple-darwin/rustc"),
-            &[0u8; 4096],
+            [0u8; 4096],
         )
         .unwrap();
 
@@ -208,7 +208,7 @@ mod tests {
         fs::create_dir_all(toolchains.join("stable-aarch64-apple-darwin")).unwrap();
         fs::write(
             toolchains.join("stable-aarch64-apple-darwin/rustc"),
-            &[0u8; 64],
+            [0u8; 64],
         )
         .unwrap();
 

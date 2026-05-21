@@ -48,6 +48,7 @@ Clean a single cache target. Replace `<target>` with one of the names below.
 | Target          | What it removes                                                       |
 |-----------------|-----------------------------------------------------------------------|
 | `act`           | `~/.cache/act/` (GitHub Actions runner)                               |
+| `apfs-snapshot` | APFS local Time Machine snapshots (tmutil deletelocalsnapshot)         |
 | `brew`          | `brew cleanup -s --prune=all`                                         |
 | `browsers`      | Old Puppeteer Chrome / Playwright (`ms-playwright*`) builds            |
 | `bun`           | `bun pm cache rm`                                                     |
@@ -64,6 +65,7 @@ Clean a single cache target. Replace `<target>` with one of the names below.
 | `go`            | `go clean -cache`                                                     |
 | `gradle`        | Gradle old version caches                                             |
 | `huggingface`   | Hugging Face model cache (`hub/`) via CLI or fallback                  |
+| `ios-backup`    | iOS device backups (interactive only — never in --yes mode)           |
 | `jetbrains`     | JetBrains IDE caches (old versions)                                   |
 | `library-logs`  | `~/Library/Logs/` — interactive heuristic scan (suggested cleanables) |
 | `logs`          | Log files older than N days (see `--keep-days`)                       |
@@ -356,6 +358,7 @@ Total reclaimable     43.7 GB
 | ターゲット      | 削除対象                                                             |
 |-----------------|----------------------------------------------------------------------|
 | `act`           | `~/.cache/act/`（GitHub Actions ランナー）                             |
+| `apfs-snapshot` | APFS ローカル Time Machine スナップショット（tmutil deletelocalsnapshot）|
 | `brew`          | `brew cleanup -s --prune=all`                                        |
 | `browsers`      | 古い Puppeteer Chrome / Playwright（`ms-playwright*`）ビルド           |
 | `bun`           | `bun pm cache rm`                                                    |
@@ -372,6 +375,7 @@ Total reclaimable     43.7 GB
 | `go`            | `go clean -cache`                                                    |
 | `gradle`        | Gradle の古いバージョンキャッシュ                                      |
 | `huggingface`   | Hugging Face モデルキャッシュ（`hub/`）CLI またはフォールバック          |
+| `ios-backup`    | iOS デバイスバックアップ（インタラクティブのみ — --yes では非実行）     |
 | `jetbrains`     | JetBrains IDE キャッシュ（古いバージョン）                              |
 | `library-logs`  | `~/Library/Logs/` — インタラクティブヒューリスティックスキャン         |
 | `logs`          | N 日より古いログファイル（`--keep-days` を参照）                        |

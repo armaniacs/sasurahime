@@ -1,6 +1,6 @@
 [package]
 name = "sasurahime"
-version = "0.1.11"
+version = "0.1.13"
 edition = "2021"
 description = "macOS developer cache cleaner — scan and wipe stale caches from 40+ tools"
 repository = "https://github.com/armaniacs/sasurahime"

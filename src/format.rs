@@ -70,8 +70,8 @@ mod tests {
     #[test]
     fn dir_size_sums_multiple_files() {
         let tmp = TempDir::new().unwrap();
-        fs::write(tmp.path().join("a.bin"), &[0u8; 100]).unwrap();
-        fs::write(tmp.path().join("b.bin"), &[0u8; 200]).unwrap();
+        fs::write(tmp.path().join("a.bin"), [0u8; 100]).unwrap();
+        fs::write(tmp.path().join("b.bin"), [0u8; 200]).unwrap();
         let expected: u64 = [tmp.path().join("a.bin"), tmp.path().join("b.bin")]
             .iter()
             .map(|p| fs::metadata(p).map(|m| m.blocks() * 512).unwrap_or(0))
@@ -84,7 +84,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let real_dir = tmp.path().join("real");
         fs::create_dir(&real_dir).unwrap();
-        fs::write(real_dir.join("data.bin"), &[0u8; 64]).unwrap();
+        fs::write(real_dir.join("data.bin"), [0u8; 64]).unwrap();
         #[cfg(unix)]
         {
             let link = tmp.path().join("link");

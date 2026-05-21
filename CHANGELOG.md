@@ -4,6 +4,30 @@ All notable changes to sasurahime will be documented in this file. The format is
 
 ---
 
+## [0.1.13] — 2026-05-21
+
+### Fixed
+
+- **Rust 1.95.0 clippy warnings:** Removed unnecessary borrows (`&[0u8; N]` →
+  `[0u8; N]`) in test code across `src/cleaners/rustup.rs`, `src/cleaners/uv.rs`,
+  and `src/format.rs` to satisfy the new `needless_borrows_for_generic_args`
+  lint.
+- **Test version strings:** Updated version assertions in
+  `tests/interactive.rs` from `0.1.12` to `0.1.13` to match the new version.
+
+## [0.1.12] — 2026-05-21
+
+### Added
+
+- **IosCleaner (PBI-012):** Scan and remove iOS device backups from
+  `~/Library/Application Support/MobileSync/Backup/`. Interactive only (never
+  runs in `--yes` mode) — backups are sent to Trash with `chflags nouchg`
+  handling. Reachable via `sasurahime clean ios-backup`.
+- **ApfsSnapshotCleaner (PBI-013):** List and delete APFS local Time Machine
+  snapshots via `tmutil deletelocalsnapshot`. Interactive only — warns about
+  losing local Time Machine protection. Reachable via
+  `sasurahime clean apfs-snapshot`.
+
 ## [0.1.11] — 2026-05-21
 
 ### Fixed

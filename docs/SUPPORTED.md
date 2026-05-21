@@ -7,7 +7,7 @@ permalink: /SUPPORTED
 <details open markdown="1">
 <summary markdown="0"><strong>🇺🇸 English</strong></summary>
 
-sasurahime provides **43 clean targets** organized by sprint.
+sasurahime provides **45 clean targets** organized by sprint.
 Every target supports both `detect` (read-only, no side effects) and
 `clean` (removal). All `clean` subcommands accept `--dry-run`.
 
@@ -1044,6 +1044,68 @@ cache via `colima prune --all`.
 
 ---
 
+## 44. `sasurahime clean ios-backup`
+
+**Category:** Sprint 6
+
+**What it removes:** iOS device backups from
+`~/Library/Application Support/MobileSync/Backup/`. Each device appears as a
+UUID-named subdirectory containing backup data (Manifest.db, etc.).
+
+**How detect works:**
+1. Checks if the backup directory exists under `MobileSync/Backup/`.
+2. Reads subdirectories (UUID-named entries), measures each with `dir_size`.
+3. Reports the total size of all backup directories as reclaimable.
+
+**How clean works:**
+1. Lists all backup directories with their sizes.
+2. Opens an interactive `dialoguer::MultiSelect` prompt to select which backups
+   to remove (unless `--dry-run`).
+3. Runs `chflags -R nouchg` to clear macOS immutable flags.
+4. Moves selected backups to Trash via `crate::trash::delete_path`.
+5. Reports total freed bytes.
+
+**Safety:**
+- iOS backups are **irreversible** — once deleted they cannot be restored
+  (Trash only helps locally; backup data is gone).
+- **Interactive only:** never runs in `--yes` mode. Non-TTY invocations are
+  safely skipped with a message.
+- In `--dry-run` mode, backups are listed but never removed.
+- macOS immutable flags (`uchg`) are handled automatically.
+
+---
+
+## 45. `sasurahime clean apfs-snapshot`
+
+**Category:** Sprint 6
+
+**What it removes:** APFS local Time Machine snapshots via
+`tmutil deletelocalsnapshot / <name>`.
+
+**How detect works:**
+1. Checks if `tmutil` is available on the system.
+2. Runs `tmutil listlocalsnapshots /` and parses output via
+   `parse_snapshot_names` (lines trimmed, empty lines filtered).
+3. Measures `/.MobileBackups` disk usage (if present) as a size estimate.
+4. Returns `Pruneable` with the measured size (or 0 if `/.MobileBackups` does
+   not exist).
+
+**How clean works:**
+1. Lists all local snapshots from `tmutil listlocalsnapshots`.
+2. Opens an interactive `dialoguer::MultiSelect` prompt (unless `--dry-run`).
+3. Runs `tmutil deletelocalsnapshot / <name>` for each selected snapshot.
+4. Reports 0 freed bytes (APFS block-sharing space cannot be measured
+   reliably after deletion).
+
+**Safety:**
+- Deleting snapshots disables local Time Machine protection until the next
+  backup.
+- **Interactive only:** never runs in `--yes` mode. Non-TTY invocations are
+  safely skipped with a message.
+- In `--dry-run` mode, snapshots are listed but never removed.
+
+---
+
 ## Scan (`sasurahime scan`)
 
 Runs `detect()` on every cleaner and prints a formatted table via
@@ -1065,7 +1127,7 @@ Runs `detect()` on every cleaner and prints a formatted table via
 <details markdown="1">
 <summary markdown="0"><strong>🇯🇵 日本語</strong></summary>
 
-sasurahime は **43 のクリーンターゲット** をスプリント単位で提供しています。
+sasurahime は **45 のクリーンターゲット** をスプリント単位で提供しています。
 すべてのターゲットは `detect`（読み取り専用、副作用なし）と `clean`（削除）の両方に対応しています。また、すべての `clean` サブコマンドは `--dry-run` をサポートしています。
 
 ---
@@ -1973,6 +2035,72 @@ sasurahime は **43 のクリーンターゲット** をスプリント単位で
 - 対話的な選択により大規模モデルの誤削除を防止します。
 - CLI が直接削除より優先され、適切なモデル管理が行われます。
 - `--dry-run` モードではモデルが一覧表示されるのみで削除は行われません。
+
+---
+
+## 44. `sasurahime clean ios-backup`
+
+**カテゴリ:** Sprint 6
+
+**削除対象:** `~/Library/Application Support/MobileSync/Backup/` 内の iOS
+デバイスバックアップ。各デバイスは UUID のような名前のサブディレクトリとして
+保存されています。
+
+**detect の動作:**
+1. バックアップディレクトリが存在するか確認します。
+2. サブディレクトリ（UUID 名のエントリ）を読み取り、各ディレクトリの
+   `dir_size` を測定します。
+3. すべてのバックアップディレクトリの合計サイズを報告します。
+
+**clean の動作:**
+1. すべてのバックアップディレクトリをサイズ付きで一覧表示します。
+2. 対話的な `dialoguer::MultiSelect` プロンプトで削除するバックアップを
+   選択します（`--dry-run` 時を除く）。
+3. `chflags -R nouchg` で macOS 不変フラグを解除します。
+4. 選択されたバックアップをゴミ箱に移動します。
+5. 解放バイト数の合計を報告します。
+
+**安全性:**
+- iOS バックアップは **元に戻せません** — 一度削除すると復元できません。
+- **インタラクティブのみ:** `--yes` モードでは決して実行されません。非 TTY
+  の呼び出しは安全にスキップされます。
+- `--dry-run` モードではバックアップが一覧表示されるのみで削除は行われません。
+- macOS 不変フラグ（`uchg`）は自動的に処理されます。
+
+---
+
+## 45. `sasurahime clean apfs-snapshot`
+
+**カテゴリ:** Sprint 6
+
+**削除対象:** `tmutil deletelocalsnapshot / <name>` による APFS ローカル
+Time Machine スナップショット。
+
+**detect の動作:**
+1. `tmutil` がシステムで利用可能か確認します。
+2. `tmutil listlocalsnapshots /` を実行し、出力を `parse_snapshot_names`
+   でパースします（行のトリミング、空行のフィルタリング）。
+3. `/.MobileBackups` のディスク使用量（存在する場合）をサイズ見積もりとして
+   測定します。
+4. 測定サイズ付きで `Pruneable` を返します（`/.MobileBackups` が存在しない
+   場合は 0）。
+
+**clean の動作:**
+1. `tmutil listlocalsnapshots` からローカルスナップショットを一覧表示します。
+2. 対話的な `dialoguer::MultiSelect` プロンプトを開きます（`--dry-run` 時を
+   除く）。
+3. 選択されたスナップショットごとに `tmutil deletelocalsnapshot / <name>`
+   を実行します。
+4. 解放バイト数として 0 を報告します（APFS ブロック共有領域は削除後に
+   確実に測定できません）。
+
+**安全性:**
+- スナップショットの削除は、次回のバックアップまでローカル Time Machine
+  保護を無効にします。
+- **インタラクティブのみ:** `--yes` モードでは決して実行されません。非 TTY
+  の呼び出しは安全にスキップされます。
+- `--dry-run` モードではスナップショットが一覧表示されるのみで削除は
+  行われません。
 
 ---
 

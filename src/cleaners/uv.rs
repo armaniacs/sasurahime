@@ -224,10 +224,10 @@ mod tests {
         let cache = tmp.path().join(".cache/uv");
         // archive-v0 — previously the only thing detect() measured
         std::fs::create_dir_all(cache.join("archive-v0")).unwrap();
-        std::fs::write(cache.join("archive-v0/pkg.tar.gz"), &[0u8; 4096]).unwrap();
+        std::fs::write(cache.join("archive-v0/pkg.tar.gz"), [0u8; 4096]).unwrap();
         // simple-vN index — was missed before the fix
         std::fs::create_dir_all(cache.join("simple-v17")).unwrap();
-        std::fs::write(cache.join("simple-v17/index.html"), &[0u8; 1024]).unwrap();
+        std::fs::write(cache.join("simple-v17/index.html"), [0u8; 1024]).unwrap();
 
         let cleaner = UvCleaner::new(tmp.path(), Box::new(NoopRunner));
         let result = cleaner.detect();
