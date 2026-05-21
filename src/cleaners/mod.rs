@@ -1,3 +1,4 @@
+pub mod apfs_snapshot;
 pub mod brew;
 pub mod browser;
 pub mod cargo;
