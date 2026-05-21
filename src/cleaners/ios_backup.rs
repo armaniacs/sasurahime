@@ -3,6 +3,7 @@ use crate::command::CommandRunner;
 use crate::progress::ProgressReporter;
 use anyhow::Result;
 use std::fs;
+use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 
 #[allow(dead_code)]
@@ -92,6 +93,19 @@ impl Cleaner for IosCleaner {
                     crate::format::format_bytes(*size)
                 );
             }
+            return Ok(CleanResult {
+                name: self.name(),
+                bytes_freed: 0,
+            });
+        }
+
+        // Safety: iOS backups are irreversible and must only be deleted
+        // interactively. If stdin is not a terminal (e.g. via --yes), refuse.
+        if !std::io::stdin().is_terminal() {
+            eprintln!(
+                "[ios-backup] not a terminal — skipping. Use `sasurahime clean ios-backup` \
+                 for interactive selection."
+            );
             return Ok(CleanResult {
                 name: self.name(),
                 bytes_freed: 0,

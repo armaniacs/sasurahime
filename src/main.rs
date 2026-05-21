@@ -451,7 +451,10 @@ fn extra_targets() -> &'static [(&'static str, &'static str)] {
             "Analyze and clean ~/Library/Logs/ with heuristic recommendations",
         ),
         ("device-support", "Xcode DeviceSupport old version cleanup"),
-        ("ios-backup", "iOS device backups (irreversible — backed up to Trash)"),
+        (
+            "ios-backup",
+            "iOS device backups (irreversible — backed up to Trash)",
+        ),
     ]
 }
 
