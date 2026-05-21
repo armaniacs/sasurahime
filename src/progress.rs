@@ -291,13 +291,13 @@ mod tests {
     }
 
     #[test]
-    fn with_spinner_result_prints_ok_on_success() {
+    fn with_spinner_result_returns_ok() {
         let result: Result<i32, String> = with_spinner_result("test", || Ok(42));
         assert_eq!(result.unwrap(), 42);
     }
 
     #[test]
-    fn with_spinner_result_prints_failed_on_error() {
+    fn with_spinner_result_returns_error() {
         let result: Result<i32, &str> = with_spinner_result("test", || Err("boom"));
         assert!(result.is_err());
         assert_eq!(result.unwrap_err(), "boom");
