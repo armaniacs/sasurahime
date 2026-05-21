@@ -3,7 +3,7 @@ use std::path::Path;
 use std::sync::Mutex;
 use std::sync::OnceLock;
 use std::time::Duration;
-use std::time::Instant;
+
 
 pub trait ProgressReporter: Send + Sync {
     fn show_spinner(&self) -> bool;
@@ -34,14 +34,12 @@ pub fn with_spinner<R>(msg: &str, f: impl FnOnce() -> R) -> R {
 
 pub struct VerboseProgress {
     pb: Mutex<Option<ProgressBar>>,
-    last_tick: Mutex<Option<Instant>>,
 }
 
 impl VerboseProgress {
     pub fn new() -> Self {
         Self {
             pb: Mutex::new(None),
-            last_tick: Mutex::new(None),
         }
     }
 }
@@ -197,7 +195,7 @@ mod tests {
     }
 
     #[test]
-    fn merge_flags_cli_suppress_overrides_config() {
+    fn merge_flags_cli_suppress_or_config() {
         let (s, d) = merge_suppress_flags(true, false, false, false);
         assert!(s);
         assert!(!d);
