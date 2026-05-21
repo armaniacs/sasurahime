@@ -25,7 +25,7 @@ fn version_flag_output() {
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("sasurahime"), "stdout: {stdout}");
-    assert!(stdout.contains("0.1.4"), "stdout: {stdout}");
+    assert!(stdout.contains("0.1.7"), "stdout: {stdout}");
 }
 
 #[test]
@@ -37,7 +37,7 @@ fn help_output_shows_version() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     // -h (short help) should show version in the header
     assert!(stdout.contains("sasurahime"), "stdout: {stdout}");
-    assert!(stdout.contains("0.1.4"), "stdout: {stdout}");
+    assert!(stdout.contains("0.1.7"), "stdout: {stdout}");
     assert!(stdout.contains("scan"), "stdout: {stdout}");
 }
 
@@ -122,7 +122,7 @@ fn startup_version_display_yes() {
 
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.starts_with("sasurahime v0.1.4"),
+        stderr.starts_with("sasurahime v0.1.7"),
         "stderr must start with version, got: {stderr}"
     );
 }
@@ -130,11 +130,12 @@ fn startup_version_display_yes() {
 #[test]
 fn version_display_on_scan() {
     let tmp = TempDir::new().unwrap();
-    let output = sasurahime(tmp.path()).args(["scan"]).output().unwrap();
-
+    let mut cmd = sasurahime(tmp.path());
+    cmd.arg("scan");
+    let output = cmd.output().unwrap();
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.starts_with("sasurahime v0.1.4"),
+        stderr.starts_with("sasurahime v0.1.7"),
         "stderr must start with version, got: {stderr}"
     );
 }
@@ -142,12 +143,13 @@ fn version_display_on_scan() {
 #[test]
 fn version_display_on_targets() {
     let tmp = TempDir::new().unwrap();
-    let output = sasurahime(tmp.path()).args(["targets"]).output().unwrap();
-
+    let mut cmd = sasurahime(tmp.path());
+    cmd.arg("targets");
+    let output = cmd.output().unwrap();
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.starts_with("sasurahime v0.1.4"),
-        "targets stderr must start with version, got: {stderr}"
+        stderr.starts_with("sasurahime v0.1.7"),
+        "stderr must start with version, got: {stderr}"
     );
 }
 
@@ -161,7 +163,7 @@ fn version_display_on_clean_dry_run() {
 
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.starts_with("sasurahime v0.1.4"),
+        stderr.starts_with("sasurahime v0.1.7"),
         "clean stderr must start with version, got: {stderr}"
     );
 }
@@ -235,7 +237,7 @@ fn yes_flag_shows_progress_spinner() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     let combined = format!("{stdout}{stderr}");
     // Must start with version
-    assert!(stderr.starts_with("sasurahime v0.1.4"), "stderr: {stderr}");
+    assert!(stderr.starts_with("sasurahime v0.1.7"), "stderr: {stderr}");
     // Must contain spinner messages (will be on stderr for the --yes path)
     assert!(
         combined.contains("Cleaning"),
