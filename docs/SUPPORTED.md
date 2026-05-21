@@ -7,7 +7,7 @@ permalink: /SUPPORTED
 <details open markdown="1">
 <summary markdown="0"><strong>🇺🇸 English</strong></summary>
 
-sasurahime provides **32 clean targets** organized by sprint.
+sasurahime provides **43 clean targets** organized by sprint.
 Every target supports both `detect` (read-only, no side effects) and
 `clean` (removal). All `clean` subcommands accept `--dry-run`.
 
@@ -319,6 +319,7 @@ user-configured log directories.
 | kilo         | `~/.local/share/kilo/log`         | `dev.log`                    |
 | opencode     | `~/.local/share/opencode/logs`    | _(none)_                     |
 | claude-code  | `~/.local/share/claude/logs`      | _(none)_                     |
+| vscode-logs  | `~/Library/Application Support/Code/logs` | _(none)_           |
 
 **Extra log targets** can be added via the config file (see `HOWTO-USE.md`
 for `config.toml` syntax). Each extra target has its own path and optional
@@ -783,6 +784,266 @@ intentional safety measure.
 
 ---
 
+## 33. `sasurahime clean volta`
+
+**Category:** Sprint 5
+
+**What it removes:** [Volta](https://volta.sh/) Node.js version manager
+cache (`~/.volta/cache/`).
+
+**Method:** Directory deletion.
+
+**How detect works:**
+1. Checks if `~/.volta/cache/` exists.
+2. Reports the total `dir_size` as pruneable.
+
+**How clean works:**
+1. Removes the `~/.volta/cache/` directory via `fs::remove_dir_all`.
+2. Reports total freed bytes.
+
+**Safety:** Only the `cache/` subdirectory is deleted; `~/.volta/` itself and
+its toolchain binaries are preserved.
+
+---
+
+## 34. `sasurahime clean sbt`
+
+**Category:** Sprint 5
+
+**What it removes:** [sbt](https://www.scala-sbt.org/) build cache
+(`~/.sbt/`) and [Ivy](https://ant.apache.org/ivy/) dependency cache
+(`~/.ivy2/cache/`).
+
+**Method:** Directory deletion.
+
+**How detect works:**
+1. Checks if `~/.sbt/` or `~/.ivy2/cache/` exist.
+2. Reports the total `dir_size` of existing directories as pruneable.
+
+**How clean works:**
+1. Removes `~/.sbt/` and `~/.ivy2/cache/` directories via `fs::remove_dir_all`.
+2. Reports total freed bytes.
+
+**Safety:** Directories are deleted entirely — dependencies will be re-fetched
+on next `sbt compile`.
+
+---
+
+## 35. `sasurahime clean tree-sitter`
+
+**Category:** Sprint 5
+
+**What it removes:** [tree-sitter](https://tree-sitter.github.io/) parser
+compilation cache (`~/.cache/tree-sitter/`).
+
+**Method:** Directory deletion.
+
+**How detect works:**
+1. Checks if `~/.cache/tree-sitter/` exists.
+2. Reports the total `dir_size` as pruneable.
+
+**How clean works:**
+1. Removes the `~/.cache/tree-sitter/` directory via `fs::remove_dir_all`.
+2. Reports total freed bytes.
+
+**Safety:** Parsers will be recompiled on next editor use (Neovim, Helix, etc.).
+
+---
+
+## 36. `sasurahime clean simulator`
+
+**Category:** Sprint 5
+
+**What it removes:** iOS Simulator cache — unavailable simulator runtimes
+via `xcrun simctl delete unavailable`.
+
+**How detect works:**
+1. Checks if `~/Library/Developer/CoreSimulator` exists.
+2. Reports the total `dir_size` as pruneable.
+
+**How clean works:**
+1. If `xcrun` is not in `PATH`, prints a message and exits (0).
+2. Runs `xcrun simctl delete unavailable`.
+3. Reports freed bytes from the simulator cache size change.
+
+**Safety:** Delegates to the official `xcrun` CLI for safe simulator management.
+
+---
+
+## 37. `sasurahime clean device-support`
+
+**Category:** Sprint 5
+
+**What it removes:** Old Xcode DeviceSupport directories under
+`~/Library/Developer/Xcode/* DeviceSupport/`. Keeps the N most recent major
+versions per platform (default: 2).
+
+**Scanned locations:**
+- `~/Library/Developer/Xcode/iOS DeviceSupport/`
+- `~/Library/Developer/Xcode/watchOS DeviceSupport/`
+- Any other `* DeviceSupport/` directory
+
+**Version comparison:**
+- For each platform directory, subdirectories named by version (e.g. `17.0`,
+  `18.0`) are collected. The major version (first number before `.`) is used
+  for comparison.
+- Versions are sorted descending by major version; the top N are kept.
+
+**How detect works:**
+1. Scans `~/Library/Developer/Xcode/` for `* DeviceSupport/` directories.
+2. For each, collects version subdirectories and sorts them.
+3. Reports the sum of disk sizes for all versions beyond the N most recent.
+
+**How clean works:**
+1. Same scan as detect.
+2. If `--dry-run`: prints what would be removed per directory.
+3. Otherwise: runs `chflags -R nouchg` then deletes via trash (or permanent).
+4. Reports total freed bytes.
+
+**Safety:**
+- The N most recent major versions per platform are always kept.
+- The `DeviceSupport` root directories are never deleted.
+
+---
+
+## 38. `sasurahime clean vscode-extensions`
+
+**Category:** Sprint 5
+
+**What it removes:** VS Code extensions cache (`~/.vscode/extensions/`).
+
+**Method:** Directory deletion.
+
+**How detect works:**
+1. Checks if `~/.vscode/extensions/` exists.
+2. Reports the total `dir_size` as pruneable.
+
+**How clean works:**
+1. Removes `~/.vscode/extensions/` via `fs::remove_dir_all`.
+2. Extensions will be re-downloaded on next VS Code launch.
+
+**Safety:** Only the extensions cache is removed; VS Code configuration and
+settings are preserved.
+
+---
+
+## 39. `sasurahime clean maven`
+
+**Category:** Sprint 5
+
+**What it removes:** Maven local repository cache
+via `mvn dependency:purge-local-repository`.
+
+**How detect works:**
+1. Checks if `~/.m2/repository` exists.
+2. Reports the total `dir_size` as pruneable.
+
+**How clean works:**
+1. If `mvn` is not in `PATH`, prints a message and exits (0).
+2. Runs `mvn dependency:purge-local-repository`.
+3. Reports freed bytes from the repository size change.
+
+**Safety:** Delegates to the official Maven CLI. Dependencies will be
+re-downloaded on next build.
+
+---
+
+## 40. `sasurahime clean terraform`
+
+**Category:** Sprint 5
+
+**What it removes:** Terraform provider plugin cache
+(`~/.terraform.d/plugin-cache/` or `$TF_PLUGIN_CACHE_DIR`).
+
+**Method:** Directory deletion.
+
+**How detect works:**
+1. Resolves the plugin cache directory: `$TF_PLUGIN_CACHE_DIR` if set,
+   otherwise `~/.terraform.d/plugin-cache/`.
+2. Reports the total `dir_size` as pruneable.
+
+**How clean works:**
+1. Removes the plugin cache directory via `fs::remove_dir_all`.
+2. Providers will be re-downloaded on next `terraform init`.
+
+**Safety:** `$TF_PLUGIN_CACHE_DIR` is validated against `is_safe_delete_target`.
+Only the provider cache is removed; Terraform state files and configurations
+are preserved.
+
+---
+
+## 41. `sasurahime clean flutter`
+
+**Category:** Sprint 5
+
+**What it removes:** Flutter/Dart pub cache
+via `dart pub cache clean`.
+
+**How detect works:**
+1. Checks if the pub cache directory exists (`$PUB_CACHE` or
+   `~/.pub-cache/`).
+2. Reports the total `dir_size` as pruneable.
+
+**How clean works:**
+1. If `dart` is not in `PATH`, prints a message and exits (0).
+2. Runs `dart pub cache clean`.
+3. Reports freed bytes from the cache size change.
+
+**Safety:** Delegates to the official Dart CLI. Published packages will be
+re-downloaded on next `dart pub get` or `flutter pub get`.
+
+---
+
+## 42. `sasurahime clean colima`
+
+**Category:** Sprint 5
+
+**What it removes:** [Colima](https://github.com/abiosoft/colima) VM disk
+cache via `colima prune --all`.
+
+**How detect works:**
+1. Checks if `~/.colima/` exists.
+2. Reports the total `dir_size` as pruneable.
+
+**How clean works:**
+1. If `colima` is not in `PATH`, prints a message and exits (0).
+2. Runs `colima prune --all`.
+3. Reports freed bytes from the directory size change.
+
+**Safety:** Delegates to the official Colima CLI.
+
+---
+
+## 43. `sasurahime clean ollama`
+
+**Category:** Sprint 5
+
+**What it removes:** [Ollama](https://ollama.com/) model cache
+(`~/.ollama/models/`).
+
+**How detect works:**
+1. If `ollama` CLI is available, runs `ollama list` and parses model sizes
+   from the output. Reports the sum of model sizes as pruneable.
+2. Falls back to `dir_size` of `~/.ollama/models/` if the CLI is not found.
+
+**How clean works:**
+1. If `ollama` CLI is available:
+   - Lists all installed models.
+   - Opens an interactive `dialoguer::MultiSelect` prompt for the user to
+     select models to remove (unless `--dry-run`).
+   - Runs `ollama rm <model>` for each selected model.
+2. If `ollama` CLI is not available:
+   - Deletes `~/.ollama/models/` directory directly with
+     `chflags -R nouchg` + `remove_dir_all` (or trash).
+3. Reports total freed bytes.
+
+**Safety:**
+- Interactive selection prevents accidental deletion of large models.
+- CLI takes precedence over direct deletion for proper model management.
+- In `--dry-run` mode, models are listed but never removed.
+
+---
+
 ## Scan (`sasurahime scan`)
 
 Runs `detect()` on every cleaner and prints a formatted table via
@@ -804,7 +1065,7 @@ Runs `detect()` on every cleaner and prints a formatted table via
 <details markdown="1">
 <summary markdown="0"><strong>🇯🇵 日本語</strong></summary>
 
-sasurahime は **32 のクリーンターゲット** をスプリント単位で提供しています。
+sasurahime は **43 のクリーンターゲット** をスプリント単位で提供しています。
 すべてのターゲットは `detect`（読み取り専用、副作用なし）と `clean`（削除）の両方に対応しています。また、すべての `clean` サブコマンドは `--dry-run` をサポートしています。
 
 ---
@@ -1075,6 +1336,7 @@ sasurahime は **32 のクリーンターゲット** をスプリント単位で
 | kilo         | `~/.local/share/kilo/log`            | `dev.log`               |
 | opencode     | `~/.local/share/opencode/logs`       | _(なし)_                |
 | claude-code  | `~/.local/share/claude/logs`         | _(なし)_                |
+| vscode-logs  | `~/Library/Application Support/Code/logs` | _(なし)_          |
 
 **追加ログターゲット** は設定ファイルで追加できます。各ターゲットは独自のパスと除外リストを持ちます。
 
@@ -1477,6 +1739,240 @@ sasurahime は **32 のクリーンターゲット** をスプリント単位で
 2. **それ以外:** Finder からゴミ箱を空にするよう指示する警告を表示します。ファイルは削除されません。
 
 **安全性:** sasurahime は `~/.Trash` の内容を削除することを拒否します。これは意図的な安全対策です。
+
+---
+
+## 33. `sasurahime clean volta`
+
+**カテゴリ:** Sprint 5
+
+**削除対象:** [Volta](https://volta.sh/) Node.js バージョンマネージャのキャッシュ（`~/.volta/cache/`）。
+
+**方法:** ディレクトリ削除。
+
+**detect の動作:**
+1. `~/.volta/cache/` が存在するか確認します。
+2. 合計サイズを報告します。
+
+**clean の動作:**
+1. `~/.volta/cache/` ディレクトリを `fs::remove_dir_all` で削除します。
+2. 解放バイト数を報告します。
+
+**安全性:** `cache/` サブディレクトリのみ削除され、`~/.volta/` 自体とツールチェーンバイナリは保持されます。
+
+---
+
+## 34. `sasurahime clean sbt`
+
+**カテゴリ:** Sprint 5
+
+**削除対象:** [sbt](https://www.scala-sbt.org/) ビルドキャッシュ（`~/.sbt/`）と [Ivy](https://ant.apache.org/ivy/) 依存関係キャッシュ（`~/.ivy2/cache/`）。
+
+**方法:** ディレクトリ削除。
+
+**detect の動作:**
+1. `~/.sbt/` または `~/.ivy2/cache/` が存在するか確認します。
+2. 既存のディレクトリの合計サイズを報告します。
+
+**clean の動作:**
+1. `~/.sbt/` と `~/.ivy2/cache/` を `fs::remove_dir_all` で削除します。
+2. 解放バイト数を報告します。
+
+**安全性:** ディレクトリは完全に削除されます。依存関係は次回 `sbt compile` 実行時に再取得されます。
+
+---
+
+## 35. `sasurahime clean tree-sitter`
+
+**カテゴリ:** Sprint 5
+
+**削除対象:** [tree-sitter](https://tree-sitter.github.io/) パーサーコンパイルキャッシュ（`~/.cache/tree-sitter/`）。
+
+**方法:** ディレクトリ削除。
+
+**detect の動作:**
+1. `~/.cache/tree-sitter/` が存在するか確認します。
+2. 合計サイズを報告します。
+
+**clean の動作:**
+1. `~/.cache/tree-sitter/` を `fs::remove_dir_all` で削除します。
+2. 解放バイト数を報告します。
+
+**安全性:** パーサーは次回エディタ（Neovim、Helix など）使用時に再コンパイルされます。
+
+---
+
+## 36. `sasurahime clean simulator`
+
+**カテゴリ:** Sprint 5
+
+**削除対象:** iOS シミュレータキャッシュ。`xcrun simctl delete unavailable` で利用不可のシミュレータランタイムを削除します。
+
+**detect の動作:**
+1. `~/Library/Developer/CoreSimulator` が存在するか確認します。
+2. 合計サイズを報告します。
+
+**clean の動作:**
+1. `xcrun` が `PATH` にない場合、メッセージを表示して終了します (0)。
+2. `xcrun simctl delete unavailable` を実行します。
+3. シミュレータキャッシュのサイズ変化から解放バイト数を報告します。
+
+**安全性:** 公式の `xcrun` CLI に委譲します。
+
+---
+
+## 37. `sasurahime clean device-support`
+
+**カテゴリ:** Sprint 5
+
+**削除対象:** `~/Library/Developer/Xcode/* DeviceSupport/` 内の古い Xcode DeviceSupport ディレクトリ。プラットフォームごとに最新 N バージョンを保持（デフォルト: 2）。
+
+**スキャン対象パス:**
+- `~/Library/Developer/Xcode/iOS DeviceSupport/`
+- `~/Library/Developer/Xcode/watchOS DeviceSupport/`
+- その他の `* DeviceSupport/` ディレクトリ
+
+**バージョン比較:**
+- プラットフォームディレクトリごとにバージョン番号のサブディレクトリ（例: `17.0`、`18.0`）を収集。メジャーバージョン（`.` の前の数値）で比較します。
+- メジャーバージョンの降順でソートし、上位 N 個を保持します。
+
+**detect の動作:**
+1. `~/Library/Developer/Xcode/` 内の `* DeviceSupport/` ディレクトリをスキャンします。
+2. 各ディレクトリ内のバージョンサブディレクトリを収集・ソートします。
+3. 最新 N バージョン以外の全バージョンのディスクサイズ合計を報告します。
+
+**clean の動作:**
+1. detect と同じスキャンロジックを使用します。
+2. `--dry-run` の場合：削除予定のディレクトリを表示します。
+3. それ以外：`chflags -R nouchg` を実行後、ゴミ箱へ移動（または完全削除）します。
+4. 解放バイト数を報告します。
+
+**安全性:**
+- プラットフォームごとに最新 N バージョンは常に保持されます。
+- `DeviceSupport` ルートディレクトリは決して削除されません。
+
+---
+
+## 38. `sasurahime clean vscode-extensions`
+
+**カテゴリ:** Sprint 5
+
+**削除対象:** VS Code 拡張機能キャッシュ（`~/.vscode/extensions/`）。
+
+**方法:** ディレクトリ削除。
+
+**detect の動作:**
+1. `~/.vscode/extensions/` が存在するか確認します。
+2. 合計サイズを報告します。
+
+**clean の動作:**
+1. `~/.vscode/extensions/` を `fs::remove_dir_all` で削除します。
+2. 拡張機能は次回 VS Code 起動時に再ダウンロードされます。
+
+**安全性:** 拡張機能キャッシュのみ削除され、VS Code の設定は保持されます。
+
+---
+
+## 39. `sasurahime clean maven`
+
+**カテゴリ:** Sprint 5
+
+**削除対象:** Maven ローカルリポジトリキャッシュ。`mvn dependency:purge-local-repository` で削除します。
+
+**detect の動作:**
+1. `~/.m2/repository` が存在するか確認します。
+2. 合計サイズを報告します。
+
+**clean の動作:**
+1. `mvn` が `PATH` にない場合、メッセージを表示して終了します (0)。
+2. `mvn dependency:purge-local-repository` を実行します。
+3. リポジトリサイズの変化から解放バイト数を報告します。
+
+**安全性:** 公式の Maven CLI に委譲します。依存関係は次回ビルド時に再ダウンロードされます。
+
+---
+
+## 40. `sasurahime clean terraform`
+
+**カテゴリ:** Sprint 5
+
+**削除対象:** Terraform プロバイダプラグインキャッシュ（`~/.terraform.d/plugin-cache/` または `$TF_PLUGIN_CACHE_DIR`）。
+
+**方法:** ディレクトリ削除。
+
+**detect の動作:**
+1. プラグインキャッシュディレクトリを解決します：`$TF_PLUGIN_CACHE_DIR` が設定されていればそのパス、そうでなければ `~/.terraform.d/plugin-cache/`。
+2. 合計サイズを報告します。
+
+**clean の動作:**
+1. プラグインキャッシュディレクトリを `fs::remove_dir_all` で削除します。
+2. プロバイダは次回 `terraform init` 実行時に再ダウンロードされます。
+
+**安全性:** `$TF_PLUGIN_CACHE_DIR` は `is_safe_delete_target` で検証されます。プロバイダキャッシュのみ削除され、Terraform のステートファイルと設定は保持されます。
+
+---
+
+## 41. `sasurahime clean flutter`
+
+**カテゴリ:** Sprint 5
+
+**削除対象:** Flutter/Dart pub キャッシュ。`dart pub cache clean` で削除します。
+
+**detect の動作:**
+1. pub キャッシュディレクトリ（`$PUB_CACHE` または `~/.pub-cache/`）が存在するか確認します。
+2. 合計サイズを報告します。
+
+**clean の動作:**
+1. `dart` が `PATH` にない場合、メッセージを表示して終了します (0)。
+2. `dart pub cache clean` を実行します。
+3. キャッシュサイズの変化から解放バイト数を報告します。
+
+**安全性:** 公式の Dart CLI に委譲します。公開パッケージは次回 `dart pub get` または `flutter pub get` 実行時に再ダウンロードされます。
+
+---
+
+## 42. `sasurahime clean colima`
+
+**カテゴリ:** Sprint 5
+
+**削除対象:** [Colima](https://github.com/abiosoft/colima) VM ディスクキャッシュ。`colima prune --all` で削除します。
+
+**detect の動作:**
+1. `~/.colima/` が存在するか確認します。
+2. 合計サイズを報告します。
+
+**clean の動作:**
+1. `colima` が `PATH` にない場合、メッセージを表示して終了します (0)。
+2. `colima prune --all` を実行します。
+3. ディレクトリサイズの変化から解放バイト数を報告します。
+
+**安全性:** 公式の Colima CLI に委譲します。
+
+---
+
+## 43. `sasurahime clean ollama`
+
+**カテゴリ:** Sprint 5
+
+**削除対象:** [Ollama](https://ollama.com/) モデルキャッシュ（`~/.ollama/models/`）。
+
+**detect の動作:**
+1. `ollama` CLI が利用可能な場合、`ollama list` を実行しモデルサイズをパースして報告します。
+2. CLI が見つからない場合は `~/.ollama/models/` の `dir_size` にフォールバックします。
+
+**clean の動作:**
+1. `ollama` CLI が利用可能な場合：
+   - インストール済みモデルを一覧表示します。
+   - 対話的な `dialoguer::MultiSelect` プロンプトで削除するモデルを選択します（`--dry-run` 時を除く）。
+   - 選択されたモデルごとに `ollama rm <model>` を実行します。
+2. `ollama` CLI が利用できない場合：
+   - `~/.ollama/models/` ディレクトリを `chflags -R nouchg` + `remove_dir_all`（またはゴミ箱）で削除します。
+3. 解放バイト数の合計を報告します。
+
+**安全性:**
+- 対話的な選択により大規模モデルの誤削除を防止します。
+- CLI が直接削除より優先され、適切なモデル管理が行われます。
+- `--dry-run` モードではモデルが一覧表示されるのみで削除は行われません。
 
 ---
 

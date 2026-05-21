@@ -4,15 +4,19 @@ All notable changes to sasurahime will be documented in this file. The format is
 
 ---
 
-## [Unreleased]
+## [0.1.8] — 2026-05-21
 
 ### Added
 
-_none_
+- **4 new clean targets:** `volta`, `sbt`, `tree-sitter`, `vscode-extensions`.
+- **vscode-logs** built-in target added to LogCleaner (`~/Library/Application Support/Code/logs`).
+- SUPPORTED.md updated to document all 43 clean targets (previously undocumented: `colima`, `simulator`, `vscode-extensions`, `maven`, `terraform`, `flutter`, `ollama`, `device-support`).
+- HOWTO-USE.md target tables (EN + JA) updated with 11 missing entries: `colima`, `device-support`, `flutter`, `maven`, `ollama`, `sbt`, `simulator`, `terraform`, `tree-sitter`, `volta`, `vscode-extensions`.
 
 ### Changed
 
-_none_
+- Cleaner count in SUPPORTED.md: English 35 → 43, Japanese 32 → 43.
+- Japanese section of SUPPORTED.md now includes translations for `volta`, `sbt`, `tree-sitter`. (These existed in English-only since 0.1.7.)
 
 ---
 

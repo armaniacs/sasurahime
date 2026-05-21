@@ -53,20 +53,25 @@ Clean a single cache target. Replace `<target>` with one of the names below.
 | `bun`           | `bun pm cache rm`                                                     |
 | `cargo`         | Cargo registry cache + `target/` directories                          |
 | `cocoa-pods`    | `pod cache clean --all`                                               |
+| `colima`        | Colima VM disk cache (`colima prune --all`)                           |
 | `conda`         | `conda clean --all -y`                                                |
 | `caches`        | All generic caches (bun, go, pip, node-gyp, npm, yarn, pnpm)         |
 | `deno`          | `deno cache -r`                                                       |
+| `device-support`| Old Xcode DeviceSupport directories (keeps recent N versions)         |
 | `docker`        | `docker system prune -f`                                              |
 | `downloads`     | `~/Downloads` old files                                               |
+| `flutter`       | `dart pub cache clean`                                                |
 | `go`            | `go clean -cache`                                                     |
 | `gradle`        | Gradle old version caches                                             |
 | `huggingface`   | Hugging Face model cache (`hub/`) via CLI or fallback                  |
 | `jetbrains`     | JetBrains IDE caches (old versions)                                   |
 | `library-logs`  | `~/Library/Logs/` — interactive heuristic scan (suggested cleanables) |
 | `logs`          | Log files older than N days (see `--keep-days`)                       |
+| `maven`         | Maven local repo (`mvn dependency:purge-local-repository`)            |
 | `mise`          | Unused runtime versions under `~/.local/share/mise/installs/`          |
 | `node-gyp`      | Deletes `~/.cache/node-gyp/`                                          |
 | `npm`           | `npm cache clean --force`                                             |
+| `ollama`        | Ollama model cache — interactive selection or directory deletion       |
 | `orbstack`      | `orb prune`                                                           |
 | `pip`           | `pip cache purge`                                                     |
 | `pipx`          | `pipx cache purge`                                                    |
@@ -74,9 +79,15 @@ Clean a single cache target. Replace `<target>` with one of the names below.
 | `poetry`        | `poetry cache clear --all`                                            |
 | `pre-commit`    | Pre-commit hook environment cache (via CLI or fallback)                |
 | `rustup`        | Unused Rust toolchains                                                |
+| `sbt`           | Scala/sbt build cache + Ivy cache                                     |
+| `simulator`     | iOS Simulator cache (`xcrun simctl delete unavailable`)                |
 | `spm`           | SwiftPM cache directory                                               |
+| `terraform`     | Terraform provider plugin cache                                       |
 | `trash`         | `~/.Trash` size (scan only — use Finder to empty)                     |
+| `tree-sitter`   | tree-sitter parser compilation cache                                  |
 | `uv`            | Stale `simple-vN` index dirs + `uv cache prune --force`               |
+| `volta`         | Volta Node.js manager cache (`~/.volta/cache/`)                       |
+| `vscode-extensions` | VS Code extensions cache (`~/.vscode/extensions/`)                |
 | `xcode`         | Xcode DerivedData project directories                                  |
 | `yarn`          | `yarn cache clean`                                                    |
 
@@ -350,20 +361,25 @@ Total reclaimable     43.7 GB
 | `bun`           | `bun pm cache rm`                                                    |
 | `cargo`         | Cargo レジストリキャッシュ + `target/` ディレクトリ                      |
 | `cocoa-pods`    | `pod cache clean --all`                                              |
+| `colima`        | Colima VM ディスクキャッシュ（`colima prune --all`）                    |
 | `conda`         | `conda clean --all -y`                                               |
 | `caches`        | すべての汎用キャッシュ（bun, go, pip, node-gyp, npm, yarn, pnpm）     |
 | `deno`          | `deno cache -r`                                                      |
+| `device-support`| 古い Xcode DeviceSupport ディレクトリ（最新Nバージョン保持）             |
 | `docker`        | `docker system prune -f`                                             |
 | `downloads`     | `~/Downloads` のファイル                                              |
+| `flutter`       | `dart pub cache clean`                                                |
 | `go`            | `go clean -cache`                                                    |
 | `gradle`        | Gradle の古いバージョンキャッシュ                                      |
 | `huggingface`   | Hugging Face モデルキャッシュ（`hub/`）CLI またはフォールバック          |
 | `jetbrains`     | JetBrains IDE キャッシュ（古いバージョン）                              |
 | `library-logs`  | `~/Library/Logs/` — インタラクティブヒューリスティックスキャン         |
 | `logs`          | N 日より古いログファイル（`--keep-days` を参照）                        |
+| `maven`         | Maven ローカルリポジトリ（`mvn dependency:purge-local-repository`）     |
 | `mise`          | `~/.local/share/mise/installs/` 下の未使用ランタイムバージョン          |
 | `node-gyp`      | `~/.cache/node-gyp/` を削除                                          |
 | `npm`           | `npm cache clean --force`                                            |
+| `ollama`        | Ollama モデルキャッシュ — 対話的選択またはディレクトリ削除                |
 | `orbstack`      | `orb prune`                                                          |
 | `pip`           | `pip cache purge`                                                    |
 | `pipx`          | `pipx cache purge`                                                   |
@@ -371,9 +387,15 @@ Total reclaimable     43.7 GB
 | `poetry`        | `poetry cache clear --all`                                           |
 | `pre-commit`    | pre-commit フック環境キャッシュ（CLI またはフォールバック）               |
 | `rustup`        | 未使用の Rust ツールチェーン                                           |
+| `sbt`           | Scala/sbt ビルドキャッシュ + Ivy キャッシュ                             |
+| `simulator`     | iOS シミュレータキャッシュ（`xcrun simctl delete unavailable`）          |
 | `spm`           | SwiftPM キャッシュディレクトリ                                         |
+| `terraform`     | Terraform プロバイダプラグインキャッシュ                                 |
 | `trash`         | `~/.Trash` のサイズ（スキャンのみ — Finder から空にしてください）       |
+| `tree-sitter`   | tree-sitter パーサーコンパイルキャッシュ                                |
 | `uv`            | 古い `simple-vN` インデックスディレクトリ + `uv cache prune --force`    |
+| `volta`         | Volta Node.js マネージャキャッシュ（`~/.volta/cache/`）                 |
+| `vscode-extensions` | VS Code 拡張機能キャッシュ（`~/.vscode/extensions/`）              |
 | `xcode`         | Xcode DerivedData プロジェクトディレクトリ                              |
 | `yarn`          | `yarn cache clean`                                                   |
 
