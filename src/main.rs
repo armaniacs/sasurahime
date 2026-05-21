@@ -436,8 +436,7 @@ impl CleanTarget {
             | CleanTarget::LibraryLogs { dry_run, .. } => *dry_run,
             CleanTarget::Logs { dry_run, .. } => *dry_run,
             CleanTarget::DeviceSupport { dry_run, .. } => *dry_run,
-            CleanTarget::IosBackup { dry_run }
-            | CleanTarget::ApfsSnapshot { dry_run } => *dry_run,
+            CleanTarget::IosBackup { dry_run } | CleanTarget::ApfsSnapshot { dry_run } => *dry_run,
             _ => self.dispatch_dry_run(),
         }
     }
@@ -549,9 +548,9 @@ fn all_cleaners(home: &std::path::Path, config: &config::Config) -> Vec<Box<dyn 
             home,
             Box::new(SystemCommandRunner),
         )),
-        Box::new(cleaners::apfs_snapshot::ApfsSnapshotCleaner::new(
-            Box::new(SystemCommandRunner),
-        )),
+        Box::new(cleaners::apfs_snapshot::ApfsSnapshotCleaner::new(Box::new(
+            SystemCommandRunner,
+        ))),
     ]
 }
 
@@ -795,9 +794,9 @@ fn main() -> anyhow::Result<()> {
                         )?;
                     }
                     CleanTarget::ApfsSnapshot { dry_run } => {
-                        let cleaner = cleaners::apfs_snapshot::ApfsSnapshotCleaner::new(
-                            Box::new(SystemCommandRunner),
-                        );
+                        let cleaner = cleaners::apfs_snapshot::ApfsSnapshotCleaner::new(Box::new(
+                            SystemCommandRunner,
+                        ));
                         run_clean_target(
                             "apfs-snapshot",
                             move |dry, rep| cleaner.clean(dry, rep),
