@@ -80,7 +80,10 @@ fn yes_flag_exits_zero_and_skips_tui() {
 #[test]
 fn yes_flag_nothing_pruneable_exits_zero() {
     let tmp = TempDir::new().unwrap();
-    // Empty HOME, restricted PATH — every cleaner returns NotFound or Clean
+    // Empty HOME, restricted PATH — most cleaners return NotFound or Clean.
+    // However ApfsSnapshotCleaner uses tmutil (always available on macOS) and
+    // may report Pruneable if local Time Machine snapshots exist. In that case
+    // the non-interactive guard skips deletion and "Total freed: 0 B" is printed.
     let output = sasurahime(tmp.path())
         .env("PATH", "/usr/bin:/bin")
         .arg("--yes")
@@ -90,8 +93,8 @@ fn yes_flag_nothing_pruneable_exits_zero() {
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        stdout.contains("Nothing to clean"),
-        "expected 'Nothing to clean', got:\n{stdout}"
+        stdout.contains("Nothing to clean") || stdout.contains("Total freed"),
+        "expected 'Nothing to clean' or 'Total freed', got:\n{stdout}"
     );
 }
 

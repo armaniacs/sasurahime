@@ -362,6 +362,12 @@ define_cleaners! {
         #[arg(long)]
         dry_run: bool,
     },
+    /// Delete APFS local Time Machine snapshots
+    #[command(name = "apfs-snapshot")]
+    ApfsSnapshot {
+        #[arg(long)]
+        dry_run: bool,
+    },
 }
 
 #[derive(Parser)]
@@ -416,6 +422,7 @@ impl CleanTarget {
             CleanTarget::LibraryLogs { .. } => "library-logs",
             CleanTarget::DeviceSupport { .. } => "device-support",
             CleanTarget::IosBackup { .. } => "ios-backup",
+            CleanTarget::ApfsSnapshot { .. } => "apfs-snapshot",
             _ => self.dispatch_command_name(),
         }
     }
@@ -429,7 +436,8 @@ impl CleanTarget {
             | CleanTarget::LibraryLogs { dry_run, .. } => *dry_run,
             CleanTarget::Logs { dry_run, .. } => *dry_run,
             CleanTarget::DeviceSupport { dry_run, .. } => *dry_run,
-            CleanTarget::IosBackup { dry_run } => *dry_run,
+            CleanTarget::IosBackup { dry_run }
+            | CleanTarget::ApfsSnapshot { dry_run } => *dry_run,
             _ => self.dispatch_dry_run(),
         }
     }
@@ -454,6 +462,10 @@ fn extra_targets() -> &'static [(&'static str, &'static str)] {
         (
             "ios-backup",
             "iOS device backups (irreversible — backed up to Trash)",
+        ),
+        (
+            "apfs-snapshot",
+            "APFS local Time Machine snapshots (tmutil deletelocalsnapshot)",
         ),
     ]
 }
@@ -535,6 +547,9 @@ fn all_cleaners(home: &std::path::Path, config: &config::Config) -> Vec<Box<dyn 
         )),
         Box::new(cleaners::ios_backup::IosCleaner::new(
             home,
+            Box::new(SystemCommandRunner),
+        )),
+        Box::new(cleaners::apfs_snapshot::ApfsSnapshotCleaner::new(
             Box::new(SystemCommandRunner),
         )),
     ]
@@ -631,6 +646,7 @@ fn main() -> anyhow::Result<()> {
                     | CleanTarget::LibraryLogs { .. }
                     | CleanTarget::DeviceSupport { .. }
                     | CleanTarget::IosBackup { .. }
+                    | CleanTarget::ApfsSnapshot { .. }
             ) {
                 // --- Special targets (custom dispatch logic) ---
                 match target {
@@ -773,6 +789,17 @@ fn main() -> anyhow::Result<()> {
                         );
                         run_clean_target(
                             "ios-backup",
+                            move |dry, rep| cleaner.clean(dry, rep),
+                            dry_run,
+                            reporter.as_ref(),
+                        )?;
+                    }
+                    CleanTarget::ApfsSnapshot { dry_run } => {
+                        let cleaner = cleaners::apfs_snapshot::ApfsSnapshotCleaner::new(
+                            Box::new(SystemCommandRunner),
+                        );
+                        run_clean_target(
+                            "apfs-snapshot",
                             move |dry, rep| cleaner.clean(dry, rep),
                             dry_run,
                             reporter.as_ref(),
