@@ -28,6 +28,8 @@ Requires Rust 1.70+ and macOS (arm64 or x86_64). No Linux/Windows support.
 
 Scan every cache target, print a summary table, and exit without deleting anything.
 
+After the table, sasurahime also checks `~/Library/Caches/`, `~/Library/Application Support/`, and `~/Library/Logs/` for large caches that belong to running apps (Edge, VSCode, Slack, Claude, Obsidian, etc.). For any entry above the threshold it prints a **Tip** block with the recommended manual command, and — for apps that can be safely auto-quit — offers to quit the app, delete the cache, and relaunch it for you.
+
 ```bash
 $ sasurahime scan
 
@@ -39,7 +41,26 @@ bun cache              5.5 GB    clearable
 mise / node (old)      3.4 GB    unused
 ────────────────────────────────────────
 Total reclaimable     43.7 GB
+
+────────────────────────────────────────────────────────────
+ Tip: The following caches can be freed manually:
+────────────────────────────────────────────────────────────
+  Claude (desktop)           428 MB  [running — quit first]
+    $ rm -rf ~/Library/Application\ Support/Claude/Cache
+  VSCode caches              693 MB  [running — quit first]
+    $ rm -rf ~/Library/Application\ Support/Code/Cache
+    $ rm -rf ~/Library/Application\ Support/Code/CachedExtensionVSIXs
+    $ rm -rf ~/Library/Application\ Support/Code/CachedData
+  Microsoft Edge             1.8 GB  [running — quit first]
+    $ rm -rf ~/Library/Caches/Microsoft\ Edge
+────────────────────────────────────────────────────────────
+
+Quit Claude (desktop) and clear cache? (428 MB will be freed) [y/N]
 ```
+
+Answering `y` quits the app via `osascript`, deletes the cache, and relaunches the app if appropriate. Answering `n` (or pressing Enter) skips it. Apps that should not be auto-relaunched (Slack, Zoom, Claude) are noted — you relaunch those yourself.
+
+The Tip block shows at most **5 entries**, sorted by size descending. Entries below 64 MB (1 MB for logs) are hidden. System-managed caches (GeoServices, etc.) are always excluded.
 
 ### `sasurahime clean <target>`
 
@@ -108,6 +129,8 @@ sasurahime clean logs
 Opens an interactive TUI with a checkbox list. Select which cache targets to
 clean, then confirm to proceed.
 
+After cleaning, the same Tip block and auto-quit prompts shown by `scan` are displayed.
+
 Requires a TTY (terminal). In CI or scripting use `--yes` instead.
 
 ### `sasurahime --yes`
@@ -122,6 +145,8 @@ sasurahime --yes
 Files are moved to Trash by default (see "Trash mode" below). If you
 combine `--yes` with `--permanent`, a confirmation prompt is shown before
 permanent deletion proceeds.
+
+After cleaning, the Tip block and auto-quit prompts are shown (the prompts still require interactive input, so in a fully non-interactive pipeline redirect stdin from `/dev/null` to suppress them).
 
 Ideal for cron jobs, CI pipelines, or maintenance scripts.
 
@@ -338,6 +363,8 @@ Rust 1.70+ と macOS（arm64 または x86_64）が必要です。Linux/Windows 
 
 すべてのキャッシュターゲットをスキャンし、サマリテーブルを表示して、何も削除せずに終了します。
 
+テーブル表示後、`~/Library/Caches/`・`~/Library/Application Support/`・`~/Library/Logs/` を調べ、起動中アプリ（Edge、VSCode、Slack、Claude、Obsidian 等）に属する大きなキャッシュを検出します。しきい値を超えるエントリが見つかると **Tip** ブロックに手動実行コマンドを表示し、安全に自動終了できるアプリについては「終了→キャッシュ削除→再起動」を代わりに行うか確認します。
+
 ```bash
 $ sasurahime scan
 
@@ -349,7 +376,26 @@ bun cache              5.5 GB    clearable
 mise / node (old)      3.4 GB    unused
 ────────────────────────────────────────
 Total reclaimable     43.7 GB
+
+────────────────────────────────────────────────────────────
+ Tip: The following caches can be freed manually:
+────────────────────────────────────────────────────────────
+  Claude (desktop)           428 MB  [running — quit first]
+    $ rm -rf ~/Library/Application\ Support/Claude/Cache
+  VSCode caches              693 MB  [running — quit first]
+    $ rm -rf ~/Library/Application\ Support/Code/Cache
+    $ rm -rf ~/Library/Application\ Support/Code/CachedExtensionVSIXs
+    $ rm -rf ~/Library/Application\ Support/Code/CachedData
+  Microsoft Edge             1.8 GB  [running — quit first]
+    $ rm -rf ~/Library/Caches/Microsoft\ Edge
+────────────────────────────────────────────────────────────
+
+Quit Claude (desktop) and clear cache? (428 MB will be freed) [y/N]
 ```
+
+`y` と答えると `osascript` でアプリを終了し、キャッシュを削除し、適切であれば再起動します。`n`（または Enter）でスキップします。自動再起動しないアプリ（Slack、Zoom、Claude）は手動で再起動してください。
+
+Tip ブロックはサイズ降順で最大 **5 件** 表示します。64 MB 未満（ログは 1 MB 未満）のエントリは非表示。GeoServices など OS 管理のキャッシュは常に除外されます。
 
 ### `sasurahime clean <target>`
 
@@ -417,6 +463,8 @@ sasurahime clean logs
 
 チェックボックスリスト付きのインタラクティブ TUI を起動します。クリーンするキャッシュターゲットを選択して確認するだけです。
 
+クリーン完了後、`scan` と同じ Tip ブロックと自動終了プロンプトが表示されます。
+
 TTY（ターミナル）が必要です。CI やスクリプトでは代わりに `--yes` を使用してください。
 
 ### `sasurahime --yes`
@@ -429,6 +477,8 @@ sasurahime --yes
 ```
 
 ファイルはデフォルトでゴミ箱に移動されます。`--yes` と `--permanent` を組み合わせると、完全削除の前に確認プロンプトが表示されます。
+
+クリーン後、Tip ブロックと自動終了プロンプトが表示されます（プロンプトにはインタラクティブ入力が必要なので、完全に非インタラクティブなパイプラインでは `< /dev/null` で stdin を抑制してください）。
 
 cron ジョブ、CI パイプライン、メンテナンススクリプトに最適です。
 

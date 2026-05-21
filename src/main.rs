@@ -3,6 +3,7 @@ mod cleaners;
 mod command;
 mod config;
 mod format;
+mod hint;
 mod interactive;
 mod progress;
 mod scanner;
@@ -620,6 +621,10 @@ fn main() -> anyhow::Result<()> {
         Some(Commands::Scan) => {
             let cleaners = all_cleaners(&home, &config);
             scanner::run_scan(&cleaners);
+            let runner = SystemCommandRunner;
+            let hints = hint::collect_hints(&home, &runner);
+            hint::print_hints(&hints);
+            hint::offer_auto_clean(&hints, &home, &runner, &hint::StdinPrompt);
         }
         Some(Commands::Targets) => {
             for (name, desc) in SUPPORTED_TARGETS.iter().chain(extra_targets()) {
@@ -633,6 +638,10 @@ fn main() -> anyhow::Result<()> {
             } else {
                 interactive::run_interactive(&cleaners)?;
             }
+            let runner = SystemCommandRunner;
+            let hints = hint::collect_hints(&home, &runner);
+            hint::print_hints(&hints);
+            hint::offer_auto_clean(&hints, &home, &runner, &hint::StdinPrompt);
         }
         Some(Commands::Clean { target }) => {
             if matches!(
