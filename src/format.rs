@@ -1,4 +1,9 @@
-/// Returns the total size in bytes of all files under `path`.
+use std::os::unix::fs::MetadataExt;
+
+/// Returns the total physical disk usage in bytes of all files under `path`.
+/// Uses `st_blocks × 512` (physical blocks) instead of logical file size so
+/// that sparse files (e.g. VM disk images in `~/.colima`) are reported at
+/// their actual on-disk footprint, matching what `du` shows.
 /// Returns 0 if the path does not exist or cannot be read.
 pub fn dir_size(path: &std::path::Path) -> u64 {
     walkdir::WalkDir::new(path)
@@ -6,7 +11,7 @@ pub fn dir_size(path: &std::path::Path) -> u64 {
         .filter_map(|e| e.ok())
         .filter(|e| e.file_type().is_file())
         .filter_map(|e| e.metadata().ok())
-        .map(|m| m.len())
+        .map(|m| m.blocks() * 512)
         .sum()
 }
 

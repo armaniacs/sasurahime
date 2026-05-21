@@ -4,6 +4,16 @@ All notable changes to sasurahime will be documented in this file. The format is
 
 ---
 
+## [0.1.11] — 2026-05-21
+
+### Fixed
+
+- **Sparse file size over-reporting:** `dir_size()` now uses physical disk
+  blocks (`st_blocks × 512`) instead of logical file size (`st_size`). This
+  fixes `sasurahime scan` showing wildly inflated sizes for sparse VM disk
+  images — e.g. colima dropped from 100.3 GB to the correct 9.3 GB, matching
+  what `du` reports.
+
 ## [0.1.10] — 2026-05-21
 
 ### Changed
