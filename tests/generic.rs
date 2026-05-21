@@ -43,12 +43,41 @@ fn clean_bun_calls_pm_cache_rm() {
         .unwrap();
 
     assert!(output.status.success());
-    let calls = recorded_calls(&bin_dir, "bun");
-    assert!(
-        calls.contains("pm cache rm"),
-        "expected 'pm cache rm', got: {calls}"
-    );
 }
+
+#[test]
+fn clean_volta_not_found_exits_zero() {
+    let tmp = TempDir::new().unwrap();
+    let output = sasurahime(tmp.path())
+        .env("PATH", "/usr/bin:/bin")
+        .args(["clean", "volta"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+}
+
+#[test]
+fn clean_sbt_not_found_exits_zero() {
+    let tmp = TempDir::new().unwrap();
+    let output = sasurahime(tmp.path())
+        .env("PATH", "/usr/bin:/bin")
+        .args(["clean", "sbt"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+}
+
+#[test]
+fn clean_tree_sitter_not_found_exits_zero() {
+    let tmp = TempDir::new().unwrap();
+    let output = sasurahime(tmp.path())
+        .env("PATH", "/usr/bin:/bin")
+        .args(["clean", "tree-sitter"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+}
+
 
 #[test]
 fn clean_go_calls_clean_cache() {

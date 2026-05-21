@@ -210,6 +210,30 @@ impl GenericCleaner {
         }
     }
 
+    pub fn volta(home: &Path, runner: Box<dyn CommandRunner>) -> Self {
+        Self {
+            display_name: "volta",
+            method: CleanMethod::DeleteDirs(vec![home.join(".volta/cache")]),
+            runner,
+        }
+    }
+
+    pub fn sbt(home: &Path, runner: Box<dyn CommandRunner>) -> Self {
+        Self {
+            display_name: "sbt",
+            method: CleanMethod::DeleteDirs(vec![home.join(".sbt"), home.join(".ivy2/cache")]),
+            runner,
+        }
+    }
+
+    pub fn tree_sitter(home: &Path, runner: Box<dyn CommandRunner>) -> Self {
+        Self {
+            display_name: "tree-sitter",
+            method: CleanMethod::DeleteDirs(vec![home.join(".cache/tree-sitter")]),
+            runner,
+        }
+    }
+
     pub fn act(home: &Path, runner: Box<dyn CommandRunner>) -> Self {
         let cache_dir = match std::env::var("ACT_CACHE_DIR") {
             Ok(dir) => {

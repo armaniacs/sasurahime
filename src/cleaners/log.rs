@@ -58,6 +58,11 @@ impl LogCleaner {
                     path: home.join(".local/share/claude/logs"),
                     exclude: vec![],
                 },
+                LogTarget {
+                    name: "vscode-logs",
+                    path: home.join("Library/Application Support/Code/logs"),
+                    exclude: vec![],
+                },
             ],
             extra,
             keep_days,

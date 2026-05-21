@@ -132,6 +132,15 @@ macro_rules! cmd_name {
     (Flutter) => {
         "flutter"
     };
+    (Volta) => {
+        "volta"
+    };
+    (Sbt) => {
+        "sbt"
+    };
+    (TreeSitter) => {
+        "tree-sitter"
+    };
 }
 
 /// Generate dispatch_clean and dispatch helpers from the same definition table.
@@ -290,6 +299,15 @@ define_cleaners! {
 
     Flutter : "flutter" => "Flutter/Dart pub cache (dart pub cache clean)";
     (|home, _config| cleaners::generic::GenericCleaner::flutter(home, Box::new(SystemCommandRunner))),
+
+    Volta : "volta" => "Volta Node.js manager cache";
+    (|home, _config| cleaners::generic::GenericCleaner::volta(home, Box::new(SystemCommandRunner))),
+
+    Sbt : "sbt" => "Scala/sbt build cache and Ivy cache";
+    (|home, _config| cleaners::generic::GenericCleaner::sbt(home, Box::new(SystemCommandRunner))),
+
+    TreeSitter : "tree-sitter" => "tree-sitter parser compilation cache";
+    (|home, _config| cleaners::generic::GenericCleaner::tree_sitter(home, Box::new(SystemCommandRunner))),
 
     ;
     /// Clean all generic caches (bun, go, pip, node-gyp, npm, yarn, pnpm)
