@@ -1,7 +1,8 @@
-use crate::cleaner::{CleanResult, Cleaner, ScanResult};
+use crate::cleaner::{CleanResult, Cleaner, ScanResult, ScanStatus};
 use crate::command::CommandRunner;
 use crate::progress::ProgressReporter;
 use anyhow::Result;
+use std::io::IsTerminal;
 
 #[allow(dead_code)]
 pub struct ApfsSnapshotCleaner {
@@ -31,11 +32,124 @@ impl Cleaner for ApfsSnapshotCleaner {
     }
 
     fn detect(&self) -> ScanResult {
-        todo!()
+        if !self.runner.exists("tmutil") {
+            return ScanResult {
+                name: self.name(),
+                status: ScanStatus::NotFound,
+            };
+        }
+        let output = match self.runner.run("tmutil", &["listlocalsnapshots", "/"]) {
+            Ok(o) => o,
+            Err(_) => {
+                return ScanResult {
+                    name: self.name(),
+                    status: ScanStatus::NotFound,
+                }
+            }
+        };
+        let names = parse_snapshot_names(&String::from_utf8_lossy(&output.stdout));
+        if names.is_empty() {
+            return ScanResult {
+                name: self.name(),
+                status: ScanStatus::Clean,
+            };
+        }
+        // Try to measure /.MobileBackups if present; fall back to 0.
+        let size = {
+            let mb = std::path::Path::new("/.MobileBackups");
+            if mb.exists() {
+                crate::format::dir_size(mb)
+            } else {
+                0
+            }
+        };
+        ScanResult {
+            name: self.name(),
+            status: ScanStatus::Pruneable(size),
+        }
     }
 
-    fn clean(&self, _dry_run: bool, _reporter: &dyn ProgressReporter) -> Result<CleanResult> {
-        todo!()
+    fn clean(&self, dry_run: bool, _reporter: &dyn ProgressReporter) -> Result<CleanResult> {
+        if !self.runner.exists("tmutil") {
+            return Ok(CleanResult {
+                name: self.name(),
+                bytes_freed: 0,
+            });
+        }
+        let output = self.runner.run("tmutil", &["listlocalsnapshots", "/"])?;
+        let names = parse_snapshot_names(&String::from_utf8_lossy(&output.stdout));
+        if names.is_empty() {
+            println!("[apfs-snapshot] no local snapshots found");
+            return Ok(CleanResult {
+                name: self.name(),
+                bytes_freed: 0,
+            });
+        }
+
+        eprintln!(
+            "⚠  Deleting snapshots disables local Time Machine protection until the next backup."
+        );
+
+        if dry_run {
+            println!("[apfs-snapshot] dry-run: {} snapshot(s) found", names.len());
+            for name in &names {
+                println!("  would delete: {}", name);
+            }
+            return Ok(CleanResult {
+                name: self.name(),
+                bytes_freed: 0,
+            });
+        }
+
+        if !std::io::stdin().is_terminal() {
+            eprintln!(
+                "[apfs-snapshot] not a terminal — skipping. Use `sasurahime clean apfs-snapshot` \
+                 for interactive selection."
+            );
+            return Ok(CleanResult {
+                name: self.name(),
+                bytes_freed: 0,
+            });
+        }
+
+        let selected = self.interactive_select(&names)?;
+        if selected.is_empty() {
+            println!("[apfs-snapshot] nothing selected");
+            return Ok(CleanResult {
+                name: self.name(),
+                bytes_freed: 0,
+            });
+        }
+
+        for name in &selected {
+            match self
+                .runner
+                .run("tmutil", &["deletelocalsnapshot", "/", name])
+            {
+                Ok(_) => println!("[apfs-snapshot] deleted: {}", name),
+                Err(e) => eprintln!("[apfs-snapshot] error deleting {}: {e}", name),
+            }
+        }
+        // Snapshot size cannot be measured after deletion; report 0.
+        println!("[apfs-snapshot] done");
+        Ok(CleanResult {
+            name: self.name(),
+            bytes_freed: 0,
+        })
+    }
+}
+
+#[allow(dead_code)]
+impl ApfsSnapshotCleaner {
+    fn interactive_select(&self, names: &[String]) -> Result<Vec<String>> {
+        use dialoguer::MultiSelect;
+        let defaults = vec![true; names.len()];
+        println!("\nLocal APFS Time Machine snapshots:\n");
+        let selections = MultiSelect::new()
+            .items(names)
+            .defaults(&defaults)
+            .interact()?;
+        Ok(selections.into_iter().map(|i| names[i].clone()).collect())
     }
 }
 
