@@ -1,6 +1,6 @@
 [package]
 name = "sasurahime"
-version = "0.1.9"
+version = "0.1.10"
 edition = "2021"
 description = "macOS developer cache cleaner — scan and wipe stale caches from 40+ tools"
 repository = "https://github.com/armaniacs/sasurahime"
@@ -15,11 +15,11 @@ path = "src/main.rs"
 clap        = { version = "4", features = ["derive"] }
 anyhow      = "1"
 walkdir     = "2"
-indicatif   = "0.17"
-dialoguer   = "0.11"
+indicatif   = "0.18"
+dialoguer   = "0.12"
 comfy-table = "7"
-dirs        = "5"
-toml        = "0.8"
+dirs        = "6"
+toml        = "1.1"
 serde       = { version = "1", features = ["derive"] }
 wait-timeout = "0.2"
 trash = "5"

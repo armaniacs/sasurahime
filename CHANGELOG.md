@@ -4,7 +4,14 @@ All notable changes to sasurahime will be documented in this file. The format is
 
 ---
 
-## [0.1.9] — 2026-05-21
+## [0.1.10] — 2026-05-21
+
+### Changed
+
+- **Dependency version bumps:** Updated four crate dependencies to latest
+  compatible versions — dialoguer 0.11→0.12, dirs 5→6, indicatif 0.17→0.18,
+  toml 0.8→1.1. No source code changes were required; all APIs remain
+  compatible.
 
 ### Fixed
 
