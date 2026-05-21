@@ -64,7 +64,9 @@ impl Cleaner for UvCleaner {
                 status: ScanStatus::NotFound,
             };
         }
-        let bytes = dir_size(&self.cache_dir.join("archive-v0"));
+        // Measure the full cache dir: includes archive-v0, simple-vN indexes,
+        // and any other dust. This matches what clean() measures before/after.
+        let bytes = dir_size(&self.cache_dir);
         ScanResult {
             name: self.name(),
             status: if bytes > 0 {

@@ -2,6 +2,7 @@ use crate::cleaner::{CleanResult, Cleaner, ScanResult, ScanStatus};
 use crate::progress::ProgressReporter;
 use anyhow::Result;
 use std::fs;
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
@@ -134,7 +135,7 @@ impl Cleaner for LogCleaner {
             .all_targets()
             .flat_map(|t| Self::find_old_logs(t.path, self.keep_days, t.exclude))
             .filter_map(|p| fs::metadata(&p).ok())
-            .map(|m| m.len())
+            .map(|m| m.blocks() * 512)
             .sum();
         ScanResult {
             name: self.name(),
@@ -170,7 +171,7 @@ impl Cleaner for LogCleaner {
 
         reporter.progress_init(self.name(), all_old.len());
         for (i, (target_name, path)) in all_old.iter().enumerate() {
-            let size = fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+            let size = fs::metadata(path).map(|m| m.blocks() * 512).unwrap_or(0);
             reporter.progress_tick(path, i + 1, size);
             crate::trash::delete_path(path)?;
             freed += size;

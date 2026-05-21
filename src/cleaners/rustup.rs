@@ -1,12 +1,12 @@
 use crate::cleaner::{CleanResult, Cleaner, ScanResult, ScanStatus};
 use crate::command::CommandRunner;
+use crate::format::dir_size;
 use crate::progress::ProgressReporter;
 use anyhow::Result;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 pub struct RustupCleaner {
-    #[allow(dead_code)]
     home: PathBuf,
     runner: Box<dyn CommandRunner>,
 }
@@ -66,8 +66,21 @@ impl Cleaner for RustupCleaner {
         };
         let stdout = String::from_utf8_lossy(&output.stdout);
         let (all, active) = Self::parse_toolchains(&stdout);
-        let unused_count = all.iter().filter(|t| !active.contains(t.as_str())).count();
-        let bytes = unused_count as u64 * 300_000_000;
+        let unused: Vec<_> = all
+            .iter()
+            .filter(|t| !active.contains(t.as_str()))
+            .collect();
+        let bytes: u64 = unused
+            .iter()
+            .map(|t| {
+                let dir = self.home.join(".rustup/toolchains").join(t);
+                if dir.exists() {
+                    dir_size(&dir)
+                } else {
+                    0
+                }
+            })
+            .sum();
         ScanResult {
             name: self.name(),
             status: if bytes > 0 {
@@ -95,12 +108,20 @@ impl Cleaner for RustupCleaner {
             if active.contains(toolchain) {
                 continue;
             }
+            let size = {
+                let dir = self.home.join(".rustup/toolchains").join(toolchain);
+                if dir.exists() {
+                    dir_size(&dir)
+                } else {
+                    0
+                }
+            };
             if dry_run {
                 println!("[dry-run] [rustup] would remove toolchain: {toolchain}");
             } else {
                 self.runner
                     .run("rustup", &["toolchain", "remove", toolchain])?;
-                freed += 300_000_000;
+                freed += size;
                 println!("[rustup] removed toolchain: {toolchain}");
             }
         }

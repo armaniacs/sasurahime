@@ -277,8 +277,12 @@ impl Cleaner for GenericCleaner {
                     status: ScanStatus::Pruneable(0),
                 }
             }
-            CleanMethod::CommandWithDetectDir { detect_dir, .. } => {
-                if !detect_dir.exists() {
+            CleanMethod::CommandWithDetectDir {
+                program,
+                detect_dir,
+                ..
+            } => {
+                if !detect_dir.exists() || !self.runner.exists(program) {
                     return ScanResult {
                         name: self.name(),
                         status: ScanStatus::NotFound,

@@ -8,11 +8,33 @@ All notable changes to sasurahime will be documented in this file. The format is
 
 ### Fixed
 
-- **Sparse file size over-reporting:** `dir_size()` now uses physical disk
-  blocks (`st_blocks × 512`) instead of logical file size (`st_size`). This
-  fixes `sasurahime scan` showing wildly inflated sizes for sparse VM disk
+- **Sparse file size over-reporting (colima):** `dir_size()` now uses physical
+  disk blocks (`st_blocks × 512`) instead of logical file size (`st_size`).
+  This fixes `sasurahime scan` showing wildly inflated sizes for sparse VM disk
   images — e.g. colima dropped from 100.3 GB to the correct 9.3 GB, matching
-  what `du` reports.
+  `du`.
+- **LogCleaner logical-size bug:** `detect()` and `clean()` were using
+  `m.len()` (logical size) instead of `m.blocks() × 512` (physical blocks),
+  inconsistent with all other cleaners after the `dir_size()` fix.
+- **CommandWithDetectDir false-positive scan:** `detect()` for colima,
+  simulator, maven, and flutter now checks that the cleaning tool is actually
+  installed before reporting the directory as reclaimable. Previously, if the
+  tool was removed but `~/.[colima|maven|flutter]` remained, scan would show a
+  large pruneable size but `clean` would silently skip.
+- **UvCleaner under-reporting:** `detect()` was only measuring the
+  `archive-v0` subdirectory but `clean()` also frees old `simple-vN` index
+  dirs. `detect()` now measures the full cache dir, matching `clean()`.
+- **RustupCleaner hardcoded size estimate:** Replaced the fixed 300 MB per
+  toolchain guess with actual `dir_size()` measurement of each unused
+  toolchain in `~/.rustup/toolchains/<name>/`.
+
+### Changed
+
+- **Audited all 16+ cleaners for size-reporting accuracy.** No other
+  discrepancies found beyond the above. Lower-severity observations (e.g.
+  `brew` uses two different measurement sources, `huggingface` CLI path
+  credits full dir size) are documented as inherent design trade-offs rather
+  than bugs.
 
 ## [0.1.10] — 2026-05-21
 
