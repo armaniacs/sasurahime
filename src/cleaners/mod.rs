@@ -5,6 +5,7 @@ pub mod device_support;
 pub mod generic;
 pub mod gradle;
 pub mod huggingface;
+pub mod ios_backup;
 pub mod library_logs;
 pub mod log;
 pub mod mise;

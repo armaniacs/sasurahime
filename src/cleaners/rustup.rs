@@ -168,14 +168,15 @@ mod tests {
         // Active toolchain — has a dir with files
         fs::create_dir_all(toolchains.join("stable-aarch64-apple-darwin")).unwrap();
         fs::write(
-            toolchains.join("stable-aarch64-apple-darwin/rustc"), &[0u8; 2048],
+            toolchains.join("stable-aarch64-apple-darwin/rustc"),
+            &[0u8; 2048],
         )
         .unwrap();
         // Unused toolchain — has a dir with files
         fs::create_dir_all(toolchains.join("nightly-2026-05-01-aarch64-apple-darwin")).unwrap();
         fs::write(
-            toolchains
-                .join("nightly-2026-05-01-aarch64-apple-darwin/rustc"), &[0u8; 4096],
+            toolchains.join("nightly-2026-05-01-aarch64-apple-darwin/rustc"),
+            &[0u8; 4096],
         )
         .unwrap();
 
@@ -189,9 +190,8 @@ mod tests {
         };
         let result = cleaner.detect();
 
-        let expected = crate::format::dir_size(
-            &toolchains.join("nightly-2026-05-01-aarch64-apple-darwin"),
-        );
+        let expected =
+            crate::format::dir_size(&toolchains.join("nightly-2026-05-01-aarch64-apple-darwin"));
         match result.status {
             ScanStatus::Pruneable(bytes) => assert_eq!(
                 bytes, expected,
@@ -206,7 +206,11 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let toolchains = tmp.path().join(".rustup/toolchains");
         fs::create_dir_all(toolchains.join("stable-aarch64-apple-darwin")).unwrap();
-        fs::write(toolchains.join("stable-aarch64-apple-darwin/rustc"), &[0u8; 64]).unwrap();
+        fs::write(
+            toolchains.join("stable-aarch64-apple-darwin/rustc"),
+            &[0u8; 64],
+        )
+        .unwrap();
 
         let runner = FakeRunner {
             toolchain_list: "stable-aarch64-apple-darwin (default)\n",
