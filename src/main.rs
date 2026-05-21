@@ -356,6 +356,12 @@ define_cleaners! {
         #[arg(long, default_value = "2")]
         keep: u32,
     },
+    /// Clean iOS device backups from ~/Library/Application Support/MobileSync/Backup/
+    #[command(name = "ios-backup")]
+    IosBackup {
+        #[arg(long)]
+        dry_run: bool,
+    },
 }
 
 #[derive(Parser)]
@@ -409,6 +415,7 @@ impl CleanTarget {
             CleanTarget::Ollama { .. } => "ollama",
             CleanTarget::LibraryLogs { .. } => "library-logs",
             CleanTarget::DeviceSupport { .. } => "device-support",
+            CleanTarget::IosBackup { .. } => "ios-backup",
             _ => self.dispatch_command_name(),
         }
     }
@@ -422,6 +429,7 @@ impl CleanTarget {
             | CleanTarget::LibraryLogs { dry_run, .. } => *dry_run,
             CleanTarget::Logs { dry_run, .. } => *dry_run,
             CleanTarget::DeviceSupport { dry_run, .. } => *dry_run,
+            CleanTarget::IosBackup { dry_run } => *dry_run,
             _ => self.dispatch_dry_run(),
         }
     }
@@ -443,6 +451,7 @@ fn extra_targets() -> &'static [(&'static str, &'static str)] {
             "Analyze and clean ~/Library/Logs/ with heuristic recommendations",
         ),
         ("device-support", "Xcode DeviceSupport old version cleanup"),
+        ("ios-backup", "iOS device backups (irreversible — backed up to Trash)"),
     ]
 }
 
@@ -519,6 +528,10 @@ fn all_cleaners(home: &std::path::Path, config: &config::Config) -> Vec<Box<dyn 
         Box::new(cleaners::device_support::DeviceSupportCleaner::new(
             home,
             2,
+            Box::new(SystemCommandRunner),
+        )),
+        Box::new(cleaners::ios_backup::IosCleaner::new(
+            home,
             Box::new(SystemCommandRunner),
         )),
     ]
@@ -614,6 +627,7 @@ fn main() -> anyhow::Result<()> {
                     | CleanTarget::Ollama { .. }
                     | CleanTarget::LibraryLogs { .. }
                     | CleanTarget::DeviceSupport { .. }
+                    | CleanTarget::IosBackup { .. }
             ) {
                 // --- Special targets (custom dispatch logic) ---
                 match target {
@@ -744,6 +758,18 @@ fn main() -> anyhow::Result<()> {
                         );
                         run_clean_target(
                             "device-support",
+                            move |dry, rep| cleaner.clean(dry, rep),
+                            dry_run,
+                            reporter.as_ref(),
+                        )?;
+                    }
+                    CleanTarget::IosBackup { dry_run } => {
+                        let cleaner = cleaners::ios_backup::IosCleaner::new(
+                            &home,
+                            Box::new(SystemCommandRunner),
+                        );
+                        run_clean_target(
+                            "ios-backup",
                             move |dry, rep| cleaner.clean(dry, rep),
                             dry_run,
                             reporter.as_ref(),
