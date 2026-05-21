@@ -53,7 +53,7 @@ impl SystemCommandRunner {
                 };
                 anyhow::bail!(
                     "command `{cmd_str}` did not complete within {}s and was killed.\n\
-                     You can run this command manually in another terminal:\n  $ {cmd_str}",
+You can run this command manually in another terminal:\n  $ {cmd_str}",
                     timeout.as_secs()
                 );
             }
