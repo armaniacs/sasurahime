@@ -4,7 +4,7 @@ use crate::format::dir_size;
 use crate::progress::ProgressReporter;
 use anyhow::Result;
 use std::fs;
-use std::io::{IsTerminal, stdin};
+use std::io::{stdin, IsTerminal};
 use std::path::{Path, PathBuf};
 
 pub enum CleanMethod {
@@ -428,7 +428,11 @@ impl Cleaner for GenericCleaner {
                             );
                         }
                         crate::trash::delete_path(detect_dir)?;
-                        println!("[{}] removed cache: {}", self.display_name, detect_dir.display());
+                        println!(
+                            "[{}] removed cache: {}",
+                            self.display_name,
+                            detect_dir.display()
+                        );
                         return Ok(CleanResult {
                             name: self.name(),
                             bytes_freed: size_before,
