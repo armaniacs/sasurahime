@@ -2,7 +2,7 @@ use assert_cmd::Command;
 use std::fs;
 use tempfile::TempDir;
 
-const VERSION: &str = "0.1.17";
+const VERSION: &str = "0.1.18";
 
 fn sasurahime(home: &std::path::Path) -> Command {
     let mut cmd = Command::cargo_bin("sasurahime").unwrap();
@@ -242,7 +242,10 @@ fn yes_flag_shows_progress_spinner() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     let combined = format!("{stdout}{stderr}");
     // Must start with version
-    assert!(stderr.starts_with(&format!("sasurahime v{VERSION}")), "stderr: {stderr}");
+    assert!(
+        stderr.starts_with(&format!("sasurahime v{VERSION}")),
+        "stderr: {stderr}"
+    );
     // Must contain spinner messages (will be on stderr for the --yes path)
     assert!(
         combined.contains("Cleaning"),

@@ -4,6 +4,14 @@ All notable changes to sasurahime will be documented in this file. The format is
 
 ---
 
+## [0.1.18] — 2026-05-22
+
+### Internal
+
+- **Applied `cargo fmt` to fix formatting drift** across
+  `src/cleaners/generic.rs` and `tests/interactive.rs` after the v0.1.16
+  colima review changes.
+
 ## [0.1.17] — 2026-05-22
 
 ### Internal
