@@ -999,15 +999,17 @@ re-downloaded on next `dart pub get` or `flutter pub get`.
 **Category:** Sprint 5
 
 **What it removes:** [Colima](https://github.com/abiosoft/colima) VM disk
-cache via `colima prune --all`.
+cache via `colima prune --all --force`.
 
 **How detect works:**
 1. Checks if `~/.colima/` exists.
 2. Reports the total `dir_size` as pruneable.
+   *Note: This is an estimated maximum — actual freed space depends on
+   which VM disk images are pruned.*
 
 **How clean works:**
 1. If `colima` is not in `PATH`, prints a message and exits (0).
-2. Runs `colima prune --all`.
+2. Runs `colima prune --all --force`.
 3. Reports freed bytes from the directory size change.
 
 **Safety:** Delegates to the official Colima CLI.
@@ -1997,15 +1999,17 @@ sasurahime は **45 のクリーンターゲット** をスプリント単位で
 
 **カテゴリ:** Sprint 5
 
-**削除対象:** [Colima](https://github.com/abiosoft/colima) VM ディスクキャッシュ。`colima prune --all` で削除します。
+**削除対象:** [Colima](https://github.com/abiosoft/colima) VM ディスクキャッシュ。`colima prune --all --force` で削除します。
 
 **detect の動作:**
 1. `~/.colima/` が存在するか確認します。
 2. 合計サイズを報告します。
+   *注: これは推定最大値です。実際の解放量は
+   どの VM ディスクイメージが削除されるかに依存します。*
 
 **clean の動作:**
 1. `colima` が `PATH` にない場合、メッセージを表示して終了します (0)。
-2. `colima prune --all` を実行します。
+2. `colima prune --all --force` を実行します。
 3. ディレクトリサイズの変化から解放バイト数を報告します。
 
 **安全性:** 公式の Colima CLI に委譲します。

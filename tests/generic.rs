@@ -369,8 +369,8 @@ fn clean_colima_calls_prune_all() {
     assert!(output.status.success());
     let calls = recorded_calls(&bin_dir, "colima");
     assert!(
-        calls.contains("prune --all"),
-        "expected 'prune --all', got: {calls}"
+        calls.contains("prune --all --force"),
+        "expected 'prune --all --force', got: {calls}"
     );
 }
 

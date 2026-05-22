@@ -4,6 +4,65 @@ All notable changes to sasurahime will be documented in this file. The format is
 
 ---
 
+## [0.1.16] — 2026-05-22
+
+### Added
+
+- **colima deletion confirmation prompt:** `sasurahime clean colima` now shows a
+  confirmation prompt on interactive TTYs before running `colima prune --all --force`,
+  warning about deletion of all stopped VM disk data (containers, images, volumes).
+  In `--yes` (non-TTY) mode the confirmation is skipped automatically.
+- **colima fallback deletion:** When the `colima` CLI is not installed but
+  `~/.colima/` exists, `sasurahime clean colima` now falls back to directly
+  deleting the directory via Trash (with `chflags nouchg` handling).
+- **colima non-zero exit warning:** If `colima prune` exits with a non-zero
+  status, sasurahime now prints a warning with the exit code and stderr output
+  instead of silently treating it as success.
+
+### Changed
+
+- **GenericCleaner now supports `confirm_message` and `fallback_delete`:**
+  Two new optional fields on `GenericCleaner` enable any command-based cleaner
+  to request interactive confirmation and/or fall back to direct directory
+  deletion when the CLI tool is missing. `colima_prune` is the first consumer.
+
+### Fixed
+
+- **colima prune hangs on confirmation prompt:** `colima prune --all` was invoked
+  without the `--force` flag, causing it to wait for `y/N` input indefinitely.
+  Added `--force` to skip the interactive prompt and proceed non-interactively.
+
+### Documentation
+
+- **SUPPORTED.md note on estimate accuracy:** Added a note to the colima entry
+  (EN + JA) that the scan report is an estimated maximum — actual freed space
+  depends on which VM disk images are pruned.
+- **Colima target description updated:** Changed from `"Colima VM disk cache
+  prune"` to `"Colima VM disk images (inactive) prune"` to more accurately
+  reflect the deletion scope.
+- **Documentation command examples updated:** All `colima prune --all`
+  references in SUPPORTED.md, HOWTO-USE.md, and CHANGELOG.md updated to
+  `colima prune --all --force`.
+
+### Internal
+
+- **Test version string deduplication:** `tests/interactive.rs` version
+  assertions now use a shared `const VERSION` instead of 7 hardcoded strings.
+- **Test refactoring:** `command_with_detect_dir_returns_not_found_when_tool_missing`
+  replaced with `command_with_detect_dir_fallback_reports_pruneable_when_tool_missing`
+  (using factory method) and `command_without_fallback_returns_not_found_when_tool_missing`.
+- **Testing team auto-fixes:** E2E test assertion strengthened from
+  `calls.contains("prune --all")` to `calls.contains("prune --all --force")`.
+  Unit test args updated from `&["prune", "--all"]` to `&["prune", "--all", "--force"]`.
+
+## [0.1.15] — 2026-05-22
+
+### Fixed
+
+- **colima prune hangs on confirmation prompt:** `colima prune --all` was invoked
+  without the `--force` flag, causing it to wait for `y/N` input indefinitely.
+  Added `--force` to skip the interactive prompt and proceed non-interactively.
+
 ## [0.1.14] — 2026-05-22
 
 ### Added
@@ -11,7 +70,7 @@ All notable changes to sasurahime will be documented in this file. The format is
 - **Command timeout hint:** When a command-based cleaner (colima, docker, brew,
   etc.) times out (>30s), the error message now includes the full command and a
   hint to run it manually: `You can run this command manually in another terminal:
-  $ colima prune --all`. Applies to all 20+ cleaners that delegate to external
+  $ colima prune --all --force`. Applies to all 20+ cleaners that delegate to external
   CLIs.
 - **`with_spinner_result()`:** New progress helper that prints `[FAILED]` instead
   of the misleading `[OK]` when a clean operation fails (e.g. due to timeout).

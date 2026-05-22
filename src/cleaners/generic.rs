@@ -4,6 +4,7 @@ use crate::format::dir_size;
 use crate::progress::ProgressReporter;
 use anyhow::Result;
 use std::fs;
+use std::io::{IsTerminal, stdin};
 use std::path::{Path, PathBuf};
 
 pub enum CleanMethod {
@@ -23,6 +24,10 @@ pub struct GenericCleaner {
     display_name: &'static str,
     method: CleanMethod,
     runner: Box<dyn CommandRunner>,
+    /// Optional confirmation prompt shown before cleaning on an interactive TTY.
+    confirm_message: Option<&'static str>,
+    /// If true and the CLI tool is not found, fall back to deleting detect_dir directly.
+    fallback_delete: bool,
 }
 
 impl GenericCleaner {
@@ -36,6 +41,8 @@ impl GenericCleaner {
             display_name,
             method: CleanMethod::Command { program, args },
             runner,
+            confirm_message: None,
+            fallback_delete: false,
         }
     }
 
@@ -88,6 +95,8 @@ impl GenericCleaner {
                 detect_dir: home.join("Library/Developer/CoreSimulator"),
             },
             runner,
+            confirm_message: None,
+            fallback_delete: false,
         }
     }
 
@@ -96,10 +105,12 @@ impl GenericCleaner {
             display_name: "colima",
             method: CleanMethod::CommandWithDetectDir {
                 program: "colima",
-                args: &["prune", "--all"],
+                args: &["prune", "--all", "--force"],
                 detect_dir: home.join(".colima"),
             },
             runner,
+            confirm_message: Some("This will delete ALL stopped Colima VM disk data (containers, images, volumes). Continue?"),
+            fallback_delete: true,
         }
     }
 
@@ -123,6 +134,8 @@ impl GenericCleaner {
                 home.join("Library/Caches/node-gyp"),
             ]),
             runner,
+            confirm_message: None,
+            fallback_delete: false,
         }
     }
 
@@ -132,6 +145,8 @@ impl GenericCleaner {
             display_name: "spm",
             method: CleanMethod::DeleteDirs(vec![cache]),
             runner,
+            confirm_message: None,
+            fallback_delete: false,
         }
     }
 
@@ -141,6 +156,8 @@ impl GenericCleaner {
             display_name: "trash",
             method: CleanMethod::DeleteDirs(vec![trash_dir]),
             runner,
+            confirm_message: None,
+            fallback_delete: false,
         }
     }
 
@@ -150,6 +167,8 @@ impl GenericCleaner {
             display_name: "downloads",
             method: CleanMethod::DeleteDirs(vec![dl_dir]),
             runner,
+            confirm_message: None,
+            fallback_delete: false,
         }
     }
 
@@ -160,6 +179,8 @@ impl GenericCleaner {
             display_name: "cargo-registry",
             method: CleanMethod::DeleteDirs(vec![cache]),
             runner,
+            confirm_message: None,
+            fallback_delete: false,
         }
     }
 
@@ -169,6 +190,8 @@ impl GenericCleaner {
             display_name: "vscode-extensions",
             method: CleanMethod::DeleteDirs(vec![cache]),
             runner,
+            confirm_message: None,
+            fallback_delete: false,
         }
     }
 
@@ -181,6 +204,8 @@ impl GenericCleaner {
                 detect_dir: home.join(".m2/repository"),
             },
             runner,
+            confirm_message: None,
+            fallback_delete: false,
         }
     }
 
@@ -192,6 +217,8 @@ impl GenericCleaner {
             display_name: "terraform",
             method: CleanMethod::DeleteDirs(vec![cache]),
             runner,
+            confirm_message: None,
+            fallback_delete: false,
         }
     }
 
@@ -207,6 +234,8 @@ impl GenericCleaner {
                 detect_dir: cache,
             },
             runner,
+            confirm_message: None,
+            fallback_delete: false,
         }
     }
 
@@ -215,6 +244,8 @@ impl GenericCleaner {
             display_name: "volta",
             method: CleanMethod::DeleteDirs(vec![home.join(".volta/cache")]),
             runner,
+            confirm_message: None,
+            fallback_delete: false,
         }
     }
 
@@ -223,6 +254,8 @@ impl GenericCleaner {
             display_name: "sbt",
             method: CleanMethod::DeleteDirs(vec![home.join(".sbt"), home.join(".ivy2/cache")]),
             runner,
+            confirm_message: None,
+            fallback_delete: false,
         }
     }
 
@@ -231,6 +264,8 @@ impl GenericCleaner {
             display_name: "tree-sitter",
             method: CleanMethod::DeleteDirs(vec![home.join(".cache/tree-sitter")]),
             runner,
+            confirm_message: None,
+            fallback_delete: false,
         }
     }
 
@@ -254,6 +289,8 @@ impl GenericCleaner {
             display_name: "act",
             method: CleanMethod::DeleteDirs(vec![cache_dir]),
             runner,
+            confirm_message: None,
+            fallback_delete: false,
         }
     }
 }
@@ -282,7 +319,7 @@ impl Cleaner for GenericCleaner {
                 detect_dir,
                 ..
             } => {
-                if !detect_dir.exists() || !self.runner.exists(program) {
+                if !detect_dir.exists() || (!self.runner.exists(program) && !self.fallback_delete) {
                     return ScanResult {
                         name: self.name(),
                         status: ScanStatus::NotFound,
@@ -353,7 +390,50 @@ impl Cleaner for GenericCleaner {
                     0
                 };
 
+                // Interactive confirmation prompt when configured
+                if let Some(msg) = &self.confirm_message {
+                    if stdin().is_terminal()
+                        && !dialoguer::Confirm::new()
+                            .with_prompt(*msg)
+                            .default(false)
+                            .interact()?
+                    {
+                        println!("{}: cancelled", self.display_name);
+                        return Ok(CleanResult {
+                            name: self.name(),
+                            bytes_freed: 0,
+                        });
+                    }
+                }
+
                 if !self.runner.exists(program) {
+                    if self.fallback_delete && detect_dir.exists() {
+                        if dry_run {
+                            println!(
+                                "[dry-run] would remove: {} ({} bytes)",
+                                detect_dir.display(),
+                                crate::format::format_bytes(size_before)
+                            );
+                            return Ok(CleanResult {
+                                name: self.name(),
+                                bytes_freed: 0,
+                            });
+                        }
+                        let path_str = detect_dir.to_string_lossy();
+                        if let Err(e) = self.runner.run("chflags", &["-R", "nouchg", &path_str]) {
+                            eprintln!(
+                                "[{}] warning: chflags failed for {}: {e}",
+                                self.display_name,
+                                detect_dir.display()
+                            );
+                        }
+                        crate::trash::delete_path(detect_dir)?;
+                        println!("[{}] removed cache: {}", self.display_name, detect_dir.display());
+                        return Ok(CleanResult {
+                            name: self.name(),
+                            bytes_freed: size_before,
+                        });
+                    }
                     println!("{}: not found, skipping", self.display_name);
                     return Ok(CleanResult {
                         name: self.name(),
@@ -373,7 +453,20 @@ impl Cleaner for GenericCleaner {
                         bytes_freed: 0,
                     });
                 }
-                self.runner.run(program, args)?;
+                let output = self.runner.run(program, args)?;
+                if !output.status.success() {
+                    eprintln!(
+                        "[{}] warning: `{} {}` exited with code {:?}",
+                        self.display_name,
+                        program,
+                        args.join(" "),
+                        output.status.code()
+                    );
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    if !stderr.is_empty() {
+                        eprintln!("[{}] stderr: {stderr}", self.display_name);
+                    }
+                }
                 let size_after = if detect_dir.exists() {
                     dir_size(detect_dir)
                 } else {
@@ -555,25 +648,34 @@ mod tests {
     }
 
     #[test]
-    fn command_with_detect_dir_returns_not_found_when_tool_missing() {
+    fn command_with_detect_dir_fallback_reports_pruneable_when_tool_missing() {
         let tmp = tempfile::TempDir::new().unwrap();
-        // Directory exists but the cleaning tool is not installed
+        // Directory exists but the cleaning tool is not installed;
+        // fallback_delete should allow detect to report Pruneable anyway.
         fs::create_dir_all(tmp.path().join(".colima/_lima/colima")).unwrap();
         fs::write(tmp.path().join(".colima/_lima/colima/dummy.img"), b"x").unwrap();
 
-        let cleaner = GenericCleaner {
-            display_name: "colima",
-            method: CleanMethod::CommandWithDetectDir {
-                program: "colima",
-                args: &["prune", "--all"],
-                detect_dir: tmp.path().join(".colima"),
-            },
-            runner: Box::new(MissingToolRunner),
-        };
+        let cleaner = GenericCleaner::colima_prune(tmp.path(), Box::new(MissingToolRunner));
+        let result = cleaner.detect();
+        assert!(
+            matches!(result.status, ScanStatus::Pruneable(_)),
+            "expected Pruneable when dir exists (fallback active), got {:#?}",
+            result.status
+        );
+    }
+
+    #[test]
+    fn command_without_fallback_returns_not_found_when_tool_missing() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join(".colima/_lima/colima")).unwrap();
+        fs::write(tmp.path().join(".colima/_lima/colima/dummy.img"), b"x").unwrap();
+
+        // Using a non-colima CommandWithDetectDir cleaner (no fallback).
+        let cleaner = GenericCleaner::simulator(tmp.path(), Box::new(MissingToolRunner));
         let result = cleaner.detect();
         assert!(
             matches!(result.status, ScanStatus::NotFound),
-            "expected NotFound when tool missing, got {:#?}",
+            "expected NotFound when tool missing and no fallback, got {:#?}",
             result.status
         );
     }

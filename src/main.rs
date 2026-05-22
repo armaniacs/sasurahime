@@ -250,7 +250,7 @@ define_cleaners! {
     CocoaPods : "cocoa-pods" => "CocoaPods cache clean --all";
     (|_home, _config| cleaners::generic::GenericCleaner::cocoapods(Box::new(SystemCommandRunner))),
 
-    Colima : "colima" => "Colima VM disk cache prune";
+    Colima : "colima" => "Colima VM disk images (inactive) prune";
     (|home, _config| cleaners::generic::GenericCleaner::colima_prune(home, Box::new(SystemCommandRunner))),
 
     SwiftPM : "spm" => "SwiftPM cache directory";
