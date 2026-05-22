@@ -1008,11 +1008,22 @@ cache via `colima prune --all --force`.
    which VM disk images are pruned.*
 
 **How clean works:**
-1. If `colima` is not in `PATH`, prints a message and exits (0).
-2. Runs `colima prune --all --force`.
-3. Reports freed bytes from the directory size change.
+1. If `colima` is not in `PATH`, falls back to deleting `~/.colima/` directly
+   via Trash (with `chflags -R nouchg` handling). Reports freed bytes.
+2. If `colima` is found:
+   - On interactive TTYs: shows a confirmation prompt warning that all stopped
+     VM disk data (containers, images, volumes) will be deleted. Aborts if
+     the user declines.
+   - In `--yes` (non-TTY) mode: skips the confirmation prompt automatically.
+3. Runs `colima prune --all --force`.
+4. If `colima prune` exits with a non-zero status, prints a warning with the
+   exit code and stderr output instead of silently treating it as success.
+5. Reports freed bytes from the directory size change.
 
-**Safety:** Delegates to the official Colima CLI.
+**Safety:**
+- Confirmation prompt on interactive TTYs prevents accidental deletion.
+- Fallback to direct deletion when CLI is missing ensures the cache is still
+  cleaned even without the `colima` CLI installed.
 
 ---
 
@@ -2008,11 +2019,22 @@ sasurahime は **45 のクリーンターゲット** をスプリント単位で
    どの VM ディスクイメージが削除されるかに依存します。*
 
 **clean の動作:**
-1. `colima` が `PATH` にない場合、メッセージを表示して終了します (0)。
-2. `colima prune --all --force` を実行します。
-3. ディレクトリサイズの変化から解放バイト数を報告します。
+1. `colima` が `PATH` にない場合、`~/.colima/` をゴミ箱経由で直接削除します
+   （`chflags -R nouchg` 処理あり）。解放バイト数を報告します。
+2. `colima` が見つかった場合：
+   - インタラクティブ TTY では：停止中の VM ディスクデータ（コンテナ、イメージ、
+     ボリューム）がすべて削除される旨を警告する確認プロンプトを表示します。
+     ユーザーが拒否した場合は中断します。
+   - `--yes`（非 TTY）モードでは：確認プロンプトを自動的にスキップします。
+3. `colima prune --all --force` を実行します。
+4. `colima prune` が非ゼロ終了した場合、サイレントに成功とみなす代わりに、
+   終了コードと標準エラー出力を含む警告を表示します。
+5. ディレクトリサイズの変化から解放バイト数を報告します。
 
-**安全性:** 公式の Colima CLI に委譲します。
+**安全性:**
+- インタラクティブ TTY での確認プロンプトが誤削除を防ぎます。
+- CLI がない場合の直接削除フォールバックにより、`colima` CLI がインストール
+  されていない環境でもキャッシュを削除できます。
 
 ---
 
