@@ -4,6 +4,15 @@ All notable changes to sasurahime will be documented in this file. The format is
 
 ---
 
+## [0.1.17] — 2026-05-22
+
+### Internal
+
+- **Archived completed design specs:** Moved 3 fully-implemented spec files
+  (`ios-backup-apfs-snapshot-design`, `command-timeout-hint-design`,
+  `running-process-hint-design`) from `docs/superpowers/specs/` to
+  `.plan/archived/`.
+
 ## [0.1.16] — 2026-05-22
 
 ### Added

@@ -2,7 +2,7 @@ use assert_cmd::Command;
 use std::fs;
 use tempfile::TempDir;
 
-const VERSION: &str = "0.1.16";
+const VERSION: &str = "0.1.17";
 
 fn sasurahime(home: &std::path::Path) -> Command {
     let mut cmd = Command::cargo_bin("sasurahime").unwrap();
