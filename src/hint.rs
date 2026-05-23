@@ -438,16 +438,22 @@ pub fn auto_clean_hint(
     Ok(())
 }
 
-/// For each running hint that supports auto-quit, ask the user and clean.
+/// For each hint that can be cleaned, ask the user and clean.
+///
+/// For running apps with a configured `quit_app`, the app is quit first, caches
+/// are deleted, and the app is optionally relaunched.  For non-running apps the
+/// cache directories are deleted directly without any quit/relaunch step.
 pub fn offer_auto_clean(
     hints: &[ProcessHint],
     home: &Path,
     runner: &dyn CommandRunner,
     prompt: &dyn PromptReader,
 ) {
+    // Include all hints.  Running hints need quit_app; non-running hints can
+    // always have their cache directories removed directly.
     let actionable: Vec<_> = hints
         .iter()
-        .filter(|h| h.running && h.entry.quit_app.is_some())
+        .filter(|h| h.running && h.entry.quit_app.is_some() || !h.running)
         .collect();
 
     if actionable.is_empty() {
@@ -456,19 +462,49 @@ pub fn offer_auto_clean(
 
     for hint in actionable {
         let size_str = format_bytes(hint.size_bytes);
-        eprint!(
-            "\nQuit {} and clear cache? ({size_str} will be freed) [y/N] ",
-            hint.entry.display_name
-        );
+        if hint.running {
+            eprint!(
+                "\nQuit {} and clear cache? ({size_str} will be freed) [y/N] ",
+                hint.entry.display_name
+            );
+        } else {
+            eprint!(
+                "\nClear {} cache? ({size_str} will be freed) [y/N] ",
+                hint.entry.display_name
+            );
+        }
         match prompt.read_line() {
             Some(input) if input.trim().eq_ignore_ascii_case("y") => {
-                if let Err(e) = auto_clean_hint(hint, home, runner) {
+                if hint.running {
+                    if let Err(e) = auto_clean_hint(hint, home, runner) {
+                        eprintln!("  Error: {e}");
+                    }
+                } else if let Err(e) = clean_hint_dirs(hint, home, runner) {
                     eprintln!("  Error: {e}");
                 }
             }
             _ => {}
         }
     }
+}
+
+/// Delete cache directories for a hint without quitting or relaunching the app.
+fn clean_hint_dirs(
+    hint: &ProcessHint,
+    home: &Path,
+    runner: &dyn CommandRunner,
+) -> anyhow::Result<()> {
+    let entry = hint.entry;
+    let base = base_path(home, entry.base_dir);
+    eprintln!("  Clearing cache...");
+    for suffix in entry.path_suffixes {
+        let path = base.join(suffix);
+        if path.exists() {
+            runner.run("rm", &["-rf", &path.to_string_lossy()])?;
+        }
+    }
+    eprintln!("  [OK]");
+    Ok(())
 }
 
 pub fn print_hints(hints: &[ProcessHint]) {
@@ -990,12 +1026,13 @@ mod tests {
     }
 
     #[test]
-    fn offer_auto_clean_skips_non_running_hints() {
+    fn offer_auto_clean_prompts_for_non_running_hints() {
         let tmp = tempfile::tempdir().unwrap();
         let home = tmp.path();
+        make_dirs(home, BaseDir::AppSupport, &["Code/Cache"]);
 
         let runner = RecordingRunner::new(&[], 0);
-        let prompt = FakePrompt::new(&["y"]); // would say yes, but shouldn't be asked
+        let prompt = FakePrompt::new(&["y"]);
         let hint = ProcessHint {
             entry: &VSCODE_ENTRY,
             size_bytes: 600 * MB,
@@ -1005,9 +1042,18 @@ mod tests {
         offer_auto_clean(&[hint], home, &runner, &prompt);
 
         let calls = runner.recorded_calls();
+        let rm_calls: Vec<_> = calls.iter().filter(|(p, _)| p == "rm").collect();
+        assert!(
+            !rm_calls.is_empty(),
+            "should clean directories for non-running hints"
+        );
         assert!(
             !calls.iter().any(|(p, _)| p == "osascript"),
-            "should not touch non-running hints"
+            "should NOT attempt to quit a non-running app"
+        );
+        assert!(
+            !calls.iter().any(|(p, _)| p == "open"),
+            "should NOT relaunch a non-running app"
         );
     }
 
