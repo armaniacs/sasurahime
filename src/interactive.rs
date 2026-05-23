@@ -55,6 +55,9 @@ pub fn run_auto(cleaners: &[Box<dyn Cleaner>]) -> Result<()> {
         }
     }
 
+    // Suppress secondary confirmation prompts (TUI already asked above).
+    crate::cleaners::generic::set_skip_confirm(true);
+
     let reporter = crate::progress::VerboseProgress::new();
     let mut total_freed: u64 = 0;
     for i in pruneable_indices {
@@ -67,6 +70,8 @@ pub fn run_auto(cleaners: &[Box<dyn Cleaner>]) -> Result<()> {
             Err(e) => eprintln!("Error cleaning {name}: {e}"),
         }
     }
+
+    crate::cleaners::generic::set_skip_confirm(false);
 
     println!("\nTotal freed: {}", format_bytes(total_freed));
     Ok(())
@@ -148,6 +153,10 @@ pub fn run_interactive(cleaners: &[Box<dyn Cleaner>]) -> Result<()> {
         return Ok(());
     }
 
+    // Suppress secondary confirmation prompts inside cleaners (TUI already
+    // asked "Proceed?" above; re-confirming would be confusing).
+    crate::cleaners::generic::set_skip_confirm(true);
+
     let reporter = crate::progress::VerboseProgress::new();
     let mut freed: u64 = 0;
     for &si in &selected {
@@ -161,6 +170,8 @@ pub fn run_interactive(cleaners: &[Box<dyn Cleaner>]) -> Result<()> {
             Err(e) => eprintln!("Error: {e}"),
         }
     }
+
+    crate::cleaners::generic::set_skip_confirm(false);
 
     println!("\nTotal freed: {}", format_bytes(freed));
     Ok(())

@@ -6,6 +6,18 @@ use anyhow::Result;
 use std::fs;
 use std::io::{stdin, IsTerminal};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+
+/// When set, skip the interactive `confirm_message` prompt inside `clean()`.
+/// Used by the TUI (interactive.rs) which already asks the user for confirmation
+/// before the cleaning loop, avoiding a redundant second prompt.
+static SKIP_CONFIRM: AtomicBool = AtomicBool::new(false);
+
+/// Globally suppress the secondary confirmation prompt in `GenericCleaner::clean()`.
+/// Call before the TUI cleaning loop and restore with `set_skip_confirm(false)` after.
+pub fn set_skip_confirm(skip: bool) {
+    SKIP_CONFIRM.store(skip, Ordering::Relaxed);
+}
 
 pub enum CleanMethod {
     Command {
@@ -390,9 +402,12 @@ impl Cleaner for GenericCleaner {
                     0
                 };
 
-                // Interactive confirmation prompt when configured
+                // Interactive confirmation prompt when configured.
+                // Skipped when running under the interactive TUI (which already
+                // asked for confirmation) or when stdin is not a terminal.
                 if let Some(msg) = &self.confirm_message {
-                    if stdin().is_terminal()
+                    if !SKIP_CONFIRM.load(Ordering::Relaxed)
+                        && stdin().is_terminal()
                         && !dialoguer::Confirm::new()
                             .with_prompt(*msg)
                             .default(false)
