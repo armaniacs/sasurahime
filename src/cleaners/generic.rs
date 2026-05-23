@@ -415,6 +415,7 @@ impl Cleaner for GenericCleaner {
                             .interact()?
                     {
                         println!("{}: cancelled", self.display_name);
+                        eprintln!("  $ {program} {}", args.join(" "));
                         return Err(anyhow::Error::from(CleanCancelled));
                     }
                 }
