@@ -385,6 +385,7 @@ impl Cleaner for GenericCleaner {
                         bytes_freed: 0,
                     });
                 }
+                println!("$ {program} {}", args.join(" "));
                 self.runner.run(program, args)?;
                 Ok(CleanResult {
                     name: self.name(),
@@ -469,6 +470,7 @@ impl Cleaner for GenericCleaner {
                         bytes_freed: 0,
                     });
                 }
+                println!("$ {program} {}", args.join(" "));
                 let output = self.runner.run(program, args)?;
                 if !output.status.success() {
                     eprintln!(
