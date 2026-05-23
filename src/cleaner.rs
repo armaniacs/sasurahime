@@ -24,6 +24,17 @@ pub struct CleanResult {
     pub bytes_freed: u64,
 }
 
+#[derive(Debug)]
+pub struct CleanCancelled;
+
+impl std::fmt::Display for CleanCancelled {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "cleaning cancelled by user")
+    }
+}
+
+impl std::error::Error for CleanCancelled {}
+
 pub trait Cleaner: Send + Sync {
     fn name(&self) -> &'static str;
     /// Read-only. Never deletes anything.

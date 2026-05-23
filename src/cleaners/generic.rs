@@ -1,4 +1,4 @@
-use crate::cleaner::{CleanResult, Cleaner, ScanResult, ScanStatus};
+use crate::cleaner::{CleanCancelled, CleanResult, Cleaner, ScanResult, ScanStatus};
 use crate::command::CommandRunner;
 use crate::format::dir_size;
 use crate::progress::ProgressReporter;
@@ -414,10 +414,7 @@ impl Cleaner for GenericCleaner {
                             .interact()?
                     {
                         println!("{}: cancelled", self.display_name);
-                        return Ok(CleanResult {
-                            name: self.name(),
-                            bytes_freed: 0,
-                        });
+                        return Err(anyhow::Error::from(CleanCancelled));
                     }
                 }
 

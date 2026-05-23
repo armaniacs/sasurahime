@@ -10,7 +10,7 @@ mod scanner;
 mod trash;
 
 use clap::{Parser, Subcommand};
-use cleaner::{CleanResult, Cleaner};
+use cleaner::{CleanCancelled, CleanResult, Cleaner};
 use command::SystemCommandRunner;
 use config::Config;
 use dirs::home_dir;
@@ -565,12 +565,39 @@ fn run_clean_target<F>(
 where
     F: FnOnce(bool, &dyn ProgressReporter) -> anyhow::Result<CleanResult>,
 {
+    let msg = format!("Cleaning {label}...");
     let result = if reporter.show_spinner() {
-        crate::progress::with_spinner_result(&format!("Cleaning {label}..."), || {
-            cleaner_fn(dry_run, reporter)
-        })?
+        let pb = indicatif::ProgressBar::new_spinner();
+        pb.set_style(
+            indicatif::ProgressStyle::with_template("{spinner:.green} {msg}")
+                .unwrap()
+                .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"),
+        );
+        pb.set_message(msg.clone());
+        pb.enable_steady_tick(std::time::Duration::from_millis(100));
+        let r = cleaner_fn(dry_run, reporter);
+        pb.finish_and_clear();
+        match r {
+            Ok(v) => {
+                eprintln!("{msg} [OK]");
+                v
+            }
+            Err(e) if e.is::<CleanCancelled>() => {
+                // User cancelled — clean shutdown, no [FAILED], no Freed line.
+                return Ok(());
+            }
+            Err(e) => {
+                eprintln!("{msg} [FAILED]");
+                return Err(e);
+            }
+        }
     } else {
-        cleaner_fn(dry_run, reporter)?
+        let r = cleaner_fn(dry_run, reporter);
+        match r {
+            Ok(v) => v,
+            Err(e) if e.is::<CleanCancelled>() => return Ok(()),
+            Err(e) => return Err(e),
+        }
     };
 
     if reporter.show_spinner() {
