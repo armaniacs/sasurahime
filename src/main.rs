@@ -627,7 +627,10 @@ fn main() -> anyhow::Result<()> {
             hint::offer_auto_clean(&hints, &home, &runner, &hint::StdinPrompt);
         }
         Some(Commands::Targets) => {
-            for (name, desc) in SUPPORTED_TARGETS.iter().chain(extra_targets()) {
+            let mut targets: Vec<&(&str, &str)> =
+                SUPPORTED_TARGETS.iter().chain(extra_targets()).collect();
+            targets.sort_by_key(|(name, _)| *name);
+            for (name, desc) in targets {
                 println!("{:<12} {}", name, desc);
             }
         }

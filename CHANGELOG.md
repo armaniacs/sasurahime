@@ -4,6 +4,14 @@ All notable changes to sasurahime will be documented in this file. The format is
 
 ---
 
+## [0.1.19] — 2026-05-23
+
+### Changed
+
+- **`sasurahime targets` output is now sorted alphabetically.** Previously the
+  target list appeared in declaration order (macro order + manual entries
+  appended). Now all targets are sorted by name for easier browsing.
+
 ## [0.1.18] — 2026-05-22
 
 ### Internal
