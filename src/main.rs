@@ -555,7 +555,7 @@ fn all_cleaners(home: &std::path::Path, config: &config::Config) -> Vec<Box<dyn 
     ]
 }
 
-/// Runs a single-target clean with spinner and prints freed bytes.
+/// Runs a single-target clean and prints freed bytes.
 fn run_clean_target<F>(
     label: &str,
     cleaner_fn: F,
@@ -567,27 +567,22 @@ where
 {
     let msg = format!("Cleaning {label}...");
     let result = if reporter.show_spinner() {
-        let pb = indicatif::ProgressBar::new_spinner();
-        pb.set_style(
-            indicatif::ProgressStyle::with_template("{spinner:.green} {msg}")
-                .unwrap()
-                .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"),
-        );
-        pb.set_message(msg.clone());
-        pb.enable_steady_tick(std::time::Duration::from_millis(100));
+        // Static message (no spinner animation) so the confirmation prompt
+        // inside the cleaner is not competing with a spinner tick.
+        eprint!("{msg}");
         let r = cleaner_fn(dry_run, reporter);
-        pb.finish_and_clear();
         match r {
             Ok(v) => {
-                eprintln!("{msg} [OK]");
+                eprintln!(" [OK]");
                 v
             }
             Err(e) if e.is::<CleanCancelled>() => {
                 // User cancelled — clean shutdown, no [FAILED], no Freed line.
+                // The hint was already printed in GenericCleaner.
                 return Ok(());
             }
             Err(e) => {
-                eprintln!("{msg} [FAILED]");
+                eprintln!(" [FAILED]");
                 return Err(e);
             }
         }
