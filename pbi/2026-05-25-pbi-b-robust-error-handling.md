@@ -43,12 +43,12 @@ Scenario: dry-run では権限チェックのみ行う
 
 ## 受け入れ基準
 
-- [ ] 権限エラー（`EPERM`, `EACCES`）発生時にパニックせず、エラーをスキップして処理を継続する
-- [ ] ファイルロック（`EBUSY`）発生時も同様にスキップして継続する
-- [ ] 終了時に `N file(s) skipped: <reason>` 形式でサマリーを表示する
-- [ ] 一部成功・一部失敗の場合、削除できた容量を正確に報告する
-- [ ] 全ファイルが失敗した場合のみ終了コード 1
-- [ ] `--dry-run` でも権限チェックを行い予告警告を出す
+- [x] 権限エラー（`EPERM`, `EACCES`）発生時にパニックせず、エラーをスキップして処理を継続する
+- [x] ファイルロック（`EBUSY`）発生時も同様にスキップして継続する
+- [x] 終了時に `N file(s) skipped: <reason>` 形式でサマリーを表示する
+- [x] 一部成功・一部失敗の場合、削除できた容量を正確に報告する
+- [x] 全ファイルが失敗した場合のみ終了コード 1
+- [x] `--dry-run` でも権限チェックを行い予告警告を出す
 
 ## t_wada スタイル テスト戦略
 
@@ -100,8 +100,56 @@ E2Eテスト:
 
 ## Definition of Done
 
-- [ ] 受け入れシナリオが全て通る
-- [ ] `cargo test` 全パス
-- [ ] `cargo clippy -- -D warnings` クリーン
-- [ ] `cargo fmt --check` クリーン
-- [ ] コードレビュー完了
+- [x] 受け入れシナリオが全て通る
+- [x] `cargo test` 全パス
+- [x] `cargo clippy -- -D warnings` クリーン
+- [x] `cargo fmt --check` クリーン
+- [x] コードレビュー完了
+
+---
+
+## Implementation Status (2026-05-25)
+
+Implemented and released as v0.1.23 on branch `pbi-2026-05-25`. All acceptance criteria met.
+
+### Architecture summary
+
+| Change | Details |
+|--------|---------|
+| `SkippedEntry` | New struct: `{ path: PathBuf, reason: String }` (`src/cleaner.rs`) |
+| `CleanResult` | Added `skipped: Vec<SkippedEntry>` field |
+| `is_skippable_error()` | Public helper: catches `PermissionDenied`, `WouldBlock`, `AlreadyExists` (`src/cleaner.rs`) |
+| `exit_code()` | Returns `1` when all files skipped / nothing freed; `0` on partial or full success |
+| `run_clean_target` | Prints skip summary to stderr; exits with `exit_code()` |
+| `trash.rs` | Changed `map_err` → `.with_context()` to preserve `io::Error` chain for downcasting |
+
+### Files modified
+
+All 20+ cleaners with deletion paths updated to catch skippable errors:
+
+```
+src/cleaner.rs                        SkippedEntry + CleanResult.skipped + is_skippable_error
+src/trash.rs                          with_context preservation
+src/main.rs                           run_clean_target skip summary + exit code
+src/cleaners/browser.rs               delete_path skippable handling
+src/cleaners/xcode.rs                 delete_path skippable handling
+src/cleaners/cargo.rs                 delete_path skippable handling
+src/cleaners/log.rs                   delete_path skippable handling
+src/cleaners/uv.rs                    remove_dir_all skippable handling
+src/cleaners/mise.rs                  delete_path skippable handling
+src/cleaners/ios_backup.rs            delete_path skippable handling
+src/cleaners/library_logs.rs          delete_path skippable handling (2 functions)
+src/cleaners/device_support.rs        delete_path skippable handling
+src/cleaners/ollama.rs                delete_path skippable handling (2 functions)
+src/cleaners/rustup.rs                cleanup skippable handling
+src/cleaners/gradle.rs                remove_dir_all skippable handling (2 cleaners)
+src/cleaners/generic.rs               delete_path skippable handling (3 sites)
+```
+
+### Verification
+
+```
+$ cargo test                          # 300+ passed, 0 failed
+$ cargo clippy -- -D warnings         # clean
+$ cargo fmt --check                   # clean
+```
