@@ -4,6 +4,53 @@ All notable changes to sasurahime will be documented in this file. The format is
 
 ---
 
+## [0.1.23] — 2026-05-25
+
+### Added
+
+- **Robust error handling (PBI-B).** All 20+ cleaners now catch permission errors
+  (`EPERM`), file-lock errors (`EBUSY`), and access errors (`EACCES`) during
+  deletion instead of panicking or aborting the entire cleanup. Affected files
+  are recorded as `skipped` and processing continues with remaining targets.
+
+- **`SkippedEntry` struct + `CleanResult.skipped` field.** Each cleaner's
+  `clean()` method now returns a `Vec<SkippedEntry>` listing files/directories
+  that could not be deleted due to permission or lock issues, along with the
+  error reason.
+
+- **Exit code semantics.** `sasurahime clean <target>` now exits with code 1
+  when ALL files failed (nothing freed, only errors), and code 0 when at least
+  some data was freed or nothing was skippable. Partial success (some freed,
+  some skipped) exits 0.
+
+- **Skip summary display.** After each clean operation, a summary of skipped
+  files is printed to stderr: `N file(s) skipped: /path: Permission denied`.
+
+- **`is_skippable_error()` helper.** New public function in `src/cleaner.rs`
+  that checks if an `anyhow::Error` wraps a skippable IO error
+  (`PermissionDenied`, `WouldBlock`, `AlreadyExists`), with fallback message
+  matching for `trash` layer errors.
+
+### Changed
+
+- **All deletion paths updated.** Every `crate::trash::delete_path()` call,
+  `fs::remove_dir_all()` call, and `rm -rf` delegate across all cleaners
+  (browser, xcode, cargo, log, uv, mise, ios_backup, library_logs,
+  device_support, ollama, rustup, gradle + JetBrains, GenericCleaner)
+  now handles skippable errors gracefully via the new pattern.
+
+### Internal
+
+- **`src/trash.rs`**: Changed `map_err` to `.with_context(…)` to preserve
+  original `io::Error` in the error chain so `is_skippable_error()` can
+  downcast correctly.
+- **`CleanResult::exit_code()`**: Returns 1 when `bytes_freed == 0` and
+  `skipped` is non-empty, 0 otherwise.
+- All existing `CleanResult` construction sites updated to provide the new
+  `skipped` field.
+
+---
+
 ## [0.1.22] — 2026-05-25
 
 ### Added
