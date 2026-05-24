@@ -87,10 +87,7 @@ impl Cleaner for BrowserCleaner {
     fn detect(&self) -> ScanResult {
         let any_found = self.groups.iter().any(|g| g.parent.exists());
         if !any_found {
-            return ScanResult {
-                name: self.name(),
-                status: ScanStatus::NotFound,
-            };
+            return ScanResult::new(self.name(), ScanStatus::NotFound);
         }
         let bytes: u64 = self
             .groups
@@ -98,14 +95,22 @@ impl Cleaner for BrowserCleaner {
             .flat_map(|g| Self::find_old_versions(&g.parent))
             .map(|p| dir_size(&p))
             .sum();
-        ScanResult {
-            name: self.name(),
-            status: if bytes > 0 {
+        let mut r = ScanResult::new(
+            self.name(),
+            if bytes > 0 {
                 ScanStatus::Pruneable(bytes)
             } else {
                 ScanStatus::Clean
             },
+        );
+        if crate::context::is_verbose() {
+            // Report the first browser group's parent as the primary target
+            // (covers puppeteer/chrome — the most common browser cache dir).
+            if let Some(group) = self.groups.first() {
+                r = r.with_target(group.parent.to_string_lossy().to_string());
+            }
         }
+        r
     }
 
     fn clean(&self, dry_run: bool, reporter: &dyn ProgressReporter) -> Result<CleanResult> {
@@ -160,6 +165,7 @@ impl Cleaner for BrowserCleaner {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::TempDir;
 
     #[test]
     fn version_key_chrome_platform_prefix() {
@@ -247,5 +253,47 @@ mod tests {
         // Without the symlink guard, the link would be followed; with the guard it is skipped.
         let old = BrowserCleaner::find_old_versions(tmp.path());
         assert_eq!(old.len(), 0, "symlinked dir must be skipped");
+    }
+
+    // ── primary_target ──────────────────────────────────────────────────────
+    #[test]
+    fn detect_includes_primary_target_when_verbose() {
+        let _guard = crate::context::TEST_LOCK.lock().unwrap();
+        crate::context::set_verbose(true);
+        let tmp = TempDir::new().unwrap();
+        let chrome = tmp.path().join(".cache/puppeteer/chrome");
+        fs::create_dir_all(chrome.join("mac_arm-131.0.6778.204")).unwrap();
+        fs::create_dir_all(chrome.join("mac_arm-140.0.7339.80")).unwrap();
+
+        let cleaner =
+            BrowserCleaner::new(tmp.path(), Box::new(crate::command::SystemCommandRunner));
+        let result = cleaner.detect();
+        assert!(
+            result.primary_target.is_some(),
+            "primary_target should be set when verbose"
+        );
+        assert!(
+            result
+                .primary_target
+                .as_deref()
+                .unwrap()
+                .contains(".cache/puppeteer/chrome"),
+            "target should point to first browser group parent"
+        );
+        crate::context::set_verbose(false);
+    }
+
+    #[test]
+    fn detect_omits_primary_target_when_not_verbose() {
+        let _guard = crate::context::TEST_LOCK.lock().unwrap();
+        crate::context::set_verbose(false);
+        let tmp = TempDir::new().unwrap();
+        let chrome = tmp.path().join(".cache/puppeteer/chrome");
+        fs::create_dir_all(chrome.join("mac_arm-131.0.6778.204")).unwrap();
+
+        let cleaner =
+            BrowserCleaner::new(tmp.path(), Box::new(crate::command::SystemCommandRunner));
+        let result = cleaner.detect();
+        assert!(result.primary_target.is_none());
     }
 }

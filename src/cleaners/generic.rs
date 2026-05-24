@@ -307,24 +307,38 @@ impl GenericCleaner {
     }
 }
 
+impl GenericCleaner {
+    fn primary_target_display(&self) -> Option<String> {
+        match &self.method {
+            CleanMethod::Command { .. } => None,
+            CleanMethod::CommandWithDetectDir { detect_dir, .. } => {
+                Some(detect_dir.to_string_lossy().to_string())
+            }
+            CleanMethod::DeleteDirs(dirs) => dirs.first().map(|d| d.to_string_lossy().to_string()),
+        }
+    }
+}
+
 impl Cleaner for GenericCleaner {
     fn name(&self) -> &'static str {
         self.display_name
     }
 
     fn detect(&self) -> ScanResult {
+        let make_result = |status| {
+            let mut r = ScanResult::new(self.name(), status);
+            if crate::context::is_verbose() {
+                r.primary_target = self.primary_target_display();
+            }
+            r
+        };
+
         match &self.method {
             CleanMethod::Command { program, .. } => {
                 if !self.runner.exists(program) {
-                    return ScanResult {
-                        name: self.name(),
-                        status: ScanStatus::NotFound,
-                    };
+                    return make_result(ScanStatus::NotFound);
                 }
-                ScanResult {
-                    name: self.name(),
-                    status: ScanStatus::Pruneable(0),
-                }
+                make_result(ScanStatus::Pruneable(0))
             }
             CleanMethod::CommandWithDetectDir {
                 program,
@@ -332,38 +346,26 @@ impl Cleaner for GenericCleaner {
                 ..
             } => {
                 if !detect_dir.exists() || (!self.runner.exists(program) && !self.fallback_delete) {
-                    return ScanResult {
-                        name: self.name(),
-                        status: ScanStatus::NotFound,
-                    };
+                    return make_result(ScanStatus::NotFound);
                 }
                 let bytes = dir_size(detect_dir);
-                ScanResult {
-                    name: self.name(),
-                    status: if bytes > 0 {
-                        ScanStatus::Pruneable(bytes)
-                    } else {
-                        ScanStatus::Clean
-                    },
-                }
+                make_result(if bytes > 0 {
+                    ScanStatus::Pruneable(bytes)
+                } else {
+                    ScanStatus::Clean
+                })
             }
             CleanMethod::DeleteDirs(dirs) => {
                 let existing: Vec<_> = dirs.iter().filter(|d| d.exists()).collect();
                 if existing.is_empty() {
-                    return ScanResult {
-                        name: self.name(),
-                        status: ScanStatus::NotFound,
-                    };
+                    return make_result(ScanStatus::NotFound);
                 }
                 let bytes: u64 = existing.iter().map(|d| dir_size(d)).sum();
-                ScanResult {
-                    name: self.name(),
-                    status: if bytes > 0 {
-                        ScanStatus::Pruneable(bytes)
-                    } else {
-                        ScanStatus::Clean
-                    },
-                }
+                make_result(if bytes > 0 {
+                    ScanStatus::Pruneable(bytes)
+                } else {
+                    ScanStatus::Clean
+                })
             }
         }
     }
@@ -791,5 +793,68 @@ mod tests {
         }
         let result = cleaner.detect();
         assert!(matches!(result.status, ScanStatus::NotFound));
+    }
+
+    // ── primary_target_display tests ────────────────────────────────────────
+
+    #[test]
+    fn primary_target_display_for_command_returns_none() {
+        let cleaner = GenericCleaner::bun(Box::new(MissingToolRunner));
+        assert!(cleaner.primary_target_display().is_none());
+    }
+
+    #[test]
+    fn primary_target_display_for_command_with_detect_dir_returns_path() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cleaner = GenericCleaner::colima_prune(tmp.path(), Box::new(MissingToolRunner));
+        let target = cleaner.primary_target_display();
+        assert!(target.is_some());
+        assert!(target.unwrap().contains(".colima"));
+    }
+
+    #[test]
+    fn primary_target_display_for_delete_dirs_returns_first_path() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cleaner = GenericCleaner::node_gyp(tmp.path(), Box::new(MissingToolRunner));
+        let target = cleaner.primary_target_display();
+        assert!(target.is_some());
+        let path = target.unwrap();
+        assert!(path.contains(".cache/node-gyp"));
+    }
+
+    #[test]
+    fn detect_includes_primary_target_when_verbose() {
+        let _guard = crate::context::TEST_LOCK.lock().unwrap();
+        crate::context::set_verbose(true);
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cache = tmp.path().join(".cache/act");
+        fs::create_dir_all(&cache).unwrap();
+        fs::write(cache.join("dummy"), b"x").unwrap();
+
+        let cleaner = GenericCleaner::act(tmp.path(), Box::new(MissingToolRunner));
+        let result = cleaner.detect();
+        assert!(
+            result.primary_target.is_some(),
+            "primary_target should be set when verbose"
+        );
+        assert!(
+            result.primary_target.unwrap().contains(".cache/act"),
+            "target should point to act cache dir"
+        );
+        crate::context::set_verbose(false);
+    }
+
+    #[test]
+    fn detect_omits_primary_target_when_not_verbose() {
+        let _guard = crate::context::TEST_LOCK.lock().unwrap();
+        crate::context::set_verbose(false);
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cache = tmp.path().join(".cache/act");
+        fs::create_dir_all(&cache).unwrap();
+        fs::write(cache.join("dummy"), b"x").unwrap();
+
+        let cleaner = GenericCleaner::act(tmp.path(), Box::new(MissingToolRunner));
+        let result = cleaner.detect();
+        assert!(result.primary_target.is_none());
     }
 }

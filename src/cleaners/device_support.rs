@@ -97,16 +97,14 @@ impl Cleaner for DeviceSupportCleaner {
     fn detect(&self) -> ScanResult {
         let to_delete = self.versions_to_delete();
         if to_delete.is_empty() {
-            return ScanResult {
-                name: self.name(),
-                status: ScanStatus::NotFound,
-            };
+            return ScanResult::new(self.name(), ScanStatus::NotFound);
         }
         let total: u64 = to_delete.iter().map(|p| dir_size(p)).sum();
-        ScanResult {
-            name: self.name(),
-            status: ScanStatus::Pruneable(total),
+        let mut r = ScanResult::new(self.name(), ScanStatus::Pruneable(total));
+        if crate::context::is_verbose() {
+            r = r.with_target(self.xcode_dev_dir.to_string_lossy().to_string());
         }
+        r
     }
 
     fn clean(&self, dry_run: bool, reporter: &dyn ProgressReporter) -> Result<CleanResult> {
@@ -178,5 +176,51 @@ mod tests {
         assert_eq!(to_delete.len(), 2, "4 versions - keep 2 = 2 to delete");
         assert!(to_delete.iter().any(|p| p.ends_with("14.0")));
         assert!(to_delete.iter().any(|p| p.ends_with("15.0")));
+    }
+
+    #[test]
+    fn detect_includes_primary_target_when_verbose() {
+        let _guard = crate::context::TEST_LOCK.lock().unwrap();
+        crate::context::set_verbose(true);
+        let tmp = TempDir::new().unwrap();
+        // Need 4 versions with keep=2 so versions_to_delete() returns 2 entries
+        let ios = tmp.path().join("Library/Developer/Xcode/iOS DeviceSupport");
+        for v in &["14.0", "15.0", "16.0", "17.0"] {
+            fs::create_dir_all(ios.join(v)).unwrap();
+            fs::write(ios.join(v).join("dummy"), b"x").unwrap();
+        }
+
+        let cleaner = DeviceSupportCleaner::new(tmp.path(), 2, Box::new(SystemCommandRunner));
+        let result = cleaner.detect();
+        assert!(
+            result.primary_target.is_some(),
+            "primary_target should be set when verbose"
+        );
+        assert!(
+            result
+                .primary_target
+                .as_deref()
+                .unwrap()
+                .contains("Library/Developer/Xcode"),
+            "target should point to Xcode dev directory"
+        );
+        crate::context::set_verbose(false);
+    }
+
+    #[test]
+    fn detect_omits_primary_target_when_not_verbose() {
+        let _guard = crate::context::TEST_LOCK.lock().unwrap();
+        crate::context::set_verbose(false);
+        let tmp = TempDir::new().unwrap();
+        // Again need 4 versions so versions_to_delete() is non-empty
+        let ios = tmp.path().join("Library/Developer/Xcode/iOS DeviceSupport");
+        for v in &["14.0", "15.0", "16.0", "17.0"] {
+            fs::create_dir_all(ios.join(v)).unwrap();
+            fs::write(ios.join(v).join("dummy"), b"x").unwrap();
+        }
+
+        let cleaner = DeviceSupportCleaner::new(tmp.path(), 2, Box::new(SystemCommandRunner));
+        let result = cleaner.detect();
+        assert!(result.primary_target.is_none());
     }
 }

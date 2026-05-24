@@ -62,6 +62,86 @@ fn scan_shows_pruneable_for_existing_cache() {
 }
 
 #[test]
+fn scan_verbose_shows_target_column() {
+    let tmp = TempDir::new().unwrap();
+    let act_cache = tmp.path().join(".cache/act");
+    fs::create_dir_all(&act_cache).unwrap();
+    fs::write(act_cache.join("dummy.tar.gz"), b"x").unwrap();
+
+    let output = sasurahime(tmp.path())
+        .arg("scan")
+        .arg("--verbose")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    // The table header should include "Target"
+    assert!(
+        stdout.contains("Target"),
+        "expected 'Target' column header in verbose output:\n{stdout}"
+    );
+    // The act cleaner's primary target (.cache/act) should appear
+    assert!(
+        stdout.contains(".cache/act"),
+        "expected '.cache/act' in verbose output:\n{stdout}"
+    );
+}
+
+#[test]
+fn scan_with_dry_run_still_shows_scan_results() {
+    let tmp = TempDir::new().unwrap();
+    // Create a cache dir so some cleaners show as pruneable
+    let act_cache = tmp.path().join(".cache/act");
+    fs::create_dir_all(&act_cache).unwrap();
+    fs::write(act_cache.join("dummy.tar.gz"), b"x").unwrap();
+
+    // --dry-run is a no-op for scan (scan is read-only) but must not error
+    let output = sasurahime(tmp.path())
+        .arg("scan")
+        .arg("--dry-run")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("Category"),
+        "expected table header in output:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("act"),
+        "expected 'act' in output:\n{stdout}"
+    );
+}
+
+#[test]
+fn scan_with_both_verbose_and_dry_run_shows_target_column() {
+    let tmp = TempDir::new().unwrap();
+    let act_cache = tmp.path().join(".cache/act");
+    fs::create_dir_all(&act_cache).unwrap();
+    fs::write(act_cache.join("dummy.tar.gz"), b"x").unwrap();
+
+    let output = sasurahime(tmp.path())
+        .arg("scan")
+        .arg("--verbose")
+        .arg("--dry-run")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("Target"),
+        "expected 'Target' column header:\n{stdout}"
+    );
+    assert!(
+        stdout.contains(".cache/act"),
+        "expected '.cache/act' in verbose output:\n{stdout}"
+    );
+}
+
+#[test]
 fn scan_shows_not_found_for_missing_dirs() {
     let tmp = TempDir::new().unwrap();
     // Do NOT create any cache dirs in tmp

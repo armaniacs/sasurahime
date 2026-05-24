@@ -126,10 +126,7 @@ impl Cleaner for LogCleaner {
     fn detect(&self) -> ScanResult {
         let any_found = self.all_targets().any(|t| t.path.exists());
         if !any_found {
-            return ScanResult {
-                name: self.name(),
-                status: ScanStatus::NotFound,
-            };
+            return ScanResult::new(self.name(), ScanStatus::NotFound);
         }
         let bytes: u64 = self
             .all_targets()
@@ -137,14 +134,18 @@ impl Cleaner for LogCleaner {
             .filter_map(|p| fs::metadata(&p).ok())
             .map(|m| m.blocks() * 512)
             .sum();
-        ScanResult {
-            name: self.name(),
-            status: if bytes > 0 {
+        let r = ScanResult::new(
+            self.name(),
+            if bytes > 0 {
                 ScanStatus::Pruneable(bytes)
             } else {
                 ScanStatus::Clean
             },
-        }
+        );
+        // No primary_target: LogCleaner monitors multiple independent directories
+        // (kilo, opencode, claude-code, vscode-logs, user-configured extras).
+        // No single path can represent the full scope.
+        r
     }
 
     fn clean(&self, dry_run: bool, reporter: &dyn ProgressReporter) -> Result<CleanResult> {
@@ -336,5 +337,26 @@ mod tests {
             std::os::unix::fs::symlink("/dev/null", &p).unwrap();
             assert!(!LogCleaner::is_older_than(&fs::metadata(&p).unwrap(), 7));
         }
+    }
+
+    // ── primary_target ──────────────────────────────────────────────────────
+    #[test]
+    fn detect_primary_target_is_none_when_verbose() {
+        let _guard = crate::context::TEST_LOCK.lock().unwrap();
+        crate::context::set_verbose(true);
+        let tmp = TempDir::new().unwrap();
+        // Create a log dir with old files so detect() returns Pruneable
+        let log_dir = tmp.path().join(".local/share/kilo/log");
+        fs::create_dir_all(&log_dir).unwrap();
+        fs::write(log_dir.join("old.log"), b"content").unwrap();
+
+        let cleaner = LogCleaner::new(tmp.path(), 7);
+        let result = cleaner.detect();
+        // LogCleaner monitors multiple directories; primary_target should remain None
+        assert!(
+            result.primary_target.is_none(),
+            "LogCleaner has no single primary target"
+        );
+        crate::context::set_verbose(false);
     }
 }

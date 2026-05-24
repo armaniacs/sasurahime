@@ -453,7 +453,7 @@ pub fn offer_auto_clean(
     // always have their cache directories removed directly.
     let actionable: Vec<_> = hints
         .iter()
-        .filter(|h| h.running && h.entry.quit_app.is_some() || !h.running)
+        .filter(|h| !h.running || h.entry.quit_app.is_some())
         .collect();
 
     if actionable.is_empty() {

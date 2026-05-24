@@ -81,15 +81,13 @@ impl Cleaner for OllamaCleaner {
     fn detect(&self) -> ScanResult {
         let bytes = self.total_size();
         if bytes == 0 {
-            return ScanResult {
-                name: self.name(),
-                status: ScanStatus::NotFound,
-            };
+            return ScanResult::new(self.name(), ScanStatus::NotFound);
         }
-        ScanResult {
-            name: self.name(),
-            status: ScanStatus::Pruneable(bytes),
+        let mut r = ScanResult::new(self.name(), ScanStatus::Pruneable(bytes));
+        if crate::context::is_verbose() {
+            r = r.with_target(self.models_dir.to_string_lossy().to_string());
         }
+        r
     }
 
     fn clean(&self, dry_run: bool, reporter: &dyn ProgressReporter) -> Result<CleanResult> {

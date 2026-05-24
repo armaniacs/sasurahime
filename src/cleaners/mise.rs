@@ -160,18 +160,12 @@ impl Cleaner for MiseCleaner {
 
     fn detect(&self) -> ScanResult {
         if !self.runner.exists("mise") {
-            return ScanResult {
-                name: self.name(),
-                status: ScanStatus::NotFound,
-            };
+            return ScanResult::new(self.name(), ScanStatus::NotFound);
         }
         let output = match self.runner.run("mise", &["ls", "--current"]) {
             Ok(o) => o,
             Err(_) => {
-                return ScanResult {
-                    name: self.name(),
-                    status: ScanStatus::NotFound,
-                }
+                return ScanResult::new(self.name(), ScanStatus::NotFound);
             }
         };
         let stdout = String::from_utf8_lossy(&output.stdout);
@@ -179,14 +173,18 @@ impl Cleaner for MiseCleaner {
         let pinned = Self::scan_pinned_versions(&self.home);
         let unused = self.unused_versions(&active, &pinned);
         let bytes: u64 = unused.iter().map(|(_, _, p)| dir_size(p)).sum();
-        ScanResult {
-            name: self.name(),
-            status: if bytes > 0 {
+        let mut r = ScanResult::new(
+            self.name(),
+            if bytes > 0 {
                 ScanStatus::Pruneable(bytes)
             } else {
                 ScanStatus::Clean
             },
+        );
+        if crate::context::is_verbose() {
+            r = r.with_target(self.installs_dir.to_string_lossy().to_string());
         }
+        r
     }
 
     fn clean(&self, dry_run: bool, reporter: &dyn ProgressReporter) -> Result<CleanResult> {

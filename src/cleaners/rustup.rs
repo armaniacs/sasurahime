@@ -50,18 +50,12 @@ impl Cleaner for RustupCleaner {
 
     fn detect(&self) -> ScanResult {
         if !self.runner.exists("rustup") {
-            return ScanResult {
-                name: self.name(),
-                status: ScanStatus::NotFound,
-            };
+            return ScanResult::new(self.name(), ScanStatus::NotFound);
         }
         let output = match self.runner.run("rustup", &["toolchain", "list"]) {
             Ok(o) => o,
             Err(_) => {
-                return ScanResult {
-                    name: self.name(),
-                    status: ScanStatus::NotFound,
-                }
+                return ScanResult::new(self.name(), ScanStatus::NotFound);
             }
         };
         let stdout = String::from_utf8_lossy(&output.stdout);
@@ -81,14 +75,23 @@ impl Cleaner for RustupCleaner {
                 }
             })
             .sum();
-        ScanResult {
-            name: self.name(),
-            status: if bytes > 0 {
+        let dir_str = self
+            .home
+            .join(".rustup/toolchains")
+            .to_string_lossy()
+            .to_string();
+        let mut r = ScanResult::new(
+            self.name(),
+            if bytes > 0 {
                 ScanStatus::Pruneable(bytes)
             } else {
                 ScanStatus::Clean
             },
+        );
+        if crate::context::is_verbose() {
+            r = r.with_target(dir_str);
         }
+        r
     }
 
     fn clean(&self, dry_run: bool, _reporter: &dyn ProgressReporter) -> Result<CleanResult> {

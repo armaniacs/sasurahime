@@ -59,22 +59,21 @@ impl Cleaner for UvCleaner {
 
     fn detect(&self) -> ScanResult {
         if !self.cache_dir.exists() {
-            return ScanResult {
-                name: self.name(),
-                status: ScanStatus::NotFound,
-            };
+            return ScanResult::new(self.name(), ScanStatus::NotFound);
         }
-        // Measure the full cache dir: includes archive-v0, simple-vN indexes,
-        // and any other dust. This matches what clean() measures before/after.
         let bytes = dir_size(&self.cache_dir);
-        ScanResult {
-            name: self.name(),
-            status: if bytes > 0 {
+        let mut r = ScanResult::new(
+            self.name(),
+            if bytes > 0 {
                 ScanStatus::Pruneable(bytes)
             } else {
                 ScanStatus::Clean
             },
+        );
+        if crate::context::is_verbose() {
+            r = r.with_target(self.cache_dir.to_string_lossy().to_string());
         }
+        r
     }
 
     fn clean(&self, dry_run: bool, _reporter: &dyn ProgressReporter) -> Result<CleanResult> {

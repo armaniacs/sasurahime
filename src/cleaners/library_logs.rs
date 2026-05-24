@@ -132,21 +132,22 @@ impl Cleaner for LibraryLogsCleaner {
     fn detect(&self) -> ScanResult {
         let dir = self.logs_dir();
         if !dir.exists() {
-            return ScanResult {
-                name: self.name(),
-                status: ScanStatus::NotFound,
-            };
+            return ScanResult::new(self.name(), ScanStatus::NotFound);
         }
         let entries = self.scan();
         let total: u64 = entries.iter().map(|e| e.size).sum();
-        ScanResult {
-            name: self.name(),
-            status: if total > 0 {
+        let mut r = ScanResult::new(
+            self.name(),
+            if total > 0 {
                 ScanStatus::Pruneable(total)
             } else {
                 ScanStatus::Clean
             },
+        );
+        if crate::context::is_verbose() {
+            r = r.with_target(self.logs_dir().to_string_lossy().to_string());
         }
+        r
     }
 
     fn clean(&self, dry_run: bool, reporter: &dyn ProgressReporter) -> Result<CleanResult> {

@@ -29,10 +29,7 @@ impl Cleaner for IosCleaner {
 
     fn detect(&self) -> ScanResult {
         if !self.backup_dir.exists() {
-            return ScanResult {
-                name: self.name(),
-                status: ScanStatus::NotFound,
-            };
+            return ScanResult::new(self.name(), ScanStatus::NotFound);
         }
         let total: u64 = match fs::read_dir(&self.backup_dir) {
             Ok(entries) => entries
@@ -42,14 +39,18 @@ impl Cleaner for IosCleaner {
                 .sum(),
             Err(_) => 0,
         };
-        ScanResult {
-            name: self.name(),
-            status: if total > 0 {
+        let mut r = ScanResult::new(
+            self.name(),
+            if total > 0 {
                 ScanStatus::Pruneable(total)
             } else {
                 ScanStatus::Clean
             },
+        );
+        if crate::context::is_verbose() {
+            r = r.with_target(self.backup_dir.to_string_lossy().to_string());
         }
+        r
     }
 
     fn clean(&self, dry_run: bool, reporter: &dyn ProgressReporter) -> Result<CleanResult> {

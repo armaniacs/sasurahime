@@ -13,7 +13,7 @@ pub fn run_scan(cleaners: &[Box<dyn Cleaner>]) {
 
     let mut table = Table::new();
     table.load_preset(UTF8_FULL);
-    table.set_header(vec!["Category", "Size", "Status"]);
+    table.set_header(vec!["Category", "Size", "Status", "Target"]);
 
     let mut total: u64 = 0;
 
@@ -27,7 +27,8 @@ pub fn run_scan(cleaners: &[Box<dyn Cleaner>]) {
             ScanStatus::NotFound => ("-".to_string(), "not found"),
             ScanStatus::PermissionDenied => ("-".to_string(), "permission denied"),
         };
-        table.add_row(vec![r.name, &size, status]);
+        let target = r.primary_target.as_deref().unwrap_or("-");
+        table.add_row(vec![r.name, &size, status, target]);
     }
 
     println!("{table}");

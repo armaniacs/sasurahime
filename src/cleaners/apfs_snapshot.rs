@@ -33,26 +33,15 @@ impl Cleaner for ApfsSnapshotCleaner {
 
     fn detect(&self) -> ScanResult {
         if !self.runner.exists("tmutil") {
-            return ScanResult {
-                name: self.name(),
-                status: ScanStatus::NotFound,
-            };
+            return ScanResult::new(self.name(), ScanStatus::NotFound);
         }
         let output = match self.runner.run("tmutil", &["listlocalsnapshots", "/"]) {
             Ok(o) => o,
-            Err(_) => {
-                return ScanResult {
-                    name: self.name(),
-                    status: ScanStatus::NotFound,
-                }
-            }
+            Err(_) => return ScanResult::new(self.name(), ScanStatus::NotFound),
         };
         let names = parse_snapshot_names(&String::from_utf8_lossy(&output.stdout));
         if names.is_empty() {
-            return ScanResult {
-                name: self.name(),
-                status: ScanStatus::Clean,
-            };
+            return ScanResult::new(self.name(), ScanStatus::Clean);
         }
         // Try to measure /.MobileBackups if present; fall back to 0.
         let size = {
@@ -63,10 +52,9 @@ impl Cleaner for ApfsSnapshotCleaner {
                 0
             }
         };
-        ScanResult {
-            name: self.name(),
-            status: ScanStatus::Pruneable(size),
-        }
+        // No primary_target: ApfsSnapshotCleaner operates on system-local
+        // snapshots via tmutil, not a user HOME directory.
+        ScanResult::new(self.name(), ScanStatus::Pruneable(size))
     }
 
     fn clean(&self, dry_run: bool, _reporter: &dyn ProgressReporter) -> Result<CleanResult> {
@@ -279,5 +267,20 @@ mod tests {
         let reporter = crate::progress::VerboseProgress::new();
         let result = cleaner.clean(true, &reporter).unwrap();
         assert_eq!(result.bytes_freed, 0);
+    }
+
+    // ── primary_target ──────────────────────────────────────────────────────
+    #[test]
+    fn detect_primary_target_is_none_when_verbose() {
+        let cleaner = ApfsSnapshotCleaner::new(Box::new(NoSnapshots));
+        let _guard = crate::context::TEST_LOCK.lock().unwrap();
+        crate::context::set_verbose(true);
+        let result = cleaner.detect();
+        // ApfsSnapshotCleaner operates on system snapshots, not a user directory
+        assert!(
+            result.primary_target.is_none(),
+            "ApfsSnapshotCleaner has no primary target"
+        );
+        crate::context::set_verbose(false);
     }
 }

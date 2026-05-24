@@ -124,6 +124,84 @@ sasurahime clean browsers
 sasurahime clean logs
 ```
 
+### `sasurahime explore`
+
+OmniDiskSweeper-style disk explorer. Scans well-known cache and data directories,
+groups usage by first-level subdirectory (= app name), and lets you act on what you find.
+
+Unlike `scan`, `explore` covers **every** app's folder — not just the ones sasurahime
+has a registered cleaner for. It is the right tool when you want to answer
+"what is eating my disk?" without prior knowledge of the culprit.
+
+```bash
+$ sasurahime explore --top 5
+
+━━━ Managed by sasurahime ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+┌──────────────────────────────────────┬──────────┬──────────────────────────────┐
+│ Path                                 │ Size     │ Clean with                   │
+├──────────────────────────────────────┼──────────┼──────────────────────────────┤
+│ ~/Library/Caches/Homebrew            │  9.1 GB  │ sasurahime clean brew        │
+│ ~/.local/share/mise                  │  5.4 GB  │ sasurahime clean mise        │
+│ ~/.cache/uv                          │  1.8 GB  │ sasurahime clean uv          │
+└──────────────────────────────────────┴──────────┴──────────────────────────────┘
+
+Select managed entries to clean (space to toggle, enter to confirm):
+> [ ] ~/Library/Caches/Homebrew   9.1 GB
+  [ ] ~/.local/share/mise         5.4 GB
+  [ ] ~/.cache/uv                 1.8 GB
+
+━━━ Not managed by sasurahime ━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+┌──────────────────────────────────────┬──────────┐
+│ Path                                 │ Size     │
+├──────────────────────────────────────┼──────────┤
+│ ~/Library/Application Support/Adobe  │ 22.3 GB  │
+│ ~/Library/Application Support/Spotify│  3.2 GB  │
+└──────────────────────────────────────┴──────────┘
+
+Select unmanaged entries to inspect:
+> [ ] ~/Library/Application Support/Adobe    22.3 GB
+  [ ] ~/Library/Application Support/Spotify   3.2 GB
+```
+
+The output has two sections:
+
+- **Managed** — paths that sasurahime knows how to clean. Select entries to run
+  `sasurahime clean <target>` immediately. After cleaning, the table is refreshed
+  with updated sizes.
+- **Not managed** — everything else. Select entries to see the full path (for
+  copy-paste) and optionally open the folder in Finder.
+
+Default scan roots: `~/Library/Application Support/`, `~/Library/Caches/`,
+`~/.cache/`, `~/.local/share/`. Empty directories (size 0) are never shown.
+
+Requires a TTY (terminal).
+
+**Options:**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--top N` | 20 | Show top N largest entries per section |
+| `--all` | — | Show all entries (overrides `--top`) |
+| `--dir PATH` | — | Scan this root instead of defaults (repeatable; replaces defaults entirely) |
+
+**Examples:**
+
+```bash
+# Default: top 20 per section across 4 default roots
+sasurahime explore
+
+# Show only the 5 biggest entries per section
+sasurahime explore --top 5
+
+# Scan a single directory, show all entries
+sasurahime explore --dir ~/Library/Application\ Support --all
+
+# Preview managed cleans without deleting
+sasurahime explore --dry-run
+```
+
 ### `sasurahime` (no arguments)
 
 Opens an interactive TUI with a checkbox list. Select which cache targets to
@@ -457,6 +535,77 @@ sasurahime clean brew
 sasurahime clean mise
 sasurahime clean browsers
 sasurahime clean logs
+```
+
+### `sasurahime explore`
+
+OmniDiskSweeper 風のディスク探索コマンドです。よく知られたキャッシュ・データディレクトリをスキャンし、第1レベルのサブディレクトリ（＝アプリ名）ごとに使用量をまとめて、発見したものに対してその場でアクションを取れます。
+
+`scan` と異なり、`explore` は sasurahime がクリーナーを登録していないアプリのフォルダも含め **すべて** カバーします。「ディスクを食っているのは誰か？」を犯人不明の状態から調べるときに最適です。
+
+```bash
+$ sasurahime explore --top 5
+
+━━━ Managed by sasurahime ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+┌──────────────────────────────────────┬──────────┬──────────────────────────────┐
+│ Path                                 │ Size     │ Clean with                   │
+├──────────────────────────────────────┼──────────┼──────────────────────────────┤
+│ ~/Library/Caches/Homebrew            │  9.1 GB  │ sasurahime clean brew        │
+│ ~/.local/share/mise                  │  5.4 GB  │ sasurahime clean mise        │
+│ ~/.cache/uv                          │  1.8 GB  │ sasurahime clean uv          │
+└──────────────────────────────────────┴──────────┴──────────────────────────────┘
+
+Select managed entries to clean (space to toggle, enter to confirm):
+> [ ] ~/Library/Caches/Homebrew   9.1 GB
+  [ ] ~/.local/share/mise         5.4 GB
+  [ ] ~/.cache/uv                 1.8 GB
+
+━━━ Not managed by sasurahime ━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+┌──────────────────────────────────────┬──────────┐
+│ Path                                 │ Size     │
+├──────────────────────────────────────┼──────────┤
+│ ~/Library/Application Support/Adobe  │ 22.3 GB  │
+│ ~/Library/Application Support/Spotify│  3.2 GB  │
+└──────────────────────────────────────┴──────────┘
+
+Select unmanaged entries to inspect:
+> [ ] ~/Library/Application Support/Adobe    22.3 GB
+  [ ] ~/Library/Application Support/Spotify   3.2 GB
+```
+
+出力は2つのセクションに分かれています：
+
+- **Managed（管理済み）** — sasurahime がクリーン方法を知っているパス。エントリを選択すると即座に `sasurahime clean <target>` を実行します。クリーン後はテーブルが更新されたサイズで再表示されます。
+- **Not managed（未管理）** — それ以外のすべて。エントリを選択するとフルパスを表示（コピー用）し、Finder でフォルダを開くか確認します。
+
+デフォルトのスキャン対象：`~/Library/Application Support/`・`~/Library/Caches/`・`~/.cache/`・`~/.local/share/`。サイズ 0（空）のディレクトリは表示されません。
+
+TTY（ターミナル）が必要です。
+
+**オプション：**
+
+| フラグ | デフォルト | 説明 |
+|--------|------------|------|
+| `--top N` | 20 | セクションごとに上位 N 件を表示 |
+| `--all` | — | すべて表示（`--top` を上書き） |
+| `--dir PATH` | — | デフォルトの代わりにこのルートをスキャン（繰り返し可、デフォルトを完全置換） |
+
+**実行例：**
+
+```bash
+# デフォルト：4つのデフォルトルートからセクションごと上位 20 件
+sasurahime explore
+
+# セクションごとに上位 5 件のみ表示
+sasurahime explore --top 5
+
+# 単一ディレクトリをスキャンしてすべて表示
+sasurahime explore --dir ~/Library/Application\ Support --all
+
+# 実際に削除せずにクリーン対象をプレビュー
+sasurahime explore --dry-run
 ```
 
 ### `sasurahime`（引数なし）

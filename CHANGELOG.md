@@ -4,13 +4,76 @@ All notable changes to sasurahime will be documented in this file. The format is
 
 ---
 
+## [0.1.20] — 2026-05-24
+
+### Added
+
+- **`sasurahime explore` — OmniDiskSweeper-style disk explorer.** Scans
+  `~/Library/Application Support/`, `~/Library/Caches/`, `~/.cache/`, and
+  `~/.local/share/` at first-level depth, groups by app name, and sorts by
+  size descending. Unlike `scan`, `explore` covers every app folder —
+  not just registered cleaners — answering "who is eating my disk?" without
+  prior knowledge of the culprit.
+
+  The interactive output has two sections:
+
+  - **Managed** — paths owned by a registered sasurahime cleaner. Select
+    entries to run `sasurahime clean <target>` in-session. After cleaning,
+    the managed table is re-scanned and reprinted with updated sizes.
+  - **Not managed** — everything else. Select entries to display the full
+    path (for copy-paste) and optionally open the folder in Finder.
+
+  Options: `--top N` (default 20, per section), `--all` (show everything),
+  `--dir PATH` (repeatable; replaces default roots entirely), `--dry-run`
+  (forwarded to any clean subprocess). Requires an interactive TTY; exits
+  with code 1 in non-TTY environments.
+
+- **`src/explorer.rs`** new module implementing:
+  - `MANAGED_PATTERNS` — 18 hardcoded path patterns mapping cache directories
+    to their `sasurahime clean <target>` names, including glob-prefix support
+    (`ms-playwright*`).
+  - `collect_entries` — first-level directory scan; skips missing roots,
+    permission errors, and size-0 entries silently.
+  - `apply_top` — `sort_unstable_by_key(Reverse(size))` + truncate.
+  - `explore_results` — `pub(crate)` testable core (no dialoguer dependency).
+  - `run_explore` — full interactive flow with TTY guard, `dialoguer::MultiSelect`
+    for both sections, subprocess spawn via `std::env::current_exe()`.
+
+### Documentation
+
+- **HOWTO-USE.md** (EN + JA): added `sasurahime explore` section with
+  annotated output example, two-section behaviour description, options table,
+  and usage examples.
+
+### Internal
+
+- 18 new unit tests in `src/explorer.rs` covering all pure functions
+  (`is_managed`, `default_roots`, `collect_entries`, `apply_top`,
+  `explore_results`) with `tempfile::TempDir` fixtures. No real `~/Library`
+  access in tests.
+
+---
+
 ## [0.1.19] — 2026-05-23
+
+### Added
+
+- **`--verbose` flag for detailed operation output.** When `--verbose` is set:
+  - `sasurahime scan` displays a 4th "Target" column showing the primary cache
+    directory each cleaner monitors (e.g. `~/.cache/uv`, `~/.colima`).
+  - `sasurahime clean` prints per-file/dir removal details for every cleaner.
+  - The flag is global and works with all subcommands (scan, clean, targets).
+- **`--dry-run` global flag.** Shows what would be cleaned without deleting
+  anything. Works alongside `--verbose` for previewing cleanup operations.
 
 ### Changed
 
 - **`sasurahime targets` output is now sorted alphabetically.** Previously the
   target list appeared in declaration order (macro order + manual entries
   appended). Now all targets are sorted by name for easier browsing.
+- **Scan result table now includes a "Target" column.** This column is always
+  present in the table but shows `"-"` when `--verbose` is not active. Each
+  cleaner reports its primary monitored path when verbose mode is on.
 
 ## [0.1.18] — 2026-05-22
 

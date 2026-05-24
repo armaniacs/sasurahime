@@ -62,14 +62,19 @@ impl Cleaner for CargoCleaner {
         }
 
         let total = reg_size + target_size;
-        ScanResult {
-            name: self.name(),
-            status: if total > 0 {
+        let mut r = ScanResult::new(
+            self.name(),
+            if total > 0 {
                 ScanStatus::Pruneable(total)
             } else {
                 ScanStatus::Clean
             },
+        );
+        if crate::context::is_verbose() {
+            // Report the Cargo registry cache as primary target.
+            r = r.with_target(reg.to_string_lossy().to_string());
         }
+        r
     }
 
     fn clean(&self, dry_run: bool, reporter: &dyn ProgressReporter) -> Result<CleanResult> {
@@ -123,5 +128,54 @@ impl Cleaner for CargoCleaner {
             name: self.name(),
             bytes_freed: freed,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::command::SystemCommandRunner;
+    use std::fs;
+    use tempfile::TempDir;
+
+    #[test]
+    fn detect_includes_primary_target_when_verbose() {
+        let _guard = crate::context::TEST_LOCK.lock().unwrap();
+        crate::context::set_verbose(true);
+        let tmp = TempDir::new().unwrap();
+        // Create registry cache so the cleaner reports Pruneable
+        let reg = tmp.path().join(".cargo/registry/cache/pkg");
+        fs::create_dir_all(&reg).unwrap();
+        fs::write(reg.join("dummy.crate"), b"x").unwrap();
+
+        let cleaner = CargoCleaner::new(tmp.path(), Box::new(SystemCommandRunner));
+        let result = cleaner.detect();
+        assert!(
+            result.primary_target.is_some(),
+            "primary_target should be set when verbose"
+        );
+        assert!(
+            result
+                .primary_target
+                .as_deref()
+                .unwrap()
+                .contains(".cargo/registry/cache"),
+            "target should point to registry cache"
+        );
+        crate::context::set_verbose(false);
+    }
+
+    #[test]
+    fn detect_omits_primary_target_when_not_verbose() {
+        let _guard = crate::context::TEST_LOCK.lock().unwrap();
+        crate::context::set_verbose(false);
+        let tmp = TempDir::new().unwrap();
+        let reg = tmp.path().join(".cargo/registry/cache/pkg");
+        fs::create_dir_all(&reg).unwrap();
+        fs::write(reg.join("dummy.crate"), b"x").unwrap();
+
+        let cleaner = CargoCleaner::new(tmp.path(), Box::new(SystemCommandRunner));
+        let result = cleaner.detect();
+        assert!(result.primary_target.is_none());
     }
 }

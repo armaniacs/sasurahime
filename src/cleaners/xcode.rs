@@ -48,20 +48,21 @@ impl Cleaner for XcodeCleaner {
 
     fn detect(&self) -> ScanResult {
         if !self.derived_data.exists() {
-            return ScanResult {
-                name: self.name(),
-                status: ScanStatus::NotFound,
-            };
+            return ScanResult::new(self.name(), ScanStatus::NotFound);
         }
         let bytes = dir_size(&self.derived_data);
-        ScanResult {
-            name: self.name(),
-            status: if bytes > 0 {
+        let mut r = ScanResult::new(
+            self.name(),
+            if bytes > 0 {
                 ScanStatus::Pruneable(bytes)
             } else {
                 ScanStatus::Clean
             },
+        );
+        if crate::context::is_verbose() {
+            r = r.with_target(self.derived_data.to_string_lossy().to_string());
         }
+        r
     }
 
     fn clean(&self, dry_run: bool, reporter: &dyn ProgressReporter) -> Result<CleanResult> {

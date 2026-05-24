@@ -60,21 +60,27 @@ impl Cleaner for GradleCleaner {
     fn detect(&self) -> ScanResult {
         let caches = self.home.join(".gradle/caches");
         if !caches.exists() {
-            return ScanResult {
-                name: self.name(),
-                status: ScanStatus::NotFound,
-            };
+            return ScanResult::new(self.name(), ScanStatus::NotFound);
         }
         let old = Self::find_old_caches(&caches);
         let bytes: u64 = old.iter().map(|p| dir_size(p)).sum();
-        ScanResult {
-            name: self.name(),
-            status: if bytes > 0 {
+        let mut r = ScanResult::new(
+            self.name(),
+            if bytes > 0 {
                 ScanStatus::Pruneable(bytes)
             } else {
                 ScanStatus::Clean
             },
+        );
+        if crate::context::is_verbose() {
+            r = r.with_target(
+                self.home
+                    .join(".gradle/caches")
+                    .to_string_lossy()
+                    .to_string(),
+            );
         }
+        r
     }
 
     fn clean(&self, dry_run: bool, _reporter: &dyn ProgressReporter) -> Result<CleanResult> {
@@ -181,21 +187,27 @@ impl Cleaner for JetBrainsCleaner {
     fn detect(&self) -> ScanResult {
         let dir = self.home.join("Library/Caches/JetBrains");
         if !dir.exists() {
-            return ScanResult {
-                name: self.name(),
-                status: ScanStatus::NotFound,
-            };
+            return ScanResult::new(self.name(), ScanStatus::NotFound);
         }
         let old = Self::find_old_caches(&dir);
         let bytes: u64 = old.iter().map(|p| dir_size(p)).sum();
-        ScanResult {
-            name: self.name(),
-            status: if bytes > 0 {
+        let mut r = ScanResult::new(
+            self.name(),
+            if bytes > 0 {
                 ScanStatus::Pruneable(bytes)
             } else {
                 ScanStatus::Clean
             },
+        );
+        if crate::context::is_verbose() {
+            r = r.with_target(
+                self.home
+                    .join("Library/Caches/JetBrains")
+                    .to_string_lossy()
+                    .to_string(),
+            );
         }
+        r
     }
 
     fn clean(&self, dry_run: bool, _reporter: &dyn ProgressReporter) -> Result<CleanResult> {
