@@ -1,6 +1,6 @@
 [package]
 name = "sasurahime"
-version = "0.1.21"
+version = "0.1.22"
 edition = "2021"
 description = "macOS developer cache cleaner — scan and wipe stale caches from 40+ tools"
 repository = "https://github.com/armaniacs/sasurahime"
@@ -23,6 +23,7 @@ toml        = "1.1"
 serde       = { version = "1", features = ["derive"] }
 wait-timeout = "0.2"
 trash = "5"
+rayon = "1"
 
 [profile.release]
 opt-level      = "z"      # Aggressive size optimization (s proved larger)

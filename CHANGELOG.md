@@ -4,6 +4,46 @@ All notable changes to sasurahime will be documented in this file. The format is
 
 ---
 
+## [0.1.22] — 2026-05-25
+
+### Added
+
+- **Parallel scan optimization (PBI-A).** `sasurahime scan` now runs cleaner
+  `detect()` calls in parallel via `rayon::par_iter()`, with a consolidated
+  progress bar showing scan completion count. Scan time is bounded by the
+  slowest cleaner rather than the sum of all cleaners.
+- **`Cleaner::is_available()` trait method.** Binary-checking cleaners (uv,
+  brew, mise, rustup, apfs-snapshot, ollama, and all GenericCleaner command
+  variants) now expose availability via `self.runner.exists("tool")`. The scan
+  phase pre-filters unavailable cleaners, skipping `detect()` entirely for
+  tools not installed — eliminating I/O overhead for 40+ unused targets.
+- **Parallel scan in interactive/auto modes.** Both `sasurahime --yes` and the
+  interactive TUI scan phases use the same parallel `with_parallel_scan()`
+  progress bar.
+
+### Changed
+
+- **Scanner progress display:** Replaced per-cleaner sequential spinners
+  (`"Scanning uv..."`, `"Scanning brew..."`, …) with a single consolidated
+  bar: `[{spinner} {bar:20}] Scanning... (3/12)`.
+- **`with_spinner()` retained** for potential future use (marked
+  `#[expect(dead_code)]`).
+
+### Internal
+
+- **New dependency:** `rayon = "1"` added to `Cargo.toml`.
+- **New progress helper:** `with_parallel_scan(total, |pb| …)` in
+  `src/progress.rs` — accepts `&ProgressBar` for rayon-thread-safe progress
+  updates.
+- **3 unit tests** in `scanner.rs`: empty cleaners, mixed availability,
+  default `is_available()` returns true.
+- **2 integration tests** in `tests/scan.rs`: table headers, size display
+  with existing cache dir.
+- Updated `tests/interactive.rs` spinner assertions to match consolidated
+  progress output; updated VERSION constant to `0.1.22`.
+
+---
+
 ## [0.1.21] — 2026-05-25
 
 ### Added

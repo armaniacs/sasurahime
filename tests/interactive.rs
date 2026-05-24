@@ -2,7 +2,7 @@ use assert_cmd::Command;
 use std::fs;
 use tempfile::TempDir;
 
-const VERSION: &str = "0.1.19";
+const VERSION: &str = "0.1.22";
 
 fn sasurahime(home: &std::path::Path) -> Command {
     let mut cmd = Command::cargo_bin("sasurahime").unwrap();
@@ -254,7 +254,7 @@ fn yes_flag_shows_progress_spinner() {
 }
 
 #[test]
-fn yes_flag_shows_detect_spinner() {
+fn yes_flag_shows_detect_progress() {
     let tmp = TempDir::new().unwrap();
     let bin_dir = tmp.path().join("bin");
     fs::create_dir_all(&bin_dir).unwrap();
@@ -280,21 +280,25 @@ fn yes_flag_shows_detect_spinner() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     let combined = format!("{stdout}{stderr}");
     assert!(
-        combined.contains("Scanning"),
-        "detect spinner must appear in --yes output, got combined: {combined}"
+        combined.contains("Scan complete"),
+        "scan progress message must appear in --yes output, got combined: {combined}"
     );
 }
 
 #[test]
-fn scan_shows_progress_spinner() {
+fn scan_shows_parallel_progress() {
     let tmp = TempDir::new().unwrap();
     let output = sasurahime(tmp.path()).args(["scan"]).output().unwrap();
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stdout.contains("Scanning") || stderr.contains("Scanning"),
+        stdout.contains("Category") || stderr.contains("Category"),
         "stdout: {stdout}\nstderr: {stderr}"
+    );
+    assert!(
+        stderr.contains("Scan complete"),
+        "parallel scan must show 'Scan complete', stderr: {stderr}"
     );
 }
 
