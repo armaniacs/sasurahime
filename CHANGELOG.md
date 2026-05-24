@@ -4,6 +4,36 @@ All notable changes to sasurahime will be documented in this file. The format is
 
 ---
 
+## [0.1.21] — 2026-05-25
+
+### Added
+
+- **primary_target now available for all 17 cleaners.** The remaining 5 cleaners
+  (browser, cargo, device_support, log, apfs_snapshot) now report their primary
+  path when `--verbose` is active. browser → `~/.cache/puppeteer/chrome`,
+  cargo → `~/.cargo/registry/cache`, device_support → `~/Library/Developer/Xcode`.
+  log and apfs_snapshot explicitly return `None` (multiple targets / no user
+  HOME directory).
+- **14 new unit tests** covering `primary_target` behavior for all 5
+  previously-missing cleaners (both verbose-on and verbose-off cases).
+
+### Changed
+
+- **Non-running app cache cleanup (hint.rs):** `sasurahime --yes` and interactive
+  auto-clean now prompt for non-running apps with known cache directories and
+  delete them directly (no quit/relaunch needed). Previously only running apps
+  were offered for cleanup.
+- **Double confirmation suppressed (interactive.rs):** `run_auto` and
+  `run_interactive` now suppress secondary confirmation prompts inside cleaners
+  via `set_skip_confirm(true)` since the TUI already asked "Proceed?".
+
+### Internal
+
+- **Completed plans archived:** Moved 3 completed implementation plans
+  (lucky-panda, explore-command, ios-backup-apfs-snapshot) to `.plan/archived/`.
+
+---
+
 ## [0.1.20] — 2026-05-24
 
 ### Added
