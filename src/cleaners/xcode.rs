@@ -71,6 +71,7 @@ impl Cleaner for XcodeCleaner {
             return Ok(CleanResult {
                 name: self.name(),
                 bytes_freed: 0,
+                skipped: vec![],
             });
         }
 
@@ -86,6 +87,7 @@ impl Cleaner for XcodeCleaner {
                 return Ok(CleanResult {
                     name: self.name(),
                     bytes_freed: 0,
+                    skipped: vec![],
                 });
             }
         }
@@ -95,6 +97,7 @@ impl Cleaner for XcodeCleaner {
             reporter.progress_init(self.name(), dirs.len());
         }
 
+        let mut skipped: Vec<crate::cleaner::SkippedEntry> = vec![];
         let mut freed: u64 = 0;
         for (i, dir) in dirs.iter().enumerate() {
             let size = dir_size(dir);
@@ -106,9 +109,19 @@ impl Cleaner for XcodeCleaner {
                 );
             } else {
                 reporter.progress_tick(dir, i + 1, size);
-                crate::trash::delete_path(dir)?;
-                freed += size;
-                println!("Removed: DerivedData/{entry_name}");
+                if let Err(e) = crate::trash::delete_path(dir) {
+                    if crate::cleaner::is_skippable_error(&e) {
+                        skipped.push(crate::cleaner::SkippedEntry {
+                            path: dir.to_path_buf(),
+                            reason: format!("{e:#}"),
+                        });
+                    } else {
+                        return Err(e);
+                    }
+                } else {
+                    freed += size;
+                    println!("Removed: DerivedData/{entry_name}");
+                }
             }
         }
 
@@ -119,6 +132,7 @@ impl Cleaner for XcodeCleaner {
         Ok(CleanResult {
             name: self.name(),
             bytes_freed: freed,
+            skipped,
         })
     }
 }

@@ -78,6 +78,7 @@ impl Cleaner for CargoCleaner {
     }
 
     fn clean(&self, dry_run: bool, reporter: &dyn ProgressReporter) -> Result<CleanResult> {
+        let mut skipped: Vec<crate::cleaner::SkippedEntry> = vec![];
         let mut freed: u64 = 0;
 
         let reg = self.home.join(".cargo/registry/cache");
@@ -93,9 +94,19 @@ impl Cleaner for CargoCleaner {
                 self.runner
                     .run("chflags", &["-R", "nouchg", &reg.to_string_lossy()])
                     .ok();
-                crate::trash::delete_path(&reg)?;
-                freed += size;
-                println!("[cargo] removed registry cache: {}", reg.display());
+                if let Err(e) = crate::trash::delete_path(&reg) {
+                    if crate::cleaner::is_skippable_error(&e) {
+                        skipped.push(crate::cleaner::SkippedEntry {
+                            path: reg.to_path_buf(),
+                            reason: format!("{e:#}"),
+                        });
+                    } else {
+                        return Err(e);
+                    }
+                } else {
+                    freed += size;
+                    println!("[cargo] removed registry cache: {}", reg.display());
+                }
             }
         }
 
@@ -115,9 +126,19 @@ impl Cleaner for CargoCleaner {
                 self.runner
                     .run("chflags", &["-R", "nouchg", &path.to_string_lossy()])
                     .ok();
-                crate::trash::delete_path(path)?;
-                freed += size;
-                println!("[cargo] removed target dir: {}", path.display());
+                if let Err(e) = crate::trash::delete_path(path) {
+                    if crate::cleaner::is_skippable_error(&e) {
+                        skipped.push(crate::cleaner::SkippedEntry {
+                            path: path.to_path_buf(),
+                            reason: format!("{e:#}"),
+                        });
+                    } else {
+                        return Err(e);
+                    }
+                } else {
+                    freed += size;
+                    println!("[cargo] removed target dir: {}", path.display());
+                }
             }
         }
         if !dry_run && !targets.is_empty() {
@@ -127,6 +148,7 @@ impl Cleaner for CargoCleaner {
         Ok(CleanResult {
             name: self.name(),
             bytes_freed: freed,
+            skipped,
         })
     }
 }

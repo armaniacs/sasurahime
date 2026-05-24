@@ -44,6 +44,10 @@ impl RustupCleaner {
 }
 
 impl Cleaner for RustupCleaner {
+    fn is_available(&self) -> bool {
+        self.runner.exists("rustup")
+    }
+
     fn name(&self) -> &'static str {
         "rustup"
     }
@@ -100,6 +104,7 @@ impl Cleaner for RustupCleaner {
             return Ok(CleanResult {
                 name: self.name(),
                 bytes_freed: 0,
+                skipped: vec![],
             });
         }
         let output = self.runner.run("rustup", &["toolchain", "list"])?;
@@ -134,6 +139,7 @@ impl Cleaner for RustupCleaner {
         Ok(CleanResult {
             name: self.name(),
             bytes_freed: freed,
+            skipped: vec![],
         })
     }
 }

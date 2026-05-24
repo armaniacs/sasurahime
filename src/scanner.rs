@@ -1,15 +1,23 @@
 use crate::cleaner::{Cleaner, ScanStatus};
 use crate::format::format_bytes;
 use comfy_table::{presets::UTF8_FULL, Table};
+use rayon::prelude::*;
 
 pub fn run_scan(cleaners: &[Box<dyn Cleaner>]) {
-    let results: Vec<_> = cleaners
-        .iter()
-        .map(|c| {
-            let name = c.name();
-            crate::progress::with_spinner(&format!("Scanning {name}..."), || c.detect())
-        })
-        .collect();
+    // Pre-filter: skip cleaners whose binary is not installed
+    let available: Vec<&Box<dyn Cleaner>> = cleaners.iter().filter(|c| c.is_available()).collect();
+    let total_available = available.len();
+
+    let results: Vec<_> = crate::progress::with_parallel_scan(total_available, |pb| {
+        available
+            .par_iter()
+            .map(|c| {
+                let r = c.detect();
+                pb.inc(1);
+                r
+            })
+            .collect()
+    });
 
     let mut table = Table::new();
     table.load_preset(UTF8_FULL);

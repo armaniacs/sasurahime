@@ -583,7 +583,7 @@ fn run_clean_target<F>(
     cleaner_fn: F,
     dry_run: bool,
     reporter: &dyn ProgressReporter,
-) -> anyhow::Result<()>
+) -> anyhow::Result<CleanResult>
 where
     F: FnOnce(bool, &dyn ProgressReporter) -> anyhow::Result<CleanResult>,
 {
@@ -601,7 +601,11 @@ where
             Err(e) if e.is::<CleanCancelled>() => {
                 // User cancelled — clean shutdown, no [FAILED], no Freed line.
                 // The hint was already printed in GenericCleaner.
-                return Ok(());
+                return Ok(CleanResult {
+                    name: "",
+                    bytes_freed: 0,
+                    skipped: vec![],
+                });
             }
             Err(e) => {
                 eprintln!(" [FAILED]");
@@ -612,7 +616,13 @@ where
         let r = cleaner_fn(dry_run, reporter);
         match r {
             Ok(v) => v,
-            Err(e) if e.is::<CleanCancelled>() => return Ok(()),
+            Err(e) if e.is::<CleanCancelled>() => {
+                return Ok(CleanResult {
+                    name: "",
+                    bytes_freed: 0,
+                    skipped: vec![],
+                })
+            }
             Err(e) => return Err(e),
         }
     };
@@ -627,7 +637,18 @@ where
             println!("Freed: {}", crate::format::format_bytes(result.bytes_freed));
         }
     }
-    Ok(())
+
+    if !result.skipped.is_empty() {
+        eprintln!(
+            "{} file(s) skipped due to errors (permission/lock):",
+            result.skipped.len()
+        );
+        for entry in &result.skipped {
+            eprintln!("  - {}: {}", entry.path.display(), entry.reason);
+        }
+    }
+
+    Ok(result)
 }
 
 fn build_reporter(cli: &Cli, config: &Config) -> Box<dyn ProgressReporter> {
@@ -773,7 +794,7 @@ fn main() -> anyhow::Result<()> {
                                 exclude: t.exclude.clone(),
                             })
                             .collect();
-                        run_clean_target(
+                        let result = run_clean_target(
                             "logs",
                             |dry, rep| {
                                 cleaners::log::LogCleaner::new_with_extra(&home, days, extra)
@@ -782,6 +803,9 @@ fn main() -> anyhow::Result<()> {
                             dry_run,
                             reporter.as_ref(),
                         )?;
+                        if result.exit_code() != 0 {
+                            std::process::exit(1);
+                        }
                     }
                     CleanTarget::Xcode { dry_run } => {
                         let xcode_cleaner = cleaners::xcode::XcodeCleaner::new(
@@ -791,12 +815,15 @@ fn main() -> anyhow::Result<()> {
                         if cli.yes && xcode_cleaner.is_xcode_running() {
                             eprintln!("Note: Xcode is running. Proceeding with --yes anyway.");
                         }
-                        run_clean_target(
+                        let result = run_clean_target(
                             "xcode",
                             |dry, rep| xcode_cleaner.clean(dry, rep),
                             dry_run,
                             reporter.as_ref(),
                         )?;
+                        if result.exit_code() != 0 {
+                            std::process::exit(1);
+                        }
                     }
                     CleanTarget::Trash { dry_run } => {
                         let cleaner = cleaners::generic::GenericCleaner::trash(
@@ -816,12 +843,15 @@ fn main() -> anyhow::Result<()> {
                             &home,
                             Box::new(SystemCommandRunner),
                         );
-                        run_clean_target(
+                        let result = run_clean_target(
                             "ollama",
                             move |dry, rep| cleaner.clean(dry, rep),
                             dry_run,
                             reporter.as_ref(),
                         )?;
+                        if result.exit_code() != 0 {
+                            std::process::exit(1);
+                        }
                     }
                     CleanTarget::LibraryLogs { dry_run, all } => {
                         let cleaner = cleaners::library_logs::LibraryLogsCleaner::new(
@@ -829,19 +859,25 @@ fn main() -> anyhow::Result<()> {
                             Box::new(SystemCommandRunner),
                         );
                         if all {
-                            run_clean_target(
+                            let result = run_clean_target(
                                 "library-logs",
                                 move |dry, rep| cleaner.clean_all(dry, rep),
                                 dry_run,
                                 reporter.as_ref(),
                             )?;
+                            if result.exit_code() != 0 {
+                                std::process::exit(1);
+                            }
                         } else {
-                            run_clean_target(
+                            let result = run_clean_target(
                                 "library-logs",
                                 move |dry, rep| cleaner.clean(dry, rep),
                                 dry_run,
                                 reporter.as_ref(),
                             )?;
+                            if result.exit_code() != 0 {
+                                std::process::exit(1);
+                            }
                         }
                     }
                     CleanTarget::DeviceSupport { dry_run, keep } => {
@@ -850,46 +886,58 @@ fn main() -> anyhow::Result<()> {
                             keep,
                             Box::new(SystemCommandRunner),
                         );
-                        run_clean_target(
+                        let result = run_clean_target(
                             "device-support",
                             move |dry, rep| cleaner.clean(dry, rep),
                             dry_run,
                             reporter.as_ref(),
                         )?;
+                        if result.exit_code() != 0 {
+                            std::process::exit(1);
+                        }
                     }
                     CleanTarget::IosBackup { dry_run } => {
                         let cleaner = cleaners::ios_backup::IosCleaner::new(
                             &home,
                             Box::new(SystemCommandRunner),
                         );
-                        run_clean_target(
+                        let result = run_clean_target(
                             "ios-backup",
                             move |dry, rep| cleaner.clean(dry, rep),
                             dry_run,
                             reporter.as_ref(),
                         )?;
+                        if result.exit_code() != 0 {
+                            std::process::exit(1);
+                        }
                     }
                     CleanTarget::ApfsSnapshot { dry_run } => {
                         let cleaner = cleaners::apfs_snapshot::ApfsSnapshotCleaner::new(Box::new(
                             SystemCommandRunner,
                         ));
-                        run_clean_target(
+                        let result = run_clean_target(
                             "apfs-snapshot",
                             move |dry, rep| cleaner.clean(dry, rep),
                             dry_run,
                             reporter.as_ref(),
                         )?;
+                        if result.exit_code() != 0 {
+                            std::process::exit(1);
+                        }
                     }
                     _ => unreachable!(),
                 }
             } else {
                 // --- Standard targets: dispatch through macro-generated handler ---
-                run_clean_target(
+                let result = run_clean_target(
                     target.command_name(),
                     |dry, rep| dispatch_clean(&home, &config, &target, dry, rep),
                     target.dry_run(),
                     reporter.as_ref(),
                 )?;
+                if result.exit_code() != 0 {
+                    std::process::exit(1);
+                }
             }
         }
     }

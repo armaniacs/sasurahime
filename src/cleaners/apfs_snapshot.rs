@@ -27,6 +27,10 @@ pub fn parse_snapshot_names(output: &str) -> Vec<String> {
 }
 
 impl Cleaner for ApfsSnapshotCleaner {
+    fn is_available(&self) -> bool {
+        self.runner.exists("tmutil")
+    }
+
     fn name(&self) -> &'static str {
         "apfs-snapshot"
     }
@@ -62,6 +66,7 @@ impl Cleaner for ApfsSnapshotCleaner {
             return Ok(CleanResult {
                 name: self.name(),
                 bytes_freed: 0,
+                skipped: vec![],
             });
         }
         let output = self.runner.run("tmutil", &["listlocalsnapshots", "/"])?;
@@ -71,6 +76,7 @@ impl Cleaner for ApfsSnapshotCleaner {
             return Ok(CleanResult {
                 name: self.name(),
                 bytes_freed: 0,
+                skipped: vec![],
             });
         }
 
@@ -86,6 +92,7 @@ impl Cleaner for ApfsSnapshotCleaner {
             return Ok(CleanResult {
                 name: self.name(),
                 bytes_freed: 0,
+                skipped: vec![],
             });
         }
 
@@ -97,6 +104,7 @@ impl Cleaner for ApfsSnapshotCleaner {
             return Ok(CleanResult {
                 name: self.name(),
                 bytes_freed: 0,
+                skipped: vec![],
             });
         }
 
@@ -106,6 +114,7 @@ impl Cleaner for ApfsSnapshotCleaner {
             return Ok(CleanResult {
                 name: self.name(),
                 bytes_freed: 0,
+                skipped: vec![],
             });
         }
 
@@ -123,6 +132,7 @@ impl Cleaner for ApfsSnapshotCleaner {
         Ok(CleanResult {
             name: self.name(),
             bytes_freed: 0,
+            skipped: vec![],
         })
     }
 }

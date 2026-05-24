@@ -154,6 +154,10 @@ impl MiseCleaner {
 }
 
 impl Cleaner for MiseCleaner {
+    fn is_available(&self) -> bool {
+        self.runner.exists("mise")
+    }
+
     fn name(&self) -> &'static str {
         "mise"
     }
@@ -193,6 +197,7 @@ impl Cleaner for MiseCleaner {
             return Ok(CleanResult {
                 name: self.name(),
                 bytes_freed: 0,
+                skipped: vec![],
             });
         }
         let output = self.runner.run("mise", &["ls", "--current"])?;
@@ -241,6 +246,7 @@ impl Cleaner for MiseCleaner {
         Ok(CleanResult {
             name: self.name(),
             bytes_freed: freed,
+            skipped: vec![],
         })
     }
 }

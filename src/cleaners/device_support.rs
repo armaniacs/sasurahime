@@ -1,4 +1,4 @@
-use crate::cleaner::{CleanResult, Cleaner, ScanResult, ScanStatus};
+use crate::cleaner::{CleanResult, Cleaner, ScanResult, ScanStatus, SkippedEntry};
 use crate::command::CommandRunner;
 use crate::format::dir_size;
 use crate::progress::ProgressReporter;
@@ -114,6 +114,7 @@ impl Cleaner for DeviceSupportCleaner {
             return Ok(CleanResult {
                 name: self.name(),
                 bytes_freed: 0,
+                skipped: vec![],
             });
         }
 
@@ -129,18 +130,24 @@ impl Cleaner for DeviceSupportCleaner {
             return Ok(CleanResult {
                 name: self.name(),
                 bytes_freed: 0,
+                skipped: vec![],
             });
         }
 
         reporter.progress_init(self.name(), to_delete.len());
 
         let mut freed: u64 = 0;
+        let mut skipped = vec![];
         for (i, p) in to_delete.iter().enumerate() {
             let size = dir_size(p);
             reporter.progress_tick(p, i + 1, size);
             let path_str = p.to_string_lossy();
             let _ = self.runner.run("chflags", &["-R", "nouchg", &path_str]);
             if let Err(e) = crate::trash::delete_path(p) {
+                skipped.push(SkippedEntry {
+                    path: p.to_path_buf(),
+                    reason: format!("{e:#}"),
+                });
                 eprintln!("[device-support] error removing {}: {e}", p.display());
             } else {
                 freed += size;
@@ -153,6 +160,7 @@ impl Cleaner for DeviceSupportCleaner {
         Ok(CleanResult {
             name: self.name(),
             bytes_freed: freed,
+            skipped,
         })
     }
 }

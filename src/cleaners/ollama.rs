@@ -74,6 +74,10 @@ fn parse_model_size(s: &str) -> u64 {
 }
 
 impl Cleaner for OllamaCleaner {
+    fn is_available(&self) -> bool {
+        self.runner.exists("ollama")
+    }
+
     fn name(&self) -> &'static str {
         "ollama"
     }
@@ -101,6 +105,7 @@ impl Cleaner for OllamaCleaner {
                 return Ok(CleanResult {
                     name: self.name(),
                     bytes_freed: 0,
+                    skipped: vec![],
                 });
             }
 
@@ -116,6 +121,7 @@ impl Cleaner for OllamaCleaner {
                 return Ok(CleanResult {
                     name: self.name(),
                     bytes_freed: 0,
+                    skipped: vec![],
                 });
             }
 
@@ -136,6 +142,7 @@ impl Cleaner for OllamaCleaner {
                 return Ok(CleanResult {
                     name: self.name(),
                     bytes_freed: 0,
+                    skipped: vec![],
                 });
             }
 
@@ -160,6 +167,7 @@ impl Cleaner for OllamaCleaner {
             return Ok(CleanResult {
                 name: self.name(),
                 bytes_freed: total,
+                skipped: vec![],
             });
         }
 
@@ -174,6 +182,7 @@ impl OllamaCleaner {
             return Ok(CleanResult {
                 name: self.name(),
                 bytes_freed: 0,
+                skipped: vec![],
             });
         }
         let size = dir_size(dir);
@@ -186,15 +195,30 @@ impl OllamaCleaner {
             return Ok(CleanResult {
                 name: self.name(),
                 bytes_freed: 0,
+                skipped: vec![],
             });
         }
         let path_str = dir.to_string_lossy();
         let _ = self.runner.run("chflags", &["-R", "nouchg", &path_str]);
-        crate::trash::delete_path(dir)?;
-        println!("[ollama] removed: {}", dir.display());
+        let mut skipped: Vec<crate::cleaner::SkippedEntry> = vec![];
+        let mut freed = size;
+        if let Err(e) = crate::trash::delete_path(dir) {
+            if crate::cleaner::is_skippable_error(&e) {
+                skipped.push(crate::cleaner::SkippedEntry {
+                    path: dir.to_path_buf(),
+                    reason: format!("{e:#}"),
+                });
+                freed = 0;
+            } else {
+                return Err(e);
+            }
+        } else {
+            println!("[ollama] removed: {}", dir.display());
+        }
         Ok(CleanResult {
             name: self.name(),
-            bytes_freed: size,
+            bytes_freed: freed,
+            skipped,
         })
     }
 }

@@ -1,5 +1,6 @@
 use crate::progress::ProgressReporter;
 use anyhow::Result;
+use std::path::PathBuf;
 
 #[derive(Debug, Clone)]
 pub enum ScanStatus {
@@ -38,10 +39,27 @@ impl ScanResult {
 }
 
 #[derive(Debug)]
+pub struct SkippedEntry {
+    pub path: PathBuf,
+    pub reason: String,
+}
+
+#[derive(Debug)]
 pub struct CleanResult {
     #[allow(dead_code)]
     pub name: &'static str,
     pub bytes_freed: u64,
+    pub skipped: Vec<SkippedEntry>,
+}
+
+impl CleanResult {
+    pub fn exit_code(&self) -> i32 {
+        if self.bytes_freed == 0 && !self.skipped.is_empty() {
+            1
+        } else {
+            0
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -54,6 +72,22 @@ impl std::fmt::Display for CleanCancelled {
 }
 
 impl std::error::Error for CleanCancelled {}
+
+pub fn is_skippable_error(e: &anyhow::Error) -> bool {
+    if let Some(io_err) = e.downcast_ref::<std::io::Error>() {
+        return matches!(
+            io_err.kind(),
+            std::io::ErrorKind::PermissionDenied
+                | std::io::ErrorKind::WouldBlock
+                | std::io::ErrorKind::AlreadyExists
+        );
+    }
+    let msg = format!("{e:#}");
+    msg.contains("Permission denied")
+        || msg.contains("Operation not permitted")
+        || msg.contains("Resource busy")
+        || msg.contains("trash failed")
+}
 
 #[cfg(test)]
 mod tests {
@@ -80,4 +114,9 @@ pub trait Cleaner: Send + Sync {
     fn detect(&self) -> ScanResult;
     /// Performs cleanup. When `dry_run` is true, must not delete anything.
     fn clean(&self, dry_run: bool, reporter: &dyn ProgressReporter) -> Result<CleanResult>;
+    /// Whether this cleaner is available (tool installed, config exists, etc.).
+    /// Defaults to true; override to skip unavailable cleaners during scan.
+    fn is_available(&self) -> bool {
+        true
+    }
 }

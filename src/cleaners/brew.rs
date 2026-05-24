@@ -66,6 +66,10 @@ impl BrewCleaner {
 }
 
 impl Cleaner for BrewCleaner {
+    fn is_available(&self) -> bool {
+        self.runner.exists("brew")
+    }
+
     fn name(&self) -> &'static str {
         "brew"
     }
@@ -95,6 +99,7 @@ impl Cleaner for BrewCleaner {
             return Ok(CleanResult {
                 name: self.name(),
                 bytes_freed: 0,
+                skipped: vec![],
             });
         }
 
@@ -115,6 +120,7 @@ impl Cleaner for BrewCleaner {
         Ok(CleanResult {
             name: self.name(),
             bytes_freed: freed,
+            skipped: vec![],
         })
     }
 }

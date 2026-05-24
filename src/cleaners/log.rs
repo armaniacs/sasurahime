@@ -167,17 +167,29 @@ impl Cleaner for LogCleaner {
             return Ok(CleanResult {
                 name: self.name(),
                 bytes_freed: 0,
+                skipped: vec![],
             });
         }
 
+        let mut skipped: Vec<crate::cleaner::SkippedEntry> = vec![];
         reporter.progress_init(self.name(), all_old.len());
         for (i, (target_name, path)) in all_old.iter().enumerate() {
             let size = fs::metadata(path).map(|m| m.blocks() * 512).unwrap_or(0);
             reporter.progress_tick(path, i + 1, size);
-            crate::trash::delete_path(path)?;
-            freed += size;
-            deleted += 1;
-            println!("[{target_name}] Removed: {}", path.display());
+            if let Err(e) = crate::trash::delete_path(path) {
+                if crate::cleaner::is_skippable_error(&e) {
+                    skipped.push(crate::cleaner::SkippedEntry {
+                        path: path.to_path_buf(),
+                        reason: format!("{e:#}"),
+                    });
+                } else {
+                    return Err(e);
+                }
+            } else {
+                freed += size;
+                deleted += 1;
+                println!("[{target_name}] Removed: {}", path.display());
+            }
         }
         reporter.progress_finish();
 
@@ -185,6 +197,7 @@ impl Cleaner for LogCleaner {
         Ok(CleanResult {
             name: self.name(),
             bytes_freed: freed,
+            skipped,
         })
     }
 }

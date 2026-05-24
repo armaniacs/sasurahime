@@ -21,6 +21,7 @@ fn spinner_style() -> &'static ProgressStyle {
     })
 }
 
+#[allow(dead_code)]
 pub fn with_spinner<R>(msg: &str, f: impl FnOnce() -> R) -> R {
     let pb = ProgressBar::new_spinner();
     pb.set_style(spinner_style().clone());
@@ -47,6 +48,26 @@ pub fn with_spinner_result<T, E: std::fmt::Display>(
     } else {
         eprintln!("{msg} [FAILED]");
     }
+    result
+}
+
+/// Show a consolidated progress bar for parallel operations.
+/// The progress bar is hidden in non-TTY environments (e.g. tests).
+/// `f` receives a `&ProgressBar` that `par_iter()` threads can call
+/// `pb.inc(1)` / `pb.set_message(...)` on.
+pub fn with_parallel_scan<R>(total: usize, f: impl FnOnce(&ProgressBar) -> R) -> R {
+    let pb = ProgressBar::new(total as u64);
+    pb.set_style(
+        ProgressStyle::default_bar()
+            .template("{spinner:.green} [{bar:20}] {msg}")
+            .expect("valid template")
+            .progress_chars("=> "),
+    );
+    pb.set_message(format!("Scanning {total} cleaners..."));
+    pb.enable_steady_tick(Duration::from_millis(100));
+    let result = f(&pb);
+    pb.finish_and_clear();
+    eprintln!("Scan complete [OK]");
     result
 }
 

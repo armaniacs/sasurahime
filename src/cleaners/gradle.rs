@@ -89,6 +89,7 @@ impl Cleaner for GradleCleaner {
             return Ok(CleanResult {
                 name: self.name(),
                 bytes_freed: 0,
+                skipped: vec![],
             });
         }
         let old = Self::find_old_caches(&caches);
@@ -113,6 +114,7 @@ impl Cleaner for GradleCleaner {
         Ok(CleanResult {
             name: self.name(),
             bytes_freed: freed,
+            skipped: vec![],
         })
     }
 }
@@ -216,6 +218,7 @@ impl Cleaner for JetBrainsCleaner {
             return Ok(CleanResult {
                 name: self.name(),
                 bytes_freed: 0,
+                skipped: vec![],
             });
         }
         let old = Self::find_old_caches(&dir);
@@ -240,6 +243,7 @@ impl Cleaner for JetBrainsCleaner {
         Ok(CleanResult {
             name: self.name(),
             bytes_freed: freed,
+            skipped: vec![],
         })
     }
 }

@@ -320,6 +320,20 @@ impl GenericCleaner {
 }
 
 impl Cleaner for GenericCleaner {
+    fn is_available(&self) -> bool {
+        match &self.method {
+            CleanMethod::Command { program, .. } => self.runner.exists(program),
+            CleanMethod::CommandWithDetectDir { program, .. } => {
+                if self.fallback_delete {
+                    true
+                } else {
+                    self.runner.exists(program)
+                }
+            }
+            CleanMethod::DeleteDirs(_) => true,
+        }
+    }
+
     fn name(&self) -> &'static str {
         self.display_name
     }
@@ -378,6 +392,7 @@ impl Cleaner for GenericCleaner {
                     return Ok(CleanResult {
                         name: self.name(),
                         bytes_freed: 0,
+                        skipped: vec![],
                     });
                 }
                 if dry_run {
@@ -385,6 +400,7 @@ impl Cleaner for GenericCleaner {
                     return Ok(CleanResult {
                         name: self.name(),
                         bytes_freed: 0,
+                        skipped: vec![],
                     });
                 }
                 println!("$ {program} {}", args.join(" "));
@@ -392,6 +408,7 @@ impl Cleaner for GenericCleaner {
                 Ok(CleanResult {
                     name: self.name(),
                     bytes_freed: 0,
+                    skipped: vec![],
                 })
             }
             CleanMethod::CommandWithDetectDir {
@@ -433,6 +450,7 @@ impl Cleaner for GenericCleaner {
                             return Ok(CleanResult {
                                 name: self.name(),
                                 bytes_freed: 0,
+                                skipped: vec![],
                             });
                         }
                         let path_str = detect_dir.to_string_lossy();
@@ -452,12 +470,14 @@ impl Cleaner for GenericCleaner {
                         return Ok(CleanResult {
                             name: self.name(),
                             bytes_freed: size_before,
+                            skipped: vec![],
                         });
                     }
                     println!("{}: not found, skipping", self.display_name);
                     return Ok(CleanResult {
                         name: self.name(),
                         bytes_freed: 0,
+                        skipped: vec![],
                     });
                 }
                 if dry_run {
@@ -471,6 +491,7 @@ impl Cleaner for GenericCleaner {
                     return Ok(CleanResult {
                         name: self.name(),
                         bytes_freed: 0,
+                        skipped: vec![],
                     });
                 }
                 println!("$ {program} {}", args.join(" "));
@@ -500,6 +521,7 @@ impl Cleaner for GenericCleaner {
                 Ok(CleanResult {
                     name: self.name(),
                     bytes_freed: freed,
+                    skipped: vec![],
                 })
             }
             CleanMethod::DeleteDirs(dirs) => {
@@ -533,6 +555,7 @@ impl Cleaner for GenericCleaner {
                 Ok(CleanResult {
                     name: self.name(),
                     bytes_freed: freed,
+                    skipped: vec![],
                 })
             }
         }
@@ -584,6 +607,7 @@ pub fn clean_cli_or_fallback(
         return Ok(CleanResult {
             name,
             bytes_freed: 0,
+            skipped: vec![],
         });
     }
 
@@ -603,6 +627,7 @@ pub fn clean_cli_or_fallback(
             return Ok(CleanResult {
                 name,
                 bytes_freed: 0,
+                skipped: vec![],
             });
         }
         let size_before = dir_size(dir);
@@ -618,6 +643,7 @@ pub fn clean_cli_or_fallback(
         return Ok(CleanResult {
             name,
             bytes_freed: size_before,
+            skipped: vec![],
         });
     }
 
@@ -632,6 +658,7 @@ pub fn clean_cli_or_fallback(
         return Ok(CleanResult {
             name,
             bytes_freed: 0,
+            skipped: vec![],
         });
     }
 
@@ -650,6 +677,7 @@ pub fn clean_cli_or_fallback(
     Ok(CleanResult {
         name,
         bytes_freed: size,
+        skipped: vec![],
     })
 }
 

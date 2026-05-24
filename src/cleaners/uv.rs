@@ -53,6 +53,10 @@ impl UvCleaner {
 }
 
 impl Cleaner for UvCleaner {
+    fn is_available(&self) -> bool {
+        self.runner.exists("uv")
+    }
+
     fn name(&self) -> &'static str {
         "uv"
     }
@@ -82,6 +86,7 @@ impl Cleaner for UvCleaner {
             return Ok(CleanResult {
                 name: self.name(),
                 bytes_freed: 0,
+                skipped: vec![],
             });
         }
 
@@ -114,6 +119,7 @@ impl Cleaner for UvCleaner {
         Ok(CleanResult {
             name: self.name(),
             bytes_freed: freed,
+            skipped: vec![],
         })
     }
 }
