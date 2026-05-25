@@ -19,7 +19,7 @@ pub struct CustomTarget {
 
 /// A user-defined log target from the config file.
 /// Kept separate from `cleaners::log::LogTarget` to avoid a cross-module dep.
-/// `#[allow(dead_code)` on fields: consumed by Task 3 (LogCleaner wiring).
+/// `#[allow(dead_code)]` on fields: consumed by Task 3 (LogCleaner wiring).
 #[derive(Debug, Clone, Deserialize)]
 #[allow(dead_code)]
 pub struct ExtraLogTarget {
@@ -115,6 +115,9 @@ impl Config {
     /// Returns defaults if the file does not exist.
     /// Returns an error if the file exists but cannot be parsed.
     pub fn load_from_path(path: &Path) -> Result<Self> {
+        if !path.exists() {
+            eprintln!("Warning: config file {:?} not found, using defaults", path);
+        }
         parse_config_file(path)
     }
 

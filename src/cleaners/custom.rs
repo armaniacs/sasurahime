@@ -81,6 +81,10 @@ impl Cleaner for CustomPathCleaner {
                 );
             } else {
                 reporter.progress_tick(&path, i + 1, size);
+                let _ = std::process::Command::new("chflags")
+                    .args(["-R", "nouchg"])
+                    .arg(&path)
+                    .status();
                 crate::trash::delete_path(&path)?;
                 freed += size;
                 println!("Removed: {entry_name}");

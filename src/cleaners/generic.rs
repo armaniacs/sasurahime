@@ -302,6 +302,14 @@ impl GenericCleaner {
     pub fn with_config(self, config: &Config) -> Self {
         let name = self.name();
         if let Some(pcc) = config.per_cleaner.get(name) {
+            if (pcc.older_than_days.is_some() || pcc.larger_than_mb.is_some())
+                && matches!(
+                    self.method,
+                    CleanMethod::Command { .. } | CleanMethod::CommandWithDetectDir { .. }
+                )
+            {
+                eprintln!("Warning: per-cleaner filters (older_than_days, larger_than_mb) are not supported for '{}': command-based cleaner. Filters apply only to DeleteDirs cleaners.", name);
+            }
             let mut c = self;
             if let Some(days) = pcc.older_than_days {
                 c = c.with_older_than(days);
