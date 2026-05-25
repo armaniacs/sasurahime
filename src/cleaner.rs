@@ -38,6 +38,17 @@ impl ScanResult {
     }
 }
 
+#[cfg(test)]
+impl ScanResult {
+    /// Returns the pruneable byte count, or 0 if not Pruneable.
+    pub fn bytes_for_test(&self) -> u64 {
+        match &self.status {
+            ScanStatus::Pruneable(b) => *b,
+            _ => 0,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct SkippedEntry {
     pub path: PathBuf,
