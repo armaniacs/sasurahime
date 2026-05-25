@@ -34,11 +34,11 @@ Scenario: dry-run では警告は表示されない
 
 ## 受け入れ基準
 
-- [ ] ゴミ箱移動が完了した後、必ず警告メッセージを表示する
-- [ ] 合計移動サイズが 1GB 以上の場合、確認プロンプトの前に強調警告を出す
-- [ ] `--dry-run` 時は警告を出さない
-- [ ] `--yes`（非インタラクティブ）時も警告は表示する（stdout に出力）
-- [ ] 警告は英語で表示する（他メッセージとの統一）
+- [x] ゴミ箱移動が完了した後、必ず警告メッセージを表示する
+- [x] 合計移動サイズが 1GB 以上の場合、確認プロンプトの前に強調警告を出す
+- [x] `--dry-run` 時は警告を出さない
+- [x] `--yes`（非インタラクティブ）時も警告は表示する（stdout に出力）
+- [x] 警告は英語で表示する（他メッセージとの統一）
 
 ## t_wada スタイル テスト戦略
 
@@ -78,8 +78,46 @@ E2Eテスト:
 
 ## Definition of Done
 
-- [ ] 受け入れシナリオが全て通る
-- [ ] `cargo test` 全パス
-- [ ] `cargo clippy -- -D warnings` クリーン
-- [ ] `cargo fmt --check` クリーン
-- [ ] コードレビュー完了
+- [x] 受け入れシナリオが全て通る
+- [x] `cargo test` 全パス
+- [x] `cargo clippy -- -D warnings` クリーン
+- [x] `cargo fmt --check` クリーン
+- [x] コードレビュー完了
+
+---
+
+## Implementation Status (2026-05-25)
+
+Implemented on branch `pbi-2026-05-25`. All acceptance criteria met.
+
+### Architecture summary
+
+| Change | Details |
+|--------|---------|
+| `CleanResult.uses_trash` | New `bool` field — set `true` when cleaner uses `delete_path()` (macOS Trash) |
+| `format_trash_warning()` | Returns `"Note: Moved X to Trash. Run 'Empty Trash'..."` when applicable |
+| `format_large_trash_warning()` | Returns `"⚠ Large files will be moved to Trash (not immediately freed)."` for ≥1GB |
+| `LARGE_TRASH_THRESHOLD_BYTES` | Constant: 1 GiB |
+| `run_clean_target` pre-clean | Shows trash notice before start when `is_trash_mode() && !dry_run` |
+| `run_clean_target` post-clean | Shows size-specific trash note after clean result |
+
+### Trash-warning cleaners
+
+Cleaners that set `uses_trash: true`:
+- browser, xcode, cargo, log, mise, ios_backup, library_logs, device_support, ollama (fallback), generic (DeleteDirs + fallback)
+
+Cleaners that set `uses_trash: false` (CLI-only or `remove_dir_all`):
+- uv, brew, apfs_snapshot, rustup, gradle
+
+### Test coverage
+
+- **7 unit tests** in `src/cleaner.rs`: both warning functions tested with None cases (no bytes, not trash, dry-run) and return cases (normal size, large threshold)
+- **3 E2E tests** in `tests/trash.rs`: trash note on clean, suppressed with `--permanent`, suppressed with `--dry-run`
+
+### Verification
+
+```
+$ cargo test                          # 350+ passed, 0 failed
+$ cargo clippy -- -D warnings         # clean
+$ cargo fmt --check                   # clean
+```
