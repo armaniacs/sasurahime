@@ -2,6 +2,7 @@ pub mod apfs_snapshot;
 pub mod brew;
 pub mod browser;
 pub mod cargo;
+pub mod custom;
 pub mod device_support;
 pub mod generic;
 pub mod gradle;

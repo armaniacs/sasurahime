@@ -2,9 +2,16 @@ use anyhow::Result;
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 
+/// A user-defined custom cache target from the config file (`[[custom]]`).
+#[derive(Debug, Clone, Deserialize)]
+pub struct CustomTarget {
+    pub name: String,
+    pub path: String,
+}
+
 /// A user-defined log target from the config file.
 /// Kept separate from `cleaners::log::LogTarget` to avoid a cross-module dep.
-/// `#[allow(dead_code)]` on fields: consumed by Task 3 (LogCleaner wiring).
+/// `#[allow(dead_code)` on fields: consumed by Task 3 (LogCleaner wiring).
 #[derive(Debug, Clone, Deserialize)]
 #[allow(dead_code)]
 pub struct ExtraLogTarget {
@@ -30,6 +37,8 @@ struct RawConfig {
     deep_suppress: Option<bool>,
     #[serde(default)]
     exclude: Vec<String>,
+    #[serde(default)]
+    custom: Vec<CustomTarget>,
 }
 
 #[derive(Debug, Clone)]
@@ -42,6 +51,7 @@ pub struct Config {
     pub suppress: bool,
     pub deep_suppress: bool,
     pub exclude: Vec<String>,
+    pub custom: Vec<CustomTarget>,
 }
 
 impl Default for Config {
@@ -53,6 +63,7 @@ impl Default for Config {
             suppress: false,
             deep_suppress: false,
             exclude: vec![],
+            custom: vec![],
         }
     }
 }
@@ -74,6 +85,7 @@ fn parse_config_file(path: &Path) -> Result<Config> {
         suppress: raw.suppress.unwrap_or(false),
         deep_suppress: raw.deep_suppress.unwrap_or(false),
         exclude: raw.exclude,
+        custom: raw.custom,
     })
 }
 

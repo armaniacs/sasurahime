@@ -111,3 +111,55 @@ fn custom_config_path_overrides_default() {
         String::from_utf8_lossy(&output.stderr)
     );
 }
+
+#[test]
+fn custom_target_appears_in_scan() {
+    let tmp = TempDir::new().unwrap();
+    // Create a custom cache dir with files
+    let custom_path = tmp.path().join("tmp").join("cache");
+    fs::create_dir_all(&custom_path).unwrap();
+    fs::write(custom_path.join("data.bin"), b"content").unwrap();
+
+    // Write config with [[custom]] entry pointing to it
+    let config_dir = tmp.path().join(".config/sasurahime");
+    fs::create_dir_all(&config_dir).unwrap();
+    let toml = format!(
+        "[[custom]]\nname = \"my-workspace\"\npath = \"{path}\"\n",
+        path = custom_path.to_string_lossy()
+    );
+    fs::write(config_dir.join("config.toml"), &toml).unwrap();
+
+    let output = sasurahime(tmp.path()).arg("scan").output().unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("my-workspace"),
+        "custom target should appear in scan output, got:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("pruneable"),
+        "custom target with content should show as pruneable, got:\n{stdout}"
+    );
+}
+
+#[test]
+fn custom_target_empty_dir_shows_not_found() {
+    let tmp = TempDir::new().unwrap();
+    // Write config with [[custom]] entry pointing to a non-existent path
+    let config_dir = tmp.path().join(".config/sasurahime");
+    fs::create_dir_all(&config_dir).unwrap();
+    let toml = "[[custom]]\nname = \"my-workspace\"\npath = \"~/tmp/nonexistent\"\n";
+    fs::write(config_dir.join("config.toml"), toml).unwrap();
+
+    let output = sasurahime(tmp.path()).arg("scan").output().unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("my-workspace"),
+        "custom target should appear in scan output even when not found, got:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("not found"),
+        "custom target without content should show as not found, got:\n{stdout}"
+    );
+}

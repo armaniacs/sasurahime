@@ -503,7 +503,7 @@ fn home() -> PathBuf {
 }
 
 fn all_cleaners(home: &std::path::Path, config: &config::Config) -> Vec<Box<dyn cleaner::Cleaner>> {
-    let all: Vec<Box<dyn cleaner::Cleaner>> = vec![
+    let mut cleaners: Vec<Box<dyn cleaner::Cleaner>> = vec![
         // Sprint 1
         Box::new(cleaners::uv::UvCleaner::new(
             home,
@@ -579,10 +579,17 @@ fn all_cleaners(home: &std::path::Path, config: &config::Config) -> Vec<Box<dyn 
             SystemCommandRunner,
         ))),
     ];
-    let excluded = &config.exclude;
-    all.into_iter()
-        .filter(|c| !excluded.iter().any(|e| e == c.name()))
-        .collect()
+    // Apply exclude filter
+    cleaners.retain(|c| !config.exclude.iter().any(|e| e == c.name()));
+    // Add custom cleaners (always included since user defined them)
+    for ct in &config.custom {
+        let path = config::Config::expand_tilde(&ct.path, home);
+        cleaners.push(Box::new(cleaners::custom::CustomPathCleaner::new(
+            ct.name.clone(),
+            path,
+        )));
+    }
+    cleaners
 }
 
 /// Runs a single-target clean and prints freed bytes.
