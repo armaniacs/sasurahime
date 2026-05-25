@@ -52,6 +52,8 @@ impl Cleaner for CustomPathCleaner {
             return Ok(CleanResult {
                 name: self.name,
                 bytes_freed: 0,
+                uses_trash: true,
+                skipped: vec![],
             });
         }
 
@@ -61,6 +63,8 @@ impl Cleaner for CustomPathCleaner {
                 return Ok(CleanResult {
                     name: self.name,
                     bytes_freed: 0,
+                    uses_trash: true,
+                    skipped: vec![],
                 })
             }
         };
@@ -98,6 +102,8 @@ impl Cleaner for CustomPathCleaner {
         Ok(CleanResult {
             name: self.name,
             bytes_freed: freed,
+            uses_trash: true,
+            skipped: vec![],
         })
     }
 }
