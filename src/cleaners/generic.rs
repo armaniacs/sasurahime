@@ -49,21 +49,29 @@ pub struct GenericCleaner {
 }
 
 impl GenericCleaner {
-    fn command_cleaner(
+    fn base_cleaner(
         display_name: &'static str,
-        program: &'static str,
-        args: &'static [&'static str],
+        method: CleanMethod,
         runner: Box<dyn CommandRunner>,
     ) -> Self {
         Self {
             display_name,
-            method: CleanMethod::Command { program, args },
+            method,
             runner,
             confirm_message: None,
             fallback_delete: false,
             older_than_days: None,
             larger_than_mb: None,
         }
+    }
+
+    fn command_cleaner(
+        display_name: &'static str,
+        program: &'static str,
+        args: &'static [&'static str],
+        runner: Box<dyn CommandRunner>,
+    ) -> Self {
+        Self::base_cleaner(display_name, CleanMethod::Command { program, args }, runner)
     }
 
     pub fn bun(runner: Box<dyn CommandRunner>) -> Self {
@@ -107,34 +115,30 @@ impl GenericCleaner {
     }
 
     pub fn simulator(home: &Path, runner: Box<dyn CommandRunner>) -> Self {
-        Self {
-            display_name: "simulator",
-            method: CleanMethod::CommandWithDetectDir {
+        Self::base_cleaner(
+            "simulator",
+            CleanMethod::CommandWithDetectDir {
                 program: "xcrun",
                 args: &["simctl", "delete", "unavailable"],
                 detect_dir: home.join("Library/Developer/CoreSimulator"),
             },
             runner,
-            confirm_message: None,
-            fallback_delete: false,
-            older_than_days: None,
-            larger_than_mb: None,
-        }
+        )
     }
 
     pub fn colima_prune(home: &Path, runner: Box<dyn CommandRunner>) -> Self {
         Self {
-            display_name: "colima",
-            method: CleanMethod::CommandWithDetectDir {
-                program: "colima",
-                args: &["prune", "--all", "--force"],
-                detect_dir: home.join(".colima"),
-            },
-            runner,
             confirm_message: Some("This will delete ALL stopped Colima VM disk data (containers, images, volumes). Continue?"),
             fallback_delete: true,
-            older_than_days: None,
-            larger_than_mb: None,
+            ..Self::base_cleaner(
+                "colima",
+                CleanMethod::CommandWithDetectDir {
+                    program: "colima",
+                    args: &["prune", "--all", "--force"],
+                    detect_dir: home.join(".colima"),
+                },
+                runner,
+            )
         }
     }
 
@@ -151,170 +155,110 @@ impl GenericCleaner {
     }
 
     pub fn node_gyp(home: &Path, runner: Box<dyn CommandRunner>) -> Self {
-        Self {
-            display_name: "node-gyp",
-            method: CleanMethod::DeleteDirs(vec![
+        Self::base_cleaner(
+            "node-gyp",
+            CleanMethod::DeleteDirs(vec![
                 home.join(".cache/node-gyp"),
                 home.join("Library/Caches/node-gyp"),
             ]),
             runner,
-            confirm_message: None,
-            fallback_delete: false,
-            older_than_days: None,
-            larger_than_mb: None,
-        }
+        )
     }
 
     pub fn spm_cache(home: &Path, runner: Box<dyn CommandRunner>) -> Self {
         let cache = home.join("Library/Caches/org.swift.swiftpm");
-        Self {
-            display_name: "spm",
-            method: CleanMethod::DeleteDirs(vec![cache]),
-            runner,
-            confirm_message: None,
-            fallback_delete: false,
-            older_than_days: None,
-            larger_than_mb: None,
-        }
+        Self::base_cleaner("spm", CleanMethod::DeleteDirs(vec![cache]), runner)
     }
 
     pub fn trash(home: &Path, runner: Box<dyn CommandRunner>) -> Self {
-        let trash_dir = home.join(".Trash");
-        Self {
-            display_name: "trash",
-            method: CleanMethod::DeleteDirs(vec![trash_dir]),
+        Self::base_cleaner(
+            "trash",
+            CleanMethod::DeleteDirs(vec![home.join(".Trash")]),
             runner,
-            confirm_message: None,
-            fallback_delete: false,
-            older_than_days: None,
-            larger_than_mb: None,
-        }
+        )
     }
 
     pub fn downloads(home: &Path, runner: Box<dyn CommandRunner>) -> Self {
-        let dl_dir = home.join("Downloads");
-        Self {
-            display_name: "downloads",
-            method: CleanMethod::DeleteDirs(vec![dl_dir]),
+        Self::base_cleaner(
+            "downloads",
+            CleanMethod::DeleteDirs(vec![home.join("Downloads")]),
             runner,
-            confirm_message: None,
-            fallback_delete: false,
-            older_than_days: None,
-            larger_than_mb: None,
-        }
+        )
     }
 
     #[allow(dead_code)]
     pub fn cargo_registry(home: &Path, runner: Box<dyn CommandRunner>) -> Self {
-        let cache = home.join(".cargo/registry/cache");
-        Self {
-            display_name: "cargo-registry",
-            method: CleanMethod::DeleteDirs(vec![cache]),
+        Self::base_cleaner(
+            "cargo-registry",
+            CleanMethod::DeleteDirs(vec![home.join(".cargo/registry/cache")]),
             runner,
-            confirm_message: None,
-            fallback_delete: false,
-            older_than_days: None,
-            larger_than_mb: None,
-        }
+        )
     }
 
     pub fn vscode_extensions(home: &Path, runner: Box<dyn CommandRunner>) -> Self {
-        let cache = home.join(".vscode/extensions");
-        Self {
-            display_name: "vscode-extensions",
-            method: CleanMethod::DeleteDirs(vec![cache]),
+        Self::base_cleaner(
+            "vscode-extensions",
+            CleanMethod::DeleteDirs(vec![home.join(".vscode/extensions")]),
             runner,
-            confirm_message: None,
-            fallback_delete: false,
-            older_than_days: None,
-            larger_than_mb: None,
-        }
+        )
     }
 
     pub fn maven(home: &Path, runner: Box<dyn CommandRunner>) -> Self {
-        Self {
-            display_name: "maven",
-            method: CleanMethod::CommandWithDetectDir {
+        Self::base_cleaner(
+            "maven",
+            CleanMethod::CommandWithDetectDir {
                 program: "mvn",
                 args: &["dependency:purge-local-repository"],
                 detect_dir: home.join(".m2/repository"),
             },
             runner,
-            confirm_message: None,
-            fallback_delete: false,
-            older_than_days: None,
-            larger_than_mb: None,
-        }
+        )
     }
 
     pub fn terraform(home: &Path, runner: Box<dyn CommandRunner>) -> Self {
         let cache = std::env::var("TF_PLUGIN_CACHE_DIR")
             .map(PathBuf::from)
             .unwrap_or_else(|_| home.join(".terraform.d/plugin-cache"));
-        Self {
-            display_name: "terraform",
-            method: CleanMethod::DeleteDirs(vec![cache]),
-            runner,
-            confirm_message: None,
-            fallback_delete: false,
-            older_than_days: None,
-            larger_than_mb: None,
-        }
+        Self::base_cleaner("terraform", CleanMethod::DeleteDirs(vec![cache]), runner)
     }
 
     pub fn flutter(home: &Path, runner: Box<dyn CommandRunner>) -> Self {
         let cache = std::env::var("PUB_CACHE")
             .map(PathBuf::from)
             .unwrap_or_else(|_| home.join(".pub-cache"));
-        Self {
-            display_name: "flutter",
-            method: CleanMethod::CommandWithDetectDir {
+        Self::base_cleaner(
+            "flutter",
+            CleanMethod::CommandWithDetectDir {
                 program: "dart",
                 args: &["pub", "cache", "clean"],
                 detect_dir: cache,
             },
             runner,
-            confirm_message: None,
-            fallback_delete: false,
-            older_than_days: None,
-            larger_than_mb: None,
-        }
+        )
     }
 
     pub fn volta(home: &Path, runner: Box<dyn CommandRunner>) -> Self {
-        Self {
-            display_name: "volta",
-            method: CleanMethod::DeleteDirs(vec![home.join(".volta/cache")]),
+        Self::base_cleaner(
+            "volta",
+            CleanMethod::DeleteDirs(vec![home.join(".volta/cache")]),
             runner,
-            confirm_message: None,
-            fallback_delete: false,
-            older_than_days: None,
-            larger_than_mb: None,
-        }
+        )
     }
 
     pub fn sbt(home: &Path, runner: Box<dyn CommandRunner>) -> Self {
-        Self {
-            display_name: "sbt",
-            method: CleanMethod::DeleteDirs(vec![home.join(".sbt"), home.join(".ivy2/cache")]),
+        Self::base_cleaner(
+            "sbt",
+            CleanMethod::DeleteDirs(vec![home.join(".sbt"), home.join(".ivy2/cache")]),
             runner,
-            confirm_message: None,
-            fallback_delete: false,
-            older_than_days: None,
-            larger_than_mb: None,
-        }
+        )
     }
 
     pub fn tree_sitter(home: &Path, runner: Box<dyn CommandRunner>) -> Self {
-        Self {
-            display_name: "tree-sitter",
-            method: CleanMethod::DeleteDirs(vec![home.join(".cache/tree-sitter")]),
+        Self::base_cleaner(
+            "tree-sitter",
+            CleanMethod::DeleteDirs(vec![home.join(".cache/tree-sitter")]),
             runner,
-            confirm_message: None,
-            fallback_delete: false,
-            older_than_days: None,
-            larger_than_mb: None,
-        }
+        )
     }
 
     pub fn act(home: &Path, runner: Box<dyn CommandRunner>) -> Self {
@@ -333,15 +277,7 @@ impl GenericCleaner {
             }
             Err(_) => home.join(".cache/act"),
         };
-        Self {
-            display_name: "act",
-            method: CleanMethod::DeleteDirs(vec![cache_dir]),
-            runner,
-            confirm_message: None,
-            fallback_delete: false,
-            older_than_days: None,
-            larger_than_mb: None,
-        }
+        Self::base_cleaner("act", CleanMethod::DeleteDirs(vec![cache_dir]), runner)
     }
 }
 
@@ -427,20 +363,25 @@ impl Cleaner for GenericCleaner {
                 })
             }
             CleanMethod::DeleteDirs(dirs) => {
-                let existing: Vec<_> = dirs
+                let entries: Vec<(PathBuf, u64)> = dirs
                     .iter()
                     .filter(|d| d.exists())
-                    .filter(|d| {
-                        fs::metadata(d)
-                            .map(|m| meets_age_filter(&m, self.older_than_days))
-                            .unwrap_or(false)
+                    .filter_map(|d| {
+                        let meta = fs::metadata(d).ok()?;
+                        if !meets_age_filter(&meta, self.older_than_days) {
+                            return None;
+                        }
+                        let size = dir_size(d);
+                        if !meets_size_filter(size, self.larger_than_mb) {
+                            return None;
+                        }
+                        Some((d.clone(), size))
                     })
-                    .filter(|d| meets_size_filter(dir_size(d), self.larger_than_mb))
                     .collect();
-                if existing.is_empty() {
+                if entries.is_empty() {
                     return make_result(ScanStatus::NotFound);
                 }
-                let bytes: u64 = existing.iter().map(|d| dir_size(d)).sum();
+                let bytes: u64 = entries.iter().map(|(_, s)| s).sum();
                 make_result(if bytes > 0 {
                     ScanStatus::Pruneable(bytes)
                 } else {

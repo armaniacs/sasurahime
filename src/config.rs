@@ -118,6 +118,15 @@ impl Config {
         parse_config_file(path)
     }
 
+    /// Returns the effective logs keep_days: per-cleaner override if set,
+    /// otherwise the top-level `logs_keep_days` value.
+    pub fn effective_logs_keep_days(&self) -> u32 {
+        self.per_cleaner
+            .get("logs")
+            .and_then(|p| p.older_than_days)
+            .unwrap_or(self.logs_keep_days)
+    }
+
     /// Expands a leading `~` to `home`. Other paths are returned unchanged.
     /// `#[allow(dead_code)]`: used by Task 3 (main.rs LogCleaner wiring).
     #[allow(dead_code)]

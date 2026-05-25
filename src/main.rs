@@ -502,39 +502,10 @@ fn home() -> PathBuf {
         .unwrap_or_else(|_| home_dir().expect("cannot determine HOME directory"))
 }
 
-/// Apply per-cleaner config filters (`older_than_days`, `larger_than_mb`)
-/// to a `GenericCleaner` before boxing it.
-///
-/// For command-based cleaners (uv, brew, etc.), per-cleaner filters cannot be
-/// applied since the external tool handles all deletion logic — the caller
-/// simply boxes the cleaner as-is.
-fn with_per_cleaner(
-    cleaner: cleaners::generic::GenericCleaner,
-    config: &config::Config,
-) -> Box<dyn cleaner::Cleaner> {
-    let name = cleaner.name();
-    if let Some(pcc) = config.per_cleaner.get(name) {
-        let mut c = cleaner;
-        if let Some(days) = pcc.older_than_days {
-            c = c.with_older_than(days);
-        }
-        if let Some(mb) = pcc.larger_than_mb {
-            c = c.with_larger_than(mb);
-        }
-        Box::new(c)
-    } else {
-        Box::new(cleaner)
-    }
-}
-
 fn all_cleaners(home: &std::path::Path, config: &config::Config) -> Vec<Box<dyn cleaner::Cleaner>> {
     // Apply per-cleaner `older_than_days` for logs if set; fall back to
     // `config.logs_keep_days` (which itself defaults to 7).
-    let logs_keep_days = config
-        .per_cleaner
-        .get("logs")
-        .and_then(|p| p.older_than_days)
-        .unwrap_or(config.logs_keep_days);
+    let logs_keep_days = config.effective_logs_keep_days();
 
     let mut cleaners: Vec<Box<dyn cleaner::Cleaner>> = vec![
         // Sprint 1
@@ -574,9 +545,9 @@ fn all_cleaners(home: &std::path::Path, config: &config::Config) -> Vec<Box<dyn 
                 .collect(),
         )),
         // Sprint 5 — act / huggingface / pre-commit
-        with_per_cleaner(
-            cleaners::generic::GenericCleaner::act(home, Box::new(SystemCommandRunner)),
-            config,
+        Box::new(
+            cleaners::generic::GenericCleaner::act(home, Box::new(SystemCommandRunner))
+                .with_config(config),
         ),
         Box::new(cleaners::huggingface::HuggingFaceCleaner::new(
             home,
@@ -591,9 +562,9 @@ fn all_cleaners(home: &std::path::Path, config: &config::Config) -> Vec<Box<dyn 
             home,
             Box::new(SystemCommandRunner),
         )),
-        with_per_cleaner(
-            cleaners::generic::GenericCleaner::colima_prune(home, Box::new(SystemCommandRunner)),
-            config,
+        Box::new(
+            cleaners::generic::GenericCleaner::colima_prune(home, Box::new(SystemCommandRunner))
+                .with_config(config),
         ),
         Box::new(cleaners::ollama::OllamaCleaner::new(
             home,
@@ -820,12 +791,7 @@ fn main() -> anyhow::Result<()> {
                         println!("Total freed: {}", format::format_bytes(total));
                     }
                     CleanTarget::Logs { dry_run, keep_days } => {
-                        let config_days = config
-                            .per_cleaner
-                            .get("logs")
-                            .and_then(|p| p.older_than_days)
-                            .unwrap_or(config.logs_keep_days);
-                        let days = keep_days.unwrap_or(config_days);
+                        let days = keep_days.unwrap_or_else(|| config.effective_logs_keep_days());
                         let extra: Vec<cleaners::log::OwnedLogTarget> = config
                             .logs_extra_targets
                             .iter()

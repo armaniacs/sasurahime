@@ -197,12 +197,40 @@ fn per_cleaner_older_than_days_hides_new_files_in_scan() {
 
     let output = sasurahime(tmp.path()).arg("scan").output().unwrap();
     assert!(output.status.success());
-    let stdout = String::from_utf8_lossy(&output.stdout).to_lowercase();
+
+    // Compute expected physical size of the aged act cache dir
+    use std::os::unix::fs::MetadataExt;
+    let expected_size: u64 = std::fs::metadata(cache_dir.join("data"))
+        .map(|m| m.blocks() * 512)
+        .unwrap_or(0);
+    assert!(expected_size > 0, "aged cache dir must have non-zero size");
+
+    let stdout_normal = String::from_utf8_lossy(&output.stdout);
+    let stdout = stdout_normal.to_lowercase();
     // The old act cache should be pruneable, new-tool should not appear
     // (it's not a registered cleaner)
     assert!(
         stdout.contains("act"),
         "act should appear in scan since old dir is filter-passing, got:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("pruneable"),
+        "act should be pruneable since old dir passes age filter, got:\n{stdout}"
+    );
+    // Check the formatted size appears in the output
+    let formatted = if expected_size >= 1_073_741_824 {
+        format!("{:.1} gb", expected_size as f64 / 1_073_741_824.0)
+    } else if expected_size >= 1_048_576 {
+        format!("{:.1} mb", expected_size as f64 / 1_048_576.0)
+    } else if expected_size >= 1024 {
+        format!("{:.1} kb", expected_size as f64 / 1024.0)
+    } else {
+        format!("{} b", expected_size)
+    };
+    assert!(
+        stdout.contains(&formatted),
+        "expected formatted size '{}' should appear in scan output, got:\n{stdout}",
+        formatted
     );
 }
 
