@@ -4,6 +4,47 @@ All notable changes to sasurahime will be documented in this file. The format is
 
 ---
 
+## [0.1.25] — 2026-05-25
+
+### Added
+
+- **Xcode subcategory selection — CLI core (PBI-D Phase 1).** `XcodeCleaner` now
+  supports partial cleanup of Xcode caches via the `--sub` flag, letting users
+  target only DerivedData, Archives, or both instead of cleaning everything.
+- **`XcodeSubcategory` enum** with `DerivedData` and `Archives` variants, plus
+  `from_str()` parser accepting `derived-data`, `deriveddata`, and `archives`.
+- **`--sub derived-data|archives` CLI flag** on `sasurahime clean xcode`.
+  Accepts comma-separated values (`--sub derived-data,archives`). When omitted,
+  defaults to `DerivedData` only (backwards-compatible).
+- **`Cleaner::sub_targets()` trait method.** Default returns empty vec; any
+  cleaner can override to expose sub-targets for TUI expansion. The
+  `interactive.rs` TUI already has generic logic to render sub-targets as
+  indented checkboxes and dispatch `sasurahime clean <name> --sub <sub_name>`
+  for each selected sub-target.
+- **`XcodeCleaner::detect_subcategories()`** returns `Vec<SubcategoryInfo>`
+  with per-subcategory path and size, used by the CLI and available for the
+  future `sub_targets()` override.
+- **`XcodeCleaner::with_subcategories()` builder** — constructs an
+  `XcodeCleaner` scoped to specific subcategories for targeted cleaning.
+- **`XcodeCleaner::is_xcode_running()`** — checks via `pgrep -x Xcode` for
+  safe DerivedData deletion with a confirmation prompt when Xcode is active.
+- **PBI-D document updated** to reflect current implementation status (Phase 1
+  complete, Phase 2 TUI pending) and scope decision (Simulators handled by the
+  standalone `simulator` cleaner, not an Xcode subcategory).
+
+### Internal
+
+- **5 E2E tests** in `tests/xcode.rs`: clean with `--sub derived-data`,
+  `--sub archives`, default (no sub), `--dry-run`, and missing-data handling.
+- **10 unit/integration tests** in `src/cleaners/xcode.rs`: `subcategory_all`,
+  `subcategory_path`, `from_str` variants, `display_name`,
+  `detect_subcategories`, `clean_selected_subcategory_only`,
+  `is_xcode_running`, detection status.
+- **`SubcategoryInfo` struct** for returning per-subcategory metadata from
+  `detect_subcategories()`.
+
+---
+
 ## [0.1.24] — 2026-05-25
 
 ### Added
