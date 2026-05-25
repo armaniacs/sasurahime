@@ -21,7 +21,7 @@ Sprint 1〜5 の全 PBI は `.plan/archived/` にアーカイブ済み。現在 
 
 | PBI | タイトル | SP | 優先度 | 備考 |
 |-----|---------|:--:|:------:|------|
-| [PBI-E](2026-05-25-pbi-e-config-toml.md) | config.toml 統合設定 | 5 | 🔴 高 | カスタムパス・ホワイトリスト・per-cleaner フィルタ |
+| ~~[PBI-E](2026-05-25-pbi-e-config-toml.md)~~ | ~~config.toml 統合設定~~ | ~~5~~ | ~~🔴 高~~ | ✅ 実装済み — exclude, --config, custom, per-cleaner フィルタ |
 | [PBI-F](2026-05-25-pbi-f-yes-flag.md) | --yes フラグ | 2 | 🟡 中 | 非インタラクティブ全削除（cron/CI 向け）|
 | [PBI-G](2026-05-25-pbi-g-stats-command.md) | sasurahime stats | 3 | 🟢 低 | 削除履歴ログ + 累計削減量表示 |
 
