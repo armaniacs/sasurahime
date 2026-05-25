@@ -31,3 +31,83 @@ fn invalid_config_exits_nonzero_with_message() {
         "expected error message in stderr, got:\n{stderr}"
     );
 }
+
+#[test]
+fn exclude_removes_cleaner_from_scan() {
+    let tmp = TempDir::new().unwrap();
+    let act_cache = tmp.path().join(".cache/act");
+    fs::create_dir_all(&act_cache).unwrap();
+    let config_dir = tmp.path().join(".config/sasurahime");
+    fs::create_dir_all(&config_dir).unwrap();
+    fs::write(config_dir.join("config.toml"), "exclude = [\"act\"]\n").unwrap();
+
+    let output = sasurahime(tmp.path()).arg("scan").output().unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        !stdout.contains("act"),
+        "excluded cleaner 'act' should not appear in scan output, got:\n{stdout}"
+    );
+}
+
+#[test]
+fn exclude_maintains_independent_cleaner() {
+    let tmp = TempDir::new().unwrap();
+    let config_dir = tmp.path().join(".config/sasurahime");
+    fs::create_dir_all(&config_dir).unwrap();
+    fs::write(config_dir.join("config.toml"), "exclude = [\"uv\"]\n").unwrap();
+
+    let output = sasurahime(tmp.path()).arg("scan").output().unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        !stdout.contains("uv"),
+        "excluded cleaner 'uv' should not appear in scan output, got:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("brew"),
+        "non-excluded cleaner 'brew' should still appear, got:\n{stdout}"
+    );
+}
+
+#[test]
+fn exclude_does_not_block_direct_clean() {
+    let tmp = TempDir::new().unwrap();
+    let config_dir = tmp.path().join(".config/sasurahime");
+    fs::create_dir_all(&config_dir).unwrap();
+    fs::write(config_dir.join("config.toml"), "exclude = [\"act\"]\n").unwrap();
+
+    let output = sasurahime(tmp.path())
+        .arg("clean")
+        .arg("act")
+        .arg("--dry-run")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "direct clean of excluded target 'act' should still work, stderr:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn custom_config_path_overrides_default() {
+    let tmp = TempDir::new().unwrap();
+    let config_dir = tmp.path().join(".config/sasurahime");
+    fs::create_dir_all(&config_dir).unwrap();
+    fs::write(config_dir.join("config.toml"), "not valid toml :::").unwrap();
+    let custom_path = tmp.path().join("my-config.toml");
+    fs::write(&custom_path, "trash_mode = false\n").unwrap();
+
+    let output = sasurahime(tmp.path())
+        .arg("--config")
+        .arg(&custom_path)
+        .arg("scan")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "custom config path should override default (invalid) config, stderr:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}

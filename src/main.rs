@@ -404,6 +404,10 @@ struct Cli {
     #[arg(long, global = true)]
     dry_run: bool,
 
+    /// Path to config file (default: ~/.config/sasurahime/config.toml)
+    #[arg(long)]
+    config: Option<PathBuf>,
+
     #[command(subcommand)]
     command: Option<Commands>,
 }
@@ -499,7 +503,7 @@ fn home() -> PathBuf {
 }
 
 fn all_cleaners(home: &std::path::Path, config: &config::Config) -> Vec<Box<dyn cleaner::Cleaner>> {
-    vec![
+    let all: Vec<Box<dyn cleaner::Cleaner>> = vec![
         // Sprint 1
         Box::new(cleaners::uv::UvCleaner::new(
             home,
@@ -574,7 +578,11 @@ fn all_cleaners(home: &std::path::Path, config: &config::Config) -> Vec<Box<dyn 
         Box::new(cleaners::apfs_snapshot::ApfsSnapshotCleaner::new(Box::new(
             SystemCommandRunner,
         ))),
-    ]
+    ];
+    let excluded = &config.exclude;
+    all.into_iter()
+        .filter(|c| !excluded.iter().any(|e| e == c.name()))
+        .collect()
 }
 
 /// Runs a single-target clean and prints freed bytes.
@@ -645,8 +653,14 @@ fn main() -> anyhow::Result<()> {
     eprintln!("sasurahime v{}", env!("CARGO_PKG_VERSION"));
     let home = home();
 
-    let config_dir = home.join(".config/sasurahime");
-    let config = match config::Config::load(&config_dir) {
+    let config = match &cli.config {
+        Some(path) => config::Config::load_from_path(path),
+        None => {
+            let config_dir = home.join(".config/sasurahime");
+            config::Config::load(&config_dir)
+        }
+    };
+    let config = match config {
         Ok(c) => c,
         Err(e) => {
             eprintln!("Error loading config: {e}");

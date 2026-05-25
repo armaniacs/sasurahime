@@ -28,6 +28,8 @@ struct RawConfig {
     trash_mode: Option<bool>,
     suppress: Option<bool>,
     deep_suppress: Option<bool>,
+    #[serde(default)]
+    exclude: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -39,6 +41,7 @@ pub struct Config {
     pub trash_mode: bool,
     pub suppress: bool,
     pub deep_suppress: bool,
+    pub exclude: Vec<String>,
 }
 
 impl Default for Config {
@@ -49,8 +52,29 @@ impl Default for Config {
             trash_mode: true,
             suppress: false,
             deep_suppress: false,
+            exclude: vec![],
         }
     }
+}
+
+/// Reads and parses a config.toml file at the given path.
+/// Returns defaults if the file does not exist.
+fn parse_config_file(path: &Path) -> Result<Config> {
+    if !path.exists() {
+        return Ok(Config::default());
+    }
+    let content = std::fs::read_to_string(path)
+        .map_err(|e| anyhow::anyhow!("cannot read {:?}: {}", path, e))?;
+    let raw: RawConfig = toml::from_str(&content)
+        .map_err(|e| anyhow::anyhow!("config parse error in {:?}: {}", path, e))?;
+    Ok(Config {
+        logs_keep_days: raw.logs.keep_days.unwrap_or(7),
+        logs_extra_targets: raw.logs.targets,
+        trash_mode: raw.trash_mode.unwrap_or(true),
+        suppress: raw.suppress.unwrap_or(false),
+        deep_suppress: raw.deep_suppress.unwrap_or(false),
+        exclude: raw.exclude,
+    })
 }
 
 impl Config {
@@ -59,20 +83,14 @@ impl Config {
     /// Returns an error if the file exists but cannot be parsed.
     pub fn load(config_dir: &Path) -> Result<Self> {
         let path = config_dir.join("config.toml");
-        if !path.exists() {
-            return Ok(Self::default());
-        }
-        let content = std::fs::read_to_string(&path)
-            .map_err(|e| anyhow::anyhow!("cannot read {:?}: {}", path, e))?;
-        let raw: RawConfig = toml::from_str(&content)
-            .map_err(|e| anyhow::anyhow!("config parse error in {:?}: {}", path, e))?;
-        Ok(Self {
-            logs_keep_days: raw.logs.keep_days.unwrap_or(7),
-            logs_extra_targets: raw.logs.targets,
-            trash_mode: raw.trash_mode.unwrap_or(true),
-            suppress: raw.suppress.unwrap_or(false),
-            deep_suppress: raw.deep_suppress.unwrap_or(false),
-        })
+        parse_config_file(&path)
+    }
+
+    /// Loads config from an explicit file path.
+    /// Returns defaults if the file does not exist.
+    /// Returns an error if the file exists but cannot be parsed.
+    pub fn load_from_path(path: &Path) -> Result<Self> {
+        parse_config_file(path)
     }
 
     /// Expands a leading `~` to `home`. Other paths are returned unchanged.
@@ -187,5 +205,49 @@ mod tests {
         std::fs::write(tmp.path().join("config.toml"), "deep_suppress = true\n").unwrap();
         let cfg = Config::load(tmp.path()).unwrap();
         assert!(cfg.deep_suppress, "deep_suppress from config must be true");
+    }
+
+    #[test]
+    fn default_exclude_is_empty() {
+        let cfg = Config::default();
+        assert!(cfg.exclude.is_empty(), "default exclude must be empty");
+    }
+
+    #[test]
+    fn exclude_parsed_from_config() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::write(
+            tmp.path().join("config.toml"),
+            "exclude = [\"act\", \"uv\"]\n",
+        )
+        .unwrap();
+        let cfg = Config::load(tmp.path()).unwrap();
+        assert_eq!(cfg.exclude, vec!["act".to_string(), "uv".to_string()]);
+    }
+
+    #[test]
+    fn load_from_path_works() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("custom.toml");
+        std::fs::write(&path, "exclude = [\"ollama\"]\n").unwrap();
+        let cfg = Config::load_from_path(&path).unwrap();
+        assert_eq!(cfg.exclude, vec!["ollama".to_string()]);
+    }
+
+    #[test]
+    fn load_from_path_missing_returns_default() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("nonexistent.toml");
+        let cfg = Config::load_from_path(&path).unwrap();
+        assert!(cfg.exclude.is_empty());
+        assert_eq!(cfg.logs_keep_days, 7);
+    }
+
+    #[test]
+    fn load_from_path_invalid_returns_error() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("bad.toml");
+        std::fs::write(&path, "not valid toml :::").unwrap();
+        assert!(Config::load_from_path(&path).is_err());
     }
 }
