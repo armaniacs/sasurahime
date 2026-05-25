@@ -66,6 +66,7 @@ impl Cleaner for ApfsSnapshotCleaner {
             return Ok(CleanResult {
                 name: self.name(),
                 bytes_freed: 0,
+                uses_trash: false,
                 skipped: vec![],
             });
         }
@@ -76,6 +77,7 @@ impl Cleaner for ApfsSnapshotCleaner {
             return Ok(CleanResult {
                 name: self.name(),
                 bytes_freed: 0,
+                uses_trash: false,
                 skipped: vec![],
             });
         }
@@ -92,6 +94,7 @@ impl Cleaner for ApfsSnapshotCleaner {
             return Ok(CleanResult {
                 name: self.name(),
                 bytes_freed: 0,
+                uses_trash: false,
                 skipped: vec![],
             });
         }
@@ -104,6 +107,7 @@ impl Cleaner for ApfsSnapshotCleaner {
             return Ok(CleanResult {
                 name: self.name(),
                 bytes_freed: 0,
+                uses_trash: false,
                 skipped: vec![],
             });
         }
@@ -114,6 +118,7 @@ impl Cleaner for ApfsSnapshotCleaner {
             return Ok(CleanResult {
                 name: self.name(),
                 bytes_freed: 0,
+                uses_trash: false,
                 skipped: vec![],
             });
         }
@@ -132,6 +137,7 @@ impl Cleaner for ApfsSnapshotCleaner {
         Ok(CleanResult {
             name: self.name(),
             bytes_freed: 0,
+            uses_trash: false,
             skipped: vec![],
         })
     }

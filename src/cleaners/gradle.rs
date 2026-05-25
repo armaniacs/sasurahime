@@ -89,6 +89,7 @@ impl Cleaner for GradleCleaner {
             return Ok(CleanResult {
                 name: self.name(),
                 bytes_freed: 0,
+                uses_trash: false,
                 skipped: vec![],
             });
         }
@@ -114,6 +115,7 @@ impl Cleaner for GradleCleaner {
         Ok(CleanResult {
             name: self.name(),
             bytes_freed: freed,
+            uses_trash: false,
             skipped: vec![],
         })
     }
@@ -218,6 +220,7 @@ impl Cleaner for JetBrainsCleaner {
             return Ok(CleanResult {
                 name: self.name(),
                 bytes_freed: 0,
+                uses_trash: false,
                 skipped: vec![],
             });
         }
@@ -243,6 +246,7 @@ impl Cleaner for JetBrainsCleaner {
         Ok(CleanResult {
             name: self.name(),
             bytes_freed: freed,
+            uses_trash: false,
             skipped: vec![],
         })
     }

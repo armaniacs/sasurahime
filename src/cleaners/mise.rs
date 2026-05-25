@@ -197,6 +197,7 @@ impl Cleaner for MiseCleaner {
             return Ok(CleanResult {
                 name: self.name(),
                 bytes_freed: 0,
+                uses_trash: true,
                 skipped: vec![],
             });
         }
@@ -246,6 +247,7 @@ impl Cleaner for MiseCleaner {
         Ok(CleanResult {
             name: self.name(),
             bytes_freed: freed,
+            uses_trash: false,
             skipped: vec![],
         })
     }

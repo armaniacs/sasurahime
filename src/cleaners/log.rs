@@ -167,6 +167,7 @@ impl Cleaner for LogCleaner {
             return Ok(CleanResult {
                 name: self.name(),
                 bytes_freed: 0,
+                uses_trash: false,
                 skipped: vec![],
             });
         }
@@ -197,6 +198,7 @@ impl Cleaner for LogCleaner {
         Ok(CleanResult {
             name: self.name(),
             bytes_freed: freed,
+            uses_trash: true,
             skipped,
         })
     }

@@ -4,6 +4,39 @@ All notable changes to sasurahime will be documented in this file. The format is
 
 ---
 
+## [0.1.24] — 2026-05-25
+
+### Added
+
+- **Trash warning UI (PBI-C).** After cleaning files via macOS Trash, `sasurahime`
+  now shows `"Note: Moved X to Trash. Run 'Empty Trash' to reclaim disk space."`
+  to inform users that Trash must be emptied to actually free disk space.
+- **Large file pre-warning.** When ≥1 GB of files will be moved to Trash, a
+  prominent `"Note: Files will be moved to Trash (not immediately freed)."`
+  warning is shown before the clean operation begins.
+- **`CleanResult.uses_trash` field.** Each cleaner reports whether it used the
+  macOS Trash (`delete_path`) or permanent deletion. CLI-based cleaners (brew,
+  uv, rustup, etc.) set `false`; directory-deletion cleaners set `true`.
+- **`format_trash_warning()` / `format_large_trash_warning()` helpers.** Pure
+  functions in `src/cleaner.rs` with 7 unit tests covering threshold boundaries,
+  dry-run suppression, and trash/non-trash modes.
+- **`LARGE_TRASH_THRESHOLD_BYTES`** constant (1 GiB) for threshold logic.
+
+### Changed
+
+- **`run_clean_target` pre/post hooks:** Added trash notice print before clean
+  (when `is_trash_mode() && !dry_run`) and size-specific note after clean
+  (when `is_trash_mode() && bytes_freed > 0`).
+
+### Internal
+
+- **All CleanResult construction sites** updated across 16+ source files to
+  provide the new `uses_trash` field.
+- **3 E2E tests** in `tests/trash.rs`: trash note visible, suppressed with
+  `--permanent`, suppressed with `--dry-run`.
+
+---
+
 ## [0.1.23] — 2026-05-25
 
 ### Added

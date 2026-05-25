@@ -156,6 +156,7 @@ impl Cleaner for LibraryLogsCleaner {
             return Ok(CleanResult {
                 name: self.name(),
                 bytes_freed: 0,
+                uses_trash: false,
                 skipped: vec![],
             });
         }
@@ -166,6 +167,7 @@ impl Cleaner for LibraryLogsCleaner {
             return Ok(CleanResult {
                 name: self.name(),
                 bytes_freed: 0,
+                uses_trash: false,
                 skipped: vec![],
             });
         }
@@ -195,6 +197,7 @@ impl Cleaner for LibraryLogsCleaner {
             return Ok(CleanResult {
                 name: self.name(),
                 bytes_freed: 0,
+                uses_trash: false,
                 skipped: vec![],
             });
         }
@@ -206,6 +209,7 @@ impl Cleaner for LibraryLogsCleaner {
             return Ok(CleanResult {
                 name: self.name(),
                 bytes_freed: 0,
+                uses_trash: false,
                 skipped: vec![],
             });
         }
@@ -240,6 +244,7 @@ impl Cleaner for LibraryLogsCleaner {
         Ok(CleanResult {
             name: self.name(),
             bytes_freed: total_freed,
+            uses_trash: true,
             skipped: vec![],
         })
     }
@@ -259,6 +264,7 @@ impl LibraryLogsCleaner {
             return Ok(CleanResult {
                 name: "library-logs",
                 bytes_freed: 0,
+                uses_trash: false,
                 skipped: vec![],
             });
         }
@@ -287,6 +293,7 @@ impl LibraryLogsCleaner {
             return Ok(CleanResult {
                 name: "library-logs",
                 bytes_freed: 0,
+                uses_trash: false,
                 skipped: vec![],
             });
         }
@@ -314,6 +321,7 @@ impl LibraryLogsCleaner {
         Ok(CleanResult {
             name: "library-logs",
             bytes_freed: total_freed,
+            uses_trash: true,
             skipped: vec![],
         })
     }

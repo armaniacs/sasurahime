@@ -392,6 +392,7 @@ impl Cleaner for GenericCleaner {
                     return Ok(CleanResult {
                         name: self.name(),
                         bytes_freed: 0,
+                        uses_trash: false,
                         skipped: vec![],
                     });
                 }
@@ -400,6 +401,7 @@ impl Cleaner for GenericCleaner {
                     return Ok(CleanResult {
                         name: self.name(),
                         bytes_freed: 0,
+                        uses_trash: false,
                         skipped: vec![],
                     });
                 }
@@ -408,6 +410,7 @@ impl Cleaner for GenericCleaner {
                 Ok(CleanResult {
                     name: self.name(),
                     bytes_freed: 0,
+                    uses_trash: false,
                     skipped: vec![],
                 })
             }
@@ -450,6 +453,7 @@ impl Cleaner for GenericCleaner {
                             return Ok(CleanResult {
                                 name: self.name(),
                                 bytes_freed: 0,
+                                uses_trash: false,
                                 skipped: vec![],
                             });
                         }
@@ -470,6 +474,7 @@ impl Cleaner for GenericCleaner {
                         return Ok(CleanResult {
                             name: self.name(),
                             bytes_freed: size_before,
+                            uses_trash: true,
                             skipped: vec![],
                         });
                     }
@@ -477,6 +482,7 @@ impl Cleaner for GenericCleaner {
                     return Ok(CleanResult {
                         name: self.name(),
                         bytes_freed: 0,
+                        uses_trash: false,
                         skipped: vec![],
                     });
                 }
@@ -491,6 +497,7 @@ impl Cleaner for GenericCleaner {
                     return Ok(CleanResult {
                         name: self.name(),
                         bytes_freed: 0,
+                        uses_trash: false,
                         skipped: vec![],
                     });
                 }
@@ -521,6 +528,7 @@ impl Cleaner for GenericCleaner {
                 Ok(CleanResult {
                     name: self.name(),
                     bytes_freed: freed,
+                    uses_trash: false,
                     skipped: vec![],
                 })
             }
@@ -555,6 +563,7 @@ impl Cleaner for GenericCleaner {
                 Ok(CleanResult {
                     name: self.name(),
                     bytes_freed: freed,
+                    uses_trash: true,
                     skipped: vec![],
                 })
             }
@@ -607,6 +616,7 @@ pub fn clean_cli_or_fallback(
         return Ok(CleanResult {
             name,
             bytes_freed: 0,
+            uses_trash: false,
             skipped: vec![],
         });
     }
@@ -627,6 +637,7 @@ pub fn clean_cli_or_fallback(
             return Ok(CleanResult {
                 name,
                 bytes_freed: 0,
+                uses_trash: false,
                 skipped: vec![],
             });
         }
@@ -643,6 +654,7 @@ pub fn clean_cli_or_fallback(
         return Ok(CleanResult {
             name,
             bytes_freed: size_before,
+            uses_trash: false,
             skipped: vec![],
         });
     }
@@ -658,6 +670,7 @@ pub fn clean_cli_or_fallback(
         return Ok(CleanResult {
             name,
             bytes_freed: 0,
+            uses_trash: false,
             skipped: vec![],
         });
     }
@@ -677,6 +690,7 @@ pub fn clean_cli_or_fallback(
     Ok(CleanResult {
         name,
         bytes_freed: size,
+        uses_trash: true,
         skipped: vec![],
     })
 }

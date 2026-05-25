@@ -58,6 +58,7 @@ impl Cleaner for IosCleaner {
             return Ok(CleanResult {
                 name: self.name(),
                 bytes_freed: 0,
+                uses_trash: false,
                 skipped: vec![],
             });
         }
@@ -80,6 +81,7 @@ impl Cleaner for IosCleaner {
             return Ok(CleanResult {
                 name: self.name(),
                 bytes_freed: 0,
+                uses_trash: false,
                 skipped: vec![],
             });
         }
@@ -99,6 +101,7 @@ impl Cleaner for IosCleaner {
             return Ok(CleanResult {
                 name: self.name(),
                 bytes_freed: 0,
+                uses_trash: false,
                 skipped: vec![],
             });
         }
@@ -113,6 +116,7 @@ impl Cleaner for IosCleaner {
             return Ok(CleanResult {
                 name: self.name(),
                 bytes_freed: 0,
+                uses_trash: false,
                 skipped: vec![],
             });
         }
@@ -123,6 +127,7 @@ impl Cleaner for IosCleaner {
             return Ok(CleanResult {
                 name: self.name(),
                 bytes_freed: 0,
+                uses_trash: false,
                 skipped: vec![],
             });
         }
@@ -153,6 +158,7 @@ impl Cleaner for IosCleaner {
         Ok(CleanResult {
             name: self.name(),
             bytes_freed: total_freed,
+            uses_trash: true,
             skipped: vec![],
         })
     }

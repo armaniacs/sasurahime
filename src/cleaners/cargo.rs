@@ -148,6 +148,7 @@ impl Cleaner for CargoCleaner {
         Ok(CleanResult {
             name: self.name(),
             bytes_freed: freed,
+            uses_trash: true,
             skipped,
         })
     }

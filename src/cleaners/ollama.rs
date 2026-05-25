@@ -105,6 +105,7 @@ impl Cleaner for OllamaCleaner {
                 return Ok(CleanResult {
                     name: self.name(),
                     bytes_freed: 0,
+                    uses_trash: false,
                     skipped: vec![],
                 });
             }
@@ -121,6 +122,7 @@ impl Cleaner for OllamaCleaner {
                 return Ok(CleanResult {
                     name: self.name(),
                     bytes_freed: 0,
+                    uses_trash: false,
                     skipped: vec![],
                 });
             }
@@ -142,6 +144,7 @@ impl Cleaner for OllamaCleaner {
                 return Ok(CleanResult {
                     name: self.name(),
                     bytes_freed: 0,
+                    uses_trash: false,
                     skipped: vec![],
                 });
             }
@@ -167,6 +170,7 @@ impl Cleaner for OllamaCleaner {
             return Ok(CleanResult {
                 name: self.name(),
                 bytes_freed: total,
+                uses_trash: false,
                 skipped: vec![],
             });
         }
@@ -182,6 +186,7 @@ impl OllamaCleaner {
             return Ok(CleanResult {
                 name: self.name(),
                 bytes_freed: 0,
+                uses_trash: false,
                 skipped: vec![],
             });
         }
@@ -195,6 +200,7 @@ impl OllamaCleaner {
             return Ok(CleanResult {
                 name: self.name(),
                 bytes_freed: 0,
+                uses_trash: false,
                 skipped: vec![],
             });
         }
@@ -218,6 +224,7 @@ impl OllamaCleaner {
         Ok(CleanResult {
             name: self.name(),
             bytes_freed: freed,
+            uses_trash: true,
             skipped,
         })
     }

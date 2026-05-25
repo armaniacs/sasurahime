@@ -120,6 +120,7 @@ impl Cleaner for BrowserCleaner {
             return Ok(CleanResult {
                 name: self.name(),
                 bytes_freed: 0,
+                uses_trash: false,
                 skipped: vec![],
             });
         }
@@ -170,6 +171,7 @@ impl Cleaner for BrowserCleaner {
         Ok(CleanResult {
             name: self.name(),
             bytes_freed: freed,
+            uses_trash: true,
             skipped,
         })
     }

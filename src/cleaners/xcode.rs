@@ -71,6 +71,7 @@ impl Cleaner for XcodeCleaner {
             return Ok(CleanResult {
                 name: self.name(),
                 bytes_freed: 0,
+                uses_trash: false,
                 skipped: vec![],
             });
         }
@@ -87,6 +88,7 @@ impl Cleaner for XcodeCleaner {
                 return Ok(CleanResult {
                     name: self.name(),
                     bytes_freed: 0,
+                    uses_trash: false,
                     skipped: vec![],
                 });
             }
@@ -132,6 +134,7 @@ impl Cleaner for XcodeCleaner {
         Ok(CleanResult {
             name: self.name(),
             bytes_freed: freed,
+            uses_trash: true,
             skipped,
         })
     }

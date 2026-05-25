@@ -132,6 +132,117 @@ fn yes_permanent_requires_confirmation() {
 }
 
 #[test]
+fn clean_shows_trash_note_when_trash_mode() {
+    let tmp = TempDir::new().unwrap();
+    let bin_dir = tmp.path().join("bin");
+    fs::create_dir_all(&bin_dir).unwrap();
+    install_fake_uv(&bin_dir);
+
+    let uv_cache = tmp.path().join(".cache/uv");
+    fs::create_dir_all(uv_cache.join("simple-v16")).unwrap();
+    fs::create_dir_all(uv_cache.join("simple-v21")).unwrap();
+    fs::write(uv_cache.join("simple-v16/pack.seq"), [0u8; 100]).unwrap();
+
+    let original_path = std::env::var("PATH").unwrap_or_default();
+    let new_path = format!("{}:{}", bin_dir.display(), original_path);
+
+    let output = sasurahime(tmp.path())
+        .env("PATH", &new_path)
+        .args(["clean", "uv"])
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success(),
+        "stdout: {stdout}\nstderr: {stderr}",
+    );
+    assert!(
+        stdout.contains("moved to Trash"),
+        "trash mode should show trash note:\n{stdout}"
+    );
+    assert!(
+        !uv_cache.join("simple-v16").exists(),
+        "old cache must be removed"
+    );
+}
+
+#[test]
+fn clean_with_permanent_flag_does_not_show_trash_note() {
+    let tmp = TempDir::new().unwrap();
+    let bin_dir = tmp.path().join("bin");
+    fs::create_dir_all(&bin_dir).unwrap();
+    install_fake_uv(&bin_dir);
+
+    let uv_cache = tmp.path().join(".cache/uv");
+    fs::create_dir_all(uv_cache.join("simple-v16")).unwrap();
+    fs::create_dir_all(uv_cache.join("simple-v21")).unwrap();
+    fs::write(uv_cache.join("simple-v16/pack.seq"), [0u8; 100]).unwrap();
+
+    let original_path = std::env::var("PATH").unwrap_or_default();
+    let new_path = format!("{}:{}", bin_dir.display(), original_path);
+
+    let output = sasurahime(tmp.path())
+        .env("PATH", &new_path)
+        .args(["--permanent", "clean", "uv"])
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        output.status.success(),
+        "stdout: {stdout}\nstderr: {}",
+        String::from_utf8_lossy(&output.stderr),
+    );
+    assert!(
+        stdout.contains("Freed:"),
+        "--permanent should show Freed:\n{stdout}"
+    );
+    assert!(
+        !stdout.contains("moved to Trash"),
+        "--permanent must not mention Trash:\n{stdout}"
+    );
+}
+
+#[test]
+fn clean_dry_run_does_not_show_trash_note() {
+    let tmp = TempDir::new().unwrap();
+    let bin_dir = tmp.path().join("bin");
+    fs::create_dir_all(&bin_dir).unwrap();
+    install_fake_uv(&bin_dir);
+
+    let uv_cache = tmp.path().join(".cache/uv");
+    fs::create_dir_all(uv_cache.join("simple-v16")).unwrap();
+    fs::create_dir_all(uv_cache.join("simple-v21")).unwrap();
+    fs::write(uv_cache.join("simple-v16/pack.seq"), [0u8; 100]).unwrap();
+
+    let original_path = std::env::var("PATH").unwrap_or_default();
+    let new_path = format!("{}:{}", bin_dir.display(), original_path);
+
+    let output = sasurahime(tmp.path())
+        .env("PATH", &new_path)
+        .args(["clean", "uv", "--dry-run"])
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success(),
+        "stdout: {stdout}\nstderr: {stderr}",
+    );
+    assert!(
+        !stdout.contains("moved to Trash"),
+        "dry-run should not show trash note:\n{stdout}"
+    );
+    assert!(
+        uv_cache.join("simple-v16").exists(),
+        "dry-run must preserve files"
+    );
+}
+
+#[test]
 fn permanent_dry_run_shows_freed_not_trash() {
     let tmp = TempDir::new().unwrap();
     let bin_dir = tmp.path().join("bin");

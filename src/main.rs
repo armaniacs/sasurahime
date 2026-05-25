@@ -604,6 +604,7 @@ where
                 return Ok(CleanResult {
                     name: "",
                     bytes_freed: 0,
+                    uses_trash: false,
                     skipped: vec![],
                 });
             }
@@ -620,6 +621,7 @@ where
                 return Ok(CleanResult {
                     name: "",
                     bytes_freed: 0,
+                    uses_trash: false,
                     skipped: vec![],
                 })
             }
