@@ -60,6 +60,57 @@ fn clean_xcode_dry_run_deletes_nothing() {
 }
 
 #[test]
+fn clean_xcode_derived_data_only_via_sub() {
+    let tmp = TempDir::new().unwrap();
+    let dd = tmp
+        .path()
+        .join("Library/Developer/Xcode/DerivedData/MyApp");
+    let arch = tmp
+        .path()
+        .join("Library/Developer/Xcode/Archives/MyArchive");
+    fs::create_dir_all(&dd).unwrap();
+    fs::write(dd.join("build.log"), b"data").unwrap();
+    fs::create_dir_all(&arch).unwrap();
+    fs::write(arch.join("archive.xcarchive"), b"data").unwrap();
+
+    let output = sasurahime(tmp.path())
+        .args(["clean", "xcode", "--sub", "derived-data"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(!dd.exists(), "DerivedData should be removed");
+    assert!(arch.exists(), "Archives should remain");
+}
+
+#[test]
+fn clean_xcode_archives_only_via_sub() {
+    let tmp = TempDir::new().unwrap();
+    let dd = tmp
+        .path()
+        .join("Library/Developer/Xcode/DerivedData/MyApp");
+    let arch = tmp
+        .path()
+        .join("Library/Developer/Xcode/Archives/MyArchive");
+    fs::create_dir_all(&dd).unwrap();
+    fs::write(dd.join("build.log"), b"data").unwrap();
+    fs::create_dir_all(&arch).unwrap();
+    fs::write(arch.join("archive.xcarchive"), b"data").unwrap();
+
+    let output = sasurahime(tmp.path())
+        .args(["clean", "xcode", "--sub", "archives"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    assert!(dd.exists(), "DerivedData should remain");
+    assert!(!arch.exists(), "Archives should be removed");
+}
+
+#[test]
 fn clean_xcode_missing_derived_data_exits_zero() {
     let tmp = TempDir::new().unwrap();
     let output = sasurahime(tmp.path())

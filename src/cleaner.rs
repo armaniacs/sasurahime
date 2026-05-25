@@ -199,4 +199,9 @@ pub trait Cleaner: Send + Sync {
     fn is_available(&self) -> bool {
         true
     }
+
+    /// Returns sub-targets with display names and sizes (for TUI/CLI).
+    fn sub_targets(&self) -> Vec<(&'static str, u64)> {
+        vec![]
+    }
 }

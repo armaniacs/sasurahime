@@ -6,17 +6,84 @@ use anyhow::Result;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum XcodeSubcategory {
+    DerivedData,
+    Archives,
+}
+
+#[allow(dead_code)]
+impl XcodeSubcategory {
+    pub fn all() -> Vec<Self> {
+        vec![Self::DerivedData, Self::Archives]
+    }
+
+    pub fn path(&self, home: &Path) -> PathBuf {
+        match self {
+            Self::DerivedData => home.join("Library/Developer/Xcode/DerivedData"),
+            Self::Archives => home.join("Library/Developer/Xcode/Archives"),
+        }
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "derived-data" | "deriveddata" => Some(Self::DerivedData),
+            "archives" => Some(Self::Archives),
+            _ => None,
+        }
+    }
+
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            Self::DerivedData => "DerivedData",
+            Self::Archives => "Archives",
+        }
+    }
+}
+
+#[allow(dead_code)]
+pub struct SubcategoryInfo {
+    pub sub: XcodeSubcategory,
+    pub path: PathBuf,
+    pub size: u64,
+}
+
 pub struct XcodeCleaner {
     derived_data: PathBuf,
+    archives: PathBuf,
     runner: Box<dyn CommandRunner>,
+    subs: Option<Vec<XcodeSubcategory>>,
 }
 
 impl XcodeCleaner {
     pub fn new(home: &Path, runner: Box<dyn CommandRunner>) -> Self {
         Self {
             derived_data: home.join("Library/Developer/Xcode/DerivedData"),
+            archives: home.join("Library/Developer/Xcode/Archives"),
             runner,
+            subs: None,
         }
+    }
+
+    pub fn with_subcategories(mut self, subs: Vec<XcodeSubcategory>) -> Self {
+        self.subs = Some(subs);
+        self
+    }
+
+    #[allow(dead_code)]
+    pub fn detect_subcategories(&self) -> Vec<SubcategoryInfo> {
+        XcodeSubcategory::all()
+            .into_iter()
+            .map(|sub| {
+                let path = match sub {
+                    XcodeSubcategory::DerivedData => self.derived_data.clone(),
+                    XcodeSubcategory::Archives => self.archives.clone(),
+                };
+                let size = if path.exists() { dir_size(&path) } else { 0 };
+                SubcategoryInfo { sub, path, size }
+            })
+            .collect()
     }
 
     /// Returns true if an Xcode process is currently running.
@@ -28,17 +95,6 @@ impl XcodeCleaner {
             .unwrap_or(false)
     }
 
-    fn project_dirs(&self) -> Vec<PathBuf> {
-        let entries = match fs::read_dir(&self.derived_data) {
-            Ok(e) => e,
-            Err(_) => return vec![],
-        };
-        entries
-            .filter_map(|e| e.ok())
-            .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
-            .map(|e| e.path())
-            .collect()
-    }
 }
 
 impl Cleaner for XcodeCleaner {
@@ -47,6 +103,30 @@ impl Cleaner for XcodeCleaner {
     }
 
     fn detect(&self) -> ScanResult {
+        if let Some(ref subs) = self.subs {
+            let total: u64 = subs
+                .iter()
+                .map(|sub| {
+                    let path = match sub {
+                        XcodeSubcategory::DerivedData => &self.derived_data,
+                        XcodeSubcategory::Archives => &self.archives,
+                    };
+                    if path.exists() { dir_size(path) } else { 0 }
+                })
+                .sum();
+            let mut r = ScanResult::new(
+                self.name(),
+                if total > 0 {
+                    ScanStatus::Pruneable(total)
+                } else {
+                    ScanStatus::NotFound
+                },
+            );
+            if crate::context::is_verbose() {
+                r = r.with_target(format!("{:?}", subs));
+            }
+            return r;
+        }
         if !self.derived_data.exists() {
             return ScanResult::new(self.name(), ScanStatus::NotFound);
         }
@@ -66,17 +146,15 @@ impl Cleaner for XcodeCleaner {
     }
 
     fn clean(&self, dry_run: bool, reporter: &dyn ProgressReporter) -> Result<CleanResult> {
-        if !self.derived_data.exists() {
-            println!("Xcode DerivedData: not found, skipping");
-            return Ok(CleanResult {
-                name: self.name(),
-                bytes_freed: 0,
-                uses_trash: false,
-                skipped: vec![],
-            });
-        }
+        let subs: Vec<XcodeSubcategory> = match self.subs {
+            Some(ref s) => s.clone(),
+            None => vec![XcodeSubcategory::DerivedData],
+        };
 
-        if self.is_xcode_running() {
+        if subs.contains(&XcodeSubcategory::DerivedData)
+            && self.derived_data.exists()
+            && self.is_xcode_running()
+        {
             eprintln!("Warning: Xcode is running. DerivedData deletion may cause issues.");
             eprint!("Continue? [y/N] ");
             use std::io::Write;
@@ -94,48 +172,75 @@ impl Cleaner for XcodeCleaner {
             }
         }
 
-        let dirs = self.project_dirs();
-        if !dry_run && !dirs.is_empty() {
-            reporter.progress_init(self.name(), dirs.len());
-        }
+        let mut total_freed = 0u64;
+        let mut all_skipped = vec![];
 
-        let mut skipped: Vec<crate::cleaner::SkippedEntry> = vec![];
-        let mut freed: u64 = 0;
-        for (i, dir) in dirs.iter().enumerate() {
-            let size = dir_size(dir);
-            let entry_name = dir.file_name().unwrap_or_default().to_string_lossy();
-            if dry_run {
-                println!(
-                    "[dry-run] would remove: DerivedData/{entry_name} ({})",
-                    crate::format::format_bytes(size)
-                );
-            } else {
-                reporter.progress_tick(dir, i + 1, size);
-                if let Err(e) = crate::trash::delete_path(dir) {
-                    if crate::cleaner::is_skippable_error(&e) {
-                        skipped.push(crate::cleaner::SkippedEntry {
-                            path: dir.to_path_buf(),
-                            reason: format!("{e:#}"),
-                        });
-                    } else {
-                        return Err(e);
-                    }
+        for sub in subs {
+            let (dir, label) = match sub {
+                XcodeSubcategory::DerivedData => (&self.derived_data, "DerivedData"),
+                XcodeSubcategory::Archives => (&self.archives, "Archives"),
+            };
+
+            if !dir.exists() {
+                println!("Xcode {label}: not found, skipping");
+                continue;
+            }
+
+            let entries = match fs::read_dir(dir) {
+                Ok(e) => e,
+                Err(_) => continue,
+            };
+
+            let dirs: Vec<PathBuf> = entries
+                .filter_map(|e| e.ok())
+                .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
+                .map(|e| e.path())
+                .collect();
+
+            if dirs.is_empty() {
+                continue;
+            }
+
+            if !dry_run {
+                reporter.progress_init(&format!("xcode/{label}"), dirs.len());
+            }
+
+            for (i, entry) in dirs.iter().enumerate() {
+                let size = dir_size(entry);
+                let entry_name = entry.file_name().unwrap_or_default().to_string_lossy();
+                if dry_run {
+                    println!(
+                        "[dry-run] would remove: {label}/{entry_name} ({})",
+                        crate::format::format_bytes(size)
+                    );
                 } else {
-                    freed += size;
-                    println!("Removed: DerivedData/{entry_name}");
+                    reporter.progress_tick(entry, i + 1, size);
+                    if let Err(e) = crate::trash::delete_path(entry) {
+                        if crate::cleaner::is_skippable_error(&e) {
+                            all_skipped.push(crate::cleaner::SkippedEntry {
+                                path: entry.to_path_buf(),
+                                reason: format!("{e:#}"),
+                            });
+                        } else {
+                            return Err(e);
+                        }
+                    } else {
+                        total_freed += size;
+                        println!("Removed: {label}/{entry_name}");
+                    }
                 }
             }
-        }
 
-        if !dry_run && !dirs.is_empty() {
-            reporter.progress_finish();
+            if !dry_run {
+                reporter.progress_finish();
+            }
         }
 
         Ok(CleanResult {
             name: self.name(),
-            bytes_freed: freed,
+            bytes_freed: total_freed,
             uses_trash: true,
-            skipped,
+            skipped: all_skipped,
         })
     }
 }
@@ -191,6 +296,101 @@ mod tests {
 
         let cleaner = XcodeCleaner::new(tmp.path(), Box::new(NoopRunner));
         assert!(matches!(cleaner.detect().status, ScanStatus::Pruneable(_)));
+    }
+
+    #[test]
+    fn subcategory_all_returns_two() {
+        let all = XcodeSubcategory::all();
+        assert_eq!(all.len(), 2);
+        assert!(all.contains(&XcodeSubcategory::DerivedData));
+        assert!(all.contains(&XcodeSubcategory::Archives));
+    }
+
+    #[test]
+    fn subcategory_path_derived_data() {
+        let home = Path::new("/Users/test");
+        let p = XcodeSubcategory::DerivedData.path(home);
+        assert!(p.ends_with("Library/Developer/Xcode/DerivedData"));
+    }
+
+    #[test]
+    fn subcategory_path_archives() {
+        let home = Path::new("/Users/test");
+        let p = XcodeSubcategory::Archives.path(home);
+        assert!(p.ends_with("Library/Developer/Xcode/Archives"));
+    }
+
+    #[test]
+    fn from_str_derived_data_variants() {
+        assert_eq!(
+            XcodeSubcategory::from_str("derived-data"),
+            Some(XcodeSubcategory::DerivedData)
+        );
+        assert_eq!(
+            XcodeSubcategory::from_str("deriveddata"),
+            Some(XcodeSubcategory::DerivedData)
+        );
+    }
+
+    #[test]
+    fn from_str_archives() {
+        assert_eq!(
+            XcodeSubcategory::from_str("archives"),
+            Some(XcodeSubcategory::Archives)
+        );
+    }
+
+    #[test]
+    fn from_str_invalid_returns_none() {
+        assert_eq!(XcodeSubcategory::from_str("invalid"), None);
+        assert_eq!(XcodeSubcategory::from_str("simulators"), None);
+    }
+
+    #[test]
+    fn display_name_is_readable() {
+        assert_eq!(XcodeSubcategory::DerivedData.display_name(), "DerivedData");
+        assert_eq!(XcodeSubcategory::Archives.display_name(), "Archives");
+    }
+
+    #[test]
+    fn detect_subcategories_returns_correct_sizes() {
+        let tmp = TempDir::new().unwrap();
+        let dd = tmp.path().join("Library/Developer/Xcode/DerivedData");
+        fs::create_dir_all(dd.join("ProjectA")).unwrap();
+        fs::write(dd.join("ProjectA").join("f"), b"x").unwrap();
+
+        let cleaner = XcodeCleaner::new(tmp.path(), Box::new(NoopRunner));
+        let infos = cleaner.detect_subcategories();
+        assert_eq!(infos.len(), 2);
+        let dd_info = infos
+            .iter()
+            .find(|i| i.sub == XcodeSubcategory::DerivedData)
+            .unwrap();
+        assert!(dd_info.size > 0, "DerivedData should have size > 0");
+        let archives_info = infos
+            .iter()
+            .find(|i| i.sub == XcodeSubcategory::Archives)
+            .unwrap();
+        assert_eq!(archives_info.size, 0, "Archives should be size 0");
+    }
+
+    #[test]
+    fn clean_selected_subcategory_only_deletes_that_one() {
+        let tmp = TempDir::new().unwrap();
+        let dd = tmp.path().join("Library/Developer/Xcode/DerivedData");
+        let arch = tmp.path().join("Library/Developer/Xcode/Archives");
+        fs::create_dir_all(dd.join("P")).unwrap();
+        fs::write(dd.join("P").join("f"), b"x").unwrap();
+        fs::create_dir_all(arch.join("A")).unwrap();
+        fs::write(arch.join("A").join("f"), b"x").unwrap();
+
+        let cleaner = XcodeCleaner::new(tmp.path(), Box::new(PgrepRunner { running: false }))
+            .with_subcategories(vec![XcodeSubcategory::DerivedData]);
+        let reporter = crate::progress::VerboseProgress::new();
+        let result = cleaner.clean(false, &reporter).unwrap();
+        assert!(result.bytes_freed > 0, "should have freed bytes");
+        assert!(!dd.join("P").exists(), "DerivedData subdirectory should be removed");
+        assert!(arch.exists(), "Archives should still exist");
     }
 
     #[test]

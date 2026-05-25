@@ -326,10 +326,13 @@ define_cleaners! {
         #[arg(long)]
         keep_days: Option<u32>,
     },
-    /// Remove Xcode DerivedData build cache
+    /// Clean Xcode caches (DerivedData, Archives)
     Xcode {
         #[arg(long)]
         dry_run: bool,
+        /// Subcategories to clean: derived-data, archives (default: all)
+        #[arg(long, value_delimiter = ',')]
+        sub: Option<Vec<String>>,
     },
     /// Report Trash size
     Trash {
@@ -453,7 +456,7 @@ impl CleanTarget {
     fn dry_run(&self) -> bool {
         match self {
             CleanTarget::Caches { dry_run }
-            | CleanTarget::Xcode { dry_run }
+            | CleanTarget::Xcode { dry_run, .. }
             | CleanTarget::Trash { dry_run }
             | CleanTarget::Ollama { dry_run }
             | CleanTarget::LibraryLogs { dry_run, .. } => *dry_run,
@@ -809,11 +812,19 @@ fn main() -> anyhow::Result<()> {
                             std::process::exit(1);
                         }
                     }
-                    CleanTarget::Xcode { dry_run } => {
-                        let xcode_cleaner = cleaners::xcode::XcodeCleaner::new(
+                    CleanTarget::Xcode { dry_run, sub } => {
+                        let mut xcode_cleaner = cleaners::xcode::XcodeCleaner::new(
                             &home,
                             Box::new(SystemCommandRunner),
                         );
+                        if let Some(ref subs) = sub {
+                            let parsed: Vec<_> = subs.iter()
+                                .filter_map(|s| cleaners::xcode::XcodeSubcategory::from_str(s))
+                                .collect();
+                            if !parsed.is_empty() {
+                                xcode_cleaner = xcode_cleaner.with_subcategories(parsed);
+                            }
+                        }
                         if cli.yes && xcode_cleaner.is_xcode_running() {
                             eprintln!("Note: Xcode is running. Proceeding with --yes anyway.");
                         }

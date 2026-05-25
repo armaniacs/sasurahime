@@ -139,15 +139,31 @@ pub fn run_interactive(cleaners: &[Box<dyn Cleaner>]) -> Result<()> {
         return Ok(());
     }
 
+    let mut selection_mapping: Vec<(usize, Option<&'static str>)> = vec![];
     let items: Vec<String> = pruneable_indices
         .iter()
-        .map(|&i| {
-            let r = &results[i];
-            let size_str = match &r.status {
-                ScanStatus::Pruneable(b) => format_bytes(*b),
-                _ => "-".to_string(),
+        .flat_map(|&i| {
+            let bytes = match &results[i].status {
+                ScanStatus::Pruneable(b) => *b,
+                _ => 0,
             };
-            format!("{:<20} {}", r.name, size_str)
+            let subs = cleaners[i].sub_targets();
+            if subs.is_empty() {
+                selection_mapping.push((i, None));
+                vec![format!("{}  ({})", cleaners[i].name(), format_bytes(bytes))]
+            } else {
+                subs.iter()
+                    .map(|&(sub_name, sub_size)| {
+                        selection_mapping.push((i, Some(sub_name)));
+                        format!(
+                            "  {} > {}  ({})",
+                            cleaners[i].name(),
+                            sub_name,
+                            format_bytes(sub_size)
+                        )
+                    })
+                    .collect()
+            }
         })
         .collect();
 
@@ -164,11 +180,19 @@ pub fn run_interactive(cleaners: &[Box<dyn Cleaner>]) -> Result<()> {
 
     let total: u64 = selected
         .iter()
-        .filter_map(|&si| {
-            if let ScanStatus::Pruneable(b) = &results[pruneable_indices[si]].status {
-                Some(*b)
+        .map(|&si| {
+            let (cleaner_idx, sub_name) = &selection_mapping[si];
+            if let Some(sub_name) = sub_name {
+                cleaners[*cleaner_idx]
+                    .sub_targets()
+                    .iter()
+                    .find(|(n, _)| n == sub_name)
+                    .map(|(_, s)| *s)
+                    .unwrap_or(0)
+            } else if let ScanStatus::Pruneable(b) = &results[*cleaner_idx].status {
+                *b
             } else {
-                None
+                0
             }
         })
         .sum();
@@ -193,14 +217,38 @@ pub fn run_interactive(cleaners: &[Box<dyn Cleaner>]) -> Result<()> {
     let reporter = crate::progress::VerboseProgress::new();
     let mut freed: u64 = 0;
     for &si in &selected {
-        let cleaner_idx = pruneable_indices[si];
-        let name = cleaners[cleaner_idx].name();
-        let result = crate::progress::with_spinner_result(&format!("Cleaning {}...", name), || {
-            cleaners[cleaner_idx].clean(false, &reporter)
-        });
-        match result {
-            Ok(r) => freed += r.bytes_freed,
-            Err(e) => eprintln!("Error: {e}"),
+        let (cleaner_idx, sub_name) = &selection_mapping[si];
+        if let Some(sub_name) = sub_name {
+            let name = cleaners[*cleaner_idx].name();
+            let result =
+                crate::progress::with_spinner_result(&format!("Cleaning {} {}...", name, sub_name), || {
+                    let status = std::process::Command::new(std::env::current_exe()?)
+                        .args(["clean", name, "--sub", sub_name])
+                        .status()?;
+                    if !status.success() {
+                        anyhow::bail!("`{} clean {} --sub {}` failed", name, name, sub_name);
+                    }
+                    Ok(crate::cleaner::CleanResult {
+                        name,
+                        bytes_freed: 0,
+                        uses_trash: false,
+                        skipped: vec![],
+                    })
+                });
+            match result {
+                Ok(r) => freed += r.bytes_freed,
+                Err(e) => eprintln!("Error cleaning {} {}: {e}", name, sub_name),
+            }
+        } else {
+            let name = cleaners[*cleaner_idx].name();
+            let result =
+                crate::progress::with_spinner_result(&format!("Cleaning {}...", name), || {
+                    cleaners[*cleaner_idx].clean(false, &reporter)
+                });
+            match result {
+                Ok(r) => freed += r.bytes_freed,
+                Err(e) => eprintln!("Error: {e}"),
+            }
         }
     }
 
