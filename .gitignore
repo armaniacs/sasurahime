@@ -34,3 +34,6 @@ docs/_site/
 
 # Brainstorming visual companion artifacts
 .superpowers/
+
+# Git worktrees
+.worktrees/
