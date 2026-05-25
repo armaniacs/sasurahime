@@ -12,6 +12,10 @@ pub struct CustomPathCleaner {
 impl CustomPathCleaner {
     pub fn new(name: String, path: PathBuf) -> Self {
         Self {
+            // SAFETY: CustomPathCleaner instances are created once per program
+            // invocation in all_cleaners() and live for the full lifetime.
+            // The leaked allocation (a per-cleaner name string) is intentional
+            // and negligible.
             name: Box::leak(name.into_boxed_str()),
             path,
         }

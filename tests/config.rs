@@ -143,7 +143,7 @@ fn custom_target_appears_in_scan() {
 }
 
 #[test]
-fn custom_target_empty_dir_shows_not_found() {
+fn custom_target_nonexistent_path_shows_not_found() {
     let tmp = TempDir::new().unwrap();
     // Write config with [[custom]] entry pointing to a non-existent path
     let config_dir = tmp.path().join(".config/sasurahime");
