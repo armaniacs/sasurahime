@@ -1,6 +1,14 @@
 use anyhow::Result;
 use serde::Deserialize;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+
+/// Per-cleaner filter configuration from `[cleaner.<name>]` sections.
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct PerCleanerConfig {
+    pub older_than_days: Option<u32>,
+    pub larger_than_mb: Option<u64>,
+}
 
 /// A user-defined custom cache target from the config file (`[[custom]]`).
 #[derive(Debug, Clone, Deserialize)]
@@ -39,6 +47,8 @@ struct RawConfig {
     exclude: Vec<String>,
     #[serde(default)]
     custom: Vec<CustomTarget>,
+    #[serde(default, rename = "cleaner")]
+    per_cleaner: HashMap<String, PerCleanerConfig>,
 }
 
 #[derive(Debug, Clone)]
@@ -52,6 +62,7 @@ pub struct Config {
     pub deep_suppress: bool,
     pub exclude: Vec<String>,
     pub custom: Vec<CustomTarget>,
+    pub per_cleaner: HashMap<String, PerCleanerConfig>,
 }
 
 impl Default for Config {
@@ -64,6 +75,7 @@ impl Default for Config {
             deep_suppress: false,
             exclude: vec![],
             custom: vec![],
+            per_cleaner: HashMap::new(),
         }
     }
 }
@@ -86,6 +98,7 @@ fn parse_config_file(path: &Path) -> Result<Config> {
         deep_suppress: raw.deep_suppress.unwrap_or(false),
         exclude: raw.exclude,
         custom: raw.custom,
+        per_cleaner: raw.per_cleaner,
     })
 }
 
@@ -261,5 +274,61 @@ mod tests {
         let path = tmp.path().join("bad.toml");
         std::fs::write(&path, "not valid toml :::").unwrap();
         assert!(Config::load_from_path(&path).is_err());
+    }
+
+    #[test]
+    fn per_cleaner_older_than_days_parsed() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::write(
+            tmp.path().join("config.toml"),
+            "[cleaner.uv]\nolder_than_days = 30\n",
+        )
+        .unwrap();
+        let cfg = Config::load(tmp.path()).unwrap();
+        let uv = cfg.per_cleaner.get("uv").unwrap();
+        assert_eq!(uv.older_than_days, Some(30));
+        assert_eq!(uv.larger_than_mb, None);
+    }
+
+    #[test]
+    fn per_cleaner_larger_than_mb_parsed() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::write(
+            tmp.path().join("config.toml"),
+            "[cleaner.brew]\nlarger_than_mb = 500\n",
+        )
+        .unwrap();
+        let cfg = Config::load(tmp.path()).unwrap();
+        let brew = cfg.per_cleaner.get("brew").unwrap();
+        assert_eq!(brew.larger_than_mb, Some(500));
+        assert_eq!(brew.older_than_days, None);
+    }
+
+    #[test]
+    fn per_cleaner_multiple_filters() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::write(
+            tmp.path().join("config.toml"),
+            "[cleaner.\"my-custom\"]\nolder_than_days = 7\nlarger_than_mb = 100\n",
+        )
+        .unwrap();
+        let cfg = Config::load(tmp.path()).unwrap();
+        let my = cfg.per_cleaner.get("my-custom").unwrap();
+        assert_eq!(my.older_than_days, Some(7));
+        assert_eq!(my.larger_than_mb, Some(100));
+    }
+
+    #[test]
+    fn per_cleaner_missing_returns_none() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::write(tmp.path().join("config.toml"), "trash_mode = false\n").unwrap();
+        let cfg = Config::load(tmp.path()).unwrap();
+        assert!(cfg.per_cleaner.is_empty());
+    }
+
+    #[test]
+    fn per_cleaner_default_is_empty() {
+        let cfg = Config::default();
+        assert!(cfg.per_cleaner.is_empty());
     }
 }

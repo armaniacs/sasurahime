@@ -35,6 +35,16 @@ impl ScanResult {
         self.primary_target = Some(target.into());
         self
     }
+
+    /// Returns the pruneable byte count, or 0 if not Pruneable.
+    /// Primarily used in tests.
+    #[allow(dead_code)]
+    pub fn bytes_for_test(&self) -> u64 {
+        match &self.status {
+            ScanStatus::Pruneable(b) => *b,
+            _ => 0,
+        }
+    }
 }
 
 #[derive(Debug)]

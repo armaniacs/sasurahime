@@ -205,7 +205,7 @@ macro_rules! define_cleaners {
 
 define_cleaners! {
     Act : "act" => "act GitHub Actions local runner cache";
-    (|home, _config| cleaners::generic::GenericCleaner::act(home, Box::new(SystemCommandRunner))),
+    (|home, config| cleaners::generic::GenericCleaner::act(home, Box::new(SystemCommandRunner)).with_config(config)),
 
     Uv : "uv" => "Stale simple-vN index directories + uv cache prune";
     (|home, _config| cleaners::uv::UvCleaner::new(home, Box::new(SystemCommandRunner))),
@@ -229,7 +229,7 @@ define_cleaners! {
     (|_home, _config| cleaners::generic::GenericCleaner::pip(Box::new(SystemCommandRunner))),
 
     NodeGyp : "node-gyp" => "node-gyp build cache directories";
-    (|home, _config| cleaners::generic::GenericCleaner::node_gyp(home, Box::new(SystemCommandRunner))),
+    (|home, config| cleaners::generic::GenericCleaner::node_gyp(home, Box::new(SystemCommandRunner)).with_config(config)),
 
     Npm : "npm" => "npm package cache";
     (|_home, _config| cleaners::generic::GenericCleaner::npm(Box::new(SystemCommandRunner))),
@@ -256,7 +256,7 @@ define_cleaners! {
     (|home, _config| cleaners::generic::GenericCleaner::colima_prune(home, Box::new(SystemCommandRunner))),
 
     SwiftPM : "spm" => "SwiftPM cache directory";
-    (|home, _config| cleaners::generic::GenericCleaner::spm_cache(home, Box::new(SystemCommandRunner))),
+    (|home, config| cleaners::generic::GenericCleaner::spm_cache(home, Box::new(SystemCommandRunner)).with_config(config)),
 
     Conda : "conda" => "Conda clean --all";
     (|_home, _config| cleaners::generic::GenericCleaner::conda(Box::new(SystemCommandRunner))),
@@ -289,28 +289,28 @@ define_cleaners! {
     (|home, _config| cleaners::gradle::JetBrainsCleaner::new(home, Box::new(SystemCommandRunner))),
 
     Downloads : "downloads" => "~/Downloads old files";
-    (|home, _config| cleaners::generic::GenericCleaner::downloads(home, Box::new(SystemCommandRunner))),
+    (|home, config| cleaners::generic::GenericCleaner::downloads(home, Box::new(SystemCommandRunner)).with_config(config)),
 
     VscodeExtensions : "vscode-extensions" => "VS Code extensions cache";
-    (|home, _config| cleaners::generic::GenericCleaner::vscode_extensions(home, Box::new(SystemCommandRunner))),
+    (|home, config| cleaners::generic::GenericCleaner::vscode_extensions(home, Box::new(SystemCommandRunner)).with_config(config)),
 
     Maven : "maven" => "Maven local repository (mvn dependency:purge-local-repository)";
     (|home, _config| cleaners::generic::GenericCleaner::maven(home, Box::new(SystemCommandRunner))),
 
     Terraform : "terraform" => "Terraform provider plugin cache";
-    (|home, _config| cleaners::generic::GenericCleaner::terraform(home, Box::new(SystemCommandRunner))),
+    (|home, config| cleaners::generic::GenericCleaner::terraform(home, Box::new(SystemCommandRunner)).with_config(config)),
 
     Flutter : "flutter" => "Flutter/Dart pub cache (dart pub cache clean)";
     (|home, _config| cleaners::generic::GenericCleaner::flutter(home, Box::new(SystemCommandRunner))),
 
     Volta : "volta" => "Volta Node.js manager cache";
-    (|home, _config| cleaners::generic::GenericCleaner::volta(home, Box::new(SystemCommandRunner))),
+    (|home, config| cleaners::generic::GenericCleaner::volta(home, Box::new(SystemCommandRunner)).with_config(config)),
 
     Sbt : "sbt" => "Scala/sbt build cache and Ivy cache";
-    (|home, _config| cleaners::generic::GenericCleaner::sbt(home, Box::new(SystemCommandRunner))),
+    (|home, config| cleaners::generic::GenericCleaner::sbt(home, Box::new(SystemCommandRunner)).with_config(config)),
 
     TreeSitter : "tree-sitter" => "tree-sitter parser compilation cache";
-    (|home, _config| cleaners::generic::GenericCleaner::tree_sitter(home, Box::new(SystemCommandRunner))),
+    (|home, config| cleaners::generic::GenericCleaner::tree_sitter(home, Box::new(SystemCommandRunner)).with_config(config)),
 
     ;
     /// Clean all generic caches (bun, go, pip, node-gyp, npm, yarn, pnpm)
@@ -502,7 +502,40 @@ fn home() -> PathBuf {
         .unwrap_or_else(|_| home_dir().expect("cannot determine HOME directory"))
 }
 
+/// Apply per-cleaner config filters (`older_than_days`, `larger_than_mb`)
+/// to a `GenericCleaner` before boxing it.
+///
+/// For command-based cleaners (uv, brew, etc.), per-cleaner filters cannot be
+/// applied since the external tool handles all deletion logic — the caller
+/// simply boxes the cleaner as-is.
+fn with_per_cleaner(
+    cleaner: cleaners::generic::GenericCleaner,
+    config: &config::Config,
+) -> Box<dyn cleaner::Cleaner> {
+    let name = cleaner.name();
+    if let Some(pcc) = config.per_cleaner.get(name) {
+        let mut c = cleaner;
+        if let Some(days) = pcc.older_than_days {
+            c = c.with_older_than(days);
+        }
+        if let Some(mb) = pcc.larger_than_mb {
+            c = c.with_larger_than(mb);
+        }
+        Box::new(c)
+    } else {
+        Box::new(cleaner)
+    }
+}
+
 fn all_cleaners(home: &std::path::Path, config: &config::Config) -> Vec<Box<dyn cleaner::Cleaner>> {
+    // Apply per-cleaner `older_than_days` for logs if set; fall back to
+    // `config.logs_keep_days` (which itself defaults to 7).
+    let logs_keep_days = config
+        .per_cleaner
+        .get("logs")
+        .and_then(|p| p.older_than_days)
+        .unwrap_or(config.logs_keep_days);
+
     let mut cleaners: Vec<Box<dyn cleaner::Cleaner>> = vec![
         // Sprint 1
         Box::new(cleaners::uv::UvCleaner::new(
@@ -529,7 +562,7 @@ fn all_cleaners(home: &std::path::Path, config: &config::Config) -> Vec<Box<dyn 
         )),
         Box::new(cleaners::log::LogCleaner::new_with_extra(
             home,
-            config.logs_keep_days,
+            logs_keep_days,
             config
                 .logs_extra_targets
                 .iter()
@@ -541,10 +574,10 @@ fn all_cleaners(home: &std::path::Path, config: &config::Config) -> Vec<Box<dyn 
                 .collect(),
         )),
         // Sprint 5 — act / huggingface / pre-commit
-        Box::new(cleaners::generic::GenericCleaner::act(
-            home,
-            Box::new(SystemCommandRunner),
-        )),
+        with_per_cleaner(
+            cleaners::generic::GenericCleaner::act(home, Box::new(SystemCommandRunner)),
+            config,
+        ),
         Box::new(cleaners::huggingface::HuggingFaceCleaner::new(
             home,
             Box::new(SystemCommandRunner),
@@ -558,10 +591,10 @@ fn all_cleaners(home: &std::path::Path, config: &config::Config) -> Vec<Box<dyn 
             home,
             Box::new(SystemCommandRunner),
         )),
-        Box::new(cleaners::generic::GenericCleaner::colima_prune(
-            home,
-            Box::new(SystemCommandRunner),
-        )),
+        with_per_cleaner(
+            cleaners::generic::GenericCleaner::colima_prune(home, Box::new(SystemCommandRunner)),
+            config,
+        ),
         Box::new(cleaners::ollama::OllamaCleaner::new(
             home,
             Box::new(SystemCommandRunner),
@@ -757,10 +790,13 @@ fn main() -> anyhow::Result<()> {
                             Box::new(cleaners::generic::GenericCleaner::pip(Box::new(
                                 SystemCommandRunner,
                             ))),
-                            Box::new(cleaners::generic::GenericCleaner::node_gyp(
-                                &home,
-                                Box::new(SystemCommandRunner),
-                            )),
+                            Box::new(
+                                cleaners::generic::GenericCleaner::node_gyp(
+                                    &home,
+                                    Box::new(SystemCommandRunner),
+                                )
+                                .with_config(&config),
+                            ),
                             Box::new(cleaners::generic::GenericCleaner::npm(Box::new(
                                 SystemCommandRunner,
                             ))),
@@ -784,7 +820,12 @@ fn main() -> anyhow::Result<()> {
                         println!("Total freed: {}", format::format_bytes(total));
                     }
                     CleanTarget::Logs { dry_run, keep_days } => {
-                        let days = keep_days.unwrap_or(config.logs_keep_days);
+                        let config_days = config
+                            .per_cleaner
+                            .get("logs")
+                            .and_then(|p| p.older_than_days)
+                            .unwrap_or(config.logs_keep_days);
+                        let days = keep_days.unwrap_or(config_days);
                         let extra: Vec<cleaners::log::OwnedLogTarget> = config
                             .logs_extra_targets
                             .iter()
