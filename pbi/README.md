@@ -12,9 +12,9 @@ Sprint 1〜5 の全 PBI は `.plan/archived/` にアーカイブ済み。現在 
 
 | PBI | タイトル | SP | 優先度 | 備考 |
 |-----|---------|:--:|:------:|------|
-| [PBI-A](2026-05-25-pbi-a-parallel-scan.md) | 並列スキャン最適化 | 3 | 🔴 高 | rayon 並列化・未インストール早期スキップ |
-| [PBI-B](2026-05-25-pbi-b-robust-error-handling.md) | 堅牢なエラーハンドリング | 3 | 🔴 高 | 権限エラー・ファイルロックをスキップし失敗サマリー表示 |
-| [PBI-C](2026-05-25-pbi-c-trash-warning-ui.md) | ゴミ箱移動の警告UI | 1 | 🟡 中 | 「ゴミ箱を空にするまで容量解放されない」を明示 |
+| ~~[PBI-A](2026-05-25-pbi-a-parallel-scan.md)~~ | ~~並列スキャン最適化~~ | ~~3~~ | ~~🔴 高~~ | ✅ 実装済み — rayon 並列化・未インストール早期スキップ |
+| ~~[PBI-B](2026-05-25-pbi-b-robust-error-handling.md)~~ | ~~堅牢なエラーハンドリング~~ | ~~3~~ | ~~🔴 高~~ | ✅ 実装済み — 権限エラー・ファイルロックをスキップし失敗サマリー表示 |
+| ~~[PBI-C](2026-05-25-pbi-c-trash-warning-ui.md)~~ | ~~ゴミ箱移動の警告UI~~ | ~~1~~ | ~~🟡 中~~ | ✅ 実装済み — 「ゴミ箱を空にするまで容量解放されない」を明示 |
 | [PBI-D](2026-05-25-pbi-d-xcode-subcategory-selection.md) | Xcode サブカテゴリ選択 | 5 | 🟡 中 | DerivedData / Archives / Simulators を個別選択 |
 
 ### フェーズ2: 新機能
@@ -33,7 +33,7 @@ Sprint 1〜5 の全 PBI は `.plan/archived/` にアーカイブ済み。現在 
 | [追加候補一覧](2026-05-19-additional-cleaners-backlog.md) | ollama/simulator/maven/terraform/flutter 他 | — | 🟡 中 | 〜70GB | 環境に応じて実装判断 |
 | [ドキュメント整備](2026-05-19-docs-deps-housekeeping.md) | README更新、cargo update | — | 🟢 低 | — | 依存関係整理 + ドキュメント同期 |
 
-**合計**: 22 SP（フェーズ1+2）+ 既存 1 SP
+**合計**: 15 SP（フェーズ1+2）+ 既存 1 SP（PBI-A 3SP + PBI-B 3SP + PBI-C 1SP 完了済み）
 
 ## 優先度ランキング（実環境でのディスク影響ベース）
 
