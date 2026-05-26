@@ -23,7 +23,7 @@ Sprint 1〜5 の全 PBI は `.plan/archived/` にアーカイブ済み。現在 
 |-----|---------|:--:|:------:|------|
 | ~~[PBI-E](2026-05-25-pbi-e-config-toml.md)~~ | ~~config.toml 統合設定~~ | ~~5~~ | ~~🔴 高~~ | ✅ 実装済み — exclude, --config, custom, per-cleaner フィルタ |
 | ~~[PBI-F](2026-05-25-pbi-f-yes-flag.md)~~ | ~~--yes フラグ~~ | ~~2~~ | ~~🟡 中~~ | ✅ 実装済み — run_auto, non-TTY, exclude/PBI-C/PBI-B 統合 |
-| [PBI-G](2026-05-25-pbi-g-stats-command.md) | sasurahime stats | 3 | 🟢 低 | 削除履歴ログ + 累計削減量表示 |
+| ~~[PBI-G](2026-05-25-pbi-g-stats-command.md)~~ | ~~sasurahime stats~~ | ~~3~~ | ~~🟢 低~~ | ✅ 実装済み — history.json + stats サブコマンド |
 
 ### 既存バックログ
 
