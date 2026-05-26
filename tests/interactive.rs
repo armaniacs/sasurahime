@@ -173,6 +173,37 @@ fn version_display_on_clean_dry_run() {
     );
 }
 
+// ── PBI-D Phase 2: sub_targets() integration ────────────────────────────────
+#[test]
+fn sub_targets_integration_via_yes_cleans_default_subcategory() {
+    let tmp = TempDir::new().unwrap();
+    let derived = tmp.path().join("Library/Developer/Xcode/DerivedData");
+    let archives = tmp.path().join("Library/Developer/Xcode/Archives");
+    fs::create_dir_all(derived.join("P1")).unwrap();
+    fs::write(derived.join("P1/f"), b"x").unwrap();
+    fs::create_dir_all(archives.join("A1")).unwrap();
+    fs::write(archives.join("A1/f"), b"x").unwrap();
+
+    let output = sasurahime(tmp.path()).arg("--yes").output().unwrap();
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    // --yes mode defaults to cleaning DerivedData only (conservative)
+    assert!(
+        !derived.join("P1").exists(),
+        "DerivedData subdirectory must be deleted"
+    );
+    assert!(derived.exists(), "DerivedData root must remain");
+    // Archives should NOT be cleaned in --yes default mode
+    assert!(
+        archives.join("A1").exists(),
+        "Archives should NOT be deleted in --yes default mode"
+    );
+}
+
 // ── GAP-007: --yes bypasses Xcode interactive prompt ──────────────────────
 #[test]
 fn yes_flag_cleans_xcode_without_interactive_prompt() {

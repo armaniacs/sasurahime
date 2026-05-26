@@ -71,7 +71,6 @@ impl XcodeCleaner {
         self
     }
 
-    #[allow(dead_code)]
     pub fn detect_subcategories(&self) -> Vec<SubcategoryInfo> {
         XcodeSubcategory::all()
             .into_iter()
@@ -99,6 +98,14 @@ impl XcodeCleaner {
 impl Cleaner for XcodeCleaner {
     fn name(&self) -> &'static str {
         "xcode"
+    }
+
+    fn sub_targets(&self) -> Vec<(&'static str, u64)> {
+        self.detect_subcategories()
+            .into_iter()
+            .filter(|info| info.size > 0)
+            .map(|info| (info.sub.display_name(), info.size))
+            .collect()
     }
 
     fn detect(&self) -> ScanResult {
@@ -375,6 +382,33 @@ mod tests {
             .find(|i| i.sub == XcodeSubcategory::Archives)
             .unwrap();
         assert_eq!(archives_info.size, 0, "Archives should be size 0");
+    }
+
+    #[test]
+    fn sub_targets_returns_only_existing_subcategories() {
+        let tmp = TempDir::new().unwrap();
+        let dd = tmp.path().join("Library/Developer/Xcode/DerivedData");
+        fs::create_dir_all(dd.join("ProjectA")).unwrap();
+        fs::write(dd.join("ProjectA").join("f"), b"x").unwrap();
+        // Archives not created — should be filtered out
+
+        let cleaner = XcodeCleaner::new(tmp.path(), Box::new(NoopRunner));
+        let targets = cleaner.sub_targets();
+        assert_eq!(targets.len(), 1, "only DerivedData should appear");
+        assert_eq!(targets[0].0, "DerivedData");
+        assert!(targets[0].1 > 0, "should have size > 0");
+    }
+
+    #[test]
+    fn sub_targets_filters_zero_size_entries() {
+        let tmp = TempDir::new().unwrap();
+        // Neither DerivedData nor Archives exist
+        let cleaner = XcodeCleaner::new(tmp.path(), Box::new(NoopRunner));
+        let targets = cleaner.sub_targets();
+        assert!(
+            targets.is_empty(),
+            "no subcategories should appear when none exist"
+        );
     }
 
     #[test]
