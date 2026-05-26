@@ -184,6 +184,7 @@ impl GenericCleaner {
             CleanMethod::DeleteDirs(vec![home.join("Downloads")]),
             runner,
         )
+        .with_older_than(30)
     }
 
     #[allow(dead_code)]
@@ -216,16 +217,38 @@ impl GenericCleaner {
     }
 
     pub fn terraform(home: &Path, runner: Box<dyn CommandRunner>) -> Self {
-        let cache = std::env::var("TF_PLUGIN_CACHE_DIR")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| home.join(".terraform.d/plugin-cache"));
+        let cache = match std::env::var("TF_PLUGIN_CACHE_DIR") {
+            Ok(dir) => {
+                let p = PathBuf::from(&dir);
+                if !is_safe_delete_target(&p) {
+                    eprintln!(
+                        "[terraform] WARNING: TF_PLUGIN_CACHE_DIR={dir} points to an unsafe path, using default"
+                    );
+                    home.join(".terraform.d/plugin-cache")
+                } else {
+                    p
+                }
+            }
+            Err(_) => home.join(".terraform.d/plugin-cache"),
+        };
         Self::base_cleaner("terraform", CleanMethod::DeleteDirs(vec![cache]), runner)
     }
 
     pub fn flutter(home: &Path, runner: Box<dyn CommandRunner>) -> Self {
-        let cache = std::env::var("PUB_CACHE")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| home.join(".pub-cache"));
+        let cache = match std::env::var("PUB_CACHE") {
+            Ok(dir) => {
+                let p = PathBuf::from(&dir);
+                if !is_safe_delete_target(&p) {
+                    eprintln!(
+                        "[flutter] WARNING: PUB_CACHE={dir} points to an unsafe path, using default"
+                    );
+                    home.join(".pub-cache")
+                } else {
+                    p
+                }
+            }
+            Err(_) => home.join(".pub-cache"),
+        };
         Self::base_cleaner(
             "flutter",
             CleanMethod::CommandWithDetectDir {
@@ -618,16 +641,30 @@ pub fn is_safe_delete_target(path: &Path) -> bool {
     if path_str.contains("..") {
         return false;
     }
-    check != Path::new("/")
-        && !check.starts_with("/System")
-        && !check.starts_with("/etc")
-        && !check.starts_with("/var")
-        && !check.starts_with("/tmp")
-        && !check.starts_with("/private")
-        && !check.starts_with("/dev")
-        && !check.starts_with("/proc")
-        && !check.starts_with("/Applications")
-        && !check.starts_with("/usr")
+    // Block exact sensitive roots and system paths.
+    // Allow macOS tempdirs (/var/folders/...) while blocking /var itself
+    // and known system subdirectories.
+    let is_exact = |p: &str| check == Path::new(p);
+    let is_sys = |p: &str| check.starts_with(p);
+    !is_exact("/")
+        && !is_exact("/private")
+        && !is_sys("/System")
+        && !is_sys("/etc")
+        && !is_sys("/dev")
+        && !is_sys("/proc")
+        && !is_sys("/Applications")
+        && !is_sys("/usr")
+        && !is_sys("/tmp")
+        && !is_sys("/private/etc")
+        && !is_sys("/private/tmp")
+        && !is_sys("/private/var/db")
+        && !is_sys("/private/var/log")
+        && !is_sys("/private/var/run")
+        && !is_sys("/var/log")
+        && !is_sys("/var/db")
+        && !is_sys("/var/root")
+        && !is_sys("/var/run")
+        && !is_exact("/var")
 }
 
 /// Returns `true` if the file or directory at `path` has a modification time

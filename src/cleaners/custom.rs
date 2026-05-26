@@ -47,6 +47,19 @@ impl Cleaner for CustomPathCleaner {
     }
 
     fn clean(&self, dry_run: bool, reporter: &dyn ProgressReporter) -> Result<CleanResult> {
+        let path = &self.path;
+        if !crate::cleaners::generic::is_safe_delete_target(path) {
+            eprintln!(
+                "{}: path {:?} is not safe to delete, skipping",
+                self.name, path
+            );
+            return Ok(CleanResult {
+                name: self.name,
+                bytes_freed: 0,
+                uses_trash: true,
+                skipped: vec![],
+            });
+        }
         if !self.path.exists() {
             println!("{}: not found, skipping", self.name);
             return Ok(CleanResult {
@@ -184,5 +197,16 @@ mod tests {
         let reporter = DeepSuppressReporter;
         let result = cleaner.clean(false, &reporter).unwrap();
         assert_eq!(result.bytes_freed, 0);
+    }
+
+    #[test]
+    fn clean_rejects_unsafe_path() {
+        let cleaner = CustomPathCleaner::new(
+            "unsafe".to_string(),
+            std::path::PathBuf::from("/etc/passwd"),
+        );
+        let reporter = DeepSuppressReporter;
+        let result = cleaner.clean(false, &reporter).unwrap();
+        assert_eq!(result.bytes_freed, 0, "must not delete unsafe paths");
     }
 }
