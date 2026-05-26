@@ -4,6 +4,65 @@ All notable changes to sasurahime will be documented in this file. The format is
 
 ---
 
+## [0.1.26] — 2026-05-26
+
+### Added
+
+- **Xcode subcategory TUI expansion (PBI-D Phase 2).** `XcodeCleaner` now
+  overrides `sub_targets()` to expose DerivedData and Archives as expandable
+  subcategories in the interactive TUI. The interactive.rs generic subcategory
+  logic automatically renders indented checkboxes for each subcategory and
+  dispatches `sasurahime clean xcode --sub <name>` for selected items. Non-
+  existent subcategories are filtered out (not shown).
+- **Config file `exclude` field (PBI-E).** `~/.config/sasurahime/config.toml`
+  now supports `exclude = ["cleaner-name"]` to exclude cleaners from scan and
+  TUI listing. Direct `sasurahime clean <target>` bypasses the filter.
+- **`--config <path>` CLI flag (PBI-E).** Override the config file path.
+  Falls back to defaults with a warning if the file doesn't exist.
+- **`[[custom]]` user-defined cache targets (PBI-E).** Add arbitrary
+  directories as scan/clean targets via `[[custom]]` sections in config.toml.
+  `CustomPathCleaner` deletes sub-contents (not root) with macOS `uchg` flag
+  handling, trash support, and progress reporting.
+- **Per-cleaner config filters (PBI-E).** `[cleaner.<name>]` sections in
+  config.toml support `older_than_days` and `larger_than_mb` filters. These
+  apply to DeleteDirs-based cleaners (act, colima, downloads, etc.) and
+  `[cleaner.logs]` (as `keep_days`). Command-based cleaners show a runtime
+  warning that the filter is not supported.
+- **`sasurahime stats` command (PBI-G).** New subcommand showing aggregated
+  deletion history: total freed bytes, run count, and a table of recent
+  cleanups. Supports `--last N` to limit output to the most recent N entries.
+- **Automatic history logging (PBI-G).** Every successful clean operation
+  (`bytes_freed > 0`, not `--dry-run`) appends a record to
+  `~/.local/share/sasurahime/history.json` with timestamp, cleaner name,
+  freed bytes, and skipped count. History writing is atomic (temp file +
+  rename) and silently ignores filesystem errors.
+- **`cleaner::Cleaner::sub_targets()` trait method.** Default returns empty
+  vec; any cleaner can override to expose sub-targets for TUI expansion.
+
+### Internal
+
+- **Comprehensive test suite:** 436 tests (270 unit + 145 integration/E2E),
+  22 test files, 0 failures.
+- **`CustomPathCleaner`** in `src/cleaners/custom.rs` with `Cleaner` trait
+  implementation, chflags nouchg handling, dry-run support, and 6 unit tests.
+- **`src/history.rs`** (362 lines) with `HistoryEntry`, `StatsSummary`,
+  atomic `append_history()`, `load_history()` (corruption-tolerant),
+  `compute_stats()`, `format_stats()`, and 9 unit tests.
+- **`GenericCleaner` builder methods:** `with_older_than()`,
+  `with_larger_than()`, `with_config()` for per-cleaner filter configuration.
+- **`Config::effective_logs_keep_days()`** resolves per-cleaner
+  `[cleaner.logs] older_than_days` over the global `logs.keep_days`.
+- **`Config::default_history_dir()`** for centralized path resolution.
+- **SCM:** `.gitignore` updated for `.worktrees/` directory.
+- **3 new E2E tests** for PBI-D Phase 2: `sub_targets_integration`,
+  `sub_targets_returns_only_existing`, `sub_targets_filters_zero_size_entries`.
+- **11 E2E tests** for PBI-E: exclude (3), --config (1), [[custom]] (2),
+  per-cleaner age/size filters (3), logs age filter (1), scan display (1).
+- **6 E2E tests** for PBI-G: stats aggregations, --last N, dry-run guard,
+  corrupted file handling, empty state, clean auto-logging.
+
+---
+
 ## [0.1.25] — 2026-05-25
 
 ### Added

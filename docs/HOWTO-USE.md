@@ -230,6 +230,39 @@ Ideal for cron jobs, CI pipelines, or maintenance scripts.
 
 ---
 
+### `sasurahime stats`
+
+Show aggregated deletion history and statistics.
+
+```bash
+$ sasurahime stats
+╔══════════════════════════════════════╗
+║  sasurahime Statistics              ║
+╠══════════════════════════════════════╣
+║  Total freed:  12.5 GB              ║
+║  Runs:         15                   ║
+╚══════════════════════════════════════╝
+
+Recent cleanups:
+  #  Date                Cleaner        Size
+  1  2026-05-26 10:30   uv             500.0 MB
+  2  2026-05-25 22:15   brew           1.2 GB
+  3  2026-05-25 18:00   xcode          3.5 GB
+```
+
+History is automatically recorded every time `sasurahime clean` frees disk
+space. Records are stored in `~/.local/share/sasurahime/history.json`.
+
+```bash
+# Show only the last 5 entries
+sasurahime stats --last 5
+```
+
+If the history file is missing or corrupted, `stats` shows a friendly message
+("No history yet") or a warning, and exits with code 0.
+
+---
+
 ## Common Flags
 
 ### `--dry-run`
@@ -313,14 +346,97 @@ path = "~/.local/share/my-app/logs"
 exclude = ["access.log"]
 ```
 
-| Field          | Type            | Default  | Description                              |
-|----------------|-----------------|----------|------------------------------------------|
-| `trash_mode`   | boolean         | `true`   | Send deleted files to Trash by default   |
-| `keep_days`    | integer         | `7`      | Global log retention period              |
-| `targets`      | array of tables | `[]`     | Extra log directories to scan            |
-| `targets[].name` | string        | required | Display name                             |
-| `targets[].path` | string        | required | Path (supports `~` expansion)            |
-| `targets[].exclude` | string[]    | `[]`     | Filenames to never delete                |
+### Example: exclude cleaners from scan/TUI
+
+```toml
+exclude = ["huggingface", "ollama"]
+```
+
+Excluded cleaners are hidden from `scan` output and the interactive TUI.
+You can still run `sasurahime clean <target>` directly on an excluded target.
+
+### Example: add custom cache directories
+
+```toml
+[[custom]]
+name = "my-project"
+path = "~/work/.cache"
+```
+
+Custom targets appear as regular cleaners in `scan` and the TUI. They can
+be cleaned individually via `sasurahime clean my-project`. Only the contents
+of the directory are removed (the root directory is preserved).
+
+### Example: per-cleaner filters
+
+```toml
+[cleaner.act]
+older_than_days = 30
+
+[cleaner.colima]
+larger_than_mb = 500
+
+[cleaner.logs]
+older_than_days = 14
+```
+
+Filters apply to directory-scanning cleaners (`DeleteDirs` method).
+`older_than_days` skips entries modified within that many days.
+`larger_than_mb` skips entries smaller than the threshold.
+Command-based cleaners (uv, brew, bun, etc.) show a warning that the
+filter does not apply — they delegate deletion to external tools.
+
+### Complete config example
+
+```toml
+# ~/.config/sasurahime/config.toml
+
+# Global settings
+trash_mode = true
+
+# Exclude certain cleaners from scan/TUI
+exclude = ["huggingface"]
+
+# Custom cache targets
+[[custom]]
+name = "my-project"
+path = "~/work/.cache"
+
+# Per-cleaner filters
+[cleaner.act]
+older_than_days = 30
+
+[cleaner.colima]
+larger_than_mb = 500
+
+# Log settings
+[logs]
+keep_days = 30
+
+[[logs.targets]]
+name = "my-app"
+path = "~/.local/share/my-app/logs"
+exclude = ["access.log"]
+```
+
+### Configuration fields
+
+| Field                      | Type            | Default  | Description                              |
+|----------------------------|-----------------|----------|------------------------------------------|
+| `trash_mode`               | boolean         | `true`   | Send deleted files to Trash by default   |
+| `exclude`                  | string[]        | `[]`     | Cleaners to hide from scan/TUI           |
+| `[[custom]]`               | array of tables | `[]`     | User-defined cache directories           |
+| `custom[].name`            | string          | required | Display name for custom target           |
+| `custom[].path`            | string          | required | Path (supports `~` expansion)            |
+| `[cleaner.<name>]`         | table           | —        | Per-cleaner filter settings              |
+| `cleaner.<name>.older_than_days` | integer  | unset    | Only delete entries older than N days    |
+| `cleaner.<name>.larger_than_mb`  | integer  | unset    | Only delete entries larger than N MB     |
+| `[logs]`                   | table           | —        | Log retention settings                   |
+| `logs.keep_days`           | integer         | `7`      | Global log retention period              |
+| `[[logs.targets]]`         | array of tables | `[]`     | Extra log directories to scan            |
+| `logs.targets[].name`      | string          | required | Display name                             |
+| `logs.targets[].path`      | string          | required | Path (supports `~` expansion)            |
+| `logs.targets[].exclude`   | string[]        | `[]`     | Filenames to never delete                |
 
 ---
 
@@ -631,6 +747,36 @@ sasurahime --yes
 
 cron ジョブ、CI パイプライン、メンテナンススクリプトに最適です。
 
+### `sasurahime stats`
+
+削除履歴と統計情報を表示します。
+
+```bash
+$ sasurahime stats
+╔══════════════════════════════════════╗
+║  sasurahime Statistics              ║
+╠══════════════════════════════════════╣
+║  Total freed:  12.5 GB              ║
+║  Runs:         15                   ║
+╚══════════════════════════════════════╝
+
+Recent cleanups:
+  #  Date                Cleaner        Size
+  1  2026-05-26 10:30   uv             500.0 MB
+  2  2026-05-25 22:15   brew           1.2 GB
+```
+
+履歴は `sasurahime clean` がディスク容量を解放するたびに自動記録され、
+`~/.local/share/sasurahime/history.json` に保存されます。
+
+```bash
+# 直近 5 件のみ表示
+sasurahime stats --last 5
+```
+
+履歴ファイルがない場合や破損している場合は、親切なメッセージとともに
+終了コード 0 で正常終了します。
+
 ---
 
 ## 共通フラグ
@@ -712,14 +858,95 @@ path = "~/.local/share/my-app/logs"
 exclude = ["access.log"]
 ```
 
-| フィールド       | 型               | デフォルト | 説明                             |
-|------------------|------------------|------------|----------------------------------|
-| `trash_mode`     | boolean          | `true`     | 削除ファイルをデフォルトでゴミ箱へ |
-| `keep_days`      | integer          | `7`        | グローバルログ保持期間            |
-| `targets`        | array of tables  | `[]`       | スキャンする追加ログディレクトリ   |
-| `targets[].name` | string           | 必須       | 表示名                            |
-| `targets[].path` | string           | 必須       | パス（`~` 展開対応）              |
-| `targets[].exclude` | string[]      | `[]`       | 削除しないファイル名              |
+### 例：クリーナーをスキャン/TUI から除外
+
+```toml
+exclude = ["huggingface", "ollama"]
+```
+
+除外されたクリーナーは `scan` 出力とインタラクティブ TUI に表示されません。
+`sasurahime clean <target>` で直接指定すれば実行できます。
+
+### 例：カスタムキャッシュディレクトリを追加
+
+```toml
+[[custom]]
+name = "my-project"
+path = "~/work/.cache"
+```
+
+カスタムターゲットは `scan` や TUI で通常のクリーナーと同様に表示されます。
+`sasurahime clean my-project` で個別にクリーンできます。ディレクトリの
+中身のみ削除され（ルートディレクトリは維持）、`uchg` フラグは自動処理されます。
+
+### 例：クリーナーごとのフィルタ
+
+```toml
+[cleaner.act]
+older_than_days = 30
+
+[cleaner.colima]
+larger_than_mb = 500
+
+[cleaner.logs]
+older_than_days = 14
+```
+
+フィルタはディレクトリスキャン方式（`DeleteDirs`）のクリーナーに適用されます。
+`older_than_days` は指定日数以内に変更されたエントリをスキップし、
+`larger_than_mb` は閾値未満のエントリをスキップします。
+コマンドベースのクリーナー（uv, brew, bun 等）にフィルタを設定すると、
+実行時に「フィルタは適用できません」というワーニングが表示されます。
+
+### 完全な設定例
+
+```toml
+# ~/.config/sasurahime/config.toml
+
+# グローバル設定
+trash_mode = true
+
+# スキャン/TUI から除外するクリーナー
+exclude = ["huggingface"]
+
+# カスタムキャッシュターゲット
+[[custom]]
+name = "my-project"
+path = "~/work/.cache"
+
+# クリーナーごとのフィルタ
+[cleaner.act]
+older_than_days = 30
+
+[cleaner.colima]
+larger_than_mb = 500
+
+# ログ設定
+[logs]
+keep_days = 30
+
+[[logs.targets]]
+name = "my-app"
+path = "~/.local/share/my-app/logs"
+exclude = ["access.log"]
+```
+
+| フィールド                   | 型               | デフォルト | 説明                             |
+|------------------------------|------------------|------------|----------------------------------|
+| `trash_mode`                 | boolean          | `true`     | 削除ファイルをデフォルトでゴミ箱へ |
+| `exclude`                    | string[]         | `[]`       | スキャン/TUI から除外するクリーナー |
+| `[[custom]]`                 | array of tables  | `[]`       | ユーザー定義キャッシュディレクトリ  |
+| `custom[].name`              | string           | 必須       | カスタムターゲットの表示名         |
+| `custom[].path`              | string           | 必須       | パス（`~` 展開対応）              |
+| `[cleaner.<name>]`           | table            | —          | クリーナーごとのフィルタ設定       |
+| `cleaner.<name>.older_than_days` | integer      | 未設定     | N 日より古いエントリのみ削除       |
+| `cleaner.<name>.larger_than_mb`  | integer      | 未設定     | N MB より大きいエントリのみ削除    |
+| `[logs]`                     | table            | —          | ログ保持設定                      |
+| `logs.keep_days`             | integer          | `7`        | グローバルログ保持期間            |
+| `[[logs.targets]]`           | array of tables  | `[]`       | スキャンする追加ログディレクトリ   |
+| `logs.targets[].name`        | string           | 必須       | 表示名                            |
+| `logs.targets[].path`        | string           | 必須       | パス（`~` 展開対応）              |
+| `logs.targets[].exclude`     | string[]         | `[]`       | 削除しないファイル名              |
 
 ---
 
