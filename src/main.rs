@@ -1003,7 +1003,7 @@ fn main() -> anyhow::Result<()> {
             }
         }
         Some(Commands::Stats { last }) => {
-            let history_dir = home.join(".local/share/sasurahime");
+            let history_dir = history::default_history_dir(&home);
             let entries = history::load_history(&history_dir.join("history.json"));
             if entries.is_empty() {
                 println!("No history yet. Run 'sasurahime clean' to get started.");

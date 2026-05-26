@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
+use std::path::PathBuf;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HistoryEntry {
@@ -171,13 +172,16 @@ fn format_entries_table(summary: &StatsSummary, count: usize, output: &mut Strin
     }
 }
 
+pub fn default_history_dir(home: &Path) -> PathBuf {
+    home.join(".local/share/sasurahime")
+}
+
 pub fn write_history_entry(label: &str, freed_bytes: u64, skipped_count: usize) {
     if freed_bytes == 0 {
         return;
     }
-    let home_str = std::env::var("HOME").unwrap_or_default();
-    let home = std::path::Path::new(&home_str);
-    let history_dir = home.join(".local/share/sasurahime");
+    let home = dirs::home_dir().unwrap_or_default();
+    let history_dir = default_history_dir(&home);
     let entry = HistoryEntry {
         timestamp: chrono::Local::now()
             .format("%Y-%m-%dT%H:%M:%S%:z")
@@ -322,11 +326,7 @@ mod tests {
         ];
         let summary = compute_stats(&entries);
         let output = format_stats_last(&summary, 1);
-        assert!(
-            output.contains("1,700,000,000")
-                || output.contains("1.7 GB")
-                || output.contains("1.6 GB")
-        );
+        assert!(output.contains("1.6 GB"));
         assert!(output.contains("Runs:"));
         let uv_lines: Vec<&str> = output.lines().filter(|l| l.contains("uv")).collect();
         assert_eq!(uv_lines.len(), 1, "only 1 entry should be shown");
