@@ -15,7 +15,7 @@ Sprint 1〜5 の全 PBI は `.plan/archived/` にアーカイブ済み。現在 
 | ~~[PBI-A](2026-05-25-pbi-a-parallel-scan.md)~~ | ~~並列スキャン最適化~~ | ~~3~~ | ~~🔴 高~~ | ✅ 実装済み — rayon 並列化・未インストール早期スキップ |
 | ~~[PBI-B](2026-05-25-pbi-b-robust-error-handling.md)~~ | ~~堅牢なエラーハンドリング~~ | ~~3~~ | ~~🔴 高~~ | ✅ 実装済み — 権限エラー・ファイルロックをスキップし失敗サマリー表示 |
 | ~~[PBI-C](2026-05-25-pbi-c-trash-warning-ui.md)~~ | ~~ゴミ箱移動の警告UI~~ | ~~1~~ | ~~🟡 中~~ | ✅ 実装済み — 「ゴミ箱を空にするまで容量解放されない」を明示 |
-| [PBI-D](2026-05-25-pbi-d-xcode-subcategory-selection.md) | Xcode サブカテゴリ選択 | 5 | 🟡 中 | Phase1 (CLI) 完了, Phase2 (TUI) 未着手 |
+| ~~[PBI-D](2026-05-25-pbi-d-xcode-subcategory-selection.md)~~ | ~~Xcode サブカテゴリ選択~~ | ~~5~~ | ~~🟡 中~~ | ✅ 実装済み — CLI + TUI subcategory expansion |
 
 ### フェーズ2: 新機能
 
