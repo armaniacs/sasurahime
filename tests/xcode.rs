@@ -62,9 +62,7 @@ fn clean_xcode_dry_run_deletes_nothing() {
 #[test]
 fn clean_xcode_derived_data_only_via_sub() {
     let tmp = TempDir::new().unwrap();
-    let dd = tmp
-        .path()
-        .join("Library/Developer/Xcode/DerivedData/MyApp");
+    let dd = tmp.path().join("Library/Developer/Xcode/DerivedData/MyApp");
     let arch = tmp
         .path()
         .join("Library/Developer/Xcode/Archives/MyArchive");
@@ -90,9 +88,7 @@ fn clean_xcode_derived_data_only_via_sub() {
 #[test]
 fn clean_xcode_archives_only_via_sub() {
     let tmp = TempDir::new().unwrap();
-    let dd = tmp
-        .path()
-        .join("Library/Developer/Xcode/DerivedData/MyApp");
+    let dd = tmp.path().join("Library/Developer/Xcode/DerivedData/MyApp");
     let arch = tmp
         .path()
         .join("Library/Developer/Xcode/Archives/MyArchive");

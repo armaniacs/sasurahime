@@ -94,7 +94,6 @@ impl XcodeCleaner {
             .map(|o| o.status.success())
             .unwrap_or(false)
     }
-
 }
 
 impl Cleaner for XcodeCleaner {
@@ -111,7 +110,11 @@ impl Cleaner for XcodeCleaner {
                         XcodeSubcategory::DerivedData => &self.derived_data,
                         XcodeSubcategory::Archives => &self.archives,
                     };
-                    if path.exists() { dir_size(path) } else { 0 }
+                    if path.exists() {
+                        dir_size(path)
+                    } else {
+                        0
+                    }
                 })
                 .sum();
             let mut r = ScanResult::new(
@@ -389,7 +392,10 @@ mod tests {
         let reporter = crate::progress::VerboseProgress::new();
         let result = cleaner.clean(false, &reporter).unwrap();
         assert!(result.bytes_freed > 0, "should have freed bytes");
-        assert!(!dd.join("P").exists(), "DerivedData subdirectory should be removed");
+        assert!(
+            !dd.join("P").exists(),
+            "DerivedData subdirectory should be removed"
+        );
         assert!(arch.exists(), "Archives should still exist");
     }
 

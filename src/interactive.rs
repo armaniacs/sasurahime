@@ -83,7 +83,12 @@ pub fn run_auto(cleaners: &[Box<dyn Cleaner>]) -> Result<()> {
             cleaners[i].clean(false, &reporter)
         });
         match result {
-            Ok(r) => total_freed += r.bytes_freed,
+            Ok(r) => {
+                total_freed += r.bytes_freed;
+                if r.bytes_freed > 0 {
+                    crate::history::write_history_entry(name, r.bytes_freed, r.skipped.len());
+                }
+            }
             Err(e) => eprintln!("Error cleaning {name}: {e}"),
         }
     }
@@ -220,8 +225,9 @@ pub fn run_interactive(cleaners: &[Box<dyn Cleaner>]) -> Result<()> {
         let (cleaner_idx, sub_name) = &selection_mapping[si];
         if let Some(sub_name) = sub_name {
             let name = cleaners[*cleaner_idx].name();
-            let result =
-                crate::progress::with_spinner_result(&format!("Cleaning {} {}...", name, sub_name), || {
+            let result = crate::progress::with_spinner_result(
+                &format!("Cleaning {} {}...", name, sub_name),
+                || {
                     let status = std::process::Command::new(std::env::current_exe()?)
                         .args(["clean", name, "--sub", sub_name])
                         .status()?;
@@ -234,7 +240,8 @@ pub fn run_interactive(cleaners: &[Box<dyn Cleaner>]) -> Result<()> {
                         uses_trash: false,
                         skipped: vec![],
                     })
-                });
+                },
+            );
             match result {
                 Ok(r) => freed += r.bytes_freed,
                 Err(e) => eprintln!("Error cleaning {} {}: {e}", name, sub_name),
@@ -246,7 +253,12 @@ pub fn run_interactive(cleaners: &[Box<dyn Cleaner>]) -> Result<()> {
                     cleaners[*cleaner_idx].clean(false, &reporter)
                 });
             match result {
-                Ok(r) => freed += r.bytes_freed,
+                Ok(r) => {
+                    freed += r.bytes_freed;
+                    if r.bytes_freed > 0 {
+                        crate::history::write_history_entry(name, r.bytes_freed, r.skipped.len());
+                    }
+                }
                 Err(e) => eprintln!("Error: {e}"),
             }
         }
