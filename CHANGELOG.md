@@ -4,6 +4,55 @@ All notable changes to sasurahime will be documented in this file. The format is
 
 ---
 
+## [0.1.27] — 2026-05-27
+
+### Added
+
+- **`is_safe_delete_target()` path validation.** New public function in
+  `src/cleaners/generic.rs` that blocks deletion of system-critical paths
+  (`/`, `/etc`, `/System`, `/var/log`, etc.) while allowing macOS tempdirs
+  (`/var/folders/...`) and user cache directories. Used by `CustomPathCleaner`
+  and the `terraform()`/`flutter()` factory methods.
+- **Downloads default 30-day age filter.** `sasurahime clean downloads` now
+  skips files modified within the last 30 days by default. Override via
+  config `[cleaner.downloads].older_than_days`.
+- **terraform/flutter env var safety validation.** `TF_PLUGIN_CACHE_DIR` and
+  `PUB_CACHE` environment variables are validated against
+  `is_safe_delete_target()`. If they point to an unsafe path (e.g. `/etc`),
+  the cleaner falls back to the default directory with a warning.
+- **history.json schema versioning.** `HistoryEntry` gains a `version: 1`
+  field with `#[serde(default)]` for forward compatibility.
+- **`build_selection_items()` + `compute_selected_total()` extracted** from
+  `interactive.rs` as pure functions, enabling unit testing of TUI selection
+  logic without a TTY. 6 new unit tests covering sub-target rendering,
+  mixed cleaners, and selected-size computation.
+- **`tests/apfs_snapshot.rs`** — new E2E test file for the APFS snapshot
+  cleaner CLI entry point (dry-run and tool-not-found paths).
+- **`--config <path>` documentation** added to `docs/HOWTO-USE.md` (EN + JA).
+
+### Security
+
+- **System path deletion protection (Checking Team: Red Team).** `terraform()`
+  and `flutter()` constructors no longer blindly trust `TF_PLUGIN_CACHE_DIR`
+  and `PUB_CACHE` environment variables. Unreasonable paths are rejected with
+  a warning before the cleaner builds its directory list.
+
+### Internal
+
+- **Checking Team multi-perspective review.** 22 agents across 3 waves
+  (core + specialists + test) reviewed the `pbi-2026-05-25` branch.
+  Score: 82.4/100 (Rank A). Report in `plans/2026-05-27-0637-review-pbi-2026-05-25.md`.
+- **Coverage gap audit.** Systematic analysis of all 24 test files.
+  Score: 8.5/10. No HIGH gaps found. Report in `plans/ln-634-coverage-audit.md`.
+- **442 tests total** (288 unit + 154 integration/E2E across 24 test files),
+  0 failures.
+- **All PBI A–G completed** (22 SP total). Sprint 5 ships PBI-D Phase 2,
+  PBI-E (config.toml), PBI-F (--yes), and PBI-G (stats).
+- **Docs DoD finalized.** All PBI-E/G documentation items marked complete
+  (exclude, custom, per-cleaner, stats, --config documented in EN + JA).
+
+---
+
 ## [0.1.26] — 2026-05-26
 
 ### Added
