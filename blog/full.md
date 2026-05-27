@@ -50,6 +50,10 @@ trait Cleaner {
 
 `uv` や `brew` のような外部コマンドは `CommandRunner` トレイトを介して呼び出します。テスト時にはモックに差し替えられるため、実際のツールがインストールされていない CI 環境でもテストが通ります。
 
+### サブターゲットによる部分削除
+
+Xcode のように複数の種類のキャッシュを持つクリーナーは、内部で `sub_targets()` を実装することで TUI で展開表示されます。選択されたサブターゲットは `sasurahime clean <target> --sub <name>` で個別に実行されます。
+
 ## 対応しているターゲット一覧
 
 現時点で **40 以上**のターゲットが実装されています。一覧は `sasurahime targets` でいつでも確認できます。
@@ -63,13 +67,15 @@ trait Cleaner {
 | uv | `~/.cache/uv/` の古い simple-vN ディレクトリ、`uv cache prune` |
 | brew | Homebrew の古いダウンロードとバージョン (`brew cleanup -s --prune=all`) |
 | bun, go, pip, npm, yarn, pnpm, pipx, poetry, conda | 各パッケージマネージャのキャッシュ |
-| cargo | Cargo registry キャッシュ + `target/` ディレクトリ |
+| cargo | Cargo registry キャッシュ |
 | rustup | 未使用の Rust ツールチェーン |
 | deno | Deno キャッシュ |
 | gradle, maven | Gradle 旧バージョンキャッシュ、Maven ローカルリポジトリ |
 | spm (SwiftPM) | SwiftPM キャッシュ |
 | cocoa-pods | CocoaPods キャッシュ |
 | flutter | Flutter/Dart pub キャッシュ |
+| sbt | Scala/sbt ビルドキャッシュ |
+| volta | Volta Node.js マネージャキャッシュ |
 
 ### ランタイム・ツール
 
@@ -78,6 +84,8 @@ trait Cleaner {
 | mise | `~/.local/share/mise/installs/` の未使用ランタイム（設定ファイルとクロスチェック） |
 | browsers | Puppeteer / Playwright の古いブラウザビルド（最新を残す） |
 | node-gyp | node-gyp ビルドキャッシュ |
+| tree-sitter | tree-sitter パーサーキャッシュ |
+| terraform | Terraform プロバイダプラグインキャッシュ |
 
 ### Docker / VM
 
@@ -91,11 +99,12 @@ trait Cleaner {
 
 | ターゲット | 対象 |
 |---|---|
-| xcode | Xcode DerivedData / アーカイブ |
+| xcode | Xcode DerivedData / Archives（部分削除可能） |
 | device-support | iOS DeviceSupport の古いシンボル（最新 N バージョンを保持） |
 | simulator | iOS Simulator キャッシュ (`xcrun simctl delete unavailable`) |
 | jetbrains | JetBrains IDE キャッシュ |
 | vscode-extensions | VS Code 拡張キャッシュ |
+| ios-backup | iOS デバイスバックアップ（インタラクティブのみ） |
 | trash | macOS Trash のサイズ報告 |
 
 ### AI/ML・CI
@@ -111,9 +120,12 @@ trait Cleaner {
 
 | ターゲット | 対象 |
 |---|---|
-| logs | `~/.local/share/kilo/log/` の古いログ |
+| logs | 保持期間を過ぎたログファイル |
 | library-logs | `~/Library/Logs/` の開発者ログ |
-| downloads | `~/Downloads` の古いファイル |
+| downloads | `~/Downloads` の古いファイル（デフォルト 30 日フィルタ） |
+| apfs-snapshot | APFS ローカルスナップショット（インタラクティブのみ） |
+| git |  Git キャッシュ |
+| torrent | トレントキャッシュ |
 
 各クリーナーは独立したファイルに分かれているため、新しい対象を追加するときは `Cleaner` トレイトを実装した struct をひとつ足すだけで済みます。
 
@@ -127,64 +139,58 @@ trait Cleaner {
 sasurahime
 ```
 
-実際の動作はこんな感じです。
+実際の動作はこんな感じです。スキャンは **rayon による並列処理**で高速化されています。
 
 ```
-sasurahime v0.1.6
-Scanning uv... [OK]
-Scanning brew... [OK]
-Scanning mise... [OK]
-Scanning browsers... [OK]
-Scanning xcode... [OK]
-Scanning logs... [OK]
+sasurahime v0.1.27
+Scanning... (12/32) [▓▓▓▓▓░░░░░░░░░░░]
 
 Select caches to clean  [space to toggle, enter to confirm]:
 > [ ] uv                   3.6 GB
   [ ] brew                 75.1 MB
+  [ ] xcode > DerivedData  15.3 GB
+  [ ] xcode > Archives     5.2 GB
   [ ] logs                 43.5 MB
-  [ ] act                  201.2 MB
   [ ] huggingface          1.1 GB
-  [ ] pre-commit           242.8 MB
-  [ ] library-logs         291.5 KB
-  [ ] colima               100.3 GB
+  [ ] colima               9.3 GB
 ```
+
+Xcode のように複数カテゴリを持つターゲットはサブ展開され、個別に選択できます。
 
 スペースで選択、Enter で確定します。確認プロンプトが表示されたら `y` で削除実行です。
 
 ```
-Will free approximately 118.6 MB.
+Will free approximately 15.4 GB.
 Proceed? [y/N]
 ```
 
 削除中はスピナーと経過表示が出ます。
 
 ```
-⠈ Cleaning brew...                                                  Freed: 54.5 MB
-Cleaning brew... [OK]
-⠙ Cleaning logs...                                                  [kilo] Removed: ...
-Cleaning logs... [OK]                                                Removed 2 log files
+Cleaning brew... [OK]              Freed: 54.5 MB
+Cleaning xcode > DerivedData [OK]  Freed: 15.0 GB
 
-Total freed: 98.0 MB
+Total freed: 15.1 GB
 ```
 
 ### `sasurahime scan`
 
-削除はせず、スキャン結果だけを一覧表示します。
+削除はせず、スキャン結果だけを一覧表示します。`--verbose` で各クリーナーの監視パスも表示されます。
 
 ```bash
 sasurahime scan
+sasurahime scan --verbose
 ```
 
 ### `sasurahime clean <target>`
 
-特定のターゲットだけを掃除します。
+特定のターゲットだけを掃除します。Xcode はサブターゲットを指定できます。
 
 ```bash
 sasurahime clean uv
 sasurahime clean brew
-sasurahime clean mise
-sasurahime clean browsers
-sasurahime clean logs
+sasurahime clean xcode --sub derived-data
+sasurahime clean xcode --sub derived-data,archives
 ```
 
 ### `sasurahime clean <target> --dry-run`
@@ -197,18 +203,50 @@ sasurahime clean uv --dry-run
 
 ### `sasurahime --yes`
 
-すべてのクリーナーを順番に実行します。確認プロンプトは出るので、無人実行には `--yes --permanent` を組み合わせます（その場合も最終確認は表示されます）。
+すべてのクリーナーを確認プロンプトなしで一括実行します。cron や CI での定期実行に最適です。
 
 ```bash
 sasurahime --yes
 ```
 
-### `sasurahime --permanent`
+設定ファイルで `exclude` にクリーナー名を書いておけば、安全な範囲だけ自動掃除できます。
 
-Trash を経由せず完全に削除します。デフォルトの Trash モードをオーバーライドするためのフラグです。
+### `sasurahime --yes --permanent`
+
+Trash を経由せず完全に削除します。この組み合わせのときは最終確認プロンプトが表示されます。
 
 ```bash
-sasurahime clean uv --permanent
+sasurahime --yes --permanent
+```
+
+### `sasurahime stats`
+
+削除履歴の累計と直近の実行一覧を表示します。
+
+```bash
+$ sasurahime stats
+Total freed:  12.5 GB
+Runs:         15
+
+Recent cleanups:
+  #  Date                Cleaner        Size
+  1  2026-05-27 10:30   uv             500.0 MB
+  2  2026-05-26 22:15   brew           1.2 GB
+```
+
+履歴は `clean` 実行時に自動記録されます。`--dry-run` のときは記録されません。
+
+```bash
+# 直近 5 件だけ表示
+sasurahime stats --last 5
+```
+
+### `sasurahime explore`
+
+OmniDiskSweeper 風のディスク探索コマンドです。`~/Library/Caches/` や `~/.cache/` などを第 1 階層までスキャンし、sasurahime が管理しているもの・していないもの両方を一覧表示します。
+
+```bash
+sasurahime explore --top 5
 ```
 
 ### `sasurahime targets`
@@ -223,11 +261,48 @@ sasurahime targets
 
 バージョン番号を表示します。
 
+## 設定ファイル
+
+`~/.config/sasurahime/config.toml` に設定を書けば、CLI フラグを毎回指定する必要がなくなります。
+
+```toml
+# スキャンから除外するクリーナー（scan / TUI で非表示に）
+exclude = ["huggingface", "ollama"]
+
+# 任意のディレクトリをクリーナーとして追加
+[[custom]]
+name = "my-project"
+path = "~/work/.cache"
+
+# クリーナーごとのフィルタ（DeleteDirs 方式のみ有効）
+[cleaner.act]
+older_than_days = 30
+
+[cleaner.colima]
+larger_than_mb = 500
+
+# ログ保持日数
+[logs]
+keep_days = 14
+```
+
+### `--config <path>` フラグ
+
+デフォルトの `~/.config/sasurahime/config.toml` とは別の設定ファイルを読み込みたいときに使います。
+
+```bash
+sasurahime scan --config /tmp/my-config.toml
+```
+
 ## 安全性の詳細
 
 ### uchg フラグの自動解除
 
-macOS ではファイルに `uchg`（ユーザー immutable）フラグが立っていると、`rm -rf` でも削除できません。sasurahime は削除の直前に `chflags -R nouchg <path>` を実行してから削除します。
+macOS ではファイルに `uchg`（ユーザー immutable）フラグが立っていると、`rm -rf` でも削除できません。sasurahime は削除の直前に `chflags -R nouchg <path>` を実行してから削除します。カスタムパスクリーナー (`[[custom]]`) にも適用されます。
+
+### 環境変数による任意パス削除の防止
+
+`TF_PLUGIN_CACHE_DIR`（terraform）や `PUB_CACHE`（flutter）のような環境変数で削除パスを指定できるクリーナーは、`is_safe_delete_target()` でパスの安全性を検証します。`/etc` や `/System` などのシステムパスを指している場合は警告を出してデフォルトパスにフォールバックします。
 
 ### mise のピン留め保護
 
@@ -239,33 +314,23 @@ macOS ではファイルに `uchg`（ユーザー immutable）フラグが立っ
 node = "18"
 ```
 
-### Trash モードの設定ファイル
+### エラーハンドリング
 
-`~/.config/sasurahime/config.toml` に `trash_mode = false` と書けば、`--permanent` をつけなくても常に完全削除モードになります。
+権限エラー (`EPERM`) やファイルロック (`EBUSY`) が発生した場合、該当ファイルをスキップして処理を継続します。失敗したファイルは削除後に `N file(s) skipped: /path: Permission denied` と表示されます。
 
-## インストール方法
-
-### GitHub Releases（推奨）
-
-プリビルドバイナリをダウンロードして配置するだけです。
-
-```bash
-curl -LO https://github.com/armaniacs/sasurahime/releases/download/v0.1.6/sasurahime-aarch64-apple-darwin.tar.gz
-tar xzf sasurahime-x86_64-apple-darwin.tar.gz
-sudo mv sasurahime /usr/local/bin/
-```
-
-### Cargo（Rust 環境がある場合）
+## インストール
 
 ```bash
 cargo install sasurahime
 ```
 
+Rust 1.70+ と macOS (arm64 / x86_64) が必要です。
+
 ## 実装のハイライト
 
 ### バイナリサイズ 872KB
 
-Rust で書かれているとはいえ、`clap`、`dialoguer`、`indicatif`、`comfy-table`、`toml`、`serde`、`trash` といくつかの依存関係があります。リリースプロファイルで以下の最適化を施し、最終的なバイナリサイズは **872KB** になりました。
+Rust で書かれているとはいえ、`clap`、`dialoguer`、`indicatif`、`comfy-table`、`toml`、`serde`、`trash`、`rayon`、`chrono` といくつかの依存関係があります。リリースプロファイルで以下の最適化を施し、最終的なバイナリサイズは **872KB** になりました。
 
 ```toml
 [profile.release]
@@ -276,17 +341,27 @@ codegen-units  = 1
 panic          = "abort"
 ```
 
+### 並列スキャン
+
+`scan` と `--yes` モードのスキャンは `rayon` による並列処理で実行されます。スキャン時間は最も遅いクリーナーに依存するため、逐次実行より大幅に高速です。
+
 ### トレイトによる拡張性
 
-`Cleaner` トレイトのおかげで、新しいキャッシュ対象を追加するときは 1 ファイル + 数行の登録コードだけで完結します。実際に、最初のリリースから 3 回のアップデートでクリーナー数が倍以上に増えました。
+`Cleaner` トレイトのおかげで、新しいキャッシュ対象を追加するときは 1 ファイル + 数行の登録コードだけで完結します。実際に、最初のリリースから 10 日間でクリーナー数が 2 倍以上に増えました。
 
 ### 外部コマンドの注入
 
 `std::process::Command` を直接呼ばず、`CommandRunner` トレイトを経由することで、テストではモックに差し替えられるようになっています。これにより、`brew` が入っていない CI でも BrewCleaner のテストが動きます。
 
+### テスト
+
+**442 tests, 0 failures**（288 unit + 154 integration/E2E、24 テストファイル）
+
+全クリーナーに `detect()` + `clean()` + `dry_run` のテストがあります。設定ファイル、削除履歴、並列スキャン、TUI 選択ロジックといった横断的機能も単体テストでカバーされています。
+
 ## さいごに
 
-sasurahime はまだ v0.1.6 のプロジェクトです。「このキャッシュも掃除したい」「こういう機能がほしい」という要望があれば、Issue や PR を歓迎しています。
+sasurahime は v0.1.27 のプロジェクトです。ここまでの機能で日常的なキャッシュ掃除には十分対応できるようになりましたが、追加のリクエストがあれば Issue や PR を歓迎しています。
 
 すぐに試したい方はこちらから：
 
