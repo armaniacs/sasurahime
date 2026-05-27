@@ -4,6 +4,45 @@ All notable changes to sasurahime will be documented in this file. The format is
 
 ---
 
+## [0.1.28] — 2026-05-28
+
+### Added
+
+- **Test coverage gaps — 6 new unit test suites.** Added targeted unit tests
+  for `is_skippable_error()` (C01), `GradleCleaner`/`JetBrainsCleaner`
+  `find_old_caches` (H01, M02), `CargoCleaner::find_target_dirs` (H03),
+  `MiseCleaner` parse/scan (M01), and `run_clean_target` dispatch (M03).
+- **`--no-unicode` CLI flag.** Disables unicode and spinner characters in
+  terminal output for better compatibility with log captures and non-unicode
+  terminal emulators.
+- **History retention cap (max 1000 entries).** `history.json` now trims to
+  the 1000 most recent entries on write, preventing unbounded file growth.
+  Configurable via `[history].max_entries` in `config.toml`.
+
+### Fixed
+
+- **`MockRunner.NotFound` order-dependency bug.** Changed from a method-based
+  mock to a `bool` fallback field, fixing a test ordering issue where
+  subsequent tests could see stale `NotFound` state.
+- **Pre-commit test env var pollution.** Tests modifying `PRE_COMMIT_HOME` or
+  `XDG_CACHE_HOME` now properly isolate via the shared `EnvGuard` guard,
+  eliminating parallel-test flakiness in the `pre_commit` test suite.
+
+### Internal
+
+- **488 tests total** (329 unit + 159 integration/E2E across 25 test files),
+  0 failures — 46 new tests (+10.4%) since v0.1.27.
+- **`src/test_helpers.rs`** introduced as a shared test infrastructure module,
+  housing the `EnvGuard` Drop-based environment variable guard extracted from
+  `pre_commit.rs`.
+- **Archived 5 completed plan documents:** PBI A-G docs (6 files), colima
+  cleaner plan, command-timeout-hint plan, and coverage-gaps test spec + plan.
+- **PBI process documentation updated.** `pbi/AGENTS.md` now includes a
+  detailed AI agent quick-reference guide; `pbi/PBI-process.md` streamlined
+  with explicit TDD and mock guidelines.
+
+---
+
 ## [0.1.27] — 2026-05-27
 
 ### Added
