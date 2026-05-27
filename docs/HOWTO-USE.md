@@ -317,6 +317,19 @@ permanently deleting anything.
 sasurahime --yes --permanent
 ```
 
+### `--config <path>`
+
+Override the config file path. By default, sasurahime reads
+`~/.config/sasurahime/config.toml`. Use this flag to use a different file.
+
+```bash
+# Use a custom config file
+sasurahime scan --config /tmp/my-config.toml
+```
+
+If the specified file does not exist, a warning is shown and defaults
+are used.
+
 ---
 
 ## Configuration File
@@ -829,6 +842,18 @@ sasurahime clean uv --permanent
 # 完全一括削除の前に確認を表示
 sasurahime --yes --permanent
 ```
+
+### `--config <path>`
+
+設定ファイルのパスを上書きします。デフォルトでは `~/.config/sasurahime/config.toml` を
+読み込みます。このフラグで別のファイルを指定できます。
+
+```bash
+# カスタム設定ファイルを使用
+sasurahime scan --config /tmp/my-config.toml
+```
+
+指定したファイルが存在しない場合は警告が表示され、デフォルト値が使用されます。
 
 ---
 
