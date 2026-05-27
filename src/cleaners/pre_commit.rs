@@ -283,13 +283,8 @@ mod tests {
     #[test]
     fn cache_dir_uses_safe_default_when_pre_commit_home_is_unsafe() {
         let tmp = TempDir::new().unwrap();
-        let prev = std::env::var("PRE_COMMIT_HOME").ok();
-        std::env::set_var("PRE_COMMIT_HOME", "/");
+        let _guard = EnvGuard::set("PRE_COMMIT_HOME", "/");
         let cleaner = PreCommitCleaner::new(tmp.path(), Box::new(SystemCommandRunner));
-        match prev {
-            Some(v) => std::env::set_var("PRE_COMMIT_HOME", v),
-            None => std::env::remove_var("PRE_COMMIT_HOME"),
-        }
         let dir = cleaner.cache_dir();
         assert_eq!(
             dir,
@@ -301,13 +296,9 @@ mod tests {
     #[test]
     fn cache_dir_uses_safe_default_when_xdg_cache_is_unsafe() {
         let tmp = TempDir::new().unwrap();
-        let prev = std::env::var("XDG_CACHE_HOME").ok();
-        std::env::set_var("XDG_CACHE_HOME", "/etc");
+        let _pre_guard = EnvGuard::set("PRE_COMMIT_HOME", "");
+        let _xdg_guard = EnvGuard::set("XDG_CACHE_HOME", "/etc");
         let cleaner = PreCommitCleaner::new(tmp.path(), Box::new(SystemCommandRunner));
-        match prev {
-            Some(v) => std::env::set_var("XDG_CACHE_HOME", v),
-            None => std::env::remove_var("XDG_CACHE_HOME"),
-        }
         let dir = cleaner.cache_dir();
         assert_eq!(
             dir,
@@ -321,13 +312,13 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let xdg_cache = tmp.path().join("xdg-cache");
         // Do NOT create the pre-commit subdirectory under XDG_CACHE_HOME
-        std::env::set_var("XDG_CACHE_HOME", &xdg_cache);
+        let _pre_guard = EnvGuard::set("PRE_COMMIT_HOME", "");
+        let _xdg_guard = EnvGuard::set("XDG_CACHE_HOME", &xdg_cache.to_string_lossy());
 
         let cleaner = PreCommitCleaner::new(tmp.path(), Box::new(SystemCommandRunner));
         let result = cleaner.detect();
 
-        std::env::remove_var("XDG_CACHE_HOME");
-
+        // EnvGuard automatically restores on drop
         // With XDG_CACHE_HOME set but no pre-commit dir, should look in $XDG_CACHE_HOME/pre-commit
         // and find NotFound (not fallback to ~/.cache/pre-commit)
         assert!(matches!(result.status, ScanStatus::NotFound));
