@@ -2,6 +2,15 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+/// Maximum number of history entries kept in the file.
+/// Oldest entries are trimmed on append.
+const MAX_HISTORY_ENTRIES: usize = 1000;
+
+/// Global flag: set to false to disable Unicode box-drawing characters
+/// in stats output (for screen-reader compatibility).
+pub static USE_UNICODE: AtomicBool = AtomicBool::new(true);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HistoryEntry {
@@ -37,26 +46,31 @@ fn format_inner_line(content: &str, inner: usize) -> String {
 
 fn build_box(lines: &[String]) -> String {
     let inner = inner_width();
+    let (tl, h, tr, vl, bl, br, hl) = if USE_UNICODE.load(Ordering::Relaxed) {
+        ('╔', '═', '╗', '║', '╚', '╝', '═')
+    } else {
+        ('+', '-', '+', '|', '+', '+', '-')
+    };
     let mut out = String::new();
-    out.push('╔');
+    out.push(tl);
     for _ in 0..inner {
-        out.push('═');
+        out.push(h);
     }
-    out.push('╗');
+    out.push(tr);
     out.push('\n');
 
     for line in lines {
-        out.push('║');
+        out.push(vl);
         out.push_str(&format_inner_line(line, inner));
-        out.push('║');
+        out.push(vl);
         out.push('\n');
     }
 
-    out.push('╚');
+    out.push(bl);
     for _ in 0..inner {
-        out.push('═');
+        out.push(hl);
     }
-    out.push('╝');
+    out.push(br);
     out.push('\n');
 
     out
@@ -84,6 +98,7 @@ pub fn append_history(entry: &HistoryEntry, history_dir: &Path) -> anyhow::Resul
     entries.push(entry.clone());
 
     entries.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+    entries.truncate(MAX_HISTORY_ENTRIES);
 
     let json = serde_json::to_string_pretty(&entries)?;
     let tmp_path = history_dir.join("history.json.tmp");
@@ -358,5 +373,71 @@ mod tests {
         assert_eq!(summary.entries[0].cleaner, "newest");
         assert_eq!(summary.entries[1].cleaner, "middle");
         assert_eq!(summary.entries[2].cleaner, "old");
+    }
+
+    #[test]
+    fn format_stats_uses_unicode_by_default() {
+        USE_UNICODE.store(true, Ordering::Relaxed);
+        let entries = vec![HistoryEntry {
+            timestamp: "2026-05-25T10:30:00+09:00".to_string(),
+            cleaner: "uv".to_string(),
+            freed_bytes: 500_000_000,
+            skipped_count: 0,
+        }];
+        let summary = compute_stats(&entries);
+        let output = format_stats(&summary);
+        assert!(
+            output.contains('╔'),
+            "default should use Unicode box-drawing: {output}"
+        );
+        assert!(
+            output.contains('║'),
+            "default should use Unicode box-drawing: {output}"
+        );
+    }
+
+    #[test]
+    fn format_stats_no_unicode_uses_ascii() {
+        USE_UNICODE.store(false, Ordering::Relaxed);
+        let entries = vec![HistoryEntry {
+            timestamp: "2026-05-25T10:30:00+09:00".to_string(),
+            cleaner: "uv".to_string(),
+            freed_bytes: 500_000_000,
+            skipped_count: 0,
+        }];
+        let summary = compute_stats(&entries);
+        let output = format_stats(&summary);
+        assert!(
+            output.contains('+'),
+            "--no-unicode should use ASCII box-drawing: {output}"
+        );
+        assert!(
+            !output.contains('╔'),
+            "--no-unicode should NOT contain Unicode: {output}"
+        );
+        USE_UNICODE.store(true, Ordering::Relaxed);
+    }
+
+    #[test]
+    fn append_history_truncates_to_max_entries() {
+        let tmp = TempDir::new().unwrap();
+        let history_dir = tmp.path().join(".local/share/sasurahime");
+        // Push more entries than MAX_HISTORY_ENTRIES
+        for i in 0..MAX_HISTORY_ENTRIES + 10 {
+            let ts = format!("2026-05-25T{:02}:00:00+09:00", i % 24);
+            append_history(
+                &HistoryEntry {
+                    timestamp: ts,
+                    cleaner: "uv".to_string(),
+                    freed_bytes: 100,
+                    skipped_count: 0,
+                },
+                &history_dir,
+            )
+            .unwrap();
+        }
+        let history_path = history_dir.join("history.json");
+        let loaded = load_history(&history_path);
+        assert_eq!(loaded.len(), MAX_HISTORY_ENTRIES);
     }
 }

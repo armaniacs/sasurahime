@@ -413,6 +413,10 @@ struct Cli {
     #[arg(long)]
     config: Option<PathBuf>,
 
+    /// Disable Unicode box-drawing characters in stats output
+    #[arg(long, global = true)]
+    no_unicode: bool,
+
     #[command(subcommand)]
     command: Option<Commands>,
 }
@@ -727,6 +731,10 @@ fn main() -> anyhow::Result<()> {
     // Config trash_mode = false also overrides to permanent deletion.
     let trash_mode = !cli.permanent && config.trash_mode;
     crate::trash::set_trash_mode(trash_mode);
+
+    if cli.no_unicode {
+        crate::history::USE_UNICODE.store(false, std::sync::atomic::Ordering::Relaxed);
+    }
 
     match cli.command {
         Some(Commands::Scan) => {
