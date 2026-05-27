@@ -4,6 +4,71 @@ use anyhow::Result;
 use rayon::prelude::*;
 use std::io::IsTerminal;
 
+/// Build display items and their mapping to (cleaner_index, optional_sub_target).
+/// Pure function — no I/O, fully testable.
+pub(crate) fn build_selection_items(
+    results: &[ScanResult],
+    cleaners: &[Box<dyn Cleaner>],
+    pruneable_indices: &[usize],
+) -> (Vec<(usize, Option<&'static str>)>, Vec<String>) {
+    let mut selection_mapping: Vec<(usize, Option<&'static str>)> = vec![];
+    let items: Vec<String> = pruneable_indices
+        .iter()
+        .flat_map(|&i| {
+            let bytes = match &results[i].status {
+                ScanStatus::Pruneable(b) => *b,
+                _ => 0,
+            };
+            let subs = cleaners[i].sub_targets();
+            if subs.is_empty() {
+                selection_mapping.push((i, None));
+                vec![format!("{}  ({})", cleaners[i].name(), format_bytes(bytes))]
+            } else {
+                subs.iter()
+                    .map(|&(sub_name, sub_size)| {
+                        selection_mapping.push((i, Some(sub_name)));
+                        format!(
+                            "  {} > {}  ({})",
+                            cleaners[i].name(),
+                            sub_name,
+                            format_bytes(sub_size)
+                        )
+                    })
+                    .collect()
+            }
+        })
+        .collect();
+    (selection_mapping, items)
+}
+
+/// Compute the total freed bytes for selected items.
+/// Pure function — no I/O, fully testable.
+pub(crate) fn compute_selected_total(
+    selected: &[usize],
+    selection_mapping: &[(usize, Option<&'static str>)],
+    results: &[ScanResult],
+    cleaners: &[Box<dyn Cleaner>],
+) -> u64 {
+    selected
+        .iter()
+        .map(|&si| {
+            let (cleaner_idx, sub_name) = &selection_mapping[si];
+            if let Some(sub_name) = sub_name {
+                cleaners[*cleaner_idx]
+                    .sub_targets()
+                    .iter()
+                    .find(|(n, _)| n == sub_name)
+                    .map(|(_, s)| *s)
+                    .unwrap_or(0)
+            } else if let ScanStatus::Pruneable(b) = &results[*cleaner_idx].status {
+                *b
+            } else {
+                0
+            }
+        })
+        .sum()
+}
+
 /// Non-interactive: clean every pruneable cleaner without prompting.
 /// Used by `--yes` flag.
 pub fn run_auto(cleaners: &[Box<dyn Cleaner>]) -> Result<()> {
@@ -144,33 +209,7 @@ pub fn run_interactive(cleaners: &[Box<dyn Cleaner>]) -> Result<()> {
         return Ok(());
     }
 
-    let mut selection_mapping: Vec<(usize, Option<&'static str>)> = vec![];
-    let items: Vec<String> = pruneable_indices
-        .iter()
-        .flat_map(|&i| {
-            let bytes = match &results[i].status {
-                ScanStatus::Pruneable(b) => *b,
-                _ => 0,
-            };
-            let subs = cleaners[i].sub_targets();
-            if subs.is_empty() {
-                selection_mapping.push((i, None));
-                vec![format!("{}  ({})", cleaners[i].name(), format_bytes(bytes))]
-            } else {
-                subs.iter()
-                    .map(|&(sub_name, sub_size)| {
-                        selection_mapping.push((i, Some(sub_name)));
-                        format!(
-                            "  {} > {}  ({})",
-                            cleaners[i].name(),
-                            sub_name,
-                            format_bytes(sub_size)
-                        )
-                    })
-                    .collect()
-            }
-        })
-        .collect();
+    let (selection_mapping, items) = build_selection_items(&results, cleaners, &pruneable_indices);
 
     // dialoguer 0.11: MultiSelect::interact() writes to and reads from the process terminal.
     let selected = dialoguer::MultiSelect::new()
@@ -183,24 +222,7 @@ pub fn run_interactive(cleaners: &[Box<dyn Cleaner>]) -> Result<()> {
         return Ok(());
     }
 
-    let total: u64 = selected
-        .iter()
-        .map(|&si| {
-            let (cleaner_idx, sub_name) = &selection_mapping[si];
-            if let Some(sub_name) = sub_name {
-                cleaners[*cleaner_idx]
-                    .sub_targets()
-                    .iter()
-                    .find(|(n, _)| n == sub_name)
-                    .map(|(_, s)| *s)
-                    .unwrap_or(0)
-            } else if let ScanStatus::Pruneable(b) = &results[*cleaner_idx].status {
-                *b
-            } else {
-                0
-            }
-        })
-        .sum();
+    let total = compute_selected_total(&selected, &selection_mapping, &results, cleaners);
 
     println!("\nWill free approximately {}.", format_bytes(total));
     print!("Proceed? [y/N] ");
@@ -268,4 +290,136 @@ pub fn run_interactive(cleaners: &[Box<dyn Cleaner>]) -> Result<()> {
 
     println!("\nTotal freed: {}", format_bytes(freed));
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cleaner::CleanResult;
+    use crate::progress::ProgressReporter;
+    use anyhow::Result;
+
+    /// A test cleaner with a fixed name, size, and sub-targets.
+    struct TestCleaner {
+        name: &'static str,
+        size: u64,
+        subs: Vec<(&'static str, u64)>,
+    }
+
+    impl TestCleaner {
+        fn new(name: &'static str, size: u64, subs: Vec<(&'static str, u64)>) -> Self {
+            Self { name, size, subs }
+        }
+    }
+
+    impl Cleaner for TestCleaner {
+        fn name(&self) -> &'static str {
+            self.name
+        }
+        fn detect(&self) -> ScanResult {
+            if self.size > 0 {
+                ScanResult::new(self.name, ScanStatus::Pruneable(self.size))
+            } else {
+                ScanResult::new(self.name, ScanStatus::NotFound)
+            }
+        }
+        fn clean(&self, _dry_run: bool, _reporter: &dyn ProgressReporter) -> Result<CleanResult> {
+            Ok(CleanResult {
+                name: self.name,
+                bytes_freed: self.size,
+                uses_trash: false,
+                skipped: vec![],
+            })
+        }
+        fn sub_targets(&self) -> Vec<(&'static str, u64)> {
+            self.subs.clone()
+        }
+    }
+
+    #[test]
+    fn build_selection_items_single_cleaner_no_sub() {
+        let cleaners: Vec<Box<dyn Cleaner>> =
+            vec![Box::new(TestCleaner::new("test", 1000, vec![]))];
+        let results = vec![cleaners[0].detect()];
+        let pruneable = vec![0];
+        let (mapping, items) = build_selection_items(&results, &cleaners, &pruneable);
+        assert_eq!(mapping.len(), 1);
+        assert_eq!(mapping[0], (0, None));
+        assert_eq!(items.len(), 1);
+        assert!(items[0].contains("test"));
+        assert!(items[0].contains("1000 B"));
+    }
+
+    #[test]
+    fn build_selection_items_with_sub_targets() {
+        let cleaners: Vec<Box<dyn Cleaner>> = vec![Box::new(TestCleaner::new(
+            "xcode",
+            0,
+            vec![("DerivedData", 500), ("Archives", 300)],
+        ))];
+        let results = vec![cleaners[0].detect()];
+        let pruneable = vec![0];
+        let (mapping, items) = build_selection_items(&results, &cleaners, &pruneable);
+        assert_eq!(mapping.len(), 2);
+        assert_eq!(mapping[0], (0, Some("DerivedData")));
+        assert_eq!(mapping[1], (0, Some("Archives")));
+        assert_eq!(items.len(), 2);
+        assert!(items[0].contains("DerivedData"));
+        assert!(items[0].contains("500"));
+        assert!(items[1].contains("Archives"));
+        assert!(items[1].contains("300"));
+    }
+
+    #[test]
+    fn build_selection_items_mixed_cleaners() {
+        let cleaners: Vec<Box<dyn Cleaner>> = vec![
+            Box::new(TestCleaner::new("xcode", 0, vec![("DerivedData", 500)])),
+            Box::new(TestCleaner::new("brew", 2000, vec![])),
+        ];
+        let results = vec![cleaners[0].detect(), cleaners[1].detect()];
+        // Both are not-find/clean (xcode sub-target has size but the cleaner itself is 0).
+        // pruneable_indices only includes cleaners with Pruneable status.
+        let pruneable = vec![1]; // only brew is Pruneable
+        let (mapping, items) = build_selection_items(&results, &cleaners, &pruneable);
+        assert_eq!(mapping.len(), 1);
+        assert_eq!(mapping[0], (1, None));
+        assert!(items[0].contains("brew"));
+    }
+
+    #[test]
+    fn compute_selected_total_cleaner_without_sub() {
+        let cleaners: Vec<Box<dyn Cleaner>> =
+            vec![Box::new(TestCleaner::new("brew", 2000, vec![]))];
+        let results = vec![cleaners[0].detect()];
+        let (mapping, _items) = build_selection_items(&results, &cleaners, &[0]);
+        let total = compute_selected_total(&[0], &mapping, &results, &cleaners);
+        assert_eq!(total, 2000);
+    }
+
+    #[test]
+    fn compute_selected_total_with_sub_category() {
+        let cleaners: Vec<Box<dyn Cleaner>> = vec![Box::new(TestCleaner::new(
+            "xcode",
+            0,
+            vec![("DerivedData", 500), ("Archives", 300)],
+        ))];
+        let results = vec![cleaners[0].detect()];
+        let (mapping, _items) = build_selection_items(&results, &cleaners, &[0]);
+        // Select both sub-targets (indices 0 and 1 in the flattened items)
+        let total = compute_selected_total(&[0, 1], &mapping, &results, &cleaners);
+        assert_eq!(total, 800);
+    }
+
+    #[test]
+    fn compute_selected_total_mixed_selection() {
+        let cleaners: Vec<Box<dyn Cleaner>> = vec![
+            Box::new(TestCleaner::new("xcode", 0, vec![("DerivedData", 500)])),
+            Box::new(TestCleaner::new("brew", 2000, vec![])),
+        ];
+        let results = vec![cleaners[0].detect(), cleaners[1].detect()];
+        let (mapping, _items) = build_selection_items(&results, &cleaners, &[0, 1]);
+        // Select xcode > DerivedData (idx 0) and brew (idx 1)
+        let total = compute_selected_total(&[0, 1], &mapping, &results, &cleaners);
+        assert_eq!(total, 500 + 2000);
+    }
 }
