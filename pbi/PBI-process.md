@@ -1,7 +1,6 @@
-# PBI-process.md — shiotsuchi-search における PBI への取り組みパターン
+# PBI-process.md — sasurahime における PBI への取り組みパターン
 
-作成日: 2026-05-25
-対象: このプロジェクトを担当するすべての開発者（ジュニア含む）
+対象: このプロジェクトを担当するすべての開発者・AIエージェント
 
 ---
 
@@ -15,120 +14,119 @@ pbi/YYYY-MM-DD-NN-<type>-<slug>.md
 |------|------|-----|
 | `YYYY-MM-DD` | PBI 作成日 | `2026-05-25` |
 | `NN` | 2桁連番（実施順） | `01`, `02`, ... |
-| `type` | `fix`（既存問題の修正）/ `feat`（新機能）/ `backlog`（将来候補） | `fix` |
+| `type` | `fix` / `feat` / `backlog` | `fix` |
 | `slug` | 内容を示す英語ケバブケース | `multi-vault-native-support` |
-
-ファイル名だけで「何番目に取り組む何の作業か」がわかるようにする。
 
 ---
 
 ## 2. PBI ファイルの構造
 
-各 PBI ファイルは以下のセクションを持つ。
+新規 PBI は **スキル `pbi:create-bdd` で生成する**。手動で書かない。
 
-```markdown
-# PBI: <タイトル>
+生成されるセクション構成:
 
-## ユーザーストーリー
-<ロール>として、<機能>がほしい、なぜなら<ビジネス価値>だから
+- ユーザーストーリー
+- ビジネス価値
+- BDD 受け入れシナリオ（Gherkin 形式）
+- 受け入れ基準
+- テスト戦略（t_wada スタイル）
+- 実装アプローチ
+- 見積もり（ストーリーポイント）
+- 技術的考慮事項
+- 実装者向け注記（現状確認コマンド・実装手順・落とし穴）
+- Definition of Done
 
-## ビジネス価値
-
-## BDD 受け入れシナリオ
-(Gherkin 形式)
-
-## 受け入れ基準
-- [ ] 検証可能な条件
-
-## テスト戦略（t_wada スタイル）
-
-## 実装アプローチ
-
-## 見積もり（ストーリーポイント）
-
-## 技術的考慮事項
-
-## 実装者向け注記（ジュニア開発者必読）
-### 現状コードの確認
-### 実装手順
-### 落とし穴
-
-## Definition of Done
-```
-
-### 「実装者向け注記」は必須
-
-ジュニア開発者が単独で着手できるよう、以下を必ず含める：
-
-1. **現状コードの確認コマンド**（`grep` コマンドをそのまま実行できる形で）
-2. **既実装かどうかの明示**（「既に実装済み」なら調査タスクとして書き直す）
-3. **実装手順**（コードスニペット付きで具体的に）
-4. **落とし穴**（ハマりやすい箇所を具体的に）
+「実装者向け注記」には `grep` コマンドをそのまま実行できる形で既実装確認手順を含める。
 
 ---
 
 ## 3. PBI のライフサイクル
 
 ```
-バックログ → 展開決定 → 設計 → 実装(TDD) → レビュー(任意) → 完了 → アーカイブ
+バックログ → 展開決定 → 実装(TDD) → レビュー(任意) → 完了 → アーカイブ
 ```
 
 ### バックログ段階
 
-- `backlog-` プレフィックスで `pbi/` に配置する
-- 実装の詳細は薄くて良い（ビジネス価値と受け入れ基準が明確であれば十分）
+- `backlog-` プレフィックスで `pbi/` に配置
+- ビジネス価値と受け入れ基準が明確であれば実装詳細は薄くて良い
 
 ### 展開決定時
 
-- 連番を確定し、ファイル名を `fix-` または `feat-` プレフィックスに変更する
-- **設計ドキュメントを `.plan/YYYY-MM-DD-<slug>-design.md` として作成する**
-  - DB スキーマ変更、API インターフェース、データフローを明記する
-  - 設計仕様を PBI の「実装者向け注記」にも反映する
+- 連番を確定し、ファイル名を `fix-` または `feat-` プレフィックスに変更
+- 必要に応じて `.plan/YYYY-MM-DD-<slug>-design.md` として設計ドキュメントを作成
+  - DB スキーマ変更、API インターフェース、データフローを明記
 
 ### 実装（TDD）
 
-- **必ず `cargo test -p shiotsuchi-core` をグリーンにしてから次に進む**
+- **着手前に `cargo test` でグリーンを確認**
 - Red → Green → Refactor を各レイヤーで繰り返す
-- 実装前に既存コードを必ず読む（特に「既実装済み」の可能性に注意）
+- **着手前に既存コードを必ず読む**（既実装済みの可能性に注意）
 
 ### レビュー（任意）
 
 - `/checking-team` または `/code-review` で実施
-- 大きな変更（新コマンド追加、DBスキーマ変更、MCP インターフェース変更）では実施を推奨
-- レビュー結果は `.plan/YYYY-MM-DD-review-<slug>.md` に保存する
+- 新クリーナー追加・DB スキーマ変更・MCP インターフェース変更では推奨
+- レビュー結果は `.plan/YYYY-MM-DD-review-<slug>.md` に保存
 
 ### 完了・アーカイブ
 
-- PBI ファイルを `.plan/archived/` に `git mv` で移動する
-- `.plan/00-INDEX.md` の「アーカイブ一覧」に1行追記する
-- 関連する設計ドキュメントも同様にアーカイブする
-
 ```bash
-# アーカイブコマンド例
-git mv pbi/2026-05-25-01-fix-mtime-size-two-stage-scan.md .plan/archived/
+git mv pbi/2026-05-25-01-fix-example.md .plan/archived/
+# .plan/00-INDEX.md の「アーカイブ一覧」に1行追記する
 ```
 
 ---
 
 ## 4. 既存コードとの照合（着手前の必須確認）
 
-### なぜ必要か
+過去のパターンを分析すると「既に実装済み」ということもある。**PBI への着手前に必ず現状コードを確認すること。**
 
-過去のパターンを分析すると、「既に実装済み」ということもある
+```bash
+# 機能名に関連するキーワードでコードを探す
+grep -r "keyword" src/
 
-**PBI への着手前に必ず現状コードを確認すること。**
+# 既存クリーナー一覧
+ls src/cleaners/
 
-### 着手前の確認（テンプレート）
+# 既存テスト一覧
+ls tests/
 
-- 機能名に関連するキーワードでコードを探す
-- 既存テストの確認
-- 既存のコマンド一覧確認
+# 既存コマンド確認
+cargo run -- --help
+cargo run -- targets
+```
 
 ---
 
 ## 5. TDD の進め方（このプロジェクト固有のルール）
 
-<<必要に応じて追加>>
+### テスト階層（Outside-In）
+
+1. **E2E テスト**: `tempdir` を HOME に見立ててバイナリまたはトップレベル関数を呼び出す。終了コードと stdout を検証。
+2. **Integration テスト**: 偽ルートパスで `Cleaner` を構築し、`detect()` / `clean(dry_run=true)` を呼び出す。
+3. **Unit テスト**: `parse_size_str`、`version_matches_spec`、`is_older_than` などの純粋関数。
+
+### モックのルール
+
+- 外部コマンド（uv, brew, bun, go, pip 等）は `CommandRunner` トレイトをインジェクションしてモック
+- ファイルシステムは `tempdir` を使う（実ファイルシステムを直接操作しない）
+
+### テストファイルの場所
+
+| 種別 | 場所 |
+|------|------|
+| E2E / Integration | `tests/*.rs` |
+| Unit | `src/` 内の各モジュール末尾 `#[cfg(test)]` |
+| テスト共通ヘルパー | `src/test_helpers.rs` |
+
+### 必須チェック（PR 前）
+
+```bash
+cargo test
+cargo clippy -- -D warnings
+cargo fmt --check
+```
 
 ---
 
@@ -158,32 +156,49 @@ docs(pbi): archive multi-vault-support PBI
 ### やること
 
 - 実装前に `cargo test` でグリーンを確認してから始める
-- Epic 規模の PBIは着手前にシニアと設計を相談する
+- Epic 規模の PBI は着手前にシニアと設計を相談する
+- mise ランタイム削除時は `~/.config/mise/config.toml` と HOME 以下の `.mise.toml`（深さ5まで）をクロスチェックする
+- macOS の `uchg` 不変フラグ対策: `chflags -R nouchg <path>` してから `rm -rf`
+- 外部ツールが PATH に無い場合は `NotFound` ステータスを返す（エラーにしない）
 
 ### やらないこと
 
-<<必要に応じて追加>>
+- `detect()` または `clean(dry_run=true)` 内でファイルを削除する
+- Linux / Windows 向けのコードを追加する（macOS 専用）
+- 外部コマンドを `CommandRunner` トレイト経由でなく直接 `Command::new` で呼ぶ（テスト不可になる）
 
 ---
 
 ## 8. コマンドリファレンス
 
-<<追加対象>>
+```bash
+cargo build                    # ビルド
+cargo test                     # 全テスト実行
+cargo test <test_name>         # 単一テスト実行
+cargo clippy -- -D warnings    # lint（警告ゼロが必須）
+cargo fmt --check              # フォーマット確認
+cargo fmt                      # フォーマット適用
+cargo run -- scan              # スキャンレポート表示
+cargo run -- targets           # 全クリーナー一覧
+cargo run -- clean <target>    # 特定クリーナー実行
+cargo run -- --yes             # 非インタラクティブ一括クリーン
+cargo run -- explore           # ディレクトリ探索モード
+cargo run -- stats             # 削除履歴・統計表示
+```
 
 ---
 
 ## 9. 重要ファイルマップ（コードを読む出発点）
 
-| ファイル | 役割 |
-|---------|------|
-| `core/src/db.rs` | SQLite スキーマ・クエリ・マイグレーション |
-| `core/src/indexer.rs` | ファイルウォーキング・インデックスロジック |
-| `core/src/search.rs` | FTS5/Vec/Hybrid 検索、スニペット抽出 |
-| `core/src/tokenizer.rs` | Vaporetto トークナイザー |
-| `core/src/embedder.rs` | ONNX 埋め込みモデル |
-| `core/src/chunker.rs` | Markdown チャンク分割 |
-| `core/src/models.rs` | データ構造定義（Chunk, ChunkSearchResult, VaultStats 等） |
-| `core/src/config.rs` | 設定スキーマ（ShiotsuchiConfig, VaultEntry 等） |
-| `cli/src/main.rs` | CLI エントリポイント・コマンド定義 |
-| `cli/src/commands/dive.rs` | 検索コマンド実装 |
-| `mcp/src/handler.rs` | MCP ツールハンドラー |
+| 役割 | ファイル |
+|------|---------|
+| Cleaner トレイト定義 | `src/cleaner.rs` |
+| 全クリーナー登録 | `src/cleaners/mod.rs` |
+| 各クリーナー実装 | `src/cleaners/<name>.rs` |
+| CLI エントリーポイント | `src/main.rs` |
+| コマンドランナートレイト | `src/command.rs` |
+| 設定ファイル読み込み | `src/config.rs` |
+| インタラクティブ TUI | `src/interactive.rs` |
+| テスト共通ヘルパー | `src/test_helpers.rs` |
+| E2E・Integration テスト | `tests/*.rs` |
+| 設計・アーカイブ | `.plan/archived/` |
