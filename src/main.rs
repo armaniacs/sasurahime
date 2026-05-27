@@ -1043,9 +1043,7 @@ mod tests {
         let reporter = crate::progress::VerboseProgress::new();
         let result = run_clean_target(
             "cancelled-test",
-            |_dry_run, _reporter| {
-                Err(anyhow::Error::from(CleanCancelled))
-            },
+            |_dry_run, _reporter| Err(anyhow::Error::from(CleanCancelled)),
             false,
             &reporter,
         );
@@ -1065,12 +1063,10 @@ mod tests {
                     name: "mock-cleaner",
                     bytes_freed: 100,
                     uses_trash: false,
-                    skipped: vec![
-                        crate::cleaner::SkippedEntry {
-                            path: std::path::PathBuf::from("/tmp/skipped-file"),
-                            reason: "Permission denied".to_string(),
-                        },
-                    ],
+                    skipped: vec![crate::cleaner::SkippedEntry {
+                        path: std::path::PathBuf::from("/tmp/skipped-file"),
+                        reason: "Permission denied".to_string(),
+                    }],
                 })
             },
             false,

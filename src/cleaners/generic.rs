@@ -1,5 +1,7 @@
 use crate::cleaner::{CleanCancelled, CleanResult, Cleaner, ScanResult, ScanStatus};
 use crate::command::CommandRunner;
+#[cfg(test)]
+use crate::command::SystemCommandRunner;
 use crate::config::Config;
 use crate::format::dir_size;
 use crate::progress::ProgressReporter;
@@ -305,6 +307,17 @@ impl GenericCleaner {
 }
 
 impl GenericCleaner {
+    /// Create a `DeleteDirs` cleaner with a given display name and target path.
+    /// The runner is a no-op since `DeleteDirs` cleaners never invoke external commands.
+    #[cfg(test)]
+    pub fn delete_dirs(name: &'static str, path: PathBuf) -> Self {
+        Self::base_cleaner(
+            name,
+            CleanMethod::DeleteDirs(vec![path]),
+            Box::new(SystemCommandRunner),
+        )
+    }
+
     /// Apply an age filter: only entries with mtime older than `days` days
     /// will be included in detect/clean.
     pub fn with_older_than(mut self, days: u32) -> Self {
@@ -1179,5 +1192,63 @@ mod tests {
         };
         let result = cleaner.detect();
         assert!(matches!(result.status, ScanStatus::NotFound));
+    }
+
+    #[test]
+    fn with_config_older_than_days_filters_detect_results() {
+        use filetime::FileTime;
+        use std::time::{Duration, SystemTime};
+
+        let tmp = tempfile::TempDir::new().unwrap();
+        let data_dir = tmp.path().join("data");
+        fs::create_dir_all(&data_dir).unwrap();
+        fs::write(data_dir.join("old.log"), b"x").unwrap();
+        // Set directory mtime after writing file (file writes can update dir mtime)
+        let old = SystemTime::now() - Duration::from_secs(7 * 86_400);
+        filetime::set_file_mtime(&data_dir, FileTime::from_system_time(old)).unwrap();
+
+        let mut per_cleaner = std::collections::HashMap::new();
+        per_cleaner.insert(
+            "test-older".to_string(),
+            crate::config::PerCleanerConfig {
+                older_than_days: Some(5),
+                larger_than_mb: None,
+            },
+        );
+        let config = crate::config::Config {
+            per_cleaner,
+            ..crate::config::Config::default()
+        };
+        let cleaner =
+            GenericCleaner::delete_dirs("test-older", data_dir.clone()).with_config(&config);
+        let result = cleaner.detect();
+        assert!(matches!(result.status, ScanStatus::Pruneable(_)));
+    }
+
+    #[test]
+    fn with_config_no_match_for_name_leaves_cleaner_unchanged() {
+        use crate::test_helpers::write_aged_file;
+
+        let tmp = tempfile::TempDir::new().unwrap();
+        let data_dir = tmp.path().join("data");
+        fs::create_dir_all(&data_dir).unwrap();
+        write_aged_file(&data_dir.join("any.log"), 1, b"x");
+
+        let mut per_cleaner = std::collections::HashMap::new();
+        per_cleaner.insert(
+            "other-cleaner".to_string(),
+            crate::config::PerCleanerConfig {
+                older_than_days: Some(999),
+                larger_than_mb: None,
+            },
+        );
+        let config = crate::config::Config {
+            per_cleaner,
+            ..crate::config::Config::default()
+        };
+        let cleaner =
+            GenericCleaner::delete_dirs("no-match-cleaner", data_dir.clone()).with_config(&config);
+        let result = cleaner.detect();
+        assert!(matches!(result.status, ScanStatus::Pruneable(_)));
     }
 }

@@ -482,3 +482,25 @@ fn clean_flutter_not_found_exits_zero() {
         .unwrap();
     assert!(output.status.success());
 }
+
+#[test]
+fn clean_terraform_rejects_unsafe_env_var() {
+    let tmp = TempDir::new().unwrap();
+    let output = sasurahime(tmp.path())
+        .env("TF_PLUGIN_CACHE_DIR", "/")
+        .args(["clean", "terraform"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+}
+
+#[test]
+fn clean_flutter_rejects_unsafe_env_var() {
+    let tmp = TempDir::new().unwrap();
+    let output = sasurahime(tmp.path())
+        .env("PUB_CACHE", "/")
+        .args(["clean", "flutter"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+}

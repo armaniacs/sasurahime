@@ -31,9 +31,7 @@ impl GradleCleaner {
             .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
             .filter_map(|e| {
                 let name = e.file_name().to_string_lossy().to_string();
-                if !name.starts_with(
-                    |c: char| c.is_ascii_digit(),
-                ) {
+                if !name.starts_with(|c: char| c.is_ascii_digit()) {
                     return None;
                 }
                 let key: Vec<u32> = name

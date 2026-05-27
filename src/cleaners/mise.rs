@@ -382,10 +382,7 @@ mod tests {
     #[test]
     fn parse_toml_kv_valid_line_returns_key_value() {
         let result = MiseCleaner::parse_toml_kv(r#"node = "20.11.0""#);
-        assert_eq!(
-            result,
-            Some(("node".to_string(), "20.11.0".to_string()))
-        );
+        assert_eq!(result, Some(("node".to_string(), "20.11.0".to_string())));
     }
 
     #[test]
@@ -447,9 +444,7 @@ mod tests {
         )
         .unwrap();
         let result = MiseCleaner::scan_pinned_versions(tmp.path());
-        assert!(
-            result.contains(&("node".to_string(), "22.0.0".to_string()))
-        );
+        assert!(result.contains(&("node".to_string(), "22.0.0".to_string())));
     }
 
     #[test]
@@ -462,9 +457,7 @@ mod tests {
         )
         .unwrap();
         let result = MiseCleaner::scan_pinned_versions(tmp.path());
-        assert!(
-            result.contains(&("python".to_string(), "3.13.0".to_string()))
-        );
+        assert!(result.contains(&("python".to_string(), "3.13.0".to_string())));
     }
 
     #[test]
