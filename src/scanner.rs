@@ -1,6 +1,7 @@
 use crate::cleaner::{Cleaner, ScanStatus};
 use crate::format::format_bytes;
-use comfy_table::{presets::UTF8_FULL, Table};
+use comfy_table::presets::{ASCII_FULL, UTF8_FULL};
+use comfy_table::Table;
 use rayon::prelude::*;
 
 pub fn run_scan(cleaners: &[Box<dyn Cleaner>]) {
@@ -20,7 +21,11 @@ pub fn run_scan(cleaners: &[Box<dyn Cleaner>]) {
     });
 
     let mut table = Table::new();
-    table.load_preset(UTF8_FULL);
+    if crate::history::USE_UNICODE.load(std::sync::atomic::Ordering::Relaxed) {
+        table.load_preset(UTF8_FULL);
+    } else {
+        table.load_preset(ASCII_FULL);
+    }
     table.set_header(vec!["Category", "Size", "Status", "Target"]);
 
     let mut total: u64 = 0;

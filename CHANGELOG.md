@@ -35,7 +35,7 @@ All notable changes to sasurahime will be documented in this file. The format is
 - **`src/test_helpers.rs`** introduced as a shared test infrastructure module,
   housing the `EnvGuard` Drop-based environment variable guard extracted from
   `pre_commit.rs`.
-- **Archived 5 completed plan documents:** PBI A-G docs (6 files), colima
+- **Archived 5 completed plan documents:** PBI A-G docs (7 files), colima
   cleaner plan, command-timeout-hint plan, and coverage-gaps test spec + plan.
 - **PBI process documentation updated.** `pbi/AGENTS.md` now includes a
   detailed AI agent quick-reference guide; `pbi/PBI-process.md` streamlined

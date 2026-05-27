@@ -495,4 +495,34 @@ mod tests {
         let results = scan_logs(&logs, 1, 1);
         assert!(results.is_empty(), "zero-size entry should be skipped");
     }
+
+    #[test]
+    fn clean_all_processes_all_entries_without_selection() {
+        let tmp = TempDir::new().unwrap();
+        let logs = logs_dir(&tmp);
+        fs::write(logs.join("big.log"), b"x".repeat(200)).unwrap();
+        fs::write(logs.join("old.log"), b"y".repeat(200)).unwrap();
+        let past = SystemTime::now() - Duration::from_secs(200 * 86400);
+        set_file_mtime(&logs.join("old.log"), FileTime::from_system_time(past)).unwrap();
+
+        let runner = crate::test_helpers::MockRunner::new()
+            .with_success("chflags");
+        let cleaner = LibraryLogsCleaner::new(tmp.path(), Box::new(runner));
+        let result = cleaner.clean_all(false, &crate::progress::DeepSuppressReporter).unwrap();
+        assert!(result.bytes_freed > 0, "clean_all should process all entries");
+        assert!(result.uses_trash, "LibraryLogsCleaner should use trash");
+    }
+
+    #[test]
+    fn clean_via_trait_processes_entries_with_interactive() {
+        let tmp = TempDir::new().unwrap();
+        let logs = logs_dir(&tmp);
+        fs::write(logs.join("big.log"), b"x".repeat(200)).unwrap();
+        let runner = crate::test_helpers::MockRunner::new()
+            .with_success("chflags");
+        let cleaner = LibraryLogsCleaner::new(tmp.path(), Box::new(runner));
+        let result = cleaner.clean(true, &crate::progress::DeepSuppressReporter).unwrap();
+        // dry run should succeed without interactive prompt
+        assert_eq!(result.bytes_freed, 0);
+    }
 }

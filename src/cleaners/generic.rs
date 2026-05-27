@@ -673,6 +673,8 @@ pub fn is_safe_delete_target(path: &Path) -> bool {
         && !is_sys("/private/var/db")
         && !is_sys("/private/var/log")
         && !is_sys("/private/var/run")
+        && !is_sys("/private/var/tmp")
+        && !is_sys("/private/var/root")
         && !is_sys("/var/log")
         && !is_sys("/var/db")
         && !is_sys("/var/root")
@@ -946,6 +948,32 @@ mod tests {
             !is_safe_delete_target(&traversed),
             "path with .. to /etc must be rejected"
         );
+    }
+
+    #[test]
+    fn is_safe_delete_target_canonicalize_fallback_nonexistent() {
+        let p = Path::new("/nonexistent_dir_for_test/deep/path");
+        assert!(
+            is_safe_delete_target(p),
+            "non-existent path should fall through (not in blocklist)"
+        );
+    }
+
+    #[test]
+    fn is_safe_delete_target_canonicalize_fallback_rejects_dotdot() {
+        let p = Path::new("/nonexistent/../../etc");
+        assert!(!is_safe_delete_target(p), "path with .. must be rejected even if uncanonicalizable");
+    }
+
+    #[test]
+    fn is_safe_delete_target_rejects_private_var_tmp() {
+        assert!(!is_safe_delete_target(Path::new("/private/var/tmp")), "/private/var/tmp must be rejected");
+        assert!(!is_safe_delete_target(Path::new("/private/var/tmp/some-dir")), "/private/var/tmp/* must be rejected");
+    }
+
+    #[test]
+    fn is_safe_delete_target_rejects_private_var_root() {
+        assert!(!is_safe_delete_target(Path::new("/private/var/root")), "/private/var/root must be rejected");
     }
 
     #[test]

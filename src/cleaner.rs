@@ -281,4 +281,46 @@ mod tests {
         let e = anyhow::Error::from(crate::cleaner::CleanCancelled);
         assert!(!is_skippable_error(&e));
     }
+
+    #[test]
+    fn is_skippable_error_false_positive_permission_denied_in_filename() {
+        let e = anyhow::anyhow!(
+            "Database says: Operation not permitted in current mode"
+        );
+        assert!(is_skippable_error(&e), "contains 'Operation not permitted' => skippable");
+    }
+
+    #[test]
+    fn is_skippable_error_permission_denied_sentence_not_io_error() {
+        let e = anyhow::anyhow!(
+            "Error: user lacks 'Permission denied' access to resource"
+        );
+        assert!(is_skippable_error(&e), "string match should still catch it");
+    }
+
+    #[test]
+    fn is_skippable_error_trash_failed_in_error_message() {
+        let e = anyhow::anyhow!("trash failed: /path/to/file");
+        assert!(is_skippable_error(&e));
+    }
+
+    #[test]
+    fn is_skippable_error_resource_busy_in_unrelated_error() {
+        let e = anyhow::anyhow!(
+            "The device reports 'Resource busy' in its status string"
+        );
+        assert!(is_skippable_error(&e), "string match catches substring");
+    }
+
+    #[test]
+    fn is_skippable_error_unrelated_error_without_skip_keywords() {
+        let e = anyhow::anyhow!("Disk full: cannot write to /dev/sda1");
+        assert!(!is_skippable_error(&e));
+    }
+
+    #[test]
+    fn is_skippable_error_filesystem_corruption() {
+        let e = anyhow::anyhow!("Input/output error: critical filesystem corruption detected");
+        assert!(!is_skippable_error(&e));
+    }
 }

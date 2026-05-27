@@ -262,8 +262,8 @@ mod tests {
 
     struct NoopRunner;
     impl CommandRunner for NoopRunner {
-        fn run(&self, _: &str, _: &[&str]) -> anyhow::Result<std::process::Output> {
-            unimplemented!()
+        fn run(&self, program: &str, args: &[&str]) -> anyhow::Result<std::process::Output> {
+            unimplemented!("MockRunner::run called unexpectedly for {program} with args {args:?}")
         }
         fn exists(&self, _: &str) -> bool {
             false

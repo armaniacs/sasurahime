@@ -112,7 +112,7 @@ impl MiseCleaner {
         let mut in_tools = false;
         for line in content.lines() {
             let trimmed = line.trim();
-            if trimmed.starts_with('[') && trimmed.contains("tools") {
+            if trimmed.starts_with('[') && trimmed.trim_end_matches(']') == "[tools" {
                 in_tools = true;
                 continue;
             }
@@ -205,7 +205,18 @@ impl Cleaner for MiseCleaner {
                 skipped: vec![],
             });
         }
-        let output = self.runner.run("mise", &["ls", "--current"])?;
+        let output = match self.runner.run("mise", &["ls", "--current"]) {
+            Ok(o) => o,
+            Err(_) => {
+                println!("mise: ls --current failed, nothing to clean");
+                return Ok(CleanResult {
+                    name: self.name(),
+                    bytes_freed: 0,
+                    uses_trash: true,
+                    skipped: vec![],
+                });
+            }
+        };
         let stdout = String::from_utf8_lossy(&output.stdout);
         let active = Self::parse_active_versions(&stdout);
         let pinned = Self::scan_pinned_versions(&self.home);
@@ -260,11 +271,13 @@ impl Cleaner for MiseCleaner {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_helpers::MockRunner;
+    use tempfile::TempDir;
 
     struct NoopRunner;
     impl CommandRunner for NoopRunner {
-        fn run(&self, _: &str, _: &[&str]) -> anyhow::Result<std::process::Output> {
-            unimplemented!()
+        fn run(&self, program: &str, args: &[&str]) -> anyhow::Result<std::process::Output> {
+            unimplemented!("MockRunner::run called unexpectedly for {program} with args {args:?}")
         }
         fn exists(&self, _: &str) -> bool {
             false
@@ -422,6 +435,37 @@ mod tests {
         assert!(result.is_empty());
     }
 
+    #[test]
+    fn parse_tools_section_toolchain_not_confused_with_tools() {
+        let mut result = std::collections::HashSet::new();
+        MiseCleaner::parse_tools_section(
+            "[toolchain]\nchannel = \"stable\"\n",
+            &mut result,
+        );
+        assert!(result.is_empty(), "[toolchain] must not match [tools]");
+    }
+
+    #[test]
+    fn parse_tools_section_devtools_not_confused_with_tools() {
+        let mut result = std::collections::HashSet::new();
+        MiseCleaner::parse_tools_section(
+            "[devtools]\nnode = \"20.0.0\"\n",
+            &mut result,
+        );
+        assert!(result.is_empty(), "[devtools] must not match [tools]");
+    }
+
+    #[test]
+    fn parse_tools_section_second_section_ends_tools() {
+        let mut result = std::collections::HashSet::new();
+        MiseCleaner::parse_tools_section(
+            "[tools]\nnode = \"22.0.0\"\n[aliases]\n",
+            &mut result,
+        );
+        assert!(result.contains(&("node".to_string(), "22.0.0".to_string())));
+        assert_eq!(result.len(), 1, "[aliases] should end [tools] section");
+    }
+
     // ── scan_pinned_versions ──
 
     #[test]
@@ -467,5 +511,30 @@ mod tests {
         fs::write(tmp.path().join(".mise.toml"), "[[[invalid toml").unwrap();
         let result = MiseCleaner::scan_pinned_versions(tmp.path());
         assert!(result.is_empty());
+    }
+
+    #[test]
+    fn clean_handles_mise_ls_current_failure_gracefully() {
+        let tmp = TempDir::new().unwrap();
+        let runner = MockRunner::new()
+            .with_not_found();
+        let cleaner = MiseCleaner::new(tmp.path(), Box::new(runner));
+        // even though mise is not found, clean should not crash
+        let result = cleaner.clean(false, &crate::progress::DeepSuppressReporter).unwrap();
+        assert_eq!(result.bytes_freed, 0);
+    }
+
+    #[test]
+    fn detect_and_clean_consistent_on_mise_not_found() {
+        let tmp = TempDir::new().unwrap();
+        let runner = MockRunner::new()
+            .with_not_found();
+        let cleaner = MiseCleaner::new(tmp.path(), Box::new(runner));
+        // detect should soft-fail when mise not found
+        let detect_result = cleaner.detect();
+        assert!(matches!(detect_result.status, ScanStatus::NotFound));
+        // clean should also soft-fail
+        let clean_result = cleaner.clean(false, &crate::progress::DeepSuppressReporter).unwrap();
+        assert_eq!(clean_result.bytes_freed, 0);
     }
 }

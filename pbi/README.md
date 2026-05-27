@@ -19,8 +19,36 @@ Sprint 1〜5 の全 7 PBI（合計 22 SP）が完了し、`v0.1.27` としてリ
 
 **現在のスペック:**
 - **40 以上のクリーンターゲット**（`sasurahime targets` で一覧）
-- **442 tests, 0 failures**（288 unit + 154 integration/E2E、24 テストファイル）
+- **511 tests, 0 failures**（352 unit + 159 integration/E2E、25 テストファイル）
 - **バイナリサイズ: 872KB**（LTO + panic=abort + strip 最適化済み）
+
+---
+
+## バックログ（未着手）
+
+Checking Team Review (2026-05-28, 総合スコア 90/100) の未修正 Medium 指摘から作成した 9 PBI。
+
+| PBI | タイトル | SP | 種別 | 概要 |
+|:---:|---------|:--:|:----:|------|
+| 01 | is_skippable_error 精度向上 | 1 | fix | 文字列マッチングの誤検出防止、テスト6件追加済み |
+| 02 | Gradle/JetBrains Trash 対応 | 1 | fix | `fs::remove_dir_all` → `trash::delete_path` |
+| 03 | E2E test パラメータ化 | 2 | fix | 17件の "tool not found" テスト重複を解消 + VerboseGuard 移行 |
+| 04 | detect/clean キャッシュ | 3 | fix | Cargo/Mise の二重 HOME walk 最適化 |
+| 05 | 構造化ログ | 5 | fix | env_logger + 監査証跡 + dead code + stderr loss |
+| 06 | Cleaner トレイト契約統一 | 3 | fix | LibraryLogsCleaner clean_all の統合 |
+| 07 | main.rs 登録システム整理 | 5 | fix | マクロ三重管理 + exit_code 重複 + stderr loss |
+| 08 | プライバシー文書 | 1 | fix | README Privacy セクション + iOS 警告文 |
+| 09 | デッドコードクリーンアップ | 1 | fix | `#[allow(dead_code)]` の整理 |
+
+**合計: 22 SP**（全 PBI が独立、優先度順に実装可能）
+
+## 設計方針（不変）
+
+- **安全性優先**: `--dry-run` を全クリーナーに実装
+- **Cleaner trait**: 全クリーナーが共通インターフェイスを実装
+- **CommandRunner trait**: 外部コマンドをモック可能にしてテスト容易性を確保
+- **Outside-In TDD**: E2E テストから開始し内側へ
+- **macOS 専用**: Apple Silicon (arm64) + Intel (x86_64)
 
 ## 設計方針（不変）
 

@@ -86,7 +86,7 @@ impl Cleaner for IosCleaner {
             });
         }
 
-        eprintln!("⚠  iOS backups cannot be restored once deleted. Proceed with caution.");
+        eprintln!("⚠  iOS backups contain personal data (contacts, messages, photos, etc.) and cannot be restored once deleted. Proceed with caution.");
 
         if dry_run {
             println!("[ios-backup] dry-run: {} backup(s) found", entries.len());

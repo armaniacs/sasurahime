@@ -511,7 +511,11 @@ pub fn print_hints(hints: &[ProcessHint]) {
     if hints.is_empty() {
         return;
     }
-    let sep = "─".repeat(60);
+    let sep = if crate::history::USE_UNICODE.load(std::sync::atomic::Ordering::Relaxed) {
+        "─".repeat(60)
+    } else {
+        "-".repeat(60)
+    };
     eprintln!("{sep}");
     eprintln!(" Tip: The following caches can be freed manually:");
     eprintln!("{sep}");

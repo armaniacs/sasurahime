@@ -1,7 +1,8 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
-use comfy_table::{presets::UTF8_FULL, Table};
+use comfy_table::presets::{ASCII_FULL, UTF8_FULL};
+use comfy_table::Table;
 use dialoguer::{Confirm, MultiSelect};
 
 use crate::format::{dir_size, format_bytes};
@@ -201,7 +202,11 @@ fn display_path(path: &Path, home: &Path) -> String {
 
 fn print_managed_table(entries: &[ExploreEntry], home: &Path) {
     let mut table = Table::new();
-    table.load_preset(UTF8_FULL);
+    if crate::history::USE_UNICODE.load(std::sync::atomic::Ordering::Relaxed) {
+        table.load_preset(UTF8_FULL);
+    } else {
+        table.load_preset(ASCII_FULL);
+    }
     table.set_header(vec!["Path", "Size", "Clean with"]);
     for e in entries {
         let cmd = format!("sasurahime clean {}", e.managed.unwrap_or("-"));
@@ -212,7 +217,11 @@ fn print_managed_table(entries: &[ExploreEntry], home: &Path) {
 
 fn print_unmanaged_table(entries: &[ExploreEntry], home: &Path) {
     let mut table = Table::new();
-    table.load_preset(UTF8_FULL);
+    if crate::history::USE_UNICODE.load(std::sync::atomic::Ordering::Relaxed) {
+        table.load_preset(UTF8_FULL);
+    } else {
+        table.load_preset(ASCII_FULL);
+    }
     table.set_header(vec!["Path", "Size"]);
     for e in entries {
         table.add_row(vec![display_path(&e.path, home), format_bytes(e.size)]);

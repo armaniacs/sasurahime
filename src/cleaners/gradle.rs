@@ -255,10 +255,52 @@ impl Cleaner for JetBrainsCleaner {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_helpers::MockRunner;
     use std::fs;
     use tempfile::TempDir;
 
     // ── GradleCleaner (M02) ──
+
+    #[test]
+    fn gradle_detect_does_not_delete() {
+        let tmp = TempDir::new().unwrap();
+        let caches = tmp.path().join(".gradle/caches");
+        fs::create_dir_all(caches.join("8.12.0")).unwrap();
+        fs::create_dir_all(caches.join("8.8.0")).unwrap();
+        // Write files so directories have non-zero size
+        fs::write(caches.join("8.12.0").join("cache.dat"), b"data").unwrap();
+        fs::write(caches.join("8.8.0").join("cache.dat"), b"data").unwrap();
+        let cleaner = GradleCleaner::new(tmp.path(), Box::new(MockRunner::new().with_not_found()));
+        let result = cleaner.detect();
+        assert!(matches!(result.status, ScanStatus::Pruneable(_)));
+        assert!(caches.join("8.12.0").exists(), "detect must not delete");
+        assert!(caches.join("8.8.0").exists(), "detect must not delete");
+    }
+
+    #[test]
+    fn gradle_clean_uses_trash_false() {
+        let tmp = TempDir::new().unwrap();
+        let caches = tmp.path().join(".gradle/caches");
+        fs::create_dir_all(caches.join("8.12.0")).unwrap();
+        fs::create_dir_all(caches.join("8.8.0")).unwrap();
+        let runner = MockRunner::new()
+            .with_success("chflags");
+        let cleaner = GradleCleaner::new(tmp.path(), Box::new(runner));
+        let result = cleaner.clean(false, &crate::progress::DeepSuppressReporter).unwrap();
+        assert!(!result.uses_trash, "GradleCleaner should report uses_trash=false");
+    }
+
+    #[test]
+    fn gradle_clean_dry_run_does_not_delete() {
+        let tmp = TempDir::new().unwrap();
+        let caches = tmp.path().join(".gradle/caches");
+        fs::create_dir_all(caches.join("8.12.0")).unwrap();
+        fs::create_dir_all(caches.join("8.8.0")).unwrap();
+        let cleaner = GradleCleaner::new(tmp.path(), Box::new(MockRunner::new().with_not_found()));
+        let _ = cleaner.clean(true, &crate::progress::DeepSuppressReporter).unwrap();
+        assert!(caches.join("8.12.0").exists(), "dry-run must not delete");
+        assert!(caches.join("8.8.0").exists(), "dry-run must not delete");
+    }
 
     #[test]
     fn gradle_find_old_caches_single_version_returns_empty() {
@@ -305,6 +347,47 @@ mod tests {
     }
 
     // ── JetBrainsCleaner (H01) ──
+
+    #[test]
+    fn jetbrains_detect_does_not_delete() {
+        let tmp = TempDir::new().unwrap();
+        let jb = tmp.path().join("Library/Caches/JetBrains");
+        fs::create_dir_all(jb.join("GoLand2024.2")).unwrap();
+        fs::create_dir_all(jb.join("GoLand2025.1")).unwrap();
+        // Write files so directories have non-zero size
+        fs::write(jb.join("GoLand2024.2").join("cache.dat"), b"data").unwrap();
+        fs::write(jb.join("GoLand2025.1").join("cache.dat"), b"data").unwrap();
+        let cleaner = JetBrainsCleaner::new(tmp.path(), Box::new(MockRunner::new().with_not_found()));
+        let result = cleaner.detect();
+        assert!(matches!(result.status, ScanStatus::Pruneable(_)));
+        assert!(jb.join("GoLand2025.1").exists(), "detect must not delete");
+        assert!(jb.join("GoLand2024.2").exists(), "detect must not delete");
+    }
+
+    #[test]
+    fn jetbrains_clean_uses_trash_false() {
+        let tmp = TempDir::new().unwrap();
+        let jb = tmp.path().join("Library/Caches/JetBrains");
+        fs::create_dir_all(jb.join("GoLand2024.2")).unwrap();
+        fs::create_dir_all(jb.join("GoLand2025.1")).unwrap();
+        let runner = MockRunner::new()
+            .with_success("chflags");
+        let cleaner = JetBrainsCleaner::new(tmp.path(), Box::new(runner));
+        let result = cleaner.clean(false, &crate::progress::DeepSuppressReporter).unwrap();
+        assert!(!result.uses_trash, "JetBrainsCleaner should report uses_trash=false");
+    }
+
+    #[test]
+    fn jetbrains_clean_dry_run_does_not_delete() {
+        let tmp = TempDir::new().unwrap();
+        let jb = tmp.path().join("Library/Caches/JetBrains");
+        fs::create_dir_all(jb.join("GoLand2024.2")).unwrap();
+        fs::create_dir_all(jb.join("GoLand2025.1")).unwrap();
+        let cleaner = JetBrainsCleaner::new(tmp.path(), Box::new(MockRunner::new().with_not_found()));
+        let _ = cleaner.clean(true, &crate::progress::DeepSuppressReporter).unwrap();
+        assert!(jb.join("GoLand2025.1").exists(), "dry-run must not delete");
+        assert!(jb.join("GoLand2024.2").exists(), "dry-run must not delete");
+    }
 
     #[test]
     fn jetbrains_find_old_caches_empty_dir_returns_empty() {

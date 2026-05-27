@@ -76,6 +76,28 @@ She is, in other words, the ultimate destructor.
 
 The name was chosen from the world of the *Kojiki* and *Nihon Shoki* for its role — purging accumulated impurities (stale caches, orphaned files) completely and finally — and for how cleanly it reads as a command name in a terminal.
 
+## Privacy
+
+sasurahime operates entirely locally on your machine. It does **not**:
+- Send any data over the network
+- Collect telemetry or usage statistics
+- Store or transmit personal information
+
+### Data access
+
+sasurahime reads the following directories to identify cleanable cache data:
+- `~/.cache/`, `~/Library/Caches/`, `~/.local/share/`, `~/Library/Application Support/`
+- `~/Library/Application Support/MobileSync/Backup/` (iOS backups — only with `sasurahime clean ios-backup`)
+
+The tool reads directory metadata (names, sizes, modification times) to determine what can be cleaned. It does **not** read the contents of your files.
+
+### Deletion history
+
+Every successful clean operation appends a record to
+`~/.local/share/sasurahime/history.json` with the cleaner name, freed bytes, and
+timestamp. This data stays on your local machine. You can control the maximum
+number of entries via `[history].max_entries` in `config.toml` (default: 1000).
+
 ## License
 
 Apache-2.0
@@ -163,6 +185,28 @@ sasurahime clean uv --permanent
 究極のデストラクタ。
 
 コマンド名としての音の響き、そして「溜まった不要なものを完全に消し去る」という役割 — 『古事記』『日本書紀』の神々の中から、このツールにぴったりの名を選びました。
+
+## プライバシー
+
+sasurahime はあなたのマシン上で完全にローカルに動作します。以下のことは一切行いません:
+- ネットワーク経由でデータを送信する
+- テレメトリや利用統計を収集する
+- 個人情報を保存または送信する
+
+### アクセスするデータ
+
+sasurahime は以下のディレクトリを読み取り、クリーニング可能なキャッシュデータを特定します:
+- `~/.cache/`、`~/Library/Caches/`、`~/.local/share/`、`~/Library/Application Support/`
+- `~/Library/Application Support/MobileSync/Backup/`（iOS バックアップ — `sasurahime clean ios-backup` でのみアクセス）
+
+ツールはディレクトリのメタデータ（名前、サイズ、更新日時）のみを読み取り、ファイルの内容を読み取ることはありません。
+
+### 削除履歴
+
+クリーン操作が成功するたびに、`~/.local/share/sasurahime/history.json` に
+クリーナー名・解放バイト数・タイムスタンプが記録されます。このデータは
+ローカルマシンに留まります。`config.toml` の `[history].max_entries` で
+最大記録件数を制御できます（デフォルト: 1000）。
 
 ## ライセンス
 
