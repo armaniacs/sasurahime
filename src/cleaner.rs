@@ -126,10 +126,10 @@ pub fn is_skippable_error(e: &anyhow::Error) -> bool {
         );
     }
     let msg = format!("{e:#}");
-    msg.contains("Permission denied")
-        || msg.contains("Operation not permitted")
-        || msg.contains("Resource busy")
-        || msg.contains("trash failed")
+    msg.contains("trash failed")
+        || msg.starts_with("Permission denied")
+        || msg.starts_with("Operation not permitted")
+        || msg.starts_with("Resource busy")
 }
 
 pub trait Cleaner: Send + Sync {
@@ -287,7 +287,7 @@ mod tests {
         let e = anyhow::anyhow!(
             "Database says: Operation not permitted in current mode"
         );
-        assert!(is_skippable_error(&e), "contains 'Operation not permitted' => skippable");
+        assert!(!is_skippable_error(&e), "sentence with 'Operation not permitted' => not skippable");
     }
 
     #[test]
@@ -295,7 +295,7 @@ mod tests {
         let e = anyhow::anyhow!(
             "Error: user lacks 'Permission denied' access to resource"
         );
-        assert!(is_skippable_error(&e), "string match should still catch it");
+        assert!(!is_skippable_error(&e), "sentence with 'Permission denied' substring => not skippable");
     }
 
     #[test]
@@ -309,7 +309,7 @@ mod tests {
         let e = anyhow::anyhow!(
             "The device reports 'Resource busy' in its status string"
         );
-        assert!(is_skippable_error(&e), "string match catches substring");
+        assert!(!is_skippable_error(&e), "sentence with 'Resource busy' substring => not skippable");
     }
 
     #[test]
