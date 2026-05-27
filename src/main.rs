@@ -12,6 +12,9 @@ mod progress;
 mod scanner;
 mod trash;
 
+#[cfg(test)]
+pub(crate) mod test_helpers;
+
 use clap::{Parser, Subcommand};
 use cleaner::{CleanCancelled, CleanResult, Cleaner};
 use command::SystemCommandRunner;
