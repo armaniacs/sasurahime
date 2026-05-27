@@ -388,7 +388,8 @@ struct Cli {
     /// Non-interactive: clean all pruneable caches without prompting
     #[arg(long)]
     yes: bool,
-    /// Move deleted files to Trash instead of permanent removal (default: enabled)
+    /// Permanently delete files instead of moving to Trash.
+    /// By default, files are moved to macOS Trash for safety.
     #[arg(long)]
     permanent: bool,
 
