@@ -2,48 +2,25 @@
 
 macOS 開発環境の不要ファイルを安全に削除する Rust 製 CLI ツール。
 
-## 実装済み
+## 全 PBI 完了 ✅
 
-Sprint 1〜5 の全 PBI は `.plan/archived/` にアーカイブ済み。現在 32 のクリーンターゲットを提供する（`sasurahime targets` で一覧）。
+Sprint 1〜5 の全 7 PBI（合計 22 SP）が完了し、`v0.1.27` としてリリース済み。
+各 PBI の詳細は `.plan/archived/` にアーカイブされています。
 
-## バックログ一覧
+| PBI | タイトル | SP | 概要 |
+|:---:|---------|:--:|------|
+| A | 並列スキャン最適化 | 3 | `rayon` による並列スキャン、未インストールツールの早期スキップ |
+| B | 堅牢なエラーハンドリング | 3 | 権限エラー・ファイルロックをスキップ、サマリー表示、終了コード分岐 |
+| C | ゴミ箱移動の警告UI | 1 | Trash モード時の明示的な警告表示、大容量ファイルの事前警告 |
+| D | Xcode サブカテゴリ選択 | 5 | DerivedData/Archives の部分削除（CLI + TUI）|
+| E | config.toml 統合設定 | 5 | exclude, --config, [[custom]], per-cleaner フィルタ |
+| F | --yes フラグ | 2 | 非インタラクティブ一括削除（cron/CI 対応）|
+| G | sasurahime stats | 3 | 削除履歴の自動記録 + 統計表示 |
 
-### フェーズ1: 堅牢性・UX改善（優先）
-
-| PBI | タイトル | SP | 優先度 | 備考 |
-|-----|---------|:--:|:------:|------|
-| ~~[PBI-A](2026-05-25-pbi-a-parallel-scan.md)~~ | ~~並列スキャン最適化~~ | ~~3~~ | ~~🔴 高~~ | ✅ 実装済み — rayon 並列化・未インストール早期スキップ |
-| ~~[PBI-B](2026-05-25-pbi-b-robust-error-handling.md)~~ | ~~堅牢なエラーハンドリング~~ | ~~3~~ | ~~🔴 高~~ | ✅ 実装済み — 権限エラー・ファイルロックをスキップし失敗サマリー表示 |
-| ~~[PBI-C](2026-05-25-pbi-c-trash-warning-ui.md)~~ | ~~ゴミ箱移動の警告UI~~ | ~~1~~ | ~~🟡 中~~ | ✅ 実装済み — 「ゴミ箱を空にするまで容量解放されない」を明示 |
-| ~~[PBI-D](2026-05-25-pbi-d-xcode-subcategory-selection.md)~~ | ~~Xcode サブカテゴリ選択~~ | ~~5~~ | ~~🟡 中~~ | ✅ 実装済み — CLI + TUI subcategory expansion |
-
-### フェーズ2: 新機能
-
-| PBI | タイトル | SP | 優先度 | 備考 |
-|-----|---------|:--:|:------:|------|
-| ~~[PBI-E](2026-05-25-pbi-e-config-toml.md)~~ | ~~config.toml 統合設定~~ | ~~5~~ | ~~🔴 高~~ | ✅ 実装済み — exclude, --config, custom, per-cleaner フィルタ |
-| ~~[PBI-F](2026-05-25-pbi-f-yes-flag.md)~~ | ~~--yes フラグ~~ | ~~2~~ | ~~🟡 中~~ | ✅ 実装済み — run_auto, non-TTY, exclude/PBI-C/PBI-B 統合 |
-| ~~[PBI-G](2026-05-25-pbi-g-stats-command.md)~~ | ~~sasurahime stats~~ | ~~3~~ | ~~🟢 低~~ | ✅ 実装済み — history.json + stats サブコマンド |
-
-### 既存バックログ
-
-| PBI | タイトル | SP | 優先度 | 実測サイズ | 備考 |
-|-----|---------|:--:|:------:|:---------:|------|
-| [Colima](2026-05-20-colima-cleaner.md) | Colima VM ディスクキャッシュ | 1 | 🔴 高 | **9.3 GB** | `colima prune --all` CLI委譲、実装計画済み |
-| [追加候補一覧](2026-05-19-additional-cleaners-backlog.md) | ollama/simulator/maven/terraform/flutter 他 | — | 🟡 中 | 〜70GB | 環境に応じて実装判断 |
-| [ドキュメント整備](2026-05-19-docs-deps-housekeeping.md) | README更新、cargo update | — | 🟢 低 | — | 依存関係整理 + ドキュメント同期 |
-
-**合計**: 15 SP（フェーズ1+2）+ 既存 1 SP（PBI-A 3SP + PBI-B 3SP + PBI-C 1SP 完了済み）
-
-## 優先度ランキング（実環境でのディスク影響ベース）
-
-| 順位 | クリーナー | 想定回収サイズ | 判断基準 |
-|:---:|----------|:------------:|---------|
-| 1 | Colima | 9.3 GB | このマシンで実測 |
-| 2 | ollama | 1〜70 GB/モデル | 未インストールだが影響大 |
-| 3 | simulator | 1〜10 GB | xcrun インストール済み、データ未確認 |
-| 4 | VSCode 拡張キャッシュ | 1.1 GB | 新規候補（バックログ外） |
-| 5〜9 | maven/terraform/flutter 等 | 〜数GB | 未インストール |
+**現在のスペック:**
+- **40 以上のクリーンターゲット**（`sasurahime targets` で一覧）
+- **442 tests, 0 failures**（288 unit + 154 integration/E2E、24 テストファイル）
+- **バイナリサイズ: 872KB**（LTO + panic=abort + strip 最適化済み）
 
 ## 設計方針（不変）
 
