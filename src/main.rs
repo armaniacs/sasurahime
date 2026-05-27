@@ -1032,3 +1032,53 @@ fn main() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cleaner::CleanCancelled;
+
+    #[test]
+    fn run_clean_target_cancelled_returns_ok_zero() {
+        let reporter = crate::progress::VerboseProgress::new();
+        let result = run_clean_target(
+            "cancelled-test",
+            |_dry_run, _reporter| {
+                Err(anyhow::Error::from(CleanCancelled))
+            },
+            false,
+            &reporter,
+        );
+        assert!(result.is_ok(), "CleanCancelled should be converted to Ok");
+        let clean_result = result.unwrap();
+        assert_eq!(clean_result.bytes_freed, 0);
+        assert!(clean_result.skipped.is_empty());
+    }
+
+    #[test]
+    fn run_clean_target_skipped_entries_do_not_panic() {
+        let reporter = crate::progress::VerboseProgress::new();
+        let result = run_clean_target(
+            "skipped-test",
+            |_dry_run, _reporter| {
+                Ok(CleanResult {
+                    name: "mock-cleaner",
+                    bytes_freed: 100,
+                    uses_trash: false,
+                    skipped: vec![
+                        crate::cleaner::SkippedEntry {
+                            path: std::path::PathBuf::from("/tmp/skipped-file"),
+                            reason: "Permission denied".to_string(),
+                        },
+                    ],
+                })
+            },
+            false,
+            &reporter,
+        );
+        assert!(result.is_ok());
+        let clean_result = result.unwrap();
+        assert_eq!(clean_result.bytes_freed, 100);
+        assert_eq!(clean_result.skipped.len(), 1);
+    }
+}
