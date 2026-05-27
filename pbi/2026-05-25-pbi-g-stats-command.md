@@ -142,4 +142,4 @@ E2Eテスト:
 - [x] `cargo clippy -- -D warnings` クリーン
 - [x] `cargo fmt --check` クリーン
 - [x] コードレビュー完了（spec + quality, 修正対応済み）
-- [ ] `docs/HOWTO-USE.md` に stats コマンドの使い方を追記
+- [x] `docs/HOWTO-USE.md` に stats コマンドの使い方を追記

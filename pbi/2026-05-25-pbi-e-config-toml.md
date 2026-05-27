@@ -80,7 +80,7 @@ Scenario: --config フラグで設定ファイルパスを上書きできる
 - [x] config.toml が存在しない場合はデフォルト動作（エラーなし）
 - [x] `--config <path>` フラグで設定ファイルパスを上書きできる
 - [x] TOML パースエラー時はわかりやすいエラーメッセージを表示して終了コード 1
-- [ ] docs/HOWTO-USE.md に新しい設定項目のドキュメントを追記（exclude, custom, per-cleaner）
+- [x] docs/HOWTO-USE.md に新しい設定項目のドキュメントを追記（exclude, custom, per-cleaner, --config）
 
 ## t_wada スタイル テスト戦略
 
@@ -195,4 +195,4 @@ older_than_days = 30  # keep_days として反映
 - [x] `cargo clippy -- -D warnings` クリーン
 - [x] `cargo fmt --check` クリーン
 - [x] コードレビュー完了（3 タスクそれぞれ spec + quality review × 2回）
-- [ ] `docs/HOWTO-USE.md` に `exclude`, `[[custom]]`, `[cleaner.<name>]` の使い方を追記
+- [x] `docs/HOWTO-USE.md` に `exclude`, `[[custom]]`, `[cleaner.<name>]` の使い方を追記
