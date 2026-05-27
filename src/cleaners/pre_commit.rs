@@ -164,10 +164,23 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let cache = tmp.path().join(".cache/pre-commit");
         fs::create_dir_all(&cache).unwrap();
-        fs::write(cache.join("hook.pck"), b"dummy").unwrap();
+        // Use a large file to ensure dir_size() > 0 on all filesystem states
+        fs::write(cache.join("hook.pck"), b"x".repeat(4096)).unwrap();
+
+        // Isolate from parallel tests that modify PRE_COMMIT_HOME or
+        // XDG_CACHE_HOME: pin PRE_COMMIT_HOME to our fixture so that
+        // cache_dir() returns the correct path regardless of env pollution.
+        let prev_home = std::env::var("PRE_COMMIT_HOME").ok();
+        std::env::set_var("PRE_COMMIT_HOME", &cache);
 
         let cleaner = PreCommitCleaner::new(tmp.path(), Box::new(SystemCommandRunner));
         let result = cleaner.detect();
+
+        match prev_home {
+            Some(v) => std::env::set_var("PRE_COMMIT_HOME", v),
+            None => std::env::remove_var("PRE_COMMIT_HOME"),
+        }
+
         assert!(matches!(result.status, ScanStatus::Pruneable(_)));
     }
 
@@ -177,7 +190,7 @@ mod tests {
         let reporter = crate::progress::VerboseProgress::new();
         let cache = tmp.path().join(".cache/pre-commit");
         fs::create_dir_all(&cache).unwrap();
-        fs::write(cache.join("hook.pck"), b"dummy").unwrap();
+        fs::write(cache.join("hook.pck"), b"x".repeat(4096)).unwrap();
 
         let cleaner = PreCommitCleaner::new(tmp.path(), Box::new(SystemCommandRunner));
         cleaner.clean(true, &reporter).unwrap();
@@ -194,7 +207,7 @@ mod tests {
         let reporter = crate::progress::VerboseProgress::new();
         let cache = tmp.path().join(".cache/pre-commit");
         fs::create_dir_all(&cache).unwrap();
-        fs::write(cache.join("hook.pck"), b"dummy").unwrap();
+        fs::write(cache.join("hook.pck"), b"x".repeat(4096)).unwrap();
 
         let cleaner = PreCommitCleaner::new(tmp.path(), Box::new(NoToolRunner));
         let result = cleaner.clean(false, &reporter).unwrap();
@@ -211,7 +224,7 @@ mod tests {
         let reporter = crate::progress::VerboseProgress::new();
         let cache = tmp.path().join(".cache/pre-commit");
         fs::create_dir_all(&cache).unwrap();
-        fs::write(cache.join("hook.pck"), b"dummy").unwrap();
+        fs::write(cache.join("hook.pck"), b"x".repeat(4096)).unwrap();
 
         let cleaner = PreCommitCleaner::new(tmp.path(), Box::new(CliToolRunner));
         let result = cleaner.clean(false, &reporter).unwrap();
@@ -224,7 +237,7 @@ mod tests {
         let reporter = crate::progress::VerboseProgress::new();
         let cache = tmp.path().join(".cache/pre-commit");
         fs::create_dir_all(&cache).unwrap();
-        fs::write(cache.join("hook.pck"), b"dummy").unwrap();
+        fs::write(cache.join("hook.pck"), b"x".repeat(4096)).unwrap();
 
         let cleaner = PreCommitCleaner::new(tmp.path(), Box::new(CliToolRunner));
         let result = cleaner.clean(true, &reporter).unwrap();
@@ -241,7 +254,7 @@ mod tests {
         let reporter = crate::progress::VerboseProgress::new();
         let cache = tmp.path().join(".cache/pre-commit");
         fs::create_dir_all(&cache).unwrap();
-        fs::write(cache.join("hook.pck"), b"dummy").unwrap();
+        fs::write(cache.join("hook.pck"), b"x".repeat(4096)).unwrap();
 
         let cleaner = PreCommitCleaner::new(tmp.path(), Box::new(CliToolRunnerFailing));
         let result = cleaner.clean(false, &reporter);
