@@ -282,7 +282,7 @@ fn per_cleaner_older_than_days_for_logs_affects_scan() {
     fs::write(log_dir.join("old.log"), b"old content").unwrap();
     let old_mtime = SystemTime::now() - Duration::from_secs(60 * 86_400);
     filetime::set_file_mtime(
-        &log_dir.join("old.log"),
+        log_dir.join("old.log"),
         FileTime::from_system_time(old_mtime),
     )
     .unwrap();
