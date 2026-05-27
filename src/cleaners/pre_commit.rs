@@ -90,6 +90,28 @@ mod tests {
     use std::process::Output;
     use tempfile::TempDir;
 
+    struct EnvGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvGuard {
+        fn set(key: &'static str, val: &str) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, val);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            match &self.previous {
+                Some(v) => std::env::set_var(self.key, v),
+                None => std::env::remove_var(self.key),
+            }
+        }
+    }
+
     /// A runner that reports no cache-cleaning tools exist, forcing the fallback path.
     struct NoToolRunner;
 
@@ -167,19 +189,10 @@ mod tests {
         // Use a large file to ensure dir_size() > 0 on all filesystem states
         fs::write(cache.join("hook.pck"), b"x".repeat(4096)).unwrap();
 
-        // Isolate from parallel tests that modify PRE_COMMIT_HOME or
-        // XDG_CACHE_HOME: pin PRE_COMMIT_HOME to our fixture so that
-        // cache_dir() returns the correct path regardless of env pollution.
-        let prev_home = std::env::var("PRE_COMMIT_HOME").ok();
-        std::env::set_var("PRE_COMMIT_HOME", &cache);
+        let _home_guard = EnvGuard::set("PRE_COMMIT_HOME", cache.to_string_lossy().as_ref());
 
         let cleaner = PreCommitCleaner::new(tmp.path(), Box::new(SystemCommandRunner));
         let result = cleaner.detect();
-
-        match prev_home {
-            Some(v) => std::env::set_var("PRE_COMMIT_HOME", v),
-            None => std::env::remove_var("PRE_COMMIT_HOME"),
-        }
 
         assert!(matches!(result.status, ScanStatus::Pruneable(_)));
     }
