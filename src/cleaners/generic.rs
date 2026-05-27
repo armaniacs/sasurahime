@@ -951,14 +951,9 @@ mod tests {
     #[test]
     fn act_path_validates_env_var_and_falls_back() {
         let tmp = tempfile::TempDir::new().unwrap();
-        let prev = std::env::var("ACT_CACHE_DIR").ok();
-        std::env::set_var("ACT_CACHE_DIR", "/");
+        let _guard = crate::test_helpers::EnvGuard::set("ACT_CACHE_DIR", "/");
         let cleaner =
             GenericCleaner::act(tmp.path(), Box::new(crate::command::SystemCommandRunner));
-        match prev {
-            Some(v) => std::env::set_var("ACT_CACHE_DIR", v),
-            None => std::env::remove_var("ACT_CACHE_DIR"),
-        }
         let result = cleaner.detect();
         assert!(matches!(result.status, ScanStatus::NotFound));
     }
@@ -1196,9 +1191,6 @@ mod tests {
 
     #[test]
     fn with_config_older_than_days_filters_detect_results() {
-        use filetime::FileTime;
-        use std::time::{Duration, SystemTime};
-
         let tmp = tempfile::TempDir::new().unwrap();
         let data_dir = tmp.path().join("data");
         fs::create_dir_all(&data_dir).unwrap();

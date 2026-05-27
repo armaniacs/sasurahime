@@ -128,31 +128,7 @@ git mv pbi/2026-05-25-01-fix-mtime-size-two-stage-scan.md .plan/archived/
 
 ## 5. TDD の進め方（このプロジェクト固有のルール）
 
-### テスト実行コマンド
-
-```bash
-cargo test -p shiotsuchi-core   # コア単体テスト
-cargo test -p shiotsuchi-cli    # CLI 単体テスト
-cargo test                       # ワークスペース全体
-cargo bench -p shiotsuchi-core  # ベンチマーク
-```
-
-### テストの配置場所
-
-| レイヤー | 場所 |
-|---------|------|
-| コア単体テスト | `core/src/*.rs` の `#[cfg(test)] mod tests` |
-| CLI 単体テスト | `cli/src/**/*.rs` の `#[cfg(test)] mod tests` |
-| E2E テスト | `e2e/` クレート |
-
-### Rust 固有の制約
-
-- **FTS5 仮想テーブルには `ALTER TABLE ADD COLUMN` が使えない**
-  スキーマ変更はマイグレーション関数（`core/src/db.rs` の `migrate_schema` 系）に追加する
-- **Rayon 並列処理がある**
-  スレッドセーフでない操作を並列クロージャに渡さないこと
-- **`ort` は build time に ONNX バイナリをダウンロードする**
-  CI ではキャッシュが効いているか確認する
+<<必要に応じて追加>>
 
 ---
 
@@ -182,31 +158,17 @@ docs(pbi): archive multi-vault-support PBI
 ### やること
 
 - 実装前に `cargo test` でグリーンを確認してから始める
-- DB スキーマ変更は必ずマイグレーション関数を書く（既存 DB が壊れる）
-- MCP インターフェース変更は後方互換を保つ（フィールド追加は OK、型変更は NG）
-- Epic 規模の PBI（PBI-21 OCR、PBI-27 Obsidian プラグイン等）は着手前にシニアと設計を相談する
+- Epic 規模の PBIは着手前にシニアと設計を相談する
 
 ### やらないこと
 
-- FTS5 仮想テーブルへの `ALTER TABLE ADD COLUMN`（エラーになる）
-- `git add .` / `git add -A`（機密ファイルや大きなバイナリを含むリスクがある）
-- バイト単位の日本語文字列操作（UTF-8 境界を壊す。`str` のメソッドを使う）
-- 本番コードに `unwrap()` を残す
-- embedder なしで `SearchMode::Vec` を呼ぶ（`Option<&Embedder>` を必ず確認する）
+<<必要に応じて追加>>
 
 ---
 
 ## 8. コマンドリファレンス
 
-| コマンド | 用途 |
-|---------|------|
-| `shiotsuchi chart` | インデックス作成・更新 |
-| `shiotsuchi dive <query>` | 検索（`search` はエイリアス） |
-| `shiotsuchi scan` | ファイルシステム監視 |
-| `shiotsuchi tide` | 統計情報表示 |
-| `shiotsuchi doctor` | 環境ヘルスチェック |
-| `shiotsuchi clean` | バックアップ + 再インデックス |
-| `shiotsuchi config-migrate` | 設定ファイルフォーマット移行 |
+<<追加対象>>
 
 ---
 

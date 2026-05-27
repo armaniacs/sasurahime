@@ -137,6 +137,34 @@ pub fn write_aged_dir(path: &Path, days_old: u64) {
     set_file_mtime(path, FileTime::from_system_time(mtime)).unwrap();
 }
 
+// ── EnvGuard ──
+
+/// A panic-safe guard that sets an environment variable for the duration of a
+/// test and restores the original value (or removes it) on `Drop`, even during
+/// a panic.
+pub struct EnvGuard {
+    key: &'static str,
+    previous: Option<String>,
+}
+
+impl EnvGuard {
+    /// Set `key` to `val`, saving the previous value. Restores on drop.
+    pub fn set(key: &'static str, val: &str) -> Self {
+        let previous = std::env::var(key).ok();
+        std::env::set_var(key, val);
+        Self { key, previous }
+    }
+}
+
+impl Drop for EnvGuard {
+    fn drop(&mut self) {
+        match &self.previous {
+            Some(v) => std::env::set_var(self.key, v),
+            None => std::env::remove_var(self.key),
+        }
+    }
+}
+
 // ── Verbose flag guard ──
 
 /// Sets verbose mode for the duration of a test, restoring on drop.
