@@ -132,6 +132,24 @@ pub fn is_skippable_error(e: &anyhow::Error) -> bool {
         || msg.contains("trash failed")
 }
 
+pub trait Cleaner: Send + Sync {
+    fn name(&self) -> &'static str;
+    /// Read-only. Never deletes anything.
+    fn detect(&self) -> ScanResult;
+    /// Performs cleanup. When `dry_run` is true, must not delete anything.
+    fn clean(&self, dry_run: bool, reporter: &dyn ProgressReporter) -> Result<CleanResult>;
+    /// Whether this cleaner is available (tool installed, config exists, etc.).
+    /// Defaults to true; override to skip unavailable cleaners during scan.
+    fn is_available(&self) -> bool {
+        true
+    }
+
+    /// Returns sub-targets with display names and sizes (for TUI/CLI).
+    fn sub_targets(&self) -> Vec<(&'static str, u64)> {
+        vec![]
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -196,23 +214,5 @@ mod tests {
         let msg = format_large_trash_warning(LARGE_TRASH_THRESHOLD_BYTES, true, false);
         assert!(msg.is_some());
         assert!(msg.unwrap().contains("Large files"));
-    }
-}
-
-pub trait Cleaner: Send + Sync {
-    fn name(&self) -> &'static str;
-    /// Read-only. Never deletes anything.
-    fn detect(&self) -> ScanResult;
-    /// Performs cleanup. When `dry_run` is true, must not delete anything.
-    fn clean(&self, dry_run: bool, reporter: &dyn ProgressReporter) -> Result<CleanResult>;
-    /// Whether this cleaner is available (tool installed, config exists, etc.).
-    /// Defaults to true; override to skip unavailable cleaners during scan.
-    fn is_available(&self) -> bool {
-        true
-    }
-
-    /// Returns sub-targets with display names and sizes (for TUI/CLI).
-    fn sub_targets(&self) -> Vec<(&'static str, u64)> {
-        vec![]
     }
 }
