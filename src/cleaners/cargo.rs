@@ -201,4 +201,68 @@ mod tests {
         let result = cleaner.detect();
         assert!(result.primary_target.is_none());
     }
+
+    #[test]
+    fn find_target_dirs_empty_home_returns_empty() {
+        let tmp = TempDir::new().unwrap();
+        let result = CargoCleaner::find_target_dirs(tmp.path());
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn find_target_dirs_finds_single_target_dir() {
+        let tmp = TempDir::new().unwrap();
+        let target = tmp.path().join("my-project/target");
+        fs::create_dir_all(&target).unwrap();
+        fs::write(target.join("dummy.o"), b"x").unwrap();
+        let result = CargoCleaner::find_target_dirs(tmp.path());
+        assert_eq!(result.len(), 1);
+        assert!(result[0].0.ends_with("my-project/target"));
+    }
+
+    #[test]
+    fn find_target_dirs_excludes_cargo_registry() {
+        let tmp = TempDir::new().unwrap();
+        // Create .cargo/registry (should be excluded)
+        let reg = tmp.path().join(".cargo/registry/cache/pkg");
+        fs::create_dir_all(&reg).unwrap();
+        fs::write(reg.join("dummy.crate"), b"x").unwrap();
+        // And a real project target dir
+        let real = tmp.path().join("my-project/target");
+        fs::create_dir_all(&real).unwrap();
+        fs::write(real.join("dummy.o"), b"x").unwrap();
+
+        let result = CargoCleaner::find_target_dirs(tmp.path());
+        assert!(!result.is_empty());
+        for (path, _) in &result {
+            assert!(
+                !path.to_string_lossy().contains(".cargo"),
+                "paths containing .cargo must be excluded: {}",
+                path.display()
+            );
+        }
+    }
+
+    #[test]
+    fn find_target_dirs_respects_max_depth() {
+        let tmp = TempDir::new().unwrap();
+        // Create a shallow target dir at depth 2
+        let shallow = tmp.path().join("a/target");
+        fs::create_dir_all(&shallow).unwrap();
+        fs::write(shallow.join("x.o"), b"x").unwrap();
+        // Create a deep target dir at depth 6 (beyond max_depth=5)
+        let deep = tmp.path().join("a/b/c/d/e/target");
+        fs::create_dir_all(&deep).unwrap();
+        fs::write(deep.join("y.o"), b"x").unwrap();
+
+        let result = CargoCleaner::find_target_dirs(tmp.path());
+        assert!(
+            result.iter().any(|(p, _)| p.ends_with("a/target")),
+            "shallow target at depth 2 should be found"
+        );
+        assert!(
+            !result.iter().any(|(p, _)| p.ends_with("a/b/c/d/e/target")),
+            "deep target at depth 6 must be excluded by max_depth=5"
+        );
+    }
 }
