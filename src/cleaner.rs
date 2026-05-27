@@ -215,4 +215,70 @@ mod tests {
         assert!(msg.is_some());
         assert!(msg.unwrap().contains("Large files"));
     }
+
+    #[test]
+    fn is_skippable_error_permission_denied() {
+        let e = anyhow::Error::from(std::io::Error::from(std::io::ErrorKind::PermissionDenied));
+        assert!(is_skippable_error(&e));
+    }
+
+    #[test]
+    fn is_skippable_error_would_block() {
+        let e = anyhow::Error::from(std::io::Error::from(std::io::ErrorKind::WouldBlock));
+        assert!(is_skippable_error(&e));
+    }
+
+    #[test]
+    fn is_skippable_error_already_exists() {
+        let e = anyhow::Error::from(std::io::Error::from(std::io::ErrorKind::AlreadyExists));
+        assert!(is_skippable_error(&e));
+    }
+
+    #[test]
+    fn is_skippable_error_not_found_is_not_skippable() {
+        let e = anyhow::Error::from(std::io::Error::from(std::io::ErrorKind::NotFound));
+        assert!(!is_skippable_error(&e));
+    }
+
+    #[test]
+    fn is_skippable_error_connection_refused_is_not_skippable() {
+        let e = anyhow::Error::from(std::io::Error::from(std::io::ErrorKind::ConnectionRefused));
+        assert!(!is_skippable_error(&e));
+    }
+
+    #[test]
+    fn is_skippable_error_permission_denied_string() {
+        let e = anyhow::anyhow!("Permission denied: /some/path");
+        assert!(is_skippable_error(&e));
+    }
+
+    #[test]
+    fn is_skippable_error_operation_not_permitted_string() {
+        let e = anyhow::anyhow!("Operation not permitted");
+        assert!(is_skippable_error(&e));
+    }
+
+    #[test]
+    fn is_skippable_error_resource_busy_string() {
+        let e = anyhow::anyhow!("Resource busy");
+        assert!(is_skippable_error(&e));
+    }
+
+    #[test]
+    fn is_skippable_error_trash_failed_string() {
+        let e = anyhow::anyhow!("trash failed: could not move to trash");
+        assert!(is_skippable_error(&e));
+    }
+
+    #[test]
+    fn is_skippable_error_arbitrary_error_is_not_skippable() {
+        let e = anyhow::anyhow!("something went horribly wrong");
+        assert!(!is_skippable_error(&e));
+    }
+
+    #[test]
+    fn is_skippable_error_clean_cancelled_is_not_skippable() {
+        let e = anyhow::Error::from(crate::cleaner::CleanCancelled);
+        assert!(!is_skippable_error(&e));
+    }
 }
