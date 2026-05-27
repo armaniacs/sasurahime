@@ -51,6 +51,18 @@ All notable changes to sasurahime will be documented in this file. The format is
 - **Docs DoD finalized.** All PBI-E/G documentation items marked complete
   (exclude, custom, per-cleaner, stats, --config documented in EN + JA).
 
+### Fixed
+
+- **`--permanent` help text was self-contradictory.** Flag named `--permanent`
+  but claimed to "Move deleted files to Trash". Clarified to accurately describe
+  the behavior: "Permanently delete files instead of moving to Trash. By default,
+  files are moved to macOS Trash for safety."
+- **Rust 1.95.0 clippy `items_after_test_module`.** Moved `#[cfg(test)] mod tests`
+  in `src/cleaner.rs` to the end of the file, after the `pub trait Cleaner`
+  definition.
+- **Rust 1.95.0 clippy `needless_borrows_for_generic_args`.** Removed unnecessary
+  `&` from `&log_dir.join(...)` in `tests/config.rs`.
+
 ---
 
 ## [0.1.26] — 2026-05-26
