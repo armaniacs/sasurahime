@@ -36,7 +36,7 @@ layout: none
 <div class="hero">
   <div class="hero-badge">macOS 開発者向けキャッシュクリーナー · Rust 製</div>
   <h1>ディスクを取り戻す。<br><em>ひとコマンドで。</em></h1>
-  <p>uv、Homebrew、mise、Docker、Cargo、Go など 35 以上のツールの古いキャッシュを、スキャン・選択・削除。</p>
+  <p>uv、Homebrew、mise、Docker、Cargo、Go など 40 以上のツールの古いキャッシュを、スキャン・選択・削除。</p>
   <div class="hero-cta">
     <a class="btn-primary" href="https://github.com/armaniacs/sasurahime/releases/latest" target="_blank" rel="noopener">最新リリースをダウンロード</a>
     <a class="btn-secondary" href="../HOWTO-USE">ドキュメントを見る</a>
@@ -84,6 +84,21 @@ layout: none
         <h3>設定ファイル</h3>
         <p><code>~/.config/sasurahime/config.toml</code> でデフォルト値を設定し、毎日のワークフローをゼロ摩擦に。</p>
       </div>
+      <div class="feature-card">
+        <div class="feature-icon">📊</div>
+        <h3>統計と履歴</h3>
+        <p><code>sasurahime stats</code> で累計削除量と実行履歴を表示。どれだけディスクを取り戻したかがひと目でわかります。</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">⚡</div>
+        <h3>並列スキャン</h3>
+        <p>全ターゲットを <code>rayon</code> で並列スキャン。待ち時間は最も遅いクリーナーに依存するため、逐次より大幅に高速です。</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">📂</div>
+        <h3>Xcode 部分削除</h3>
+        <p>DerivedData だけ、Archives だけ、あるいは両方を選んで削除。全部消す必要がないときも安心。</p>
+      </div>
     </div>
   </div>
 </section>
@@ -107,7 +122,7 @@ layout: none
           </tr>
           <tr>
             <td>ランタイム / ツール</td>
-            <td><span class="tag">mise</span><span class="tag">browsers</span><span class="tag">node-gyp</span></td>
+            <td><span class="tag">mise</span><span class="tag">browsers</span><span class="tag">node-gyp</span><span class="tag">sbt</span><span class="tag">volta</span></td>
           </tr>
           <tr>
             <td>Docker / VM</td>
@@ -115,7 +130,7 @@ layout: none
           </tr>
           <tr>
             <td>IDE / シミュレーター</td>
-            <td><span class="tag">xcode</span><span class="tag">device-support</span><span class="tag">simulator</span><span class="tag">jetbrains</span><span class="tag">vscode-extensions</span></td>
+            <td><span class="tag">xcode</span><span class="tag">device-support</span><span class="tag">simulator</span><span class="tag">jetbrains</span><span class="tag">vscode-extensions</span><span class="tag">ios-backup</span></td>
           </tr>
           <tr>
             <td>AI/ML / CI</td>
@@ -123,7 +138,7 @@ layout: none
           </tr>
           <tr>
             <td>ログ / その他</td>
-            <td><span class="tag">logs</span><span class="tag">library-logs</span><span class="tag">downloads</span><span class="tag">trash</span></td>
+            <td><span class="tag">logs</span><span class="tag">library-logs</span><span class="tag">downloads</span><span class="tag">trash</span><span class="tag">apfs-snapshot</span><span class="tag">git</span><span class="tag">torrent</span><span class="tag">terraform</span><span class="tag">tree-sitter</span></td>
           </tr>
         </tbody>
       </table>

@@ -38,7 +38,7 @@ layout: none
 <div class="hero">
   <div class="hero-badge">macOS Developer Cache Cleaner · Written in Rust</div>
   <h1>Reclaim disk space.<br><em>Effortlessly.</em></h1>
-  <p>Scan, choose, and wipe stale caches from uv, Homebrew, mise, Docker, Cargo, Go, and 35+ other tools — all from a single terminal command.</p>
+  <p>Scan, choose, and wipe stale caches from uv, Homebrew, mise, Docker, Cargo, Go, and 40+ other tools — all from a single terminal command.</p>
   <div class="hero-cta">
     <a class="btn-primary" href="https://github.com/armaniacs/sasurahime/releases/latest" target="_blank" rel="noopener">Download latest release</a>
     <a class="btn-secondary" href="HOWTO-USE">View Documentation</a>
@@ -87,6 +87,21 @@ layout: none
         <h3>Config File</h3>
         <p>Set defaults in <code>~/.config/sasurahime/config.toml</code> for a zero-friction daily workflow.</p>
       </div>
+      <div class="feature-card">
+        <div class="feature-icon">📊</div>
+        <h3>Stats & History</h3>
+        <p><code>sasurahime stats</code> shows how much space you've reclaimed over time, with per-run details.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">⚡</div>
+        <h3>Parallel Scan</h3>
+        <p>Scans all targets concurrently via rayon — total scan time is bounded by the slowest cleaner, not the sum.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">📂</div>
+        <h3>Partial Xcode Clean</h3>
+        <p>Clean only DerivedData, only Archives, or both — no need to nuke everything when you only need one.</p>
+      </div>
     </div>
   </div>
 </section>
@@ -111,7 +126,7 @@ layout: none
           </tr>
           <tr>
             <td>Runtimes / Tools</td>
-            <td><span class="tag">mise</span><span class="tag">browsers</span><span class="tag">node-gyp</span></td>
+            <td><span class="tag">mise</span><span class="tag">browsers</span><span class="tag">node-gyp</span><span class="tag">sbt</span><span class="tag">volta</span></td>
           </tr>
           <tr>
             <td>Docker / VM</td>
@@ -119,7 +134,7 @@ layout: none
           </tr>
           <tr>
             <td>IDE / Simulator</td>
-            <td><span class="tag">xcode</span><span class="tag">device-support</span><span class="tag">simulator</span><span class="tag">jetbrains</span><span class="tag">vscode-extensions</span></td>
+            <td><span class="tag">xcode</span><span class="tag">device-support</span><span class="tag">simulator</span><span class="tag">jetbrains</span><span class="tag">vscode-extensions</span><span class="tag">ios-backup</span></td>
           </tr>
           <tr>
             <td>AI/ML / CI</td>
@@ -127,7 +142,7 @@ layout: none
           </tr>
           <tr>
             <td>Logs / Other</td>
-            <td><span class="tag">logs</span><span class="tag">library-logs</span><span class="tag">downloads</span><span class="tag">trash</span></td>
+            <td><span class="tag">logs</span><span class="tag">library-logs</span><span class="tag">downloads</span><span class="tag">trash</span><span class="tag">apfs-snapshot</span><span class="tag">git</span><span class="tag">torrent</span><span class="tag">terraform</span><span class="tag">tree-sitter</span></td>
           </tr>
         </tbody>
       </table>

@@ -7,7 +7,7 @@ permalink: /SUPPORTED
 <details open markdown="1">
 <summary markdown="0"><strong>🇺🇸 English</strong></summary>
 
-sasurahime provides **45 clean targets** organized by sprint.
+sasurahime provides **46 clean targets** organized by sprint.
 Every target supports both `detect` (read-only, no side effects) and
 `clean` (removal). All `clean` subcommands accept `--dry-run`.
 
@@ -1119,6 +1119,98 @@ UUID-named subdirectory containing backup data (Manifest.db, etc.).
 
 ---
 
+## 46. `sasurahime stats`
+
+**Category:** Sprint 5
+
+**What it shows:** Aggregated deletion history and statistics.
+
+**How it works:**
+1. Every successful `sasurahime clean <target>` (where `freed_bytes > 0` and not `--dry-run`) appends a
+   `HistoryEntry` to `~/.local/share/sasurahime/history.json`.
+2. Each entry contains: `timestamp`, `cleaner`, `freed_bytes`, `skipped_count`.
+3. The history file uses atomic writes (temp file + rename) to prevent corruption.
+4. `sasurahime stats` reads the file, computes aggregates, and prints a summary table.
+5. If the history file is missing or corrupted, a friendly message is shown and the program
+   exits with code 0 (no crash).
+
+**Supported flags:**
+- `--last N` — show only the most recent N entries (default: 10).
+
+**Output example:**
+```
+$ sasurahime stats
+╔══════════════════════════════════════╗
+║  sasurahime Statistics              ║
+╠══════════════════════════════════════╣
+║  Total freed:  12.5 GB              ║
+║  Runs:         15                   ║
+╚══════════════════════════════════════╝
+
+Recent cleanups:
+  #  Date                Cleaner        Size
+  1  2026-05-27 10:30   uv             500.0 MB
+  2  2026-05-26 22:15   brew           1.2 GB
+```
+
+**Implementation:** `src/history.rs` (362 lines), 9 unit tests + 6 E2E tests.
+
+---
+
+## Configuration File: `~/.config/sasurahime/config.toml`
+
+**Category:** Sprint 5
+
+The config file is optional — if absent, sensible defaults are used.
+
+**Example:**
+```toml
+# Exclude cleaners from scan/TUI listing
+exclude = ["huggingface", "ollama"]
+
+# User-defined cache directories
+[[custom]]
+name = "my-project"
+path = "~/work/.cache"
+
+# Per-cleaner age/size filters (DeleteDirs cleaners only)
+[cleaner.act]
+older_than_days = 30
+
+[cleaner.colima]
+larger_than_mb = 500
+
+# Log retention
+[logs]
+keep_days = 14
+```
+
+**Config fields:**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `trash_mode` | boolean | `true` | Send deleted files to Trash by default |
+| `exclude` | string[] | `[]` | Cleaners to hide from scan/TUI |
+| `[[custom]]` | table[] | `[]` | User-defined cache directories |
+| `custom[].name` | string | required | Display name |
+| `custom[].path` | string | required | Path (supports `~`) |
+| `[cleaner.<name>]` | table | — | Per-cleaner filter settings |
+| `cleaner.<name>.older_than_days` | integer | unset | Only delete entries older than N days |
+| `cleaner.<name>.larger_than_mb` | integer | unset | Only delete entries larger than N MB |
+| `[logs]` | table | — | Log retention settings |
+| `logs.keep_days` | integer | `7` | Global log retention period |
+| `[[logs.targets]]` | table[] | `[]` | Extra log directories |
+| `logs.targets[].name` | string | required | Display name |
+| `logs.targets[].path` | string | required | Path (supports `~`) |
+| `logs.targets[].exclude` | string[] | `[]` | Filenames to never delete |
+
+**CLI flag override:**
+```bash
+sasurahime scan --config /path/to/config.toml
+```
+
+---
+
 ## Scan (`sasurahime scan`)
 
 Runs `detect()` on every cleaner and prints a formatted table via
@@ -1140,7 +1232,7 @@ Runs `detect()` on every cleaner and prints a formatted table via
 <details markdown="1">
 <summary markdown="0"><strong>🇯🇵 日本語</strong></summary>
 
-sasurahime は **45 のクリーンターゲット** をスプリント単位で提供しています。
+sasurahime は **46 のクリーンターゲット** をスプリント単位で提供しています。
 すべてのターゲットは `detect`（読み取り専用、副作用なし）と `clean`（削除）の両方に対応しています。また、すべての `clean` サブコマンドは `--dry-run` をサポートしています。
 
 ---
@@ -2127,6 +2219,92 @@ Time Machine スナップショット。
   の呼び出しは安全にスキップされます。
 - `--dry-run` モードではスナップショットが一覧表示されるのみで削除は
   行われません。
+
+---
+
+## 46. `sasurahime stats`
+
+**カテゴリ:** Sprint 5
+
+**機能:** 削除履歴と統計を表示します。
+
+**動作:**
+1. `sasurahime clean <target>` がバイト数を解放するたびに、`~/.local/share/sasurahime/history.json` に履歴を追記します（`--dry-run` は除く）。
+2. 各エントリには `timestamp`、`cleaner`、`freed_bytes`、`skipped_count` が含まれます。
+3. ファイルはアトミック書き込み（一時ファイル + リネーム）で更新されるため、破損しにくい設計です。
+4. `sasurahime stats` はファイルを読み込み、集計結果を表示します。
+5. 履歴ファイルがない場合や壊れている場合でも、親切なメッセージとともに終了コード 0 で正常終了します。
+
+**オプション:**
+- `--last N` — 直近 N 件のみ表示（デフォルト: 10）。
+
+**出力例:**
+```
+$ sasurahime stats
+Total freed:  12.5 GB
+Runs:         15
+
+Recent cleanups:
+  #  Date                Cleaner        Size
+  1  2026-05-27 10:30   uv             500.0 MB
+  2  2026-05-26 22:15   brew           1.2 GB
+```
+
+**実装:** `src/history.rs`（362行）、9 unit tests + 6 E2E tests。
+
+---
+
+## 設定ファイル: `~/.config/sasurahime/config.toml`
+
+**カテゴリ:** Sprint 5
+
+設定ファイルは必須ではありません。存在しない場合は適切なデフォルト値が使われます。
+
+**設定例:**
+```toml
+# スキャン/TUI から除外するクリーナー
+exclude = ["huggingface", "ollama"]
+
+# ユーザー定義のキャッシュディレクトリ
+[[custom]]
+name = "my-project"
+path = "~/work/.cache"
+
+# クリーナーごとのフィルタ（DeleteDirs のみ有効）
+[cleaner.act]
+older_than_days = 30
+
+[cleaner.colima]
+larger_than_mb = 500
+
+# ログ保持期間
+[logs]
+keep_days = 14
+```
+
+**設定フィールド:**
+
+| フィールド | 型 | デフォルト | 説明 |
+|-----------|-----|-----------|------|
+| `trash_mode` | boolean | `true` | 削除ファイルをデフォルトでゴミ箱へ |
+| `exclude` | string[] | `[]` | スキャン/TUI から除外するクリーナー |
+| `[[custom]]` | table[] | `[]` | ユーザー定義キャッシュディレクトリ |
+| `custom[].name` | string | 必須 | 表示名 |
+| `custom[].path` | string | 必須 | パス（`~` 展開対応） |
+| `[cleaner.<name>]` | table | — | クリーナーごとのフィルタ設定 |
+| `cleaner.<name>.older_than_days` | integer | 未設定 | N 日より古いエントリのみ削除 |
+| `cleaner.<name>.larger_than_mb` | integer | 未設定 | N MB より大きいエントリのみ削除 |
+| `[logs]` | table | — | ログ保持設定 |
+| `logs.keep_days` | integer | `7` | グローバルログ保持期間 |
+| `[[logs.targets]]` | table[] | `[]` | 追加ログディレクトリ |
+| `logs.targets[].name` | string | 必須 | 表示名 |
+| `logs.targets[].path` | string | 必須 | パス（`~` 展開対応） |
+| `logs.targets[].exclude` | string[] | `[]` | 削除しないファイル名 |
+
+**CLI フラグ:**
+```bash
+sasurahime scan --config /path/to/config.toml
+```
 
 ---
 
