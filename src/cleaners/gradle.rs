@@ -31,13 +31,15 @@ impl GradleCleaner {
             .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
             .filter_map(|e| {
                 let name = e.file_name().to_string_lossy().to_string();
+                if !name.starts_with(
+                    |c: char| c.is_ascii_digit(),
+                ) {
+                    return None;
+                }
                 let key: Vec<u32> = name
                     .split(|c: char| !c.is_ascii_digit())
                     .filter_map(|s| s.parse().ok())
                     .collect();
-                if key.is_empty() {
-                    return None;
-                }
                 Some((key, e.path()))
             })
             .collect();
@@ -249,5 +251,113 @@ impl Cleaner for JetBrainsCleaner {
             uses_trash: false,
             skipped: vec![],
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    // ── GradleCleaner (M02) ──
+
+    #[test]
+    fn gradle_find_old_caches_single_version_returns_empty() {
+        let tmp = TempDir::new().unwrap();
+        let caches = tmp.path().join(".gradle/caches");
+        fs::create_dir_all(caches.join("8.12.0")).unwrap();
+        let result = GradleCleaner::find_old_caches(&caches);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn gradle_find_old_caches_old_versions_returned() {
+        let tmp = TempDir::new().unwrap();
+        let caches = tmp.path().join(".gradle/caches");
+        fs::create_dir_all(caches.join("8.8.0")).unwrap();
+        fs::create_dir_all(caches.join("8.10.1")).unwrap();
+        fs::create_dir_all(caches.join("8.12.0")).unwrap();
+        let result = GradleCleaner::find_old_caches(&caches);
+        assert_eq!(result.len(), 2);
+        assert!(result.iter().any(|p| p.ends_with("8.8.0")));
+        assert!(result.iter().any(|p| p.ends_with("8.10.1")));
+    }
+
+    #[test]
+    fn gradle_find_old_caches_varying_digit_counts() {
+        let tmp = TempDir::new().unwrap();
+        let caches = tmp.path().join(".gradle/caches");
+        fs::create_dir_all(caches.join("7.0")).unwrap();
+        fs::create_dir_all(caches.join("8.12.0")).unwrap();
+        fs::create_dir_all(caches.join("8.12.1")).unwrap();
+        let result = GradleCleaner::find_old_caches(&caches);
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn gradle_find_old_caches_skip_non_version_names() {
+        let tmp = TempDir::new().unwrap();
+        let caches = tmp.path().join(".gradle/caches");
+        fs::create_dir_all(caches.join("modules-2")).unwrap();
+        fs::create_dir_all(caches.join("wrapper")).unwrap();
+        fs::create_dir_all(caches.join("journal-1")).unwrap();
+        let result = GradleCleaner::find_old_caches(&caches);
+        assert!(result.is_empty());
+    }
+
+    // ── JetBrainsCleaner (H01) ──
+
+    #[test]
+    fn jetbrains_find_old_caches_empty_dir_returns_empty() {
+        let tmp = TempDir::new().unwrap();
+        let jb = tmp.path().join("Library/Caches/JetBrains");
+        fs::create_dir_all(&jb).unwrap();
+        let result = JetBrainsCleaner::find_old_caches(&jb);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn jetbrains_find_old_caches_single_version_per_ide_returns_empty() {
+        let tmp = TempDir::new().unwrap();
+        let jb = tmp.path().join("Library/Caches/JetBrains");
+        fs::create_dir_all(jb.join("GoLand2025.1")).unwrap();
+        let result = JetBrainsCleaner::find_old_caches(&jb);
+        assert!(result.is_empty(), "single version must be kept");
+    }
+
+    #[test]
+    fn jetbrains_find_old_caches_old_versions_are_returned() {
+        let tmp = TempDir::new().unwrap();
+        let jb = tmp.path().join("Library/Caches/JetBrains");
+        fs::create_dir_all(jb.join("GoLand2024.2")).unwrap();
+        fs::create_dir_all(jb.join("GoLand2025.1")).unwrap();
+        let result = JetBrainsCleaner::find_old_caches(&jb);
+        assert_eq!(result.len(), 1);
+        assert!(result[0].ends_with("GoLand2024.2"));
+    }
+
+    #[test]
+    fn jetbrains_find_old_caches_multiple_ides_independent_retention() {
+        let tmp = TempDir::new().unwrap();
+        let jb = tmp.path().join("Library/Caches/JetBrains");
+        fs::create_dir_all(jb.join("GoLand2024.2")).unwrap();
+        fs::create_dir_all(jb.join("GoLand2025.1")).unwrap();
+        fs::create_dir_all(jb.join("IntelliJIdea2024.3")).unwrap();
+        fs::create_dir_all(jb.join("IntelliJIdea2025.2")).unwrap();
+        let result = JetBrainsCleaner::find_old_caches(&jb);
+        assert_eq!(result.len(), 2);
+        assert!(result.iter().any(|p| p.ends_with("GoLand2024.2")));
+        assert!(result.iter().any(|p| p.ends_with("IntelliJIdea2024.3")));
+    }
+
+    #[test]
+    fn jetbrains_find_old_caches_non_parseable_names_skipped() {
+        let tmp = TempDir::new().unwrap();
+        let jb = tmp.path().join("Library/Caches/JetBrains");
+        fs::create_dir_all(jb.join("_tmp")).unwrap();
+        fs::create_dir_all(jb.join(".hidden")).unwrap();
+        let result = JetBrainsCleaner::find_old_caches(&jb);
+        assert!(result.is_empty(), "unparseable names must be skipped");
     }
 }
