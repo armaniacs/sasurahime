@@ -131,6 +131,10 @@ impl MiseCleaner {
 
     /// Parses a single `key = "value"` line from TOML.
     fn parse_toml_kv(line: &str) -> Option<(String, String)> {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            return None;
+        }
         let (key, rest) = line.split_once('=')?;
         let key = key.trim().to_string();
         let val = rest.trim().trim_matches('"').to_string();
@@ -371,5 +375,104 @@ mod tests {
         assert_eq!(unused.len(), 1);
         assert_eq!(unused[0].0, "python");
         assert_eq!(unused[0].1, "3.12.0");
+    }
+
+    // ── parse_toml_kv ──
+
+    #[test]
+    fn parse_toml_kv_valid_line_returns_key_value() {
+        let result = MiseCleaner::parse_toml_kv(r#"node = "20.11.0""#);
+        assert_eq!(
+            result,
+            Some(("node".to_string(), "20.11.0".to_string()))
+        );
+    }
+
+    #[test]
+    fn parse_toml_kv_comment_line_returns_none() {
+        let result = MiseCleaner::parse_toml_kv("# node = \"20.11.0\"");
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn parse_toml_kv_empty_line_returns_none() {
+        assert_eq!(MiseCleaner::parse_toml_kv(""), None);
+    }
+
+    #[test]
+    fn parse_toml_kv_no_equals_returns_none() {
+        assert_eq!(MiseCleaner::parse_toml_kv("node 20.11.0"), None);
+    }
+
+    // ── parse_tools_section ──
+
+    #[test]
+    fn parse_tools_section_with_tools_returns_parsed_entries() {
+        let mut result = std::collections::HashSet::new();
+        MiseCleaner::parse_tools_section(
+            "[tools]\nnode = \"20.11.0\"\npython = \"3.12.0\"\n",
+            &mut result,
+        );
+        assert_eq!(result.len(), 2);
+        assert!(result.contains(&("node".to_string(), "20.11.0".to_string())));
+        assert!(result.contains(&("python".to_string(), "3.12.0".to_string())));
+    }
+
+    #[test]
+    fn parse_tools_section_empty_content_returns_empty() {
+        let mut result = std::collections::HashSet::new();
+        MiseCleaner::parse_tools_section("", &mut result);
+        assert!(result.is_empty());
+    }
+
+    // ── scan_pinned_versions ──
+
+    #[test]
+    fn scan_pinned_versions_no_config_files_returns_empty() {
+        use tempfile::TempDir;
+        let tmp = TempDir::new().unwrap();
+        let result = MiseCleaner::scan_pinned_versions(tmp.path());
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn scan_pinned_versions_global_config_is_read() {
+        use tempfile::TempDir;
+        let tmp = TempDir::new().unwrap();
+        let config_dir = tmp.path().join(".config/mise");
+        fs::create_dir_all(&config_dir).unwrap();
+        fs::write(
+            config_dir.join("config.toml"),
+            "[tools]\nnode = \"22.0.0\"\n",
+        )
+        .unwrap();
+        let result = MiseCleaner::scan_pinned_versions(tmp.path());
+        assert!(
+            result.contains(&("node".to_string(), "22.0.0".to_string()))
+        );
+    }
+
+    #[test]
+    fn scan_pinned_versions_project_mise_toml_is_read() {
+        use tempfile::TempDir;
+        let tmp = TempDir::new().unwrap();
+        fs::write(
+            tmp.path().join(".mise.toml"),
+            "[tools]\npython = \"3.13.0\"\n",
+        )
+        .unwrap();
+        let result = MiseCleaner::scan_pinned_versions(tmp.path());
+        assert!(
+            result.contains(&("python".to_string(), "3.13.0".to_string()))
+        );
+    }
+
+    #[test]
+    fn scan_pinned_versions_malformed_toml_does_not_panic() {
+        use tempfile::TempDir;
+        let tmp = TempDir::new().unwrap();
+        fs::write(tmp.path().join(".mise.toml"), "[[[invalid toml").unwrap();
+        let result = MiseCleaner::scan_pinned_versions(tmp.path());
+        assert!(result.is_empty());
     }
 }
