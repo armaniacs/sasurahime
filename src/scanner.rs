@@ -38,7 +38,6 @@ pub fn run_scan(cleaners: &[Box<dyn Cleaner>]) {
             }
             ScanStatus::Clean => ("-".to_string(), "clean"),
             ScanStatus::NotFound => ("-".to_string(), "not found"),
-            ScanStatus::PermissionDenied => ("-".to_string(), "permission denied"),
         };
         let target = r.primary_target.as_deref().unwrap_or("-");
         table.add_row(vec![r.name, &size, status, target]);
