@@ -116,6 +116,18 @@ impl GenericCleaner {
         Self::command_cleaner("orbstack", "orb", &["prune"], runner)
     }
 
+    pub fn gem(runner: Box<dyn CommandRunner>) -> Self {
+        Self::command_cleaner("gem", "gem", &["cleanup"], runner)
+    }
+
+    pub fn bundle(runner: Box<dyn CommandRunner>) -> Self {
+        Self::command_cleaner("bundle", "bundle", &["clean"], runner)
+    }
+
+    pub fn dotnet(runner: Box<dyn CommandRunner>) -> Self {
+        Self::command_cleaner("dotnet", "dotnet", &["nuget", "locals", "all", "--clear"], runner)
+    }
+
     pub fn simulator(home: &Path, runner: Box<dyn CommandRunner>) -> Self {
         Self::base_cleaner(
             "simulator",

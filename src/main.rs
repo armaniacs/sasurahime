@@ -148,6 +148,15 @@ macro_rules! cmd_name {
     (TreeSitter) => {
         "tree-sitter"
     };
+    (Gem) => {
+        "gem"
+    };
+    (Bundle) => {
+        "bundle"
+    };
+    (Dotnet) => {
+        "dotnet"
+    };
 }
 
 /// Generate dispatch_clean and dispatch helpers from the same definition table.
@@ -273,6 +282,15 @@ define_cleaners! {
 
     Deno : "deno" => "Deno cache reload";
     (|_home, _config| cleaners::generic::GenericCleaner::deno(Box::new(SystemCommandRunner))),
+
+    Dotnet : "dotnet" => ".NET NuGet cache clear";
+    (|_home, _config| cleaners::generic::GenericCleaner::dotnet(Box::new(SystemCommandRunner))),
+
+    Gem : "gem" => "RubyGems old gem versions cleanup";
+    (|_home, _config| cleaners::generic::GenericCleaner::gem(Box::new(SystemCommandRunner))),
+
+    Bundle : "bundle" => "Bundler cache clean";
+    (|_home, _config| cleaners::generic::GenericCleaner::bundle(Box::new(SystemCommandRunner))),
 
     Rustup : "rustup" => "Unused Rust toolchains";
     (|home, _config| cleaners::rustup::RustupCleaner::new(home, Box::new(SystemCommandRunner))),
