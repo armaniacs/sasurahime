@@ -116,6 +116,7 @@ impl Cleaner for DeviceSupportCleaner {
                 bytes_freed: 0,
                 uses_trash: false,
                 skipped: vec![],
+            deleted_paths: vec![],
             });
         }
 
@@ -133,6 +134,7 @@ impl Cleaner for DeviceSupportCleaner {
                 bytes_freed: 0,
                 uses_trash: false,
                 skipped: vec![],
+            deleted_paths: vec![],
             });
         }
 
@@ -150,7 +152,7 @@ impl Cleaner for DeviceSupportCleaner {
                     path: p.to_path_buf(),
                     reason: format!("{e:#}"),
                 });
-                eprintln!("[device-support] error removing {}: {e}", p.display());
+                log::error!("[device-support] error removing {}: {e}", p.display());
             } else {
                 freed += size;
                 println!("[device-support] removed: {}", p.display());
@@ -164,6 +166,7 @@ impl Cleaner for DeviceSupportCleaner {
             bytes_freed: freed,
             uses_trash: true,
             skipped,
+        deleted_paths: vec![],
         })
     }
 }

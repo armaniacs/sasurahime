@@ -157,6 +157,7 @@ impl Cleaner for CargoCleaner {
             bytes_freed: freed,
             uses_trash: true,
             skipped,
+        deleted_paths: vec![],
         })
     }
 }

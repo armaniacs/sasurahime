@@ -101,6 +101,7 @@ impl Cleaner for BrewCleaner {
                 bytes_freed: 0,
                 uses_trash: false,
                 skipped: vec![],
+            deleted_paths: vec![],
             });
         }
 
@@ -123,6 +124,7 @@ impl Cleaner for BrewCleaner {
             bytes_freed: freed,
             uses_trash: false,
             skipped: vec![],
+            deleted_paths: vec![],
         })
     }
 }

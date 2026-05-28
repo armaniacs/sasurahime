@@ -224,6 +224,7 @@ impl Cleaner for MiseCleaner {
                 bytes_freed: 0,
                 uses_trash: true,
                 skipped: vec![],
+            deleted_paths: vec![],
             });
         }
         let stdout = match self.get_mise_output() {
@@ -235,6 +236,7 @@ impl Cleaner for MiseCleaner {
                     bytes_freed: 0,
                     uses_trash: true,
                     skipped: vec![],
+            deleted_paths: vec![],
                 });
             }
         };
@@ -284,6 +286,7 @@ impl Cleaner for MiseCleaner {
             bytes_freed: freed,
             uses_trash: false,
             skipped: vec![],
+            deleted_paths: vec![],
         })
     }
 }

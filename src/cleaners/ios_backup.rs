@@ -58,6 +58,7 @@ impl Cleaner for IosCleaner {
                 bytes_freed: 0,
                 uses_trash: false,
                 skipped: vec![],
+            deleted_paths: vec![],
             });
         }
 
@@ -81,6 +82,7 @@ impl Cleaner for IosCleaner {
                 bytes_freed: 0,
                 uses_trash: false,
                 skipped: vec![],
+            deleted_paths: vec![],
             });
         }
 
@@ -102,6 +104,7 @@ impl Cleaner for IosCleaner {
                 bytes_freed: 0,
                 uses_trash: false,
                 skipped: vec![],
+            deleted_paths: vec![],
             });
         }
 
@@ -117,6 +120,7 @@ impl Cleaner for IosCleaner {
                 bytes_freed: 0,
                 uses_trash: false,
                 skipped: vec![],
+            deleted_paths: vec![],
             });
         }
 
@@ -128,6 +132,7 @@ impl Cleaner for IosCleaner {
                 bytes_freed: 0,
                 uses_trash: false,
                 skipped: vec![],
+            deleted_paths: vec![],
             });
         }
 
@@ -146,7 +151,7 @@ impl Cleaner for IosCleaner {
                         crate::format::format_bytes(*size)
                     );
                 }
-                Err(e) => eprintln!("[ios-backup] error removing {}: {e}", path.display()),
+                Err(e) => log::error!("[ios-backup] error removing {}: {e}", path.display()),
             }
         }
         reporter.progress_finish();
@@ -159,6 +164,7 @@ impl Cleaner for IosCleaner {
             bytes_freed: total_freed,
             uses_trash: true,
             skipped: vec![],
+            deleted_paths: vec![],
         })
     }
 }

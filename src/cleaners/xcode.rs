@@ -163,7 +163,7 @@ impl Cleaner for XcodeCleaner {
             && self.derived_data.exists()
             && self.is_xcode_running()
         {
-            eprintln!("Warning: Xcode is running. DerivedData deletion may cause issues.");
+            log::warn!("Xcode is running. DerivedData deletion may cause issues.");
             eprint!("Continue? [y/N] ");
             use std::io::Write;
             std::io::stderr().flush()?;
@@ -176,6 +176,7 @@ impl Cleaner for XcodeCleaner {
                     bytes_freed: 0,
                     uses_trash: false,
                     skipped: vec![],
+            deleted_paths: vec![],
                 });
             }
         }
@@ -249,6 +250,7 @@ impl Cleaner for XcodeCleaner {
             bytes_freed: total_freed,
             uses_trash: true,
             skipped: all_skipped,
+        deleted_paths: vec![],
         })
     }
 }
