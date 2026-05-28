@@ -26,6 +26,7 @@ chrono      = { version = "0.4", features = ["serde"] }
 wait-timeout = "0.2"
 trash = "5"
 rayon = "1"
+fs2    = "0.4"
 
 [profile.release]
 opt-level      = "z"      # Aggressive size optimization (s proved larger)

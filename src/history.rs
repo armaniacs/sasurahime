@@ -1,3 +1,4 @@
+use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
@@ -89,14 +90,28 @@ fn table_row(i: usize, ts: &str, cleaner: &str, size: &str) -> String {
 
 pub fn append_history(entry: &HistoryEntry, history_dir: &Path) -> anyhow::Result<()> {
     let history_path = history_dir.join("history.json");
-    let mut entries = if history_path.exists() {
-        load_history(&history_path)
-    } else {
+    // Ensure the directory exists before opening the file for locking.
+    if !history_path.exists() {
         fs::create_dir_all(history_dir)?;
-        Vec::new()
+    }
+    // Open (or create) the file and acquire an exclusive advisory lock
+    // to prevent concurrent sasurahime processes from losing entries.
+    let file = if history_path.exists() {
+        fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&history_path)?
+    } else {
+        fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .open(&history_path)?
     };
-    entries.push(entry.clone());
+    file.lock_exclusive()?;
 
+    let mut entries = load_history(&history_path);
+    entries.push(entry.clone());
     entries.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
     entries.truncate(MAX_HISTORY_ENTRIES);
 
@@ -105,6 +120,7 @@ pub fn append_history(entry: &HistoryEntry, history_dir: &Path) -> anyhow::Resul
     fs::write(&tmp_path, &json)?;
     fs::rename(&tmp_path, &history_path)?;
 
+    // Lock is released on drop.
     Ok(())
 }
 
