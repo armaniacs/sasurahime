@@ -300,7 +300,7 @@ mod tests {
     }
 
     #[test]
-    fn gradle_clean_uses_trash_false() {
+    fn gradle_clean_uses_trash_true() {
         let tmp = TempDir::new().unwrap();
         let caches = tmp.path().join(".gradle/caches");
         fs::create_dir_all(caches.join("8.12.0")).unwrap();
@@ -309,7 +309,7 @@ mod tests {
             .with_success("chflags");
         let cleaner = GradleCleaner::new(tmp.path(), Box::new(runner));
         let result = cleaner.clean(false, &crate::progress::DeepSuppressReporter).unwrap();
-        assert!(!result.uses_trash, "GradleCleaner should report uses_trash=false");
+        assert!(result.uses_trash, "GradleCleaner should report uses_trash=true (default trash mode)");
     }
 
     #[test]
@@ -387,7 +387,7 @@ mod tests {
     }
 
     #[test]
-    fn jetbrains_clean_uses_trash_false() {
+    fn jetbrains_clean_uses_trash_true() {
         let tmp = TempDir::new().unwrap();
         let jb = tmp.path().join("Library/Caches/JetBrains");
         fs::create_dir_all(jb.join("GoLand2024.2")).unwrap();
@@ -396,7 +396,7 @@ mod tests {
             .with_success("chflags");
         let cleaner = JetBrainsCleaner::new(tmp.path(), Box::new(runner));
         let result = cleaner.clean(false, &crate::progress::DeepSuppressReporter).unwrap();
-        assert!(!result.uses_trash, "JetBrainsCleaner should report uses_trash=false");
+        assert!(result.uses_trash, "JetBrainsCleaner should report uses_trash=true (default trash mode)");
     }
 
     #[test]
