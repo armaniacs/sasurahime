@@ -76,6 +76,14 @@ impl CleanResult {
     }
 }
 
+/// Options for fine-grained control over clean operations.
+/// The default (`all: false`) preserves existing behavior.
+#[non_exhaustive]
+#[derive(Debug, Clone, Default)]
+pub struct CleanOptions {
+    pub all: bool,
+}
+
 #[derive(Debug)]
 pub struct CleanCancelled;
 
@@ -109,6 +117,15 @@ pub trait Cleaner: Send + Sync {
     fn detect(&self) -> ScanResult;
     /// Performs cleanup. When `dry_run` is true, must not delete anything.
     fn clean(&self, dry_run: bool, reporter: &dyn ProgressReporter) -> Result<CleanResult>;
+    /// Clean with additional options. Default impl calls `clean()` ignoring opts.
+    fn clean_with_opts(
+        &self,
+        dry_run: bool,
+        reporter: &dyn ProgressReporter,
+        _opts: &CleanOptions,
+    ) -> Result<CleanResult> {
+        self.clean(dry_run, reporter)
+    }
     /// Whether this cleaner is available (tool installed, config exists, etc.).
     /// Defaults to true; override to skip unavailable cleaners during scan.
     fn is_available(&self) -> bool {

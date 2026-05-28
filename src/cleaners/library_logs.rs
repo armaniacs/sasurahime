@@ -248,16 +248,16 @@ impl Cleaner for LibraryLogsCleaner {
             skipped: vec![],
         })
     }
-}
 
-// ── Clean all (for --all flag, includes chflags) ──
-
-impl LibraryLogsCleaner {
-    pub(crate) fn clean_all(
+    fn clean_with_opts(
         &self,
         dry_run: bool,
         reporter: &dyn ProgressReporter,
+        opts: &crate::cleaner::CleanOptions,
     ) -> Result<CleanResult> {
+        if !opts.all {
+            return self.clean(dry_run, reporter);
+        }
         let entries = self.scan();
         if entries.is_empty() {
             println!("[library-logs] nothing to clean");
@@ -497,22 +497,22 @@ mod tests {
     }
 
     #[test]
-    fn clean_all_processes_all_entries_without_selection() {
+    fn clean_all_via_opts_processes_all_entries() {
         let tmp = TempDir::new().unwrap();
         let logs = logs_dir(&tmp);
-        fs::write(logs.join("big.log"), b"x".repeat(200)).unwrap();
-        fs::write(logs.join("old.log"), b"y".repeat(200)).unwrap();
+        fs::write(logs.join("test.log"), b"x").unwrap();
         let past = SystemTime::now() - Duration::from_secs(200 * 86400);
-        set_file_mtime(&logs.join("old.log"), FileTime::from_system_time(past)).unwrap();
+        set_file_mtime(&logs.join("test.log"), FileTime::from_system_time(past)).unwrap();
 
         let runner = crate::test_helpers::MockRunner::new().with_success("chflags");
         let cleaner = LibraryLogsCleaner::new(tmp.path(), Box::new(runner));
+        let opts = crate::cleaner::CleanOptions { all: true };
         let result = cleaner
-            .clean_all(false, &crate::progress::DeepSuppressReporter)
+            .clean_with_opts(false, &crate::progress::DeepSuppressReporter, &opts)
             .unwrap();
         assert!(
             result.bytes_freed > 0,
-            "clean_all should process all entries"
+            "clean_with_opts(all=true) should process all entries"
         );
         assert!(result.uses_trash, "LibraryLogsCleaner should use trash");
     }

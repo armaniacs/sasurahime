@@ -950,26 +950,15 @@ fn main() -> anyhow::Result<()> {
                             &home,
                             Box::new(SystemCommandRunner),
                         );
-                        if all {
-                            let result = run_clean_target(
-                                "library-logs",
-                                move |dry, rep| cleaner.clean_all(dry, rep),
-                                dry_run,
-                                reporter.as_ref(),
-                            )?;
-                            if result.exit_code() != 0 {
-                                std::process::exit(1);
-                            }
-                        } else {
-                            let result = run_clean_target(
-                                "library-logs",
-                                move |dry, rep| cleaner.clean(dry, rep),
-                                dry_run,
-                                reporter.as_ref(),
-                            )?;
-                            if result.exit_code() != 0 {
-                                std::process::exit(1);
-                            }
+                        let opts = crate::cleaner::CleanOptions { all };
+                        let result = run_clean_target(
+                            "library-logs",
+                            move |dry, rep| cleaner.clean_with_opts(dry, rep, &opts),
+                            dry_run,
+                            reporter.as_ref(),
+                        )?;
+                        if result.exit_code() != 0 {
+                            std::process::exit(1);
                         }
                     }
                     CleanTarget::DeviceSupport { dry_run, keep } => {
