@@ -89,12 +89,13 @@ impl Cleaner for GradleCleaner {
             return Ok(CleanResult {
                 name: self.name(),
                 bytes_freed: 0,
-                uses_trash: false,
+                uses_trash: crate::trash::is_trash_mode(),
                 skipped: vec![],
             });
         }
         let old = Self::find_old_caches(&caches);
         let mut freed: u64 = 0;
+        let mut skipped: Vec<crate::cleaner::SkippedEntry> = vec![];
         for path in &old {
             let size = dir_size(path);
             if dry_run {
@@ -107,16 +108,26 @@ impl Cleaner for GradleCleaner {
                 self.runner
                     .run("chflags", &["-R", "nouchg", &path.to_string_lossy()])
                     .ok();
-                fs::remove_dir_all(path)?;
-                freed += size;
-                println!("[gradle] removed: {}", path.display());
+                if let Err(e) = crate::trash::delete_path(path) {
+                    if crate::cleaner::is_skippable_error(&e) {
+                        skipped.push(crate::cleaner::SkippedEntry {
+                            path: path.to_path_buf(),
+                            reason: format!("{e:#}"),
+                        });
+                    } else {
+                        return Err(e);
+                    }
+                } else {
+                    freed += size;
+                    println!("[gradle] removed: {}", path.display());
+                }
             }
         }
         Ok(CleanResult {
             name: self.name(),
             bytes_freed: freed,
-            uses_trash: false,
-            skipped: vec![],
+            uses_trash: crate::trash::is_trash_mode(),
+            skipped,
         })
     }
 }
@@ -220,12 +231,13 @@ impl Cleaner for JetBrainsCleaner {
             return Ok(CleanResult {
                 name: self.name(),
                 bytes_freed: 0,
-                uses_trash: false,
+                uses_trash: crate::trash::is_trash_mode(),
                 skipped: vec![],
             });
         }
         let old = Self::find_old_caches(&dir);
         let mut freed: u64 = 0;
+        let mut skipped: Vec<crate::cleaner::SkippedEntry> = vec![];
         for path in &old {
             let size = dir_size(path);
             if dry_run {
@@ -238,16 +250,26 @@ impl Cleaner for JetBrainsCleaner {
                 self.runner
                     .run("chflags", &["-R", "nouchg", &path.to_string_lossy()])
                     .ok();
-                fs::remove_dir_all(path)?;
-                freed += size;
-                println!("[jetbrains] removed: {}", path.display());
+                if let Err(e) = crate::trash::delete_path(path) {
+                    if crate::cleaner::is_skippable_error(&e) {
+                        skipped.push(crate::cleaner::SkippedEntry {
+                            path: path.to_path_buf(),
+                            reason: format!("{e:#}"),
+                        });
+                    } else {
+                        return Err(e);
+                    }
+                } else {
+                    freed += size;
+                    println!("[jetbrains] removed: {}", path.display());
+                }
             }
         }
         Ok(CleanResult {
             name: self.name(),
             bytes_freed: freed,
-            uses_trash: false,
-            skipped: vec![],
+            uses_trash: crate::trash::is_trash_mode(),
+            skipped,
         })
     }
 }
