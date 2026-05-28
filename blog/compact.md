@@ -6,11 +6,15 @@ topics: ["rust", "macos", "cli", "キャッシュクリーン", "sasurahime"]
 published: false
 ---
 
+https://armaniacs.github.io/sasurahime/ja/
+
 ## なにができるのか
+
+uv、Homebrew、mise、Docker、Cargo、Go など 40 以上のツールの古いキャッシュを、スキャン・選択・削除。
 
 `uv` のアーカイブキャッシュ、Homebrew のダウンロード残骸、`mise` が取り残した古い Node ランタイム、Playwright や Puppeteer がダウンロードしたブラウザの過去バージョン──。
 
-そういった開発ツールのキャッシュを検出し、**選んで削除**できる CLI ツールです。
+そういった開発ツールのキャッシュを検出し、**選んで削除**できる CLI ツールです。削除するのはキャッシュや古いバージョンだけで、現在使用中のランタイムやパッケージには触れません。
 
 名前は **sasurahime**（速佐須良比売）。日本神話の大祓詞に出てくる、穢れを奈落の底で跡形もなく消し去る女神から来ています。
 
@@ -147,6 +151,8 @@ IDE： xcode (DerivedData / Archives), device-support, vscode-extensions, jetbra
 その他： logs, library-logs, ios-backup, huggingface, ollama, pre-commit, tree-sitter, cargo, node-gyp, torrent, downloads, trash, explorer, apfs-snapshot, act, terraform, simulator, git, volta
 
 40 以上のターゲットに対応しています。`sasurahime targets` でいつでも一覧を確認できます。
+
+まず `sasurahime scan` で何がどれだけあるか確認するところから始めてください。
 
 ---
 

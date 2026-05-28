@@ -91,7 +91,7 @@ impl Cleaner for GradleCleaner {
                 bytes_freed: 0,
                 uses_trash: crate::trash::is_trash_mode(),
                 skipped: vec![],
-            deleted_paths: vec![],
+                deleted_paths: vec![],
             });
         }
         let old = Self::find_old_caches(&caches);
@@ -110,10 +110,7 @@ impl Cleaner for GradleCleaner {
                     .runner
                     .run("chflags", &["-R", "nouchg", &path.to_string_lossy()])
                 {
-                    log::warn!(
-                        "[gradle] chflags failed for {}: {e}",
-                        path.display()
-                    );
+                    log::warn!("[gradle] chflags failed for {}: {e}", path.display());
                 }
                 if let Err(e) = crate::trash::delete_path(path) {
                     if crate::cleaner::is_skippable_error(&e) {
@@ -135,7 +132,7 @@ impl Cleaner for GradleCleaner {
             bytes_freed: freed,
             uses_trash: crate::trash::is_trash_mode(),
             skipped,
-        deleted_paths: vec![],
+            deleted_paths: vec![],
         })
     }
 }
@@ -241,7 +238,7 @@ impl Cleaner for JetBrainsCleaner {
                 bytes_freed: 0,
                 uses_trash: crate::trash::is_trash_mode(),
                 skipped: vec![],
-            deleted_paths: vec![],
+                deleted_paths: vec![],
             });
         }
         let old = Self::find_old_caches(&dir);
@@ -260,10 +257,7 @@ impl Cleaner for JetBrainsCleaner {
                     .runner
                     .run("chflags", &["-R", "nouchg", &path.to_string_lossy()])
                 {
-                    log::warn!(
-                        "[jetbrains] chflags failed for {}: {e}",
-                        path.display()
-                    );
+                    log::warn!("[jetbrains] chflags failed for {}: {e}", path.display());
                 }
                 if let Err(e) = crate::trash::delete_path(path) {
                     if crate::cleaner::is_skippable_error(&e) {
@@ -285,7 +279,7 @@ impl Cleaner for JetBrainsCleaner {
             bytes_freed: freed,
             uses_trash: crate::trash::is_trash_mode(),
             skipped,
-        deleted_paths: vec![],
+            deleted_paths: vec![],
         })
     }
 }

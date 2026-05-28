@@ -107,7 +107,7 @@ impl Cleaner for OllamaCleaner {
                     bytes_freed: 0,
                     uses_trash: false,
                     skipped: vec![],
-            deleted_paths: vec![],
+                    deleted_paths: vec![],
                 });
             }
 
@@ -125,7 +125,7 @@ impl Cleaner for OllamaCleaner {
                     bytes_freed: 0,
                     uses_trash: false,
                     skipped: vec![],
-            deleted_paths: vec![],
+                    deleted_paths: vec![],
                 });
             }
 
@@ -148,7 +148,7 @@ impl Cleaner for OllamaCleaner {
                     bytes_freed: 0,
                     uses_trash: false,
                     skipped: vec![],
-            deleted_paths: vec![],
+                    deleted_paths: vec![],
                 });
             }
 
@@ -175,7 +175,7 @@ impl Cleaner for OllamaCleaner {
                 bytes_freed: total,
                 uses_trash: false,
                 skipped: vec![],
-            deleted_paths: vec![],
+                deleted_paths: vec![],
             });
         }
 
@@ -192,7 +192,7 @@ impl OllamaCleaner {
                 bytes_freed: 0,
                 uses_trash: false,
                 skipped: vec![],
-            deleted_paths: vec![],
+                deleted_paths: vec![],
             });
         }
         let size = dir_size(dir);
@@ -207,7 +207,7 @@ impl OllamaCleaner {
                 bytes_freed: 0,
                 uses_trash: false,
                 skipped: vec![],
-            deleted_paths: vec![],
+                deleted_paths: vec![],
             });
         }
         let path_str = dir.to_string_lossy();
@@ -232,7 +232,7 @@ impl OllamaCleaner {
             bytes_freed: freed,
             uses_trash: true,
             skipped,
-        deleted_paths: vec![],
+            deleted_paths: vec![],
         })
     }
 }

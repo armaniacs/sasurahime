@@ -2,7 +2,7 @@ use crate::command::CommandRunner;
 use crate::format::format_bytes;
 use std::path::Path;
 
-use super::{base_path, PromptReader, ProcessHint};
+use super::{base_path, ProcessHint, PromptReader};
 
 const QUIT_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
 const QUIT_TIMEOUT_SECS: usize = 10;

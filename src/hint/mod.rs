@@ -67,8 +67,8 @@ fn base_path(home: &Path, base: BaseDir) -> PathBuf {
 mod tests {
     use super::*;
     use crate::command::CommandRunner;
-    use cleaner::auto_clean_hint;
     use anyhow::Result;
+    use cleaner::auto_clean_hint;
     use std::os::unix::process::ExitStatusExt;
     use std::process::Output;
 
@@ -184,9 +184,12 @@ mod tests {
             home,
             BaseDir::Caches,
             &[
-                "Microsoft Edge", "com.microsoft.VSCode.ShipIt",
-                "ms-playwright", "ms-playwright-go",
-                "electron", "BraveSoftware",
+                "Microsoft Edge",
+                "com.microsoft.VSCode.ShipIt",
+                "ms-playwright",
+                "ms-playwright-go",
+                "electron",
+                "BraveSoftware",
                 "Homebrew",
             ],
         );
@@ -247,7 +250,9 @@ mod tests {
             &[],
         );
         let hints = collect_hints(home, &runner);
-        let vscode = hints.iter().find(|h| h.entry.display_name == "VSCode caches");
+        let vscode = hints
+            .iter()
+            .find(|h| h.entry.display_name == "VSCode caches");
         assert!(vscode.is_some());
         assert_eq!(vscode.unwrap().size_bytes, 600 * 1024 * 1024);
     }
@@ -417,7 +422,10 @@ mod tests {
         let calls = runner.recorded_calls();
         let open_calls: Vec<_> = calls.iter().filter(|(p, _)| p == "open").collect();
         assert_eq!(open_calls.len(), 1);
-        assert!(open_calls[0].1.iter().any(|a| a.contains("Visual Studio Code")));
+        assert!(open_calls[0]
+            .1
+            .iter()
+            .any(|a| a.contains("Visual Studio Code")));
     }
 
     #[test]

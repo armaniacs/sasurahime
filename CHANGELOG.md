@@ -4,6 +4,65 @@ All notable changes to sasurahime will be documented in this file. The format is
 
 ---
 
+## [0.2.0] — 2026-05-29
+
+### Added
+
+- **3 new clean targets: `gem`, `bundle`, `dotnet` (PBI-10/11/12).**
+  `sasurahime clean gem` runs `gem cleanup`, `clean bundle` runs `bundle clean`,
+  `clean dotnet` runs `dotnet nuget locals all --clear`. All follow the standard
+  `command_cleaner` pattern with `is_available()` / `--dry-run` support.
+- **`CleanOptions` struct + `clean_with_opts()` trait method (PBI-06).**
+  `LibraryLogsCleaner.clean_all()` is now `clean_with_opts(opts)` on the `Cleaner`
+  trait, eliminating the special-case dispatch in `main.rs`.
+- **`deleted_paths` on `CleanResult` (PBI-05).** Each cleaner now records
+  successfully-deleted file paths for audit trail (used in `--permanent` mode).
+- **`log` + `env_logger` structured logging (PBI-05).** Runtime diagnostics
+  use `log::warn!`/`log::error!` instead of raw `eprintln!`. Controlled via
+  `RUST_LOG` environment variable (default: `warn`).
+- **Privacy section in README (PBI-08).** Covers data access, telemetry policy,
+  and `history.json` retention. Japanese version included.
+- **iOS backup warning strengthened (PBI-08).** Now explicitly mentions
+  personal data types (contacts, messages, photos) before deletion.
+
+### Changed
+
+- **`is_skippable_error` substring matching → prefix matching (PBI-01).**
+  `contains("Permission denied")` → `starts_with("Permission denied")` to avoid
+  false positives when keywords appear inside longer error messages.
+- **GradleCleaner / JetBrainsCleaner now use `trash::delete_path` (PBI-02).**
+  Previously used `fs::remove_dir_all` directly, bypassing the global
+  `trash_mode` setting. Both now respect Trash / `--permanent` like all other
+  cleaners.
+- **17 "tool not found" E2E tests parameterized with `rstest` (PBI-03).**
+  One parameterized test replaces 17 near-identical functions. Reduces test
+  compilation overhead.
+- **CargoCleaner / MiseCleaner cache detect results (PBI-04).**
+  `std::sync::OnceLock` avoids re-running `find_target_dirs` /
+  `scan_pinned_versions` when `clean()` follows `detect()` in the same process.
+- **`cmd_name!` macro eliminated (PBI-07).** CLI names now come directly from
+  `define_cleaners!`'s `$cli_name` literal; 118 lines removed.
+- **`exit_code() != 0` duplication consolidated (PBI-07).** `run_and_exit()`
+  wrapper replaces 8 manual exit-code checks.
+- **`scan` stderr loss fixed (PBI-05).** `clean_cli_or_fallback` now logs
+  stderr before bailing on non-zero exit.
+- **`hint.rs` split into 4 sub-modules.** 1094-line monolith → `mod.rs`,
+  `apps.rs`, `detector.rs`, `cleaner.rs`. No behavioral change.
+
+### Fixed
+
+- **`#[allow(dead_code)]` stale annotations cleaned (PBI-09).**
+  14 locations reviewed: 6 removed (never-used items), 8 converted to
+  `#[expect(dead_code, reason = "...")]` with intent comments.
+- **TOCTOU race in env-var-derived paths.** `is_safe_delete_target` now
+  re-validated at `clean()` time for `DeleteDirs` and `fallback_delete` paths.
+- **`history.json` concurrent write race.** Exclusive `fs2::FileExt::lock_exclusive`
+  prevents entry loss when two `sasurahime` processes run concurrently.
+- **`SystemCommandRunner::exists()` no longer spawns external `which`.**
+  Native `PATH` resolution via `std::env::split_paths` + `fs::metadata`.
+
+---
+
 ## [0.1.28] — 2026-05-28
 
 ### Added
