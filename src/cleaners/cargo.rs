@@ -164,7 +164,6 @@ mod tests {
     #[test]
     fn detect_includes_primary_target_when_verbose() {
         let _guard = crate::test_helpers::VerboseGuard::new();
-        crate::context::set_verbose(true);
         let tmp = TempDir::new().unwrap();
         // Create registry cache so the cleaner reports Pruneable
         let reg = tmp.path().join(".cargo/registry/cache/pkg");
@@ -185,13 +184,11 @@ mod tests {
                 .contains(".cargo/registry/cache"),
             "target should point to registry cache"
         );
-        crate::context::set_verbose(false);
     }
 
     #[test]
     fn detect_omits_primary_target_when_not_verbose() {
-        let _guard = crate::test_helpers::VerboseGuard::new();
-        crate::context::set_verbose(false);
+        let _guard = crate::test_helpers::VerboseGuard::with_value(false);
         let tmp = TempDir::new().unwrap();
         let reg = tmp.path().join(".cargo/registry/cache/pkg");
         fs::create_dir_all(&reg).unwrap();

@@ -13,7 +13,7 @@ pub enum XcodeSubcategory {
     Archives,
 }
 
-#[allow(dead_code)]
+#[expect(dead_code)]
 impl XcodeSubcategory {
     pub fn all() -> Vec<Self> {
         vec![Self::DerivedData, Self::Archives]
@@ -42,7 +42,7 @@ impl XcodeSubcategory {
     }
 }
 
-#[allow(dead_code)]
+#[expect(dead_code)]
 pub struct SubcategoryInfo {
     pub sub: XcodeSubcategory,
     pub path: PathBuf,
@@ -258,17 +258,8 @@ impl Cleaner for XcodeCleaner {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_helpers::MockRunner;
     use tempfile::TempDir;
-
-    struct NoopRunner;
-    impl CommandRunner for NoopRunner {
-        fn run(&self, program: &str, args: &[&str]) -> anyhow::Result<std::process::Output> {
-            unimplemented!("MockRunner::run called unexpectedly for {program} with args {args:?}")
-        }
-        fn exists(&self, _: &str) -> bool {
-            false
-        }
-    }
 
     struct PgrepRunner {
         running: bool,
@@ -291,7 +282,7 @@ mod tests {
     #[test]
     fn detect_not_found_when_missing() {
         let tmp = TempDir::new().unwrap();
-        let cleaner = XcodeCleaner::new(tmp.path(), Box::new(NoopRunner));
+        let cleaner = XcodeCleaner::new(tmp.path(), Box::new(MockRunner::new().with_not_found()));
         assert!(matches!(cleaner.detect().status, ScanStatus::NotFound));
     }
 
@@ -304,7 +295,7 @@ mod tests {
         fs::create_dir_all(&derived).unwrap();
         fs::write(derived.join("f"), b"x").unwrap();
 
-        let cleaner = XcodeCleaner::new(tmp.path(), Box::new(NoopRunner));
+        let cleaner = XcodeCleaner::new(tmp.path(), Box::new(MockRunner::new().with_not_found()));
         assert!(matches!(cleaner.detect().status, ScanStatus::Pruneable(_)));
     }
 
@@ -369,7 +360,7 @@ mod tests {
         fs::create_dir_all(dd.join("ProjectA")).unwrap();
         fs::write(dd.join("ProjectA").join("f"), b"x").unwrap();
 
-        let cleaner = XcodeCleaner::new(tmp.path(), Box::new(NoopRunner));
+        let cleaner = XcodeCleaner::new(tmp.path(), Box::new(MockRunner::new().with_not_found()));
         let infos = cleaner.detect_subcategories();
         assert_eq!(infos.len(), 2);
         let dd_info = infos
@@ -392,7 +383,7 @@ mod tests {
         fs::write(dd.join("ProjectA").join("f"), b"x").unwrap();
         // Archives not created — should be filtered out
 
-        let cleaner = XcodeCleaner::new(tmp.path(), Box::new(NoopRunner));
+        let cleaner = XcodeCleaner::new(tmp.path(), Box::new(MockRunner::new().with_not_found()));
         let targets = cleaner.sub_targets();
         assert_eq!(targets.len(), 1, "only DerivedData should appear");
         assert_eq!(targets[0].0, "DerivedData");
@@ -403,7 +394,7 @@ mod tests {
     fn sub_targets_filters_zero_size_entries() {
         let tmp = TempDir::new().unwrap();
         // Neither DerivedData nor Archives exist
-        let cleaner = XcodeCleaner::new(tmp.path(), Box::new(NoopRunner));
+        let cleaner = XcodeCleaner::new(tmp.path(), Box::new(MockRunner::new().with_not_found()));
         let targets = cleaner.sub_targets();
         assert!(
             targets.is_empty(),

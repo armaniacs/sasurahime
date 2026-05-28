@@ -1,6 +1,8 @@
 use crate::cleaner::{CleanResult, Cleaner, ScanResult, ScanStatus};
 use crate::command::CommandRunner;
 use crate::format::dir_size;
+#[cfg(test)]
+use crate::test_helpers::MockRunner;
 use crate::progress::ProgressReporter;
 use anyhow::Result;
 use std::collections::HashSet;
@@ -271,18 +273,7 @@ impl Cleaner for MiseCleaner {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_helpers::MockRunner;
     use tempfile::TempDir;
-
-    struct NoopRunner;
-    impl CommandRunner for NoopRunner {
-        fn run(&self, program: &str, args: &[&str]) -> anyhow::Result<std::process::Output> {
-            unimplemented!("MockRunner::run called unexpectedly for {program} with args {args:?}")
-        }
-        fn exists(&self, _: &str) -> bool {
-            false
-        }
-    }
 
     #[test]
     fn parse_active_versions_space_separated() {
@@ -322,7 +313,7 @@ mod tests {
         fs::create_dir_all(installs.join("20.11.0")).unwrap();
         fs::create_dir_all(installs.join("24.15.0")).unwrap();
 
-        let cleaner = MiseCleaner::new(tmp.path(), Box::new(NoopRunner));
+        let cleaner = MiseCleaner::new(tmp.path(), Box::new(MockRunner::new().with_not_found()));
         let mut active = std::collections::HashSet::new();
         active.insert(("node".to_string(), "24.15.0".to_string()));
 
@@ -339,7 +330,7 @@ mod tests {
         let installs = tmp.path().join(".local/share/mise/installs/node");
         fs::create_dir_all(installs.join("24.15.0")).unwrap();
 
-        let cleaner = MiseCleaner::new(tmp.path(), Box::new(NoopRunner));
+        let cleaner = MiseCleaner::new(tmp.path(), Box::new(MockRunner::new().with_not_found()));
         let mut active = std::collections::HashSet::new();
         active.insert(("node".to_string(), "24.15.0".to_string()));
 
@@ -355,7 +346,7 @@ mod tests {
         fs::create_dir_all(installs.join("20.11.0")).unwrap();
         fs::create_dir_all(installs.join("24.15.0")).unwrap();
 
-        let cleaner = MiseCleaner::new(tmp.path(), Box::new(NoopRunner));
+        let cleaner = MiseCleaner::new(tmp.path(), Box::new(MockRunner::new().with_not_found()));
         let active = std::collections::HashSet::new(); // nothing active
 
         let mut pinned = std::collections::HashSet::new();
@@ -380,7 +371,7 @@ mod tests {
         fs::write(installs.join(".DS_Store"), b"").unwrap();
         fs::write(installs.join(".mise.backend"), b"").unwrap();
 
-        let cleaner = MiseCleaner::new(tmp.path(), Box::new(NoopRunner));
+        let cleaner = MiseCleaner::new(tmp.path(), Box::new(MockRunner::new().with_not_found()));
         let active = std::collections::HashSet::new();
         let pinned = std::collections::HashSet::new();
         let unused = cleaner.unused_versions(&active, &pinned);

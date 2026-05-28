@@ -34,8 +34,8 @@ pub struct LogCleaner {
 }
 
 impl LogCleaner {
-    /// `#[allow(dead_code)]`: clients call `new_with_extra` instead.
-    #[allow(dead_code)]
+    /// `#[expect(dead_code)]`: clients call `new_with_extra` instead.
+    #[expect(dead_code)]
     pub fn new(home: &Path, keep_days: u32) -> Self {
         Self::new_with_extra(home, keep_days, vec![])
     }
@@ -357,8 +357,7 @@ mod tests {
     // ── primary_target ──────────────────────────────────────────────────────
     #[test]
     fn detect_primary_target_is_none_when_verbose() {
-        let _guard = crate::context::TEST_LOCK.lock().unwrap();
-        crate::context::set_verbose(true);
+        let _guard = crate::test_helpers::VerboseGuard::new();
         let tmp = TempDir::new().unwrap();
         // Create a log dir with old files so detect() returns Pruneable
         let log_dir = tmp.path().join(".local/share/kilo/log");
@@ -372,6 +371,5 @@ mod tests {
             result.primary_target.is_none(),
             "LogCleaner has no single primary target"
         );
-        crate::context::set_verbose(false);
     }
 }

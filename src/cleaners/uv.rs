@@ -2,6 +2,8 @@ use crate::cleaner::{CleanResult, Cleaner, ScanResult, ScanStatus};
 use crate::command::CommandRunner;
 use crate::format::dir_size;
 use crate::progress::ProgressReporter;
+#[cfg(test)]
+use crate::test_helpers::MockRunner;
 use anyhow::Result;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -131,16 +133,6 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
-    struct NoopRunner;
-    impl CommandRunner for NoopRunner {
-        fn run(&self, program: &str, args: &[&str]) -> anyhow::Result<std::process::Output> {
-            unimplemented!("MockRunner::run called unexpectedly for {program} with args {args:?}")
-        }
-        fn exists(&self, _: &str) -> bool {
-            false
-        }
-    }
-
     #[test]
     fn parse_simple_version_valid() {
         assert_eq!(UvCleaner::parse_simple_version("simple-v16"), Some(16));
@@ -162,7 +154,7 @@ mod tests {
         std::fs::create_dir_all(cache.join("simple-v17")).unwrap();
         std::fs::create_dir_all(cache.join("simple-v21")).unwrap();
 
-        let cleaner = UvCleaner::new(tmp.path(), Box::new(NoopRunner));
+        let cleaner = UvCleaner::new(tmp.path(), Box::new(MockRunner::new().with_not_found()));
         let old = cleaner.detect_old_indexes();
         assert_eq!(old.len(), 2);
         let names: Vec<_> = old
@@ -179,7 +171,7 @@ mod tests {
         let cache = tmp.path().join(".cache/uv");
         std::fs::create_dir_all(cache.join("simple-v21")).unwrap();
 
-        let cleaner = UvCleaner::new(tmp.path(), Box::new(NoopRunner));
+        let cleaner = UvCleaner::new(tmp.path(), Box::new(MockRunner::new().with_not_found()));
         assert!(cleaner.detect_old_indexes().is_empty());
     }
 
@@ -196,7 +188,7 @@ mod tests {
             std::os::unix::fs::symlink(&target, cache.join("simple-v99")).unwrap();
         }
 
-        let cleaner = UvCleaner::new(tmp.path(), Box::new(NoopRunner));
+        let cleaner = UvCleaner::new(tmp.path(), Box::new(MockRunner::new().with_not_found()));
         // Without the symlink guard, simple-v99 would be the max and simple-v21 would
         // be marked as old. With the guard, only simple-v21 exists → returns empty.
         assert!(cleaner.detect_old_indexes().is_empty());
@@ -209,7 +201,7 @@ mod tests {
         std::fs::create_dir_all(&cache).unwrap();
         std::fs::write(cache.join("simple-v21"), b"not a dir").unwrap();
 
-        let cleaner = UvCleaner::new(tmp.path(), Box::new(NoopRunner));
+        let cleaner = UvCleaner::new(tmp.path(), Box::new(MockRunner::new().with_not_found()));
         // The .to_owned() returns None (not a dir), so the entry is skipped by
         // filter_map. But we test explicitly here for clarity.
         assert!(cleaner.detect_old_indexes().is_empty());
@@ -219,7 +211,7 @@ mod tests {
     fn detect_old_indexes_missing_dir_returns_empty() {
         let tmp = TempDir::new().unwrap();
         // cache dir does not exist
-        let cleaner = UvCleaner::new(tmp.path(), Box::new(NoopRunner));
+        let cleaner = UvCleaner::new(tmp.path(), Box::new(MockRunner::new().with_not_found()));
         assert!(cleaner.detect_old_indexes().is_empty());
     }
 
@@ -236,7 +228,7 @@ mod tests {
         std::fs::create_dir_all(cache.join("simple-v17")).unwrap();
         std::fs::write(cache.join("simple-v17/index.html"), [0u8; 1024]).unwrap();
 
-        let cleaner = UvCleaner::new(tmp.path(), Box::new(NoopRunner));
+        let cleaner = UvCleaner::new(tmp.path(), Box::new(MockRunner::new().with_not_found()));
         let result = cleaner.detect();
 
         let expected = crate::format::dir_size(&cache);
@@ -250,7 +242,7 @@ mod tests {
     fn detect_returns_not_found_when_cache_missing() {
         let tmp = TempDir::new().unwrap();
         // cache dir does not exist
-        let cleaner = UvCleaner::new(tmp.path(), Box::new(NoopRunner));
+        let cleaner = UvCleaner::new(tmp.path(), Box::new(MockRunner::new().with_not_found()));
         let result = cleaner.detect();
         assert!(
             matches!(result.status, ScanStatus::NotFound),

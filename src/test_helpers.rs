@@ -186,6 +186,16 @@ impl VerboseGuard {
             _lock: lock,
         }
     }
+
+    pub fn with_value(verbose: bool) -> Self {
+        let lock = crate::context::TEST_LOCK.lock().ok();
+        let previous = crate::context::is_verbose();
+        crate::context::set_verbose(verbose);
+        Self {
+            previous,
+            _lock: lock,
+        }
+    }
 }
 
 impl Drop for VerboseGuard {

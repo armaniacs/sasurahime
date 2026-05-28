@@ -201,7 +201,7 @@ impl GenericCleaner {
         .with_older_than(30)
     }
 
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     pub fn cargo_registry(home: &Path, runner: Box<dyn CommandRunner>) -> Self {
         Self::base_cleaner(
             "cargo-registry",
@@ -551,7 +551,7 @@ impl Cleaner for GenericCleaner {
                         return Ok(CleanResult {
                             name: self.name(),
                             bytes_freed: size_before,
-                            uses_trash: true,
+                            uses_trash: crate::trash::is_trash_mode(),
                             skipped: vec![],
                         });
                     }
@@ -649,7 +649,7 @@ impl Cleaner for GenericCleaner {
                 Ok(CleanResult {
                     name: self.name(),
                     bytes_freed: freed,
-                    uses_trash: true,
+                    uses_trash: crate::trash::is_trash_mode(),
                     skipped: vec![],
                 })
             }
@@ -830,7 +830,7 @@ pub fn clean_cli_or_fallback(
     Ok(CleanResult {
         name,
         bytes_freed: size,
-        uses_trash: true,
+        uses_trash: crate::trash::is_trash_mode(),
         skipped: vec![],
     })
 }
@@ -1028,7 +1028,6 @@ mod tests {
     #[test]
     fn detect_includes_primary_target_when_verbose() {
         let _guard = crate::test_helpers::VerboseGuard::new();
-        crate::context::set_verbose(true);
         let tmp = tempfile::TempDir::new().unwrap();
         let cache = tmp.path().join(".cache/act");
         fs::create_dir_all(&cache).unwrap();
@@ -1044,13 +1043,11 @@ mod tests {
             result.primary_target.unwrap().contains(".cache/act"),
             "target should point to act cache dir"
         );
-        crate::context::set_verbose(false);
     }
 
     #[test]
     fn detect_omits_primary_target_when_not_verbose() {
-        let _guard = crate::test_helpers::VerboseGuard::new();
-        crate::context::set_verbose(false);
+        let _guard = crate::test_helpers::VerboseGuard::with_value(false);
         let tmp = tempfile::TempDir::new().unwrap();
         let cache = tmp.path().join(".cache/act");
         fs::create_dir_all(&cache).unwrap();

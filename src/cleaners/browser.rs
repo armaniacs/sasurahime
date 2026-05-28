@@ -273,8 +273,7 @@ mod tests {
     // ── primary_target ──────────────────────────────────────────────────────
     #[test]
     fn detect_includes_primary_target_when_verbose() {
-        let _guard = crate::context::TEST_LOCK.lock().unwrap();
-        crate::context::set_verbose(true);
+        let _guard = crate::test_helpers::VerboseGuard::new();
         let tmp = TempDir::new().unwrap();
         let chrome = tmp.path().join(".cache/puppeteer/chrome");
         fs::create_dir_all(chrome.join("mac_arm-131.0.6778.204")).unwrap();
@@ -295,13 +294,11 @@ mod tests {
                 .contains(".cache/puppeteer/chrome"),
             "target should point to first browser group parent"
         );
-        crate::context::set_verbose(false);
     }
 
     #[test]
     fn detect_omits_primary_target_when_not_verbose() {
-        let _guard = crate::context::TEST_LOCK.lock().unwrap();
-        crate::context::set_verbose(false);
+        let _guard = crate::test_helpers::VerboseGuard::with_value(false);
         let tmp = TempDir::new().unwrap();
         let chrome = tmp.path().join(".cache/puppeteer/chrome");
         fs::create_dir_all(chrome.join("mac_arm-131.0.6778.204")).unwrap();
