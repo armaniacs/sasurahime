@@ -105,9 +105,12 @@ impl Cleaner for GradleCleaner {
                     crate::format::format_bytes(size)
                 );
             } else {
-                self.runner
-                    .run("chflags", &["-R", "nouchg", &path.to_string_lossy()])
-                    .ok();
+                if let Err(e) = self.runner.run("chflags", &["-R", "nouchg", &path.to_string_lossy()]) {
+                    eprintln!(
+                        "[gradle] warning: chflags failed for {}: {e}",
+                        path.display()
+                    );
+                }
                 if let Err(e) = crate::trash::delete_path(path) {
                     if crate::cleaner::is_skippable_error(&e) {
                         skipped.push(crate::cleaner::SkippedEntry {
@@ -247,9 +250,12 @@ impl Cleaner for JetBrainsCleaner {
                     crate::format::format_bytes(size)
                 );
             } else {
-                self.runner
-                    .run("chflags", &["-R", "nouchg", &path.to_string_lossy()])
-                    .ok();
+                if let Err(e) = self.runner.run("chflags", &["-R", "nouchg", &path.to_string_lossy()]) {
+                    eprintln!(
+                        "[jetbrains] warning: chflags failed for {}: {e}",
+                        path.display()
+                    );
+                }
                 if let Err(e) = crate::trash::delete_path(path) {
                     if crate::cleaner::is_skippable_error(&e) {
                         skipped.push(crate::cleaner::SkippedEntry {

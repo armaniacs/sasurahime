@@ -289,14 +289,12 @@ mod tests {
     #[test]
     fn detect_primary_target_is_none_when_verbose() {
         let cleaner = ApfsSnapshotCleaner::new(Box::new(NoSnapshots));
-        let _guard = crate::context::TEST_LOCK.lock().unwrap();
-        crate::context::set_verbose(true);
+        let _guard = crate::test_helpers::VerboseGuard::new();
         let result = cleaner.detect();
         // ApfsSnapshotCleaner operates on system snapshots, not a user directory
         assert!(
             result.primary_target.is_none(),
             "ApfsSnapshotCleaner has no primary target"
         );
-        crate::context::set_verbose(false);
     }
 }
