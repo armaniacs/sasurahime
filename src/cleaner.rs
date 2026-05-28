@@ -207,18 +207,20 @@ mod tests {
 
     #[test]
     fn is_skippable_error_false_positive_permission_denied_in_filename() {
-        let e = anyhow::anyhow!(
-            "Database says: Operation not permitted in current mode"
+        let e = anyhow::anyhow!("Database says: Operation not permitted in current mode");
+        assert!(
+            !is_skippable_error(&e),
+            "sentence with 'Operation not permitted' => not skippable"
         );
-        assert!(!is_skippable_error(&e), "sentence with 'Operation not permitted' => not skippable");
     }
 
     #[test]
     fn is_skippable_error_permission_denied_sentence_not_io_error() {
-        let e = anyhow::anyhow!(
-            "Error: user lacks 'Permission denied' access to resource"
+        let e = anyhow::anyhow!("Error: user lacks 'Permission denied' access to resource");
+        assert!(
+            !is_skippable_error(&e),
+            "sentence with 'Permission denied' substring => not skippable"
         );
-        assert!(!is_skippable_error(&e), "sentence with 'Permission denied' substring => not skippable");
     }
 
     #[test]
@@ -229,10 +231,11 @@ mod tests {
 
     #[test]
     fn is_skippable_error_resource_busy_in_unrelated_error() {
-        let e = anyhow::anyhow!(
-            "The device reports 'Resource busy' in its status string"
+        let e = anyhow::anyhow!("The device reports 'Resource busy' in its status string");
+        assert!(
+            !is_skippable_error(&e),
+            "sentence with 'Resource busy' substring => not skippable"
         );
-        assert!(!is_skippable_error(&e), "sentence with 'Resource busy' substring => not skippable");
     }
 
     #[test]

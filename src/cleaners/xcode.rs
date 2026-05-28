@@ -6,7 +6,6 @@ use anyhow::Result;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum XcodeSubcategory {
     DerivedData,
@@ -86,7 +85,6 @@ impl XcodeCleaner {
     }
 
     /// Returns true if an Xcode process is currently running.
-    #[allow(dead_code)]
     pub fn is_xcode_running(&self) -> bool {
         self.runner
             .run("pgrep", &["-x", "Xcode"])

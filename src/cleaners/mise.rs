@@ -1,9 +1,9 @@
 use crate::cleaner::{CleanResult, Cleaner, ScanResult, ScanStatus};
 use crate::command::CommandRunner;
 use crate::format::dir_size;
+use crate::progress::ProgressReporter;
 #[cfg(test)]
 use crate::test_helpers::MockRunner;
-use crate::progress::ProgressReporter;
 use anyhow::Result;
 use std::collections::HashSet;
 use std::fs;
@@ -429,30 +429,21 @@ mod tests {
     #[test]
     fn parse_tools_section_toolchain_not_confused_with_tools() {
         let mut result = std::collections::HashSet::new();
-        MiseCleaner::parse_tools_section(
-            "[toolchain]\nchannel = \"stable\"\n",
-            &mut result,
-        );
+        MiseCleaner::parse_tools_section("[toolchain]\nchannel = \"stable\"\n", &mut result);
         assert!(result.is_empty(), "[toolchain] must not match [tools]");
     }
 
     #[test]
     fn parse_tools_section_devtools_not_confused_with_tools() {
         let mut result = std::collections::HashSet::new();
-        MiseCleaner::parse_tools_section(
-            "[devtools]\nnode = \"20.0.0\"\n",
-            &mut result,
-        );
+        MiseCleaner::parse_tools_section("[devtools]\nnode = \"20.0.0\"\n", &mut result);
         assert!(result.is_empty(), "[devtools] must not match [tools]");
     }
 
     #[test]
     fn parse_tools_section_second_section_ends_tools() {
         let mut result = std::collections::HashSet::new();
-        MiseCleaner::parse_tools_section(
-            "[tools]\nnode = \"22.0.0\"\n[aliases]\n",
-            &mut result,
-        );
+        MiseCleaner::parse_tools_section("[tools]\nnode = \"22.0.0\"\n[aliases]\n", &mut result);
         assert!(result.contains(&("node".to_string(), "22.0.0".to_string())));
         assert_eq!(result.len(), 1, "[aliases] should end [tools] section");
     }
@@ -507,25 +498,27 @@ mod tests {
     #[test]
     fn clean_handles_mise_ls_current_failure_gracefully() {
         let tmp = TempDir::new().unwrap();
-        let runner = MockRunner::new()
-            .with_not_found();
+        let runner = MockRunner::new().with_not_found();
         let cleaner = MiseCleaner::new(tmp.path(), Box::new(runner));
         // even though mise is not found, clean should not crash
-        let result = cleaner.clean(false, &crate::progress::DeepSuppressReporter).unwrap();
+        let result = cleaner
+            .clean(false, &crate::progress::DeepSuppressReporter)
+            .unwrap();
         assert_eq!(result.bytes_freed, 0);
     }
 
     #[test]
     fn detect_and_clean_consistent_on_mise_not_found() {
         let tmp = TempDir::new().unwrap();
-        let runner = MockRunner::new()
-            .with_not_found();
+        let runner = MockRunner::new().with_not_found();
         let cleaner = MiseCleaner::new(tmp.path(), Box::new(runner));
         // detect should soft-fail when mise not found
         let detect_result = cleaner.detect();
         assert!(matches!(detect_result.status, ScanStatus::NotFound));
         // clean should also soft-fail
-        let clean_result = cleaner.clean(false, &crate::progress::DeepSuppressReporter).unwrap();
+        let clean_result = cleaner
+            .clean(false, &crate::progress::DeepSuppressReporter)
+            .unwrap();
         assert_eq!(clean_result.bytes_freed, 0);
     }
 }

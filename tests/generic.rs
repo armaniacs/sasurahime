@@ -48,22 +48,22 @@ fn clean_bun_calls_pm_cache_rm() {
 use rstest::rstest;
 
 #[rstest]
-#[case("bun",          "/usr/bin:/bin", true)]
-#[case("cocoa-pods",   "/usr/bin:/bin", true)]
-#[case("colima",       "/usr/bin:/bin", true)]
-#[case("conda",        "/usr/bin:/bin", true)]
-#[case("deno",         "/usr/bin:/bin", true)]
-#[case("docker",       "/usr/bin:/bin", true)]
-#[case("flutter",      "/usr/bin:/bin", false)]
-#[case("maven",        "/usr/bin:/bin", true)]
-#[case("orbstack",     "/usr/bin:/bin", true)]
-#[case("pipx",         "/usr/bin:/bin", true)]
-#[case("poetry",       "/usr/bin:/bin", true)]
-#[case("sbt",          "/usr/bin:/bin", false)]
-#[case("simulator",    "/tmp",           true)]
-#[case("terraform",    "/usr/bin:/bin", false)]
-#[case("tree-sitter",  "/usr/bin:/bin", false)]
-#[case("volta",        "/usr/bin:/bin", false)]
+#[case("bun", "/usr/bin:/bin", true)]
+#[case("cocoa-pods", "/usr/bin:/bin", true)]
+#[case("colima", "/usr/bin:/bin", true)]
+#[case("conda", "/usr/bin:/bin", true)]
+#[case("deno", "/usr/bin:/bin", true)]
+#[case("docker", "/usr/bin:/bin", true)]
+#[case("flutter", "/usr/bin:/bin", false)]
+#[case("maven", "/usr/bin:/bin", true)]
+#[case("orbstack", "/usr/bin:/bin", true)]
+#[case("pipx", "/usr/bin:/bin", true)]
+#[case("poetry", "/usr/bin:/bin", true)]
+#[case("sbt", "/usr/bin:/bin", false)]
+#[case("simulator", "/tmp", true)]
+#[case("terraform", "/usr/bin:/bin", false)]
+#[case("tree-sitter", "/usr/bin:/bin", false)]
+#[case("volta", "/usr/bin:/bin", false)]
 #[case("vscode-extensions", "/usr/bin:/bin", false)]
 fn clean_tool_not_found_skips(#[case] tool: &str, #[case] path: &str, #[case] check_stdout: bool) {
     let tmp = TempDir::new().unwrap();
@@ -162,8 +162,6 @@ fn clean_caches_continues_past_missing_tools() {
     let calls = recorded_calls(&bin_dir, "bun");
     assert!(calls.contains("pm cache rm"), "bun must still be called");
 }
-
-
 
 #[test]
 fn clean_spm_cache_dry_run_deletes_nothing() {
@@ -279,8 +277,6 @@ fn clean_colima_dry_run_does_not_invoke() {
     );
 }
 
-
-
 #[test]
 fn scan_shows_colima_for_existing_dir() {
     let tmp = TempDir::new().unwrap();
@@ -357,10 +353,7 @@ fn clean_bundle_calls_clean() {
 
     assert!(output.status.success());
     let calls = recorded_calls(&bin_dir, "bundle");
-    assert!(
-        calls.contains("clean"),
-        "expected 'clean', got: {calls}"
-    );
+    assert!(calls.contains("clean"), "expected 'clean', got: {calls}");
 }
 
 #[test]

@@ -505,11 +505,15 @@ mod tests {
         let past = SystemTime::now() - Duration::from_secs(200 * 86400);
         set_file_mtime(&logs.join("old.log"), FileTime::from_system_time(past)).unwrap();
 
-        let runner = crate::test_helpers::MockRunner::new()
-            .with_success("chflags");
+        let runner = crate::test_helpers::MockRunner::new().with_success("chflags");
         let cleaner = LibraryLogsCleaner::new(tmp.path(), Box::new(runner));
-        let result = cleaner.clean_all(false, &crate::progress::DeepSuppressReporter).unwrap();
-        assert!(result.bytes_freed > 0, "clean_all should process all entries");
+        let result = cleaner
+            .clean_all(false, &crate::progress::DeepSuppressReporter)
+            .unwrap();
+        assert!(
+            result.bytes_freed > 0,
+            "clean_all should process all entries"
+        );
         assert!(result.uses_trash, "LibraryLogsCleaner should use trash");
     }
 
@@ -518,10 +522,11 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let logs = logs_dir(&tmp);
         fs::write(logs.join("big.log"), b"x".repeat(200)).unwrap();
-        let runner = crate::test_helpers::MockRunner::new()
-            .with_success("chflags");
+        let runner = crate::test_helpers::MockRunner::new().with_success("chflags");
         let cleaner = LibraryLogsCleaner::new(tmp.path(), Box::new(runner));
-        let result = cleaner.clean(true, &crate::progress::DeepSuppressReporter).unwrap();
+        let result = cleaner
+            .clean(true, &crate::progress::DeepSuppressReporter)
+            .unwrap();
         // dry run should succeed without interactive prompt
         assert_eq!(result.bytes_freed, 0);
     }

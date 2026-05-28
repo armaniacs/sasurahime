@@ -78,15 +78,13 @@ impl CommandRunner for SystemCommandRunner {
                     let candidate = dir.join(program);
                     if candidate.is_file() {
                         // Also verify it's executable on Unix.
-                        std::fs::metadata(&candidate)
-                            .ok()
-                            .and_then(|m| {
-                                if m.permissions().mode() & 0o111 != 0 {
-                                    Some(())
-                                } else {
-                                    None
-                                }
-                            })
+                        std::fs::metadata(&candidate).ok().and_then(|m| {
+                            if m.permissions().mode() & 0o111 != 0 {
+                                Some(())
+                            } else {
+                                None
+                            }
+                        })
                     } else {
                         None
                     }

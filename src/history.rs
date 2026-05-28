@@ -106,6 +106,7 @@ pub fn append_history(entry: &HistoryEntry, history_dir: &Path) -> anyhow::Resul
             .read(true)
             .write(true)
             .create(true)
+            .truncate(true)
             .open(&history_path)?
     };
     file.lock_exclusive()?;
