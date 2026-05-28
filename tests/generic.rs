@@ -504,3 +504,69 @@ fn clean_flutter_rejects_unsafe_env_var() {
         .unwrap();
     assert!(output.status.success());
 }
+
+#[test]
+fn clean_gem_calls_cleanup() {
+    let tmp = TempDir::new().unwrap();
+    let bin_dir = tmp.path().join("bin");
+    fs::create_dir_all(&bin_dir).unwrap();
+    install_fake_tool(&bin_dir, "gem");
+
+    let original_path = std::env::var("PATH").unwrap_or_default();
+    let output = sasurahime(tmp.path())
+        .env("PATH", format!("{}:{original_path}", bin_dir.display()))
+        .args(["clean", "gem"])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let calls = recorded_calls(&bin_dir, "gem");
+    assert!(
+        calls.contains("cleanup"),
+        "expected 'cleanup', got: {calls}"
+    );
+}
+
+#[test]
+fn clean_bundle_calls_clean() {
+    let tmp = TempDir::new().unwrap();
+    let bin_dir = tmp.path().join("bin");
+    fs::create_dir_all(&bin_dir).unwrap();
+    install_fake_tool(&bin_dir, "bundle");
+
+    let original_path = std::env::var("PATH").unwrap_or_default();
+    let output = sasurahime(tmp.path())
+        .env("PATH", format!("{}:{original_path}", bin_dir.display()))
+        .args(["clean", "bundle"])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let calls = recorded_calls(&bin_dir, "bundle");
+    assert!(
+        calls.contains("clean"),
+        "expected 'clean', got: {calls}"
+    );
+}
+
+#[test]
+fn clean_dotnet_calls_nuget_locals_clear() {
+    let tmp = TempDir::new().unwrap();
+    let bin_dir = tmp.path().join("bin");
+    fs::create_dir_all(&bin_dir).unwrap();
+    install_fake_tool(&bin_dir, "dotnet");
+
+    let original_path = std::env::var("PATH").unwrap_or_default();
+    let output = sasurahime(tmp.path())
+        .env("PATH", format!("{}:{original_path}", bin_dir.display()))
+        .args(["clean", "dotnet"])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let calls = recorded_calls(&bin_dir, "dotnet");
+    assert!(
+        calls.contains("nuget locals all --clear"),
+        "expected 'nuget locals all --clear', got: {calls}"
+    );
+}
