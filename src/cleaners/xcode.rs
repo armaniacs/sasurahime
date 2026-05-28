@@ -176,7 +176,7 @@ impl Cleaner for XcodeCleaner {
                     bytes_freed: 0,
                     uses_trash: false,
                     skipped: vec![],
-            deleted_paths: vec![],
+                    deleted_paths: vec![],
                 });
             }
         }
@@ -250,7 +250,7 @@ impl Cleaner for XcodeCleaner {
             bytes_freed: total_freed,
             uses_trash: true,
             skipped: all_skipped,
-        deleted_paths: vec![],
+            deleted_paths: vec![],
         })
     }
 }

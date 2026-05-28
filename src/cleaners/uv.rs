@@ -90,7 +90,7 @@ impl Cleaner for UvCleaner {
                 bytes_freed: 0,
                 uses_trash: false,
                 skipped: vec![],
-            deleted_paths: vec![],
+                deleted_paths: vec![],
             });
         }
 

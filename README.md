@@ -3,9 +3,11 @@
 <details open>
 <summary><strong>🇺🇸 English</strong></summary>
 
-A macOS developer cache cleaner written in Rust.
+Scan, select, and remove stale caches from 40+ developer tools — uv, Homebrew, mise, Docker, Cargo, Go, pip, and more — all from a single command on macOS.
 
-sasurahime scans well-known cache locations — uv, Homebrew, mise runtimes, Playwright/Puppeteer browsers, bun, Go, pip, and more — shows you what's taking up space, and lets you choose what to remove. Safely.
+sasurahime only removes caches and unused old versions. It never touches runtimes or packages that are currently in use. Every deletion goes to macOS Trash by default, so you can restore anything with a single click.
+
+**What 44 GB looks like:**
 
 ```
 $ sasurahime scan
@@ -27,20 +29,13 @@ Total reclaimable    44.2 GB
 ## Usage
 
 ```bash
-# Scan and report (no deletion)
+# --- Step 1: see what's reclaimable (no deletion) ---
 sasurahime scan
+sasurahime targets               # list all supported clean targets
 
-# List all supported clean targets
-sasurahime targets
-
-# Show version
-sasurahime --version
-
-# Clean everything interactively
-sasurahime
-
-# Clean specific targets
-sasurahime clean uv
+# --- Step 2: clean what you want ---
+sasurahime                       # interactive — pick targets from a menu
+sasurahime clean uv              # clean a specific target
 sasurahime clean brew
 sasurahime clean mise
 sasurahime clean browsers
@@ -48,14 +43,11 @@ sasurahime clean xcode
 sasurahime clean caches          # bun / go / pip / node-gyp / npm / yarn / pnpm
 sasurahime clean logs
 
-# Preview without deleting
-sasurahime clean uv --dry-run
-
-# Non-interactive (CI / scripting)
-sasurahime --yes
-
-# Permanently delete (bypass Trash)
-sasurahime clean uv --permanent
+# --- Options ---
+sasurahime clean uv --dry-run    # preview without deleting
+sasurahime --yes                 # non-interactive full clean (CI / scripting)
+sasurahime clean uv --permanent  # permanently delete (bypass Trash)
+sasurahime --version
 ```
 
 ## Safety first
@@ -113,9 +105,11 @@ For feature proposals, please open an issue first so we can discuss the scope be
 <details>
 <summary><strong>🇯🇵 日本語</strong></summary>
 
-macOS 開発者向けキャッシュクリーナー（Rust 製）。
+uv・Homebrew・mise・Docker・Cargo・Go・pip など 40 以上のツールの古いキャッシュを、スキャン・選択・削除。macOS 開発者向けキャッシュクリーナー（Rust 製）。
 
-uv・Homebrew・mise のランタイム・Playwright/Puppeteer のブラウザバイナリ・bun・Go・pip など、開発ツールが積み上げたキャッシュをスキャンし、何がどれだけ使っているかを表示したうえで、選択して削除できます。安全に。
+削除するのはキャッシュや古いバージョンのみです。現在使用中のランタイムやパッケージには一切触れません。また、削除したファイルはデフォルトで macOS のゴミ箱に移動されるため、いつでも Finder から復元できます。
+
+**44 GB が積み上がるとこうなる:**
 
 ```
 $ sasurahime scan
@@ -137,20 +131,13 @@ Total reclaimable    44.2 GB
 ## 使い方
 
 ```bash
-# スキャンして一覧表示（削除しない）
+# --- Step 1: まず何があるか確認する（削除しない）---
 sasurahime scan
+sasurahime targets               # 対応している削除対象を一覧表示
 
-# 対応している削除対象を一覧表示
-sasurahime targets
-
-# バージョン表示
-sasurahime --version
-
-# インタラクティブに選択して削除
-sasurahime
-
-# 対象を指定して削除
-sasurahime clean uv
+# --- Step 2: 削除したいものを片付ける ---
+sasurahime                       # インタラクティブモード — メニューから選択
+sasurahime clean uv              # 対象を指定して削除
 sasurahime clean brew
 sasurahime clean mise
 sasurahime clean browsers
@@ -158,15 +145,11 @@ sasurahime clean xcode
 sasurahime clean caches          # bun / go / pip / node-gyp / npm / yarn / pnpm
 sasurahime clean logs
 
-# 削除せずに確認だけ（dry-run）
-sasurahime clean uv --dry-run
-sasurahime scan --dry-run
-
-# 確認なしで全削除（CI・スクリプト向け）
-sasurahime --yes
-
-# 完全削除（ゴミ箱を経由しない）
-sasurahime clean uv --permanent
+# --- オプション ---
+sasurahime clean uv --dry-run    # 削除せずに確認だけ（dry-run）
+sasurahime --yes                 # 確認なしで全削除（CI・スクリプト向け）
+sasurahime clean uv --permanent  # 完全削除（ゴミ箱を経由しない）
+sasurahime --version
 ```
 
 ## 安全性について

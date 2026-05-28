@@ -361,7 +361,10 @@ impl GenericCleaner {
                     CleanMethod::Command { .. } | CleanMethod::CommandWithDetectDir { .. }
                 )
             {
-                log::warn!("per-cleaner filters not supported for '{}': command-based cleaner", name);
+                log::warn!(
+                    "per-cleaner filters not supported for '{}': command-based cleaner",
+                    name
+                );
             }
             let mut c = self;
             if let Some(days) = pcc.older_than_days {
@@ -476,7 +479,7 @@ impl Cleaner for GenericCleaner {
                         bytes_freed: 0,
                         uses_trash: false,
                         skipped: vec![],
-            deleted_paths: vec![],
+                        deleted_paths: vec![],
                     });
                 }
                 if dry_run {
@@ -486,7 +489,7 @@ impl Cleaner for GenericCleaner {
                         bytes_freed: 0,
                         uses_trash: false,
                         skipped: vec![],
-            deleted_paths: vec![],
+                        deleted_paths: vec![],
                     });
                 }
                 println!("$ {program} {}", args.join(" "));
@@ -496,7 +499,7 @@ impl Cleaner for GenericCleaner {
                     bytes_freed: 0,
                     uses_trash: false,
                     skipped: vec![],
-            deleted_paths: vec![],
+                    deleted_paths: vec![],
                 })
             }
             CleanMethod::CommandWithDetectDir {
@@ -540,7 +543,7 @@ impl Cleaner for GenericCleaner {
                                 bytes_freed: 0,
                                 uses_trash: false,
                                 skipped: vec![],
-            deleted_paths: vec![],
+                                deleted_paths: vec![],
                             });
                         }
                         // TOCTOU mitigation: re-validate fallback delete path.
@@ -555,7 +558,7 @@ impl Cleaner for GenericCleaner {
                                 bytes_freed: 0,
                                 uses_trash: crate::trash::is_trash_mode(),
                                 skipped: vec![],
-            deleted_paths: vec![],
+                                deleted_paths: vec![],
                             });
                         }
                         let path_str = detect_dir.to_string_lossy();
@@ -577,7 +580,7 @@ impl Cleaner for GenericCleaner {
                             bytes_freed: size_before,
                             uses_trash: crate::trash::is_trash_mode(),
                             skipped: vec![],
-            deleted_paths: vec![],
+                            deleted_paths: vec![],
                         });
                     }
                     println!("{}: not found, skipping", self.display_name);
@@ -586,7 +589,7 @@ impl Cleaner for GenericCleaner {
                         bytes_freed: 0,
                         uses_trash: false,
                         skipped: vec![],
-            deleted_paths: vec![],
+                        deleted_paths: vec![],
                     });
                 }
                 if dry_run {
@@ -602,7 +605,7 @@ impl Cleaner for GenericCleaner {
                         bytes_freed: 0,
                         uses_trash: false,
                         skipped: vec![],
-            deleted_paths: vec![],
+                        deleted_paths: vec![],
                     });
                 }
                 println!("$ {program} {}", args.join(" "));
@@ -634,7 +637,7 @@ impl Cleaner for GenericCleaner {
                     bytes_freed: freed,
                     uses_trash: false,
                     skipped: vec![],
-            deleted_paths: vec![],
+                    deleted_paths: vec![],
                 })
             }
             CleanMethod::DeleteDirs(dirs) => {
@@ -689,7 +692,7 @@ impl Cleaner for GenericCleaner {
                     bytes_freed: freed,
                     uses_trash: crate::trash::is_trash_mode(),
                     skipped: vec![],
-            deleted_paths: vec![],
+                    deleted_paths: vec![],
                 })
             }
         }
@@ -819,14 +822,18 @@ pub fn clean_cli_or_fallback(
                 bytes_freed: 0,
                 uses_trash: false,
                 skipped: vec![],
-            deleted_paths: vec![],
+                deleted_paths: vec![],
             });
         }
         let size_before = dir_size(dir);
         let output = runner.run(config.tool, config.args)?;
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            log::warn!("{} failed (exit {:?}): {stderr}", config.tool, output.status.code());
+            log::warn!(
+                "{} failed (exit {:?}): {stderr}",
+                config.tool,
+                output.status.code()
+            );
             anyhow::bail!(
                 "{} failed with exit code {:?}",
                 config.tool,
@@ -877,7 +884,7 @@ pub fn clean_cli_or_fallback(
         bytes_freed: size,
         uses_trash: crate::trash::is_trash_mode(),
         skipped: vec![],
-            deleted_paths: vec![],
+        deleted_paths: vec![],
     })
 }
 

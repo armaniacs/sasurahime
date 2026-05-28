@@ -7,9 +7,63 @@ permalink: /SUPPORTED
 <details open markdown="1">
 <summary markdown="0"><strong>🇺🇸 English</strong></summary>
 
-sasurahime provides **46 clean targets** organized by sprint.
-Every target supports both `detect` (read-only, no side effects) and
-`clean` (removal). All `clean` subcommands accept `--dry-run`.
+sasurahime provides **49 clean targets**. Every target supports both `detect`
+(read-only, no side effects) and `clean` (removal). All `clean` subcommands
+accept `--dry-run`. Only caches and old versions are removed — active runtimes
+and packages are never touched.
+
+### Quick Reference
+
+| Target | What it removes |
+|--------|-----------------|
+| `uv` | Stale `simple-vN` index dirs + `uv cache prune --force` |
+| `brew` | `brew cleanup -s --prune=all` |
+| `mise` | Unused runtime versions (cross-checks `.mise.toml` first) |
+| `browsers` | Old Puppeteer/Playwright builds (keeps latest per family) |
+| `cargo` | Cargo registry cache + `target/` dirs |
+| `bun` | `bun pm cache rm` |
+| `go` | `go clean -cache` |
+| `pip` | `pip cache purge` |
+| `npm` | `npm cache clean --force` |
+| `yarn` | `yarn cache clean` |
+| `pnpm` | `pnpm store prune` |
+| `deno` | `deno cache -r` |
+| `rustup` | Unused Rust toolchains |
+| `flutter` | `dart pub cache clean` |
+| `conda` | `conda clean --all -y` |
+| `pipx` | `pipx cache purge` |
+| `poetry` | `poetry cache clear --all` |
+| `gem` | `gem cleanup` |
+| `bundle` | `bundle clean` |
+| `dotnet` | `dotnet nuget locals all --clear` |
+| `caches` | All of: bun, go, pip, node-gyp, npm, yarn, pnpm |
+| `node-gyp` | `~/.cache/node-gyp/` |
+| `xcode` | Xcode DerivedData project dirs |
+| `device-support` | Old Xcode DeviceSupport dirs (keeps recent N) |
+| `simulator` | `xcrun simctl delete unavailable` |
+| `spm` | SwiftPM cache dirs |
+| `cocoa-pods` | `pod cache clean --all` |
+| `gradle` | Old Gradle version caches |
+| `maven` | `mvn dependency:purge-local-repository` |
+| `sbt` | Scala/sbt + Ivy cache |
+| `jetbrains` | Old JetBrains IDE caches |
+| `vscode-extensions` | `~/.vscode/extensions/` |
+| `docker` | `docker system prune -f` (dangling only) |
+| `colima` | `colima prune --all --force` |
+| `orbstack` | `orb prune` |
+| `huggingface` | HF model cache (`hub/`) |
+| `ollama` | Ollama model cache (interactive selection) |
+| `act` | `~/.cache/act/` |
+| `pre-commit` | pre-commit hook env cache |
+| `terraform` | Terraform provider plugin cache |
+| `tree-sitter` | tree-sitter parser cache |
+| `volta` | `~/.volta/cache/` |
+| `logs` | Log files older than N days |
+| `library-logs` | `~/Library/Logs/` (heuristic, interactive) |
+| `downloads` | `~/Downloads/` old files |
+| `ios-backup` | iOS backups — interactive only, never in `--yes` |
+| `apfs-snapshot` | APFS local Time Machine snapshots — interactive only |
+| `trash` | Reports `~/.Trash` size (scan only) |
 
 ---
 
@@ -1279,8 +1333,63 @@ Runs `detect()` on every cleaner and prints a formatted table via
 <details markdown="1">
 <summary markdown="0"><strong>🇯🇵 日本語</strong></summary>
 
-sasurahime は **49 のクリーンターゲット** をスプリント単位で提供しています。
-すべてのターゲットは `detect`（読み取り専用、副作用なし）と `clean`（削除）の両方に対応しています。また、すべての `clean` サブコマンドは `--dry-run` をサポートしています。
+sasurahime は **49 のクリーンターゲット** を提供しています。すべてのターゲットは
+`detect`（読み取り専用、副作用なし）と `clean`（削除）の両方に対応しており、
+すべての `clean` サブコマンドは `--dry-run` をサポートしています。
+削除されるのはキャッシュや古いバージョンのみで、現在使用中のランタイムやパッケージには触れません。
+
+### クイックリファレンス
+
+| ターゲット | 削除対象 |
+|-----------|---------|
+| `uv` | 古い `simple-vN` インデックスディレクトリ + `uv cache prune --force` |
+| `brew` | `brew cleanup -s --prune=all` |
+| `mise` | 未使用ランタイムバージョン（先に `.mise.toml` をクロスチェック） |
+| `browsers` | 古い Puppeteer/Playwright ビルド（ファミリーごとに最新を保持） |
+| `cargo` | Cargo レジストリキャッシュ + `target/` ディレクトリ |
+| `bun` | `bun pm cache rm` |
+| `go` | `go clean -cache` |
+| `pip` | `pip cache purge` |
+| `npm` | `npm cache clean --force` |
+| `yarn` | `yarn cache clean` |
+| `pnpm` | `pnpm store prune` |
+| `deno` | `deno cache -r` |
+| `rustup` | 未使用の Rust ツールチェーン |
+| `flutter` | `dart pub cache clean` |
+| `conda` | `conda clean --all -y` |
+| `pipx` | `pipx cache purge` |
+| `poetry` | `poetry cache clear --all` |
+| `gem` | `gem cleanup` |
+| `bundle` | `bundle clean` |
+| `dotnet` | `dotnet nuget locals all --clear` |
+| `caches` | bun, go, pip, node-gyp, npm, yarn, pnpm をまとめて実行 |
+| `node-gyp` | `~/.cache/node-gyp/` |
+| `xcode` | Xcode DerivedData プロジェクトディレクトリ |
+| `device-support` | 古い Xcode DeviceSupport ディレクトリ（最新 N を保持） |
+| `simulator` | `xcrun simctl delete unavailable` |
+| `spm` | SwiftPM キャッシュディレクトリ |
+| `cocoa-pods` | `pod cache clean --all` |
+| `gradle` | Gradle の古いバージョンキャッシュ |
+| `maven` | `mvn dependency:purge-local-repository` |
+| `sbt` | Scala/sbt + Ivy キャッシュ |
+| `jetbrains` | 古い JetBrains IDE キャッシュ |
+| `vscode-extensions` | `~/.vscode/extensions/` |
+| `docker` | `docker system prune -f`（dangling イメージのみ） |
+| `colima` | `colima prune --all --force` |
+| `orbstack` | `orb prune` |
+| `huggingface` | HF モデルキャッシュ（`hub/`） |
+| `ollama` | Ollama モデルキャッシュ（対話的選択） |
+| `act` | `~/.cache/act/` |
+| `pre-commit` | pre-commit フック環境キャッシュ |
+| `terraform` | Terraform プロバイダプラグインキャッシュ |
+| `tree-sitter` | tree-sitter パーサーキャッシュ |
+| `volta` | `~/.volta/cache/` |
+| `logs` | N 日より古いログファイル |
+| `library-logs` | `~/Library/Logs/`（ヒューリスティック、対話的） |
+| `downloads` | `~/Downloads/` の古いファイル |
+| `ios-backup` | iOS バックアップ — 対話的のみ、`--yes` では非実行 |
+| `apfs-snapshot` | APFS ローカル Time Machine スナップショット — 対話的のみ |
+| `trash` | `~/.Trash` のサイズを報告（スキャンのみ） |
 
 ---
 

@@ -58,7 +58,7 @@ impl Cleaner for CustomPathCleaner {
                 bytes_freed: 0,
                 uses_trash: true,
                 skipped: vec![],
-            deleted_paths: vec![],
+                deleted_paths: vec![],
             });
         }
         if !self.path.exists() {
@@ -68,7 +68,7 @@ impl Cleaner for CustomPathCleaner {
                 bytes_freed: 0,
                 uses_trash: true,
                 skipped: vec![],
-            deleted_paths: vec![],
+                deleted_paths: vec![],
             });
         }
 
@@ -80,7 +80,7 @@ impl Cleaner for CustomPathCleaner {
                     bytes_freed: 0,
                     uses_trash: true,
                     skipped: vec![],
-            deleted_paths: vec![],
+                    deleted_paths: vec![],
                 })
             }
         };

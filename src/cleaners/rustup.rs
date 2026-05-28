@@ -106,7 +106,7 @@ impl Cleaner for RustupCleaner {
                 bytes_freed: 0,
                 uses_trash: false,
                 skipped: vec![],
-            deleted_paths: vec![],
+                deleted_paths: vec![],
             });
         }
         let output = self.runner.run("rustup", &["toolchain", "list"])?;

@@ -261,7 +261,7 @@ pub fn run_interactive(cleaners: &[Box<dyn Cleaner>]) -> Result<()> {
                         bytes_freed: 0,
                         uses_trash: false,
                         skipped: vec![],
-            deleted_paths: vec![],
+                        deleted_paths: vec![],
                     })
                 },
             );
@@ -330,7 +330,7 @@ mod tests {
                 bytes_freed: self.size,
                 uses_trash: false,
                 skipped: vec![],
-            deleted_paths: vec![],
+                deleted_paths: vec![],
             })
         }
         fn sub_targets(&self) -> Vec<(&'static str, u64)> {

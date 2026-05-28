@@ -169,7 +169,7 @@ impl Cleaner for LogCleaner {
                 bytes_freed: 0,
                 uses_trash: false,
                 skipped: vec![],
-            deleted_paths: vec![],
+                deleted_paths: vec![],
             });
         }
 
@@ -201,7 +201,7 @@ impl Cleaner for LogCleaner {
             bytes_freed: freed,
             uses_trash: true,
             skipped,
-        deleted_paths: vec![],
+            deleted_paths: vec![],
         })
     }
 }

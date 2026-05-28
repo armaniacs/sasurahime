@@ -22,7 +22,8 @@ impl CargoCleaner {
 
     /// Returns the cached target dirs, computing them on first call.
     fn get_target_dirs(&self) -> &Vec<(PathBuf, u64)> {
-        self.target_cache.get_or_init(|| Self::find_target_dirs(&self.home))
+        self.target_cache
+            .get_or_init(|| Self::find_target_dirs(&self.home))
     }
 
     fn find_target_dirs(home: &Path) -> Vec<(PathBuf, u64)> {
@@ -157,7 +158,7 @@ impl Cleaner for CargoCleaner {
             bytes_freed: freed,
             uses_trash: true,
             skipped,
-        deleted_paths: vec![],
+            deleted_paths: vec![],
         })
     }
 }
