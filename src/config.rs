@@ -21,7 +21,6 @@ pub struct CustomTarget {
 /// Kept separate from `cleaners::log::LogTarget` to avoid a cross-module dep.
 /// `#[allow(dead_code)]` on fields: consumed by Task 3 (LogCleaner wiring).
 #[derive(Debug, Clone, Deserialize)]
-#[allow(dead_code)]
 pub struct ExtraLogTarget {
     pub name: String,
     pub path: String,
@@ -52,8 +51,6 @@ struct RawConfig {
 }
 
 #[derive(Debug, Clone)]
-/// `#[allow(dead_code)]`: fields consumed by Task 3 (LogCleaner wiring).
-#[allow(dead_code)]
 pub struct Config {
     pub logs_keep_days: u32,
     pub logs_extra_targets: Vec<ExtraLogTarget>,
@@ -131,8 +128,6 @@ impl Config {
     }
 
     /// Expands a leading `~` to `home`. Other paths are returned unchanged.
-    /// `#[allow(dead_code)]`: used by Task 3 (main.rs LogCleaner wiring).
-    #[allow(dead_code)]
     pub fn expand_tilde(path: &str, home: &Path) -> PathBuf {
         if let Some(rest) = path.strip_prefix("~/") {
             home.join(rest)

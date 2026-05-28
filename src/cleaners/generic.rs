@@ -125,7 +125,12 @@ impl GenericCleaner {
     }
 
     pub fn dotnet(runner: Box<dyn CommandRunner>) -> Self {
-        Self::command_cleaner("dotnet", "dotnet", &["nuget", "locals", "all", "--clear"], runner)
+        Self::command_cleaner(
+            "dotnet",
+            "dotnet",
+            &["nuget", "locals", "all", "--clear"],
+            runner,
+        )
     }
 
     pub fn simulator(home: &Path, runner: Box<dyn CommandRunner>) -> Self {
@@ -998,18 +1003,30 @@ mod tests {
     #[test]
     fn is_safe_delete_target_canonicalize_fallback_rejects_dotdot() {
         let p = Path::new("/nonexistent/../../etc");
-        assert!(!is_safe_delete_target(p), "path with .. must be rejected even if uncanonicalizable");
+        assert!(
+            !is_safe_delete_target(p),
+            "path with .. must be rejected even if uncanonicalizable"
+        );
     }
 
     #[test]
     fn is_safe_delete_target_rejects_private_var_tmp() {
-        assert!(!is_safe_delete_target(Path::new("/private/var/tmp")), "/private/var/tmp must be rejected");
-        assert!(!is_safe_delete_target(Path::new("/private/var/tmp/some-dir")), "/private/var/tmp/* must be rejected");
+        assert!(
+            !is_safe_delete_target(Path::new("/private/var/tmp")),
+            "/private/var/tmp must be rejected"
+        );
+        assert!(
+            !is_safe_delete_target(Path::new("/private/var/tmp/some-dir")),
+            "/private/var/tmp/* must be rejected"
+        );
     }
 
     #[test]
     fn is_safe_delete_target_rejects_private_var_root() {
-        assert!(!is_safe_delete_target(Path::new("/private/var/root")), "/private/var/root must be rejected");
+        assert!(
+            !is_safe_delete_target(Path::new("/private/var/root")),
+            "/private/var/root must be rejected"
+        );
     }
 
     #[test]

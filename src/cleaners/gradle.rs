@@ -105,7 +105,10 @@ impl Cleaner for GradleCleaner {
                     crate::format::format_bytes(size)
                 );
             } else {
-                if let Err(e) = self.runner.run("chflags", &["-R", "nouchg", &path.to_string_lossy()]) {
+                if let Err(e) = self
+                    .runner
+                    .run("chflags", &["-R", "nouchg", &path.to_string_lossy()])
+                {
                     eprintln!(
                         "[gradle] warning: chflags failed for {}: {e}",
                         path.display()
@@ -250,7 +253,10 @@ impl Cleaner for JetBrainsCleaner {
                     crate::format::format_bytes(size)
                 );
             } else {
-                if let Err(e) = self.runner.run("chflags", &["-R", "nouchg", &path.to_string_lossy()]) {
+                if let Err(e) = self
+                    .runner
+                    .run("chflags", &["-R", "nouchg", &path.to_string_lossy()])
+                {
                     eprintln!(
                         "[jetbrains] warning: chflags failed for {}: {e}",
                         path.display()
@@ -311,11 +317,15 @@ mod tests {
         let caches = tmp.path().join(".gradle/caches");
         fs::create_dir_all(caches.join("8.12.0")).unwrap();
         fs::create_dir_all(caches.join("8.8.0")).unwrap();
-        let runner = MockRunner::new()
-            .with_success("chflags");
+        let runner = MockRunner::new().with_success("chflags");
         let cleaner = GradleCleaner::new(tmp.path(), Box::new(runner));
-        let result = cleaner.clean(false, &crate::progress::DeepSuppressReporter).unwrap();
-        assert!(result.uses_trash, "GradleCleaner should report uses_trash=true (default trash mode)");
+        let result = cleaner
+            .clean(false, &crate::progress::DeepSuppressReporter)
+            .unwrap();
+        assert!(
+            result.uses_trash,
+            "GradleCleaner should report uses_trash=true (default trash mode)"
+        );
     }
 
     #[test]
@@ -325,7 +335,9 @@ mod tests {
         fs::create_dir_all(caches.join("8.12.0")).unwrap();
         fs::create_dir_all(caches.join("8.8.0")).unwrap();
         let cleaner = GradleCleaner::new(tmp.path(), Box::new(MockRunner::new().with_not_found()));
-        let _ = cleaner.clean(true, &crate::progress::DeepSuppressReporter).unwrap();
+        let _ = cleaner
+            .clean(true, &crate::progress::DeepSuppressReporter)
+            .unwrap();
         assert!(caches.join("8.12.0").exists(), "dry-run must not delete");
         assert!(caches.join("8.8.0").exists(), "dry-run must not delete");
     }
@@ -385,7 +397,8 @@ mod tests {
         // Write files so directories have non-zero size
         fs::write(jb.join("GoLand2024.2").join("cache.dat"), b"data").unwrap();
         fs::write(jb.join("GoLand2025.1").join("cache.dat"), b"data").unwrap();
-        let cleaner = JetBrainsCleaner::new(tmp.path(), Box::new(MockRunner::new().with_not_found()));
+        let cleaner =
+            JetBrainsCleaner::new(tmp.path(), Box::new(MockRunner::new().with_not_found()));
         let result = cleaner.detect();
         assert!(matches!(result.status, ScanStatus::Pruneable(_)));
         assert!(jb.join("GoLand2025.1").exists(), "detect must not delete");
@@ -398,11 +411,15 @@ mod tests {
         let jb = tmp.path().join("Library/Caches/JetBrains");
         fs::create_dir_all(jb.join("GoLand2024.2")).unwrap();
         fs::create_dir_all(jb.join("GoLand2025.1")).unwrap();
-        let runner = MockRunner::new()
-            .with_success("chflags");
+        let runner = MockRunner::new().with_success("chflags");
         let cleaner = JetBrainsCleaner::new(tmp.path(), Box::new(runner));
-        let result = cleaner.clean(false, &crate::progress::DeepSuppressReporter).unwrap();
-        assert!(result.uses_trash, "JetBrainsCleaner should report uses_trash=true (default trash mode)");
+        let result = cleaner
+            .clean(false, &crate::progress::DeepSuppressReporter)
+            .unwrap();
+        assert!(
+            result.uses_trash,
+            "JetBrainsCleaner should report uses_trash=true (default trash mode)"
+        );
     }
 
     #[test]
@@ -411,8 +428,11 @@ mod tests {
         let jb = tmp.path().join("Library/Caches/JetBrains");
         fs::create_dir_all(jb.join("GoLand2024.2")).unwrap();
         fs::create_dir_all(jb.join("GoLand2025.1")).unwrap();
-        let cleaner = JetBrainsCleaner::new(tmp.path(), Box::new(MockRunner::new().with_not_found()));
-        let _ = cleaner.clean(true, &crate::progress::DeepSuppressReporter).unwrap();
+        let cleaner =
+            JetBrainsCleaner::new(tmp.path(), Box::new(MockRunner::new().with_not_found()));
+        let _ = cleaner
+            .clean(true, &crate::progress::DeepSuppressReporter)
+            .unwrap();
         assert!(jb.join("GoLand2025.1").exists(), "dry-run must not delete");
         assert!(jb.join("GoLand2024.2").exists(), "dry-run must not delete");
     }

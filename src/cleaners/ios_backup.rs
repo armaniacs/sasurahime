@@ -6,13 +6,11 @@ use std::fs;
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 
-#[allow(dead_code)]
 pub struct IosCleaner {
     pub backup_dir: PathBuf,
     pub runner: Box<dyn CommandRunner>,
 }
 
-#[allow(dead_code)]
 impl IosCleaner {
     pub fn new(home: &Path, runner: Box<dyn CommandRunner>) -> Self {
         Self {
@@ -165,7 +163,6 @@ impl Cleaner for IosCleaner {
     }
 }
 
-#[allow(dead_code)]
 impl IosCleaner {
     fn interactive_select(&self, entries: &[(PathBuf, u64)]) -> Result<Vec<(PathBuf, u64)>> {
         use dialoguer::MultiSelect;

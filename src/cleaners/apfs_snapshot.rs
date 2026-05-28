@@ -4,19 +4,16 @@ use crate::progress::ProgressReporter;
 use anyhow::Result;
 use std::io::IsTerminal;
 
-#[allow(dead_code)]
 pub struct ApfsSnapshotCleaner {
     pub runner: Box<dyn CommandRunner>,
 }
 
-#[allow(dead_code)]
 impl ApfsSnapshotCleaner {
     pub fn new(runner: Box<dyn CommandRunner>) -> Self {
         Self { runner }
     }
 }
 
-#[allow(dead_code)]
 pub fn parse_snapshot_names(output: &str) -> Vec<String> {
     output
         .lines()
@@ -143,7 +140,6 @@ impl Cleaner for ApfsSnapshotCleaner {
     }
 }
 
-#[allow(dead_code)]
 impl ApfsSnapshotCleaner {
     fn interactive_select(&self, names: &[String]) -> Result<Vec<String>> {
         use dialoguer::MultiSelect;
