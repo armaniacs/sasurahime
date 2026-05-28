@@ -87,6 +87,7 @@ impl Cleaner for IosCleaner {
         }
 
         eprintln!("⚠  iOS backups contain personal data (contacts, messages, photos, etc.) and cannot be restored once deleted. Proceed with caution.");
+        eprintln!("    iOS バックアップには個人データ（連絡先・メッセージ・写真など）が含まれており、削除後は復元できません。注意して実行してください。");
 
         if dry_run {
             println!("[ios-backup] dry-run: {} backup(s) found", entries.len());

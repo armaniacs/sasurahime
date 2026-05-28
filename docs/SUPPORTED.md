@@ -1119,7 +1119,54 @@ UUID-named subdirectory containing backup data (Manifest.db, etc.).
 
 ---
 
-## 46. `sasurahime stats`
+## 46. `sasurahime clean gem`
+
+**Category:** Sprint 5
+
+**What it removes:** [RubyGems](https://rubygems.org/) old gem versions via
+`gem cleanup`.
+
+**How clean works:**
+1. Runs `gem cleanup` to remove outdated gem versions from `~/.gem/`.
+2. On next `gem install`, the latest version is fetched automatically.
+
+**Safety:** Delegates to the official `gem` CLI. Gem sources are unaffected.
+
+---
+
+## 47. `sasurahime clean bundle`
+
+**Category:** Sprint 5
+
+**What it removes:** [Bundler](https://bundler.io/) cache via `bundle clean`.
+
+**How clean works:**
+1. Runs `bundle clean` to clear Bundler's cached gem files.
+2. Cached gems are redownloaded on next `bundle install`.
+
+**Safety:** Delegates to the official `bundle` CLI. Only cached/stale gems
+are removed; `Gemfile.lock` is not modified.
+
+---
+
+## 48. `sasurahime clean dotnet`
+
+**Category:** Sprint 5
+
+**What it removes:** [.NET SDK](https://dotnet.microsoft.com/) NuGet cache via
+`dotnet nuget locals all --clear`.
+
+**How clean works:**
+1. Runs `dotnet nuget locals all --clear` to purge all NuGet caches
+   (http-cache, packages-cache, temp, plugins-cache).
+2. Packages are re-downloaded on next `dotnet restore`.
+
+**Safety:** Delegates to the official `dotnet` CLI. Project-level `packages/`
+(check-in directories) are not affected.
+
+---
+
+## 49. `sasurahime stats`
 
 **Category:** Sprint 5
 
@@ -1232,7 +1279,7 @@ Runs `detect()` on every cleaner and prints a formatted table via
 <details markdown="1">
 <summary markdown="0"><strong>🇯🇵 日本語</strong></summary>
 
-sasurahime は **46 のクリーンターゲット** をスプリント単位で提供しています。
+sasurahime は **49 のクリーンターゲット** をスプリント単位で提供しています。
 すべてのターゲットは `detect`（読み取り専用、副作用なし）と `clean`（削除）の両方に対応しています。また、すべての `clean` サブコマンドは `--dry-run` をサポートしています。
 
 ---
@@ -2222,7 +2269,53 @@ Time Machine スナップショット。
 
 ---
 
-## 46. `sasurahime stats`
+## 46. `sasurahime clean gem`
+
+**カテゴリ:** Sprint 5
+
+**削除対象:** [RubyGems](https://rubygems.org/) の古い gem バージョンを
+`gem cleanup` で削除します。
+
+**削除の仕組み:**
+1. `gem cleanup` を実行し、`~/.gem/` にある古い gem バージョンを削除します。
+2. 次回 `gem install` 時に最新バージョンが自動的に取得されます。
+
+**安全性:** 公式の `gem` CLI に委譲します。Gem ソース自体には影響しません。
+
+---
+
+## 47. `sasurahime clean bundle`
+
+**カテゴリ:** Sprint 5
+
+**削除対象:** [Bundler](https://bundler.io/) のキャッシュを `bundle clean` で削除します。
+
+**削除の仕組み:**
+1. `bundle clean` を実行し、Bundler のキャッシュ済み gem ファイルを削除します。
+2. 次回 `bundle install` 時に再ダウンロードされます。
+
+**安全性:** 公式の `bundle` CLI に委譲します。`Gemfile.lock` は変更されません。
+
+---
+
+## 48. `sasurahime clean dotnet`
+
+**カテゴリ:** Sprint 5
+
+**削除対象:** [.NET SDK](https://dotnet.microsoft.com/) NuGet キャッシュを
+`dotnet nuget locals all --clear` で削除します。
+
+**削除の仕組み:**
+1. `dotnet nuget locals all --clear` を実行し、全 NuGet キャッシュ
+   (http-cache, packages-cache, temp, plugins-cache) を削除します。
+2. 次回 `dotnet restore` 時に再ダウンロードされます。
+
+**安全性:** 公式の `dotnet` CLI に委譲します。プロジェクト内の `packages/`
+ディレクトリには影響しません。
+
+---
+
+## 49. `sasurahime stats`
 
 **カテゴリ:** Sprint 5
 

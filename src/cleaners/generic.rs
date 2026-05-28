@@ -534,6 +534,20 @@ impl Cleaner for GenericCleaner {
                                 skipped: vec![],
                             });
                         }
+                        // TOCTOU mitigation: re-validate fallback delete path.
+                        if !is_safe_delete_target(detect_dir) {
+                            eprintln!(
+                                "[{}] warning: unsafe fallback path, skipping: {}",
+                                self.display_name,
+                                detect_dir.display()
+                            );
+                            return Ok(CleanResult {
+                                name: self.name(),
+                                bytes_freed: 0,
+                                uses_trash: crate::trash::is_trash_mode(),
+                                skipped: vec![],
+                            });
+                        }
                         let path_str = detect_dir.to_string_lossy();
                         if let Err(e) = self.runner.run("chflags", &["-R", "nouchg", &path_str]) {
                             eprintln!(
@@ -629,6 +643,16 @@ impl Cleaner for GenericCleaner {
                     if dry_run {
                         println!("[dry-run] would remove: {}", dir.display());
                     } else {
+                        // Verify path safety at clean-time (TOCTOU mitigation for
+                        // env-var-derived paths: terraform, flutter, act).
+                        if !is_safe_delete_target(dir) {
+                            eprintln!(
+                                "[{}] warning: unsafe path, skipping: {}",
+                                self.display_name,
+                                dir.display()
+                            );
+                            continue;
+                        }
                         reporter.progress_tick(dir, i + 1, size);
                         let path_str = dir.to_string_lossy();
                         if let Err(e) = self.runner.run("chflags", &["-R", "nouchg", &path_str]) {

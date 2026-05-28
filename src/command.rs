@@ -1,5 +1,7 @@
 use anyhow::Result;
 use std::io::Read;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::process::{Command, Output, Stdio};
 use std::time::Duration;
 use wait_timeout::ChildExt;
@@ -67,11 +69,30 @@ impl CommandRunner for SystemCommandRunner {
     }
 
     fn exists(&self, program: &str) -> bool {
-        Command::new("which")
-            .arg(program)
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
+        // Resolve program against PATH natively instead of spawning `which`.
+        // Avoids external process overhead and eliminates `which`-availability risk.
+        std::env::var_os("PATH")
+            .as_ref()
+            .and_then(|path| {
+                std::env::split_paths(path).find_map(|dir| {
+                    let candidate = dir.join(program);
+                    if candidate.is_file() {
+                        // Also verify it's executable on Unix.
+                        std::fs::metadata(&candidate)
+                            .ok()
+                            .and_then(|m| {
+                                if m.permissions().mode() & 0o111 != 0 {
+                                    Some(())
+                                } else {
+                                    None
+                                }
+                            })
+                    } else {
+                        None
+                    }
+                })
+            })
+            .is_some()
     }
 }
 
