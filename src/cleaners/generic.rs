@@ -1027,7 +1027,7 @@ mod tests {
 
     #[test]
     fn detect_includes_primary_target_when_verbose() {
-        let _guard = crate::context::TEST_LOCK.lock().unwrap();
+        let _guard = crate::test_helpers::VerboseGuard::new();
         crate::context::set_verbose(true);
         let tmp = tempfile::TempDir::new().unwrap();
         let cache = tmp.path().join(".cache/act");
@@ -1049,7 +1049,7 @@ mod tests {
 
     #[test]
     fn detect_omits_primary_target_when_not_verbose() {
-        let _guard = crate::context::TEST_LOCK.lock().unwrap();
+        let _guard = crate::test_helpers::VerboseGuard::new();
         crate::context::set_verbose(false);
         let tmp = tempfile::TempDir::new().unwrap();
         let cache = tmp.path().join(".cache/act");
