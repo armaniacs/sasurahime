@@ -38,3 +38,4 @@ panic          = "abort"  # Abort on panic removes unwinding code
 assert_cmd = "2"
 filetime   = "0.2"
 tempfile   = "3"
+rstest     = "0.22"

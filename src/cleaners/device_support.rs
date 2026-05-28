@@ -191,7 +191,7 @@ mod tests {
 
     #[test]
     fn detect_includes_primary_target_when_verbose() {
-        let _guard = crate::context::TEST_LOCK.lock().unwrap();
+        let _guard = crate::test_helpers::VerboseGuard::new();
         crate::context::set_verbose(true);
         let tmp = TempDir::new().unwrap();
         // Need 4 versions with keep=2 so versions_to_delete() returns 2 entries
@@ -220,7 +220,7 @@ mod tests {
 
     #[test]
     fn detect_omits_primary_target_when_not_verbose() {
-        let _guard = crate::context::TEST_LOCK.lock().unwrap();
+        let _guard = crate::test_helpers::VerboseGuard::new();
         crate::context::set_verbose(false);
         let tmp = TempDir::new().unwrap();
         // Again need 4 versions so versions_to_delete() is non-empty

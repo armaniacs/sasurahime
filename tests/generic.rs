@@ -45,37 +45,41 @@ fn clean_bun_calls_pm_cache_rm() {
     assert!(output.status.success());
 }
 
-#[test]
-fn clean_volta_not_found_exits_zero() {
-    let tmp = TempDir::new().unwrap();
-    let output = sasurahime(tmp.path())
-        .env("PATH", "/usr/bin:/bin")
-        .args(["clean", "volta"])
-        .output()
-        .unwrap();
-    assert!(output.status.success());
-}
+use rstest::rstest;
 
-#[test]
-fn clean_sbt_not_found_exits_zero() {
+#[rstest]
+#[case("bun",          "/usr/bin:/bin", true)]
+#[case("cocoa-pods",   "/usr/bin:/bin", true)]
+#[case("colima",       "/usr/bin:/bin", true)]
+#[case("conda",        "/usr/bin:/bin", true)]
+#[case("deno",         "/usr/bin:/bin", true)]
+#[case("docker",       "/usr/bin:/bin", true)]
+#[case("flutter",      "/usr/bin:/bin", false)]
+#[case("maven",        "/usr/bin:/bin", true)]
+#[case("orbstack",     "/usr/bin:/bin", true)]
+#[case("pipx",         "/usr/bin:/bin", true)]
+#[case("poetry",       "/usr/bin:/bin", true)]
+#[case("sbt",          "/usr/bin:/bin", false)]
+#[case("simulator",    "/tmp",           true)]
+#[case("terraform",    "/usr/bin:/bin", false)]
+#[case("tree-sitter",  "/usr/bin:/bin", false)]
+#[case("volta",        "/usr/bin:/bin", false)]
+#[case("vscode-extensions", "/usr/bin:/bin", false)]
+fn clean_tool_not_found_skips(#[case] tool: &str, #[case] path: &str, #[case] check_stdout: bool) {
     let tmp = TempDir::new().unwrap();
     let output = sasurahime(tmp.path())
-        .env("PATH", "/usr/bin:/bin")
-        .args(["clean", "sbt"])
+        .env("PATH", path)
+        .args(["clean", tool])
         .output()
         .unwrap();
     assert!(output.status.success());
-}
-
-#[test]
-fn clean_tree_sitter_not_found_exits_zero() {
-    let tmp = TempDir::new().unwrap();
-    let output = sasurahime(tmp.path())
-        .env("PATH", "/usr/bin:/bin")
-        .args(["clean", "tree-sitter"])
-        .output()
-        .unwrap();
-    assert!(output.status.success());
+    if check_stdout {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            stdout.contains("skipping") || stdout.contains("not found"),
+            "stdout: {stdout}"
+        );
+    }
 }
 
 #[test]
@@ -159,128 +163,7 @@ fn clean_caches_continues_past_missing_tools() {
     assert!(calls.contains("pm cache rm"), "bun must still be called");
 }
 
-#[test]
-fn clean_tool_not_found_exits_zero() {
-    let tmp = TempDir::new().unwrap();
-    let output = sasurahime(tmp.path())
-        .env("PATH", "/usr/bin:/bin")
-        .args(["clean", "bun"])
-        .output()
-        .unwrap();
 
-    assert!(output.status.success());
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("not found") || stdout.contains("skipping"));
-}
-
-#[test]
-fn clean_deno_not_found_skips() {
-    let tmp = TempDir::new().unwrap();
-    let output = sasurahime(tmp.path())
-        .env("PATH", "/usr/bin:/bin")
-        .args(["clean", "deno"])
-        .output()
-        .unwrap();
-    assert!(output.status.success());
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(
-        stdout.contains("skipping") || stdout.contains("not found"),
-        "stdout: {stdout}"
-    );
-}
-
-#[test]
-fn clean_pipx_not_found_skips() {
-    let tmp = TempDir::new().unwrap();
-    let output = sasurahime(tmp.path())
-        .args(["clean", "pipx"])
-        .output()
-        .unwrap();
-    assert!(output.status.success());
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(
-        stdout.contains("skipping") || stdout.contains("not found"),
-        "stdout: {stdout}"
-    );
-}
-
-#[test]
-fn clean_docker_not_found_skips() {
-    let tmp = TempDir::new().unwrap();
-    let output = sasurahime(tmp.path())
-        .env("PATH", "/usr/bin:/bin")
-        .args(["clean", "docker"])
-        .output()
-        .unwrap();
-    assert!(output.status.success());
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(
-        stdout.contains("skipping") || stdout.contains("not found"),
-        "stdout: {stdout}"
-    );
-}
-
-#[test]
-fn clean_orbstack_not_found_skips() {
-    let tmp = TempDir::new().unwrap();
-    let output = sasurahime(tmp.path())
-        .args(["clean", "orbstack"])
-        .output()
-        .unwrap();
-    assert!(output.status.success());
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(
-        stdout.contains("skipping") || stdout.contains("not found"),
-        "stdout: {stdout}"
-    );
-}
-
-#[test]
-fn clean_cocoapods_not_found_skips() {
-    let tmp = TempDir::new().unwrap();
-    let output = sasurahime(tmp.path())
-        .env("PATH", "/usr/bin:/bin")
-        .args(["clean", "cocoa-pods"])
-        .output()
-        .unwrap();
-    assert!(output.status.success());
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(
-        stdout.contains("skipping") || stdout.contains("not found"),
-        "stdout: {stdout}"
-    );
-}
-
-#[test]
-fn clean_conda_not_found_skips() {
-    let tmp = TempDir::new().unwrap();
-    let output = sasurahime(tmp.path())
-        .args(["clean", "conda"])
-        .output()
-        .unwrap();
-    assert!(output.status.success());
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(
-        stdout.contains("skipping") || stdout.contains("not found"),
-        "stdout: {stdout}"
-    );
-}
-
-#[test]
-fn clean_poetry_not_found_skips() {
-    let tmp = TempDir::new().unwrap();
-    let output = sasurahime(tmp.path())
-        .env("PATH", "/usr/bin:/bin")
-        .args(["clean", "poetry"])
-        .output()
-        .unwrap();
-    assert!(output.status.success());
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(
-        stdout.contains("skipping") || stdout.contains("not found"),
-        "stdout: {stdout}"
-    );
-}
 
 #[test]
 fn clean_spm_cache_dry_run_deletes_nothing() {
@@ -396,32 +279,7 @@ fn clean_colima_dry_run_does_not_invoke() {
     );
 }
 
-#[test]
-fn clean_colima_not_found_exits_zero() {
-    let tmp = TempDir::new().unwrap();
-    let output = sasurahime(tmp.path())
-        .env("PATH", "/usr/bin:/bin")
-        .args(["clean", "colima"])
-        .output()
-        .unwrap();
 
-    assert!(output.status.success());
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("not found") || stdout.contains("skipping"));
-}
-
-#[test]
-fn clean_simulator_not_found_exits_zero() {
-    let tmp = TempDir::new().unwrap();
-    let output = sasurahime(tmp.path())
-        .env("PATH", "/tmp")
-        .args(["clean", "simulator"])
-        .output()
-        .unwrap();
-    assert!(output.status.success());
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("not found") || stdout.contains("skipping"));
-}
 
 #[test]
 fn scan_shows_colima_for_existing_dir() {
@@ -437,50 +295,6 @@ fn scan_shows_colima_for_existing_dir() {
         stdout.contains("colima"),
         "scan output should include colima:\n{stdout}"
     );
-}
-
-#[test]
-fn clean_vscode_extensions_not_found_exits_zero() {
-    let tmp = TempDir::new().unwrap();
-    let output = sasurahime(tmp.path())
-        .env("PATH", "/usr/bin:/bin")
-        .args(["clean", "vscode-extensions"])
-        .output()
-        .unwrap();
-    assert!(output.status.success());
-}
-
-#[test]
-fn clean_maven_not_found_exits_zero() {
-    let tmp = TempDir::new().unwrap();
-    let output = sasurahime(tmp.path())
-        .env("PATH", "/usr/bin:/bin")
-        .args(["clean", "maven"])
-        .output()
-        .unwrap();
-    assert!(output.status.success());
-}
-
-#[test]
-fn clean_terraform_not_found_exits_zero() {
-    let tmp = TempDir::new().unwrap();
-    let output = sasurahime(tmp.path())
-        .env("PATH", "/usr/bin:/bin")
-        .args(["clean", "terraform"])
-        .output()
-        .unwrap();
-    assert!(output.status.success());
-}
-
-#[test]
-fn clean_flutter_not_found_exits_zero() {
-    let tmp = TempDir::new().unwrap();
-    let output = sasurahime(tmp.path())
-        .env("PATH", "/usr/bin:/bin")
-        .args(["clean", "flutter"])
-        .output()
-        .unwrap();
-    assert!(output.status.success());
 }
 
 #[test]
