@@ -23,7 +23,8 @@ pub fn set_dry_run(v: bool) {
     DRY_RUN.store(v, Ordering::Relaxed);
 }
 
-#[expect(dead_code)]
+/// `#[allow(dead_code)]`: reserved for future `--dry-run` chain support.
+#[allow(dead_code)]
 pub fn is_dry_run() -> bool {
     DRY_RUN.load(Ordering::Relaxed)
 }

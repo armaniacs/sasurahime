@@ -34,8 +34,9 @@ pub struct LogCleaner {
 }
 
 impl LogCleaner {
-    /// `#[expect(dead_code)]`: clients call `new_with_extra` instead.
-    #[expect(dead_code)]
+    /// Convenience constructor that delegates to `new_with_extra` with no extra targets.
+    /// `#[allow(dead_code)]`: used by tests in this module.
+    #[allow(dead_code)]
     pub fn new(home: &Path, keep_days: u32) -> Self {
         Self::new_with_extra(home, keep_days, vec![])
     }

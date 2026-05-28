@@ -21,7 +21,8 @@ fn spinner_style() -> &'static ProgressStyle {
     })
 }
 
-#[expect(dead_code)]
+/// `#[allow(dead_code)]`: retained for potential future use in long-running operations.
+#[allow(dead_code)]
 pub fn with_spinner<R>(msg: &str, f: impl FnOnce() -> R) -> R {
     let pb = ProgressBar::new_spinner();
     pb.set_style(spinner_style().clone());

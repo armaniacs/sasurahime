@@ -12,12 +12,13 @@ pub enum XcodeSubcategory {
     Archives,
 }
 
-#[expect(dead_code)]
 impl XcodeSubcategory {
     pub fn all() -> Vec<Self> {
         vec![Self::DerivedData, Self::Archives]
     }
 
+    /// `#[allow(dead_code)]`: used in tests (detect_subcategories test).
+    #[allow(dead_code)]
     pub fn path(&self, home: &Path) -> PathBuf {
         match self {
             Self::DerivedData => home.join("Library/Developer/Xcode/DerivedData"),

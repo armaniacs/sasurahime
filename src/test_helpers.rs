@@ -27,12 +27,6 @@ enum MockBehavior {
 ///
 /// // Tool succeeds with empty output
 /// let runner = MockRunner::new().with_success("brew");
-///
-/// // Tool returns specific output
-/// let runner = MockRunner::new().with_output("go", ok_output(b"OK"));
-///
-/// // Tool exits with failure
-/// let runner = MockRunner::new().with_exit_code("rustup", 1);
 /// ```
 #[derive(Default)]
 pub struct MockRunner {
@@ -60,24 +54,6 @@ impl MockRunner {
                 stdout: vec![],
                 stderr: vec![],
             },
-        });
-        self
-    }
-
-    /// A specific tool exists and returns the given output.
-    pub fn with_output(mut self, program: &str, output: std::process::Output) -> Self {
-        self.behaviors.push(MockBehavior::Output {
-            program: program.to_string(),
-            output,
-        });
-        self
-    }
-
-    /// A specific tool exists but exits with the given code.
-    pub fn with_exit_code(mut self, program: &str, code: i32) -> Self {
-        self.behaviors.push(MockBehavior::ExitCode {
-            program: program.to_string(),
-            code,
         });
         self
     }
@@ -126,13 +102,6 @@ impl CommandRunner for MockRunner {
 /// Write a file and set its modification time to `days_old` days ago.
 pub fn write_aged_file(path: &Path, days_old: u64, content: &[u8]) {
     std::fs::write(path, content).unwrap();
-    let mtime = SystemTime::now() - Duration::from_secs(days_old * 86_400);
-    set_file_mtime(path, FileTime::from_system_time(mtime)).unwrap();
-}
-
-/// Create a directory and all its ancestors, then set the dir mtime.
-pub fn write_aged_dir(path: &Path, days_old: u64) {
-    std::fs::create_dir_all(path).unwrap();
     let mtime = SystemTime::now() - Duration::from_secs(days_old * 86_400);
     set_file_mtime(path, FileTime::from_system_time(mtime)).unwrap();
 }
@@ -201,21 +170,5 @@ impl VerboseGuard {
 impl Drop for VerboseGuard {
     fn drop(&mut self) {
         crate::context::set_verbose(self.previous);
-    }
-}
-
-// ── Exit status / output factories ──
-
-/// Create an ExitStatus representing success (code 0).
-pub fn exit_ok() -> std::process::ExitStatus {
-    std::process::ExitStatus::from_raw(0)
-}
-
-/// Create a successful Output with the given stdout bytes.
-pub fn ok_output(stdout: &[u8]) -> std::process::Output {
-    std::process::Output {
-        status: exit_ok(),
-        stdout: stdout.to_vec(),
-        stderr: vec![],
     }
 }

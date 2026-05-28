@@ -61,7 +61,8 @@ pub struct CleanResult {
     pub name: &'static str,
     pub bytes_freed: u64,
     /// Whether the operation used macOS Trash (vs permanent deletion).
-    #[expect(dead_code, reason = "pub API — callers may read")]
+    /// `#[allow(dead_code)]`: pub API field, intended for downstream inspection.
+    #[allow(dead_code)]
     pub uses_trash: bool,
     pub skipped: Vec<SkippedEntry>,
     /// Paths that were successfully deleted (populated when --verbose is active).
