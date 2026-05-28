@@ -13,6 +13,8 @@ pub struct MiseCleaner {
     installs_dir: PathBuf,
     home: PathBuf,
     runner: Box<dyn CommandRunner>,
+    mise_output_cache: std::sync::OnceLock<Option<String>>,
+    pinned_cache: std::sync::OnceLock<HashSet<(String, String)>>,
 }
 
 impl MiseCleaner {
@@ -21,7 +23,27 @@ impl MiseCleaner {
             installs_dir: home.join(".local/share/mise/installs"),
             home: home.to_path_buf(),
             runner,
+            mise_output_cache: std::sync::OnceLock::new(),
+            pinned_cache: std::sync::OnceLock::new(),
         }
+    }
+
+    /// Returns cached stdout from `mise ls --current`, computing it on first call.
+    fn get_mise_output(&self) -> Option<String> {
+        self.mise_output_cache
+            .get_or_init(|| {
+                self.runner
+                    .run("mise", &["ls", "--current"])
+                    .ok()
+                    .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
+            })
+            .clone()
+    }
+
+    /// Returns cached pinned versions, computing them on first call.
+    fn get_pinned(&self) -> &HashSet<(String, String)> {
+        self.pinned_cache
+            .get_or_init(|| Self::scan_pinned_versions(&self.home))
     }
 
     /// Parses `mise ls --current` stdout into a set of (tool, version) pairs.
@@ -172,15 +194,12 @@ impl Cleaner for MiseCleaner {
         if !self.runner.exists("mise") {
             return ScanResult::new(self.name(), ScanStatus::NotFound);
         }
-        let output = match self.runner.run("mise", &["ls", "--current"]) {
-            Ok(o) => o,
-            Err(_) => {
-                return ScanResult::new(self.name(), ScanStatus::NotFound);
-            }
+        let stdout = match self.get_mise_output() {
+            Some(ref s) => s.clone(),
+            None => return ScanResult::new(self.name(), ScanStatus::NotFound),
         };
-        let stdout = String::from_utf8_lossy(&output.stdout);
         let active = Self::parse_active_versions(&stdout);
-        let pinned = Self::scan_pinned_versions(&self.home);
+        let pinned = self.get_pinned().clone();
         let unused = self.unused_versions(&active, &pinned);
         let bytes: u64 = unused.iter().map(|(_, _, p)| dir_size(p)).sum();
         let mut r = ScanResult::new(
@@ -207,9 +226,9 @@ impl Cleaner for MiseCleaner {
                 skipped: vec![],
             });
         }
-        let output = match self.runner.run("mise", &["ls", "--current"]) {
-            Ok(o) => o,
-            Err(_) => {
+        let stdout = match self.get_mise_output() {
+            Some(ref s) => s.clone(),
+            None => {
                 println!("mise: ls --current failed, nothing to clean");
                 return Ok(CleanResult {
                     name: self.name(),
@@ -219,9 +238,8 @@ impl Cleaner for MiseCleaner {
                 });
             }
         };
-        let stdout = String::from_utf8_lossy(&output.stdout);
         let active = Self::parse_active_versions(&stdout);
-        let pinned = Self::scan_pinned_versions(&self.home);
+        let pinned = self.get_pinned().clone();
         let unused = self.unused_versions(&active, &pinned);
 
         if !unused.is_empty() && !pinned.is_empty() {

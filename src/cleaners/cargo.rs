@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 pub struct CargoCleaner {
     home: PathBuf,
     runner: Box<dyn CommandRunner>,
+    target_cache: std::sync::OnceLock<Vec<(PathBuf, u64)>>,
 }
 
 impl CargoCleaner {
@@ -15,7 +16,13 @@ impl CargoCleaner {
         Self {
             home: home.to_path_buf(),
             runner,
+            target_cache: std::sync::OnceLock::new(),
         }
+    }
+
+    /// Returns the cached target dirs, computing them on first call.
+    fn get_target_dirs(&self) -> &Vec<(PathBuf, u64)> {
+        self.target_cache.get_or_init(|| Self::find_target_dirs(&self.home))
     }
 
     fn find_target_dirs(home: &Path) -> Vec<(PathBuf, u64)> {
@@ -55,7 +62,7 @@ impl Cleaner for CargoCleaner {
             0
         };
 
-        let targets = Self::find_target_dirs(&self.home);
+        let targets = self.get_target_dirs();
         let target_size: u64 = targets.iter().map(|(_, s)| s).sum();
         if !targets.is_empty() {
             println!("[cargo] found {} target/ directory(ies)", targets.len());
@@ -110,7 +117,7 @@ impl Cleaner for CargoCleaner {
             }
         }
 
-        let targets = Self::find_target_dirs(&self.home);
+        let targets = self.get_target_dirs();
         if !dry_run && !targets.is_empty() {
             reporter.progress_init(self.name(), targets.len());
         }
