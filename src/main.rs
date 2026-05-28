@@ -39,126 +39,6 @@ use std::path::PathBuf;
 /// }
 /// ```
 /// Helper: extract the CLI command name for a standard CleanTarget variant.
-macro_rules! cmd_name {
-    (Act) => {
-        "act"
-    };
-    (Uv) => {
-        "uv"
-    };
-    (Brew) => {
-        "brew"
-    };
-    (Mise) => {
-        "mise"
-    };
-    (Browsers) => {
-        "browsers"
-    };
-    (Bun) => {
-        "bun"
-    };
-    (Go) => {
-        "go"
-    };
-    (Pip) => {
-        "pip"
-    };
-    (NodeGyp) => {
-        "node-gyp"
-    };
-    (Npm) => {
-        "npm"
-    };
-    (Yarn) => {
-        "yarn"
-    };
-    (Pnpm) => {
-        "pnpm"
-    };
-    (Cargo) => {
-        "cargo"
-    };
-    (Docker) => {
-        "docker"
-    };
-    (Orbstack) => {
-        "orbstack"
-    };
-    (CocoaPods) => {
-        "cocoa-pods"
-    };
-    (Colima) => {
-        "colima"
-    };
-    (SwiftPM) => {
-        "spm"
-    };
-    (Conda) => {
-        "conda"
-    };
-    (Poetry) => {
-        "poetry"
-    };
-    (Pipx) => {
-        "pipx"
-    };
-    (Deno) => {
-        "deno"
-    };
-    (Rustup) => {
-        "rustup"
-    };
-    (Simulator) => {
-        "simulator"
-    };
-    (Gradle) => {
-        "gradle"
-    };
-    (Huggingface) => {
-        "huggingface"
-    };
-    (PreCommit) => {
-        "pre-commit"
-    };
-    (JetBrains) => {
-        "jetbrains"
-    };
-    (Downloads) => {
-        "downloads"
-    };
-    (VscodeExtensions) => {
-        "vscode-extensions"
-    };
-    (Maven) => {
-        "maven"
-    };
-    (Terraform) => {
-        "terraform"
-    };
-    (Flutter) => {
-        "flutter"
-    };
-    (Volta) => {
-        "volta"
-    };
-    (Sbt) => {
-        "sbt"
-    };
-    (TreeSitter) => {
-        "tree-sitter"
-    };
-    (Gem) => {
-        "gem"
-    };
-    (Bundle) => {
-        "bundle"
-    };
-    (Dotnet) => {
-        "dotnet"
-    };
-}
-
 /// Generate dispatch_clean and dispatch helpers from the same definition table.
 macro_rules! define_cleaners {
     ($(
@@ -201,7 +81,7 @@ macro_rules! define_cleaners {
         impl CleanTarget {
             fn dispatch_command_name(&self) -> &'static str {
                 match self {
-                    $( CleanTarget::$variant { .. } => cmd_name!($variant), )*
+                    $( CleanTarget::$variant { .. } => $cli_name, )*
                     _ => unreachable!("dispatch_command_name: unexpected special variant"),
                 }
             }
@@ -712,6 +592,23 @@ where
     Ok(result)
 }
 
+/// Wraps `run_clean_target` and exits with code 1 if `CleanResult.exit_code() != 0`.
+fn run_and_exit<F>(
+    label: &str,
+    cleaner_fn: F,
+    dry_run: bool,
+    reporter: &dyn ProgressReporter,
+) -> anyhow::Result<CleanResult>
+where
+    F: FnOnce(bool, &dyn ProgressReporter) -> anyhow::Result<CleanResult>,
+{
+    let result = run_clean_target(label, cleaner_fn, dry_run, reporter)?;
+    if result.exit_code() != 0 {
+        std::process::exit(1);
+    }
+    Ok(result)
+}
+
 fn build_reporter(cli: &Cli, config: &Config) -> Box<dyn ProgressReporter> {
     let (suppress, deep_suppress) = merge_suppress_flags(
         cli.suppress,
@@ -877,7 +774,7 @@ fn main() -> anyhow::Result<()> {
                                 exclude: t.exclude.clone(),
                             })
                             .collect();
-                        let result = run_clean_target(
+                        run_and_exit(
                             "logs",
                             |dry, rep| {
                                 cleaners::log::LogCleaner::new_with_extra(&home, days, extra)
@@ -886,9 +783,6 @@ fn main() -> anyhow::Result<()> {
                             dry_run,
                             reporter.as_ref(),
                         )?;
-                        if result.exit_code() != 0 {
-                            std::process::exit(1);
-                        }
                     }
                     CleanTarget::Xcode { dry_run, sub } => {
                         let mut xcode_cleaner = cleaners::xcode::XcodeCleaner::new(
@@ -907,15 +801,12 @@ fn main() -> anyhow::Result<()> {
                         if cli.yes && xcode_cleaner.is_xcode_running() {
                             eprintln!("Note: Xcode is running. Proceeding with --yes anyway.");
                         }
-                        let result = run_clean_target(
+                        run_and_exit(
                             "xcode",
                             |dry, rep| xcode_cleaner.clean(dry, rep),
                             dry_run,
                             reporter.as_ref(),
                         )?;
-                        if result.exit_code() != 0 {
-                            std::process::exit(1);
-                        }
                     }
                     CleanTarget::Trash { dry_run } => {
                         let cleaner = cleaners::generic::GenericCleaner::trash(
@@ -935,15 +826,12 @@ fn main() -> anyhow::Result<()> {
                             &home,
                             Box::new(SystemCommandRunner),
                         );
-                        let result = run_clean_target(
+                        run_and_exit(
                             "ollama",
                             move |dry, rep| cleaner.clean(dry, rep),
                             dry_run,
                             reporter.as_ref(),
                         )?;
-                        if result.exit_code() != 0 {
-                            std::process::exit(1);
-                        }
                     }
                     CleanTarget::LibraryLogs { dry_run, all } => {
                         let cleaner = cleaners::library_logs::LibraryLogsCleaner::new(
@@ -951,15 +839,12 @@ fn main() -> anyhow::Result<()> {
                             Box::new(SystemCommandRunner),
                         );
                         let opts = crate::cleaner::CleanOptions { all };
-                        let result = run_clean_target(
+                        run_and_exit(
                             "library-logs",
                             move |dry, rep| cleaner.clean_with_opts(dry, rep, &opts),
                             dry_run,
                             reporter.as_ref(),
                         )?;
-                        if result.exit_code() != 0 {
-                            std::process::exit(1);
-                        }
                     }
                     CleanTarget::DeviceSupport { dry_run, keep } => {
                         let cleaner = cleaners::device_support::DeviceSupportCleaner::new(
@@ -967,58 +852,46 @@ fn main() -> anyhow::Result<()> {
                             keep,
                             Box::new(SystemCommandRunner),
                         );
-                        let result = run_clean_target(
+                        run_and_exit(
                             "device-support",
                             move |dry, rep| cleaner.clean(dry, rep),
                             dry_run,
                             reporter.as_ref(),
                         )?;
-                        if result.exit_code() != 0 {
-                            std::process::exit(1);
-                        }
                     }
                     CleanTarget::IosBackup { dry_run } => {
                         let cleaner = cleaners::ios_backup::IosCleaner::new(
                             &home,
                             Box::new(SystemCommandRunner),
                         );
-                        let result = run_clean_target(
+                        run_and_exit(
                             "ios-backup",
                             move |dry, rep| cleaner.clean(dry, rep),
                             dry_run,
                             reporter.as_ref(),
                         )?;
-                        if result.exit_code() != 0 {
-                            std::process::exit(1);
-                        }
                     }
                     CleanTarget::ApfsSnapshot { dry_run } => {
                         let cleaner = cleaners::apfs_snapshot::ApfsSnapshotCleaner::new(Box::new(
                             SystemCommandRunner,
                         ));
-                        let result = run_clean_target(
+                        run_and_exit(
                             "apfs-snapshot",
                             move |dry, rep| cleaner.clean(dry, rep),
                             dry_run,
                             reporter.as_ref(),
                         )?;
-                        if result.exit_code() != 0 {
-                            std::process::exit(1);
-                        }
                     }
                     _ => unreachable!(),
                 }
             } else {
                 // --- Standard targets: dispatch through macro-generated handler ---
-                let result = run_clean_target(
+                run_and_exit(
                     target.command_name(),
                     |dry, rep| dispatch_clean(&home, &config, &target, dry, rep),
                     target.dry_run(),
                     reporter.as_ref(),
                 )?;
-                if result.exit_code() != 0 {
-                    std::process::exit(1);
-                }
             }
         }
         Some(Commands::Stats { last }) => {
