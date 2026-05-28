@@ -158,6 +158,7 @@ impl Cleaner for LibraryLogsCleaner {
                 bytes_freed: 0,
                 uses_trash: false,
                 skipped: vec![],
+            deleted_paths: vec![],
             });
         }
 
@@ -169,6 +170,7 @@ impl Cleaner for LibraryLogsCleaner {
                 bytes_freed: 0,
                 uses_trash: false,
                 skipped: vec![],
+            deleted_paths: vec![],
             });
         }
 
@@ -199,6 +201,7 @@ impl Cleaner for LibraryLogsCleaner {
                 bytes_freed: 0,
                 uses_trash: false,
                 skipped: vec![],
+            deleted_paths: vec![],
             });
         }
 
@@ -211,6 +214,7 @@ impl Cleaner for LibraryLogsCleaner {
                 bytes_freed: 0,
                 uses_trash: false,
                 skipped: vec![],
+            deleted_paths: vec![],
             });
         }
 
@@ -246,6 +250,7 @@ impl Cleaner for LibraryLogsCleaner {
             bytes_freed: total_freed,
             uses_trash: true,
             skipped: vec![],
+            deleted_paths: vec![],
         })
     }
 
@@ -266,6 +271,7 @@ impl Cleaner for LibraryLogsCleaner {
                 bytes_freed: 0,
                 uses_trash: false,
                 skipped: vec![],
+            deleted_paths: vec![],
             });
         }
         if dry_run {
@@ -295,6 +301,7 @@ impl Cleaner for LibraryLogsCleaner {
                 bytes_freed: 0,
                 uses_trash: false,
                 skipped: vec![],
+            deleted_paths: vec![],
             });
         }
         let mut total_freed: u64 = 0;
@@ -323,6 +330,7 @@ impl Cleaner for LibraryLogsCleaner {
             bytes_freed: total_freed,
             uses_trash: true,
             skipped: vec![],
+            deleted_paths: vec![],
         })
     }
 }

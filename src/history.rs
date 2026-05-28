@@ -139,7 +139,7 @@ pub fn load_history(history_path: &Path) -> Vec<HistoryEntry> {
             entries
         }
         Err(_) => {
-            eprintln!("Warning: history file corrupted, starting fresh.");
+            log::warn!("history file corrupted, starting fresh.");
             Vec::new()
         }
     }

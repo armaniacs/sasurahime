@@ -113,7 +113,7 @@ impl Config {
     /// Returns an error if the file exists but cannot be parsed.
     pub fn load_from_path(path: &Path) -> Result<Self> {
         if !path.exists() {
-            eprintln!("Warning: config file {:?} not found, using defaults", path);
+            log::warn!("config file {:?} not found, using defaults", path);
         }
         parse_config_file(path)
     }

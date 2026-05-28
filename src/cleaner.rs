@@ -64,6 +64,10 @@ pub struct CleanResult {
     #[expect(dead_code, reason = "pub API — callers may read")]
     pub uses_trash: bool,
     pub skipped: Vec<SkippedEntry>,
+    /// Paths that were successfully deleted (populated when --verbose is active).
+    /// Primarily used for audit trail in --permanent mode.
+    #[expect(dead_code, reason = "pub API — callers may read")]
+    pub deleted_paths: Vec<PathBuf>,
 }
 
 impl CleanResult {

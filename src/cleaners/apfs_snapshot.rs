@@ -65,6 +65,7 @@ impl Cleaner for ApfsSnapshotCleaner {
                 bytes_freed: 0,
                 uses_trash: false,
                 skipped: vec![],
+            deleted_paths: vec![],
             });
         }
         let output = self.runner.run("tmutil", &["listlocalsnapshots", "/"])?;
@@ -76,6 +77,7 @@ impl Cleaner for ApfsSnapshotCleaner {
                 bytes_freed: 0,
                 uses_trash: false,
                 skipped: vec![],
+            deleted_paths: vec![],
             });
         }
 
@@ -93,6 +95,7 @@ impl Cleaner for ApfsSnapshotCleaner {
                 bytes_freed: 0,
                 uses_trash: false,
                 skipped: vec![],
+            deleted_paths: vec![],
             });
         }
 
@@ -106,6 +109,7 @@ impl Cleaner for ApfsSnapshotCleaner {
                 bytes_freed: 0,
                 uses_trash: false,
                 skipped: vec![],
+            deleted_paths: vec![],
             });
         }
 
@@ -117,6 +121,7 @@ impl Cleaner for ApfsSnapshotCleaner {
                 bytes_freed: 0,
                 uses_trash: false,
                 skipped: vec![],
+            deleted_paths: vec![],
             });
         }
 
@@ -126,7 +131,7 @@ impl Cleaner for ApfsSnapshotCleaner {
                 .run("tmutil", &["deletelocalsnapshot", "/", name])
             {
                 Ok(_) => println!("[apfs-snapshot] deleted: {}", name),
-                Err(e) => eprintln!("[apfs-snapshot] error deleting {}: {e}", name),
+                Err(e) => log::error!("[apfs-snapshot] error deleting {}: {e}", name),
             }
         }
         // Snapshot size cannot be measured after deletion; report 0.
@@ -136,6 +141,7 @@ impl Cleaner for ApfsSnapshotCleaner {
             bytes_freed: 0,
             uses_trash: false,
             skipped: vec![],
+            deleted_paths: vec![],
         })
     }
 }

@@ -541,6 +541,7 @@ where
                     bytes_freed: 0,
                     uses_trash: false,
                     skipped: vec![],
+            deleted_paths: vec![],
                 });
             }
             Err(e) => {
@@ -558,6 +559,7 @@ where
                     bytes_freed: 0,
                     uses_trash: false,
                     skipped: vec![],
+            deleted_paths: vec![],
                 })
             }
             Err(e) => return Err(e),
@@ -620,7 +622,12 @@ fn build_reporter(cli: &Cli, config: &Config) -> Box<dyn ProgressReporter> {
 }
 
 fn main() -> anyhow::Result<()> {
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn"))
+        .format_timestamp(None)
+        .init();
+
     let cli = Cli::parse();
+    log::info!("sasurahime v{} starting", env!("CARGO_PKG_VERSION"));
     eprintln!("sasurahime v{}", env!("CARGO_PKG_VERSION"));
     let home = home();
 
@@ -947,6 +954,7 @@ mod tests {
                         path: std::path::PathBuf::from("/tmp/skipped-file"),
                         reason: "Permission denied".to_string(),
                     }],
+                    deleted_paths: vec![],
                 })
             },
             false,
