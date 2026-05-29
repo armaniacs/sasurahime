@@ -11,10 +11,6 @@ enum MockBehavior {
         program: String,
         output: std::process::Output,
     },
-    ExitCode {
-        program: String,
-        code: i32,
-    },
 }
 
 /// A configurable mock for [`CommandRunner`].
@@ -66,13 +62,6 @@ impl CommandRunner for MockRunner {
                 MockBehavior::Output { program: p, output } if p == program => {
                     return Ok(output.clone());
                 }
-                MockBehavior::ExitCode { program: p, code } if p == program => {
-                    return Ok(std::process::Output {
-                        status: std::process::ExitStatus::from_raw(*code),
-                        stdout: vec![],
-                        stderr: vec![],
-                    });
-                }
                 _ => {}
             }
         }
@@ -86,7 +75,6 @@ impl CommandRunner for MockRunner {
         for b in &self.behaviors {
             match b {
                 MockBehavior::Output { program: p, .. } if p == program => return true,
-                MockBehavior::ExitCode { program: p, .. } if p == program => return true,
                 _ => {}
             }
         }

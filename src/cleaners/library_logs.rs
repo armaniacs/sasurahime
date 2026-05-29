@@ -510,7 +510,7 @@ mod tests {
         let logs = logs_dir(&tmp);
         fs::write(logs.join("test.log"), b"x").unwrap();
         let past = SystemTime::now() - Duration::from_secs(200 * 86400);
-        set_file_mtime(&logs.join("test.log"), FileTime::from_system_time(past)).unwrap();
+        set_file_mtime(logs.join("test.log"), FileTime::from_system_time(past)).unwrap();
 
         let runner = crate::test_helpers::MockRunner::new().with_success("chflags");
         let cleaner = LibraryLogsCleaner::new(tmp.path(), Box::new(runner));
