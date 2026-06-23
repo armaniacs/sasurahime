@@ -42,7 +42,8 @@ layout: none
     <a class="btn-secondary" href="../HOWTO-USE">ドキュメントを見る</a>
   </div>
   <div class="hero-code">
-    <span class="prompt">$</span><span class="cmd">cargo install sasurahime</span>
+    <span class="prompt">$</span><span class="cmd">brew tap armaniacs/sasurahime</span><br>
+    <span class="prompt">$</span><span class="cmd">brew install sasurahime</span>
   </div>
 </div>
 
@@ -158,7 +159,7 @@ layout: none
         <div class="step-num">1</div>
         <div>
           <h3>インストール</h3>
-          <p><code>cargo install sasurahime</code> を実行するか、リリースページからビルド済みバイナリをダウンロードします。</p>
+          <p><code>brew tap armaniacs/sasurahime</code>、<code>brew install sasurahime</code> を実行するか、<code>cargo install sasurahime</code> / リリースページからビルド済みバイナリをダウンロードします。</p>
         </div>
       </div>
       <div class="step">
@@ -185,7 +186,13 @@ layout: none
   <div class="section-inner">
     <div class="section-label">インストール</div>
     <h2 class="section-title">今すぐ始める</h2>
-    <p class="section-sub">macOS (arm64 または x86_64) が必要です。cargo install には Rust ツールチェインが必要です。</p>
+    <p class="section-sub">macOS (arm64 または x86_64) が必要です。Homebrew Tap からは自動的にソースビルドされます。</p>
+    <div class="install-block">
+      <span class="prompt"># </span>Homebrew 経由（推奨）<br>
+      <span class="prompt">$ </span><span class="cmd">brew tap armaniacs/sasurahime</span><br>
+      <span class="prompt">$ </span><span class="cmd">brew install sasurahime</span>
+    </div>
+    <div class="or-divider">— または —</div>
     <div class="install-block">
       <span class="prompt"># </span>Cargo 経由<br>
       <span class="prompt">$ </span><span class="cmd">cargo install sasurahime</span>
