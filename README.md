@@ -26,6 +26,13 @@ Total reclaimable    44.2 GB
 > **Note on sizes**: The numbers above are from one developer's machine.
 > Your environment will differ — these are examples, not guarantees.
 
+## Install
+
+```bash
+brew tap armaniacs/sasurahime
+brew install sasurahime
+```
+
 ## Usage
 
 ```bash
@@ -127,6 +134,13 @@ Total reclaimable    44.2 GB
 
 > **サイズについて**: 上記の数値は開発者一人の環境での実測値です。
 > 環境によって大きく異なります。目安としてご覧ください。
+
+## インストール
+
+```bash
+brew tap armaniacs/sasurahime
+brew install sasurahime
+```
 
 ## 使い方
 

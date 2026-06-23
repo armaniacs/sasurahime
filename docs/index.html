@@ -44,7 +44,8 @@ layout: none
     <a class="btn-secondary" href="HOWTO-USE">View Documentation</a>
   </div>
   <div class="hero-code">
-    <span class="prompt">$</span><span class="cmd">cargo install sasurahime</span>
+    <span class="prompt">$</span><span class="cmd">brew tap armaniacs/sasurahime</span><br>
+    <span class="prompt">$</span><span class="cmd">brew install sasurahime</span>
   </div>
 </div>
 
@@ -163,7 +164,7 @@ layout: none
         <div class="step-num">1</div>
         <div>
           <h3>Install</h3>
-          <p>Run <code>cargo install sasurahime</code> or download a prebuilt binary from the releases page.</p>
+          <p>Run <code>brew tap armaniacs/sasurahime</code> and <code>brew install sasurahime</code>, or use <code>cargo install sasurahime</code> / a prebuilt binary from the releases page.</p>
         </div>
       </div>
       <div class="step">
@@ -191,7 +192,13 @@ layout: none
   <div class="section-inner">
     <div class="section-label">Installation</div>
     <h2 class="section-title">Get started now</h2>
-    <p class="section-sub">Requires macOS (arm64 or x86_64) and Rust toolchain for the cargo install path.</p>
+    <p class="section-sub">Requires macOS (arm64 or x86_64). The Homebrew tap builds from source automatically.</p>
+    <div class="install-block">
+      <span class="prompt"># </span>Via Homebrew (recommended)<br>
+      <span class="prompt">$ </span><span class="cmd">brew tap armaniacs/sasurahime</span><br>
+      <span class="prompt">$ </span><span class="cmd">brew install sasurahime</span>
+    </div>
+    <div class="or-divider">— or —</div>
     <div class="install-block">
       <span class="prompt"># </span>Via Cargo<br>
       <span class="prompt">$ </span><span class="cmd">cargo install sasurahime</span>
