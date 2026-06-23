@@ -4,6 +4,23 @@ All notable changes to sasurahime will be documented in this file. The format is
 
 ---
 
+## [0.2.1] — 2026-06-24
+
+### Added
+
+- **`sasurahime history` as a visible alias for `sasurahime stats`.**
+  Users can now type `sasurahime history` to view deletion history and
+  statistics, matching the familiar `mo history` pattern from Mole.
+- **Homebrew tap `armaniacs/sasurahime` is now available.**
+  Install with `brew tap armaniacs/sasurahime && brew install sasurahime`.
+
+### Internal
+
+- **History alias integration tests.** Added E2E coverage ensuring
+  `history` produces identical output to `stats`, including `--last` filtering.
+
+---
+
 ## [0.2.0] — 2026-05-29
 
 ### Added

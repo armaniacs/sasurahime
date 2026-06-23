@@ -346,6 +346,7 @@ enum Commands {
         dirs: Vec<PathBuf>,
     },
     /// Show deletion history and statistics
+    #[command(visible_alias = "history")]
     Stats {
         /// Show only the last N entries
         #[arg(long, default_value = "10")]

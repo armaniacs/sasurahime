@@ -2,6 +2,17 @@ use assert_cmd::Command;
 use std::fs;
 use tempfile::TempDir;
 
+const TWO_ENTRIES: &str = r#"[
+    {"timestamp":"2026-05-25T10:30:00+09:00","cleaner":"uv","freed_bytes":500000000,"skipped_count":0},
+    {"timestamp":"2026-05-24T22:15:00+09:00","cleaner":"brew","freed_bytes":1200000000,"skipped_count":1}
+]"#;
+
+const THREE_ENTRIES: &str = r#"[
+    {"timestamp":"2026-05-25T10:30:00+09:00","cleaner":"uv","freed_bytes":500000000,"skipped_count":0},
+    {"timestamp":"2026-05-24T22:15:00+09:00","cleaner":"brew","freed_bytes":1200000000,"skipped_count":1},
+    {"timestamp":"2026-05-23T18:00:00+09:00","cleaner":"xcode","freed_bytes":3500000000,"skipped_count":0}
+]"#;
+
 fn sasurahime(home: &std::path::Path) -> Command {
     let mut cmd = Command::cargo_bin("sasurahime").unwrap();
     cmd.env("HOME", home);
@@ -14,16 +25,24 @@ fn write_history(home: &std::path::Path, entries: &str) {
     fs::write(dir.join("history.json"), entries).unwrap();
 }
 
+fn assert_history_alias_matches_stats(home: &std::path::Path, extra_args: &[&str]) {
+    let mut stats_args = vec!["stats"];
+    stats_args.extend_from_slice(extra_args);
+    let mut history_args = vec!["history"];
+    history_args.extend_from_slice(extra_args);
+
+    let stats_output = sasurahime(home).args(&stats_args).output().unwrap();
+    let history_output = sasurahime(home).args(&history_args).output().unwrap();
+    assert!(history_output.status.success());
+    let stats_stdout = String::from_utf8_lossy(&stats_output.stdout);
+    let history_stdout = String::from_utf8_lossy(&history_output.stdout);
+    assert_eq!(stats_stdout, history_stdout);
+}
+
 #[test]
 fn stats_shows_aggregated_results() {
     let tmp = TempDir::new().unwrap();
-    write_history(
-        tmp.path(),
-        r#"[
-        {"timestamp":"2026-05-25T10:30:00+09:00","cleaner":"uv","freed_bytes":500000000,"skipped_count":0},
-        {"timestamp":"2026-05-24T22:15:00+09:00","cleaner":"brew","freed_bytes":1200000000,"skipped_count":1}
-    ]"#,
-    );
+    write_history(tmp.path(), TWO_ENTRIES);
     let output = sasurahime(tmp.path()).args(["stats"]).output().unwrap();
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -56,14 +75,7 @@ fn stats_corrupted_history_does_not_crash() {
 #[test]
 fn stats_last_n_filters() {
     let tmp = TempDir::new().unwrap();
-    write_history(
-        tmp.path(),
-        r#"[
-        {"timestamp":"2026-05-25T10:30:00+09:00","cleaner":"uv","freed_bytes":500000000,"skipped_count":0},
-        {"timestamp":"2026-05-24T22:15:00+09:00","cleaner":"brew","freed_bytes":1200000000,"skipped_count":1},
-        {"timestamp":"2026-05-23T18:00:00+09:00","cleaner":"xcode","freed_bytes":3500000000,"skipped_count":0}
-    ]"#,
-    );
+    write_history(tmp.path(), THREE_ENTRIES);
     let output = sasurahime(tmp.path())
         .args(["stats", "--last", "2"])
         .output()
@@ -80,6 +92,26 @@ fn stats_last_n_filters() {
         2,
         "Only 2 of 3 entries should appear"
     );
+}
+
+#[test]
+fn history_alias_matches_stats_with_entries() {
+    let tmp = TempDir::new().unwrap();
+    write_history(tmp.path(), TWO_ENTRIES);
+    assert_history_alias_matches_stats(tmp.path(), &[]);
+}
+
+#[test]
+fn history_alias_matches_stats_empty() {
+    let tmp = TempDir::new().unwrap();
+    assert_history_alias_matches_stats(tmp.path(), &[]);
+}
+
+#[test]
+fn history_alias_matches_stats_with_last_filter() {
+    let tmp = TempDir::new().unwrap();
+    write_history(tmp.path(), THREE_ENTRIES);
+    assert_history_alias_matches_stats(tmp.path(), &["--last", "2"]);
 }
 
 #[test]

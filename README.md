@@ -51,9 +51,11 @@ sasurahime clean caches          # bun / go / pip / node-gyp / npm / yarn / pnpm
 sasurahime clean logs
 
 # --- Options ---
-sasurahime clean uv --dry-run    # preview without deleting
-sasurahime --yes                 # non-interactive full clean (CI / scripting)
-sasurahime clean uv --permanent  # permanently delete (bypass Trash)
+sasurahime stats                   # show deletion history and statistics
+sasurahime history                 # alias for stats
+sasurahime clean uv --dry-run      # preview without deleting
+sasurahime --yes                   # non-interactive full clean (CI / scripting)
+sasurahime clean uv --permanent    # permanently delete (bypass Trash)
 sasurahime --version
 ```
 
@@ -160,9 +162,11 @@ sasurahime clean caches          # bun / go / pip / node-gyp / npm / yarn / pnpm
 sasurahime clean logs
 
 # --- オプション ---
-sasurahime clean uv --dry-run    # 削除せずに確認だけ（dry-run）
-sasurahime --yes                 # 確認なしで全削除（CI・スクリプト向け）
-sasurahime clean uv --permanent  # 完全削除（ゴミ箱を経由しない）
+sasurahime stats                   # 削除履歴と統計を表示
+sasurahime history                 # stats のエイリアス
+sasurahime clean uv --dry-run      # 削除せずに確認だけ（dry-run）
+sasurahime --yes                   # 確認なしで全削除（CI・スクリプト向け）
+sasurahime clean uv --permanent    # 完全削除（ゴミ箱を経由しない）
 sasurahime --version
 ```
 
