@@ -14,6 +14,15 @@ locations, reports disk usage, and lets you selectively remove stale data.
 
 ## Installation
 
+### Via Homebrew (recommended)
+
+```bash
+brew tap armaniacs/sasurahime
+brew install sasurahime
+```
+
+### Via Cargo
+
 ```bash
 cargo install sasurahime
 ```
@@ -576,6 +585,15 @@ sasurahime
 ---
 
 ## インストール
+
+### Homebrew 経由（推奨）
+
+```bash
+brew tap armaniacs/sasurahime
+brew install sasurahime
+```
+
+### Cargo 経由
 
 ```bash
 cargo install sasurahime
