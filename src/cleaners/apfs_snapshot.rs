@@ -483,7 +483,13 @@ mod tests {
         let cleaner = ApfsSnapshotCleaner::new(Box::new(runner));
         let names = vec!["com.apple.TimeMachine.2026-05-10-120000.local".to_string()];
         let report = cleaner.delete_snapshots(&names);
-        assert_eq!(report, DeleteReport::default());
+        assert_eq!(
+            report,
+            DeleteReport {
+                deleted: 1,
+                ..Default::default()
+            }
+        );
         assert_eq!(
             *calls.lock().unwrap(),
             vec![vec![
