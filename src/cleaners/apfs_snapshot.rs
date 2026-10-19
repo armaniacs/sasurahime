@@ -1,4 +1,4 @@
-use crate::cleaner::{CleanResult, Cleaner, ScanResult, ScanStatus};
+use crate::cleaner::{CleanResult, Cleaner, ScanResult, ScanStatus, SkippedEntry};
 use crate::command::CommandRunner;
 use crate::progress::ProgressReporter;
 use anyhow::Result;
@@ -179,20 +179,37 @@ impl Cleaner for ApfsSnapshotCleaner {
         // under-report right after deletion.
         let before = (self.free_space)();
         let report = self.delete_snapshots(&selected);
-        let after = (self.free_space)();
+        // Free space also moves for unrelated I/O, so a delta is only
+        // attributable to us when at least one deletion succeeded.
+        let bytes_freed = if report.deleted == 0 {
+            0
+        } else {
+            match (before, (self.free_space)()) {
+                (Some(b), Some(a)) => freed_bytes(b, a),
+                _ => 0,
+            }
+        };
         if !report.failed_dates.is_empty() {
             eprint!("{}", sudo_hint(&report.failed_dates));
         }
-        let bytes_freed = match (before, after) {
-            (Some(b), Some(a)) => freed_bytes(b, a),
-            _ => 0,
-        };
-        println!("[apfs-snapshot] done");
+        let skipped = report
+            .failed_dates
+            .iter()
+            .map(|d| SkippedEntry {
+                path: std::path::PathBuf::from(d),
+                reason: format!("requires root: sudo tmutil deletelocalsnapshots {d}"),
+            })
+            .collect();
+        if report.deleted == 0 {
+            eprintln!("[apfs-snapshot] failed: no snapshot was deleted");
+        } else {
+            println!("[apfs-snapshot] done");
+        }
         Ok(CleanResult {
             name: self.name(),
             bytes_freed,
             uses_trash: false,
-            skipped: vec![],
+            skipped,
             deleted_paths: vec![],
         })
     }
@@ -212,6 +229,7 @@ pub fn sudo_hint(failed_dates: &[String]) -> String {
 struct DeleteReport {
     /// Dates `tmutil` could not delete; these get the sudo hint.
     failed_dates: Vec<String>,
+    deleted: usize,
     /// Names with no parseable date. They are not deleted and the user must
     /// be told, since silently skipping would look like a successful cleanup.
     unparsed_names: Vec<String>,
@@ -227,7 +245,10 @@ impl ApfsSnapshotCleaner {
                 continue;
             };
             match self.runner.run("tmutil", &["deletelocalsnapshots", &date]) {
-                Ok(o) if o.status.success() => println!("[apfs-snapshot] deleted: {name}"),
+                Ok(o) if o.status.success() => {
+                    println!("[apfs-snapshot] deleted: {name}");
+                    report.deleted += 1;
+                }
                 Ok(_) | Err(_) => report.failed_dates.push(date),
             }
         }
@@ -551,6 +572,70 @@ mod tests {
         let reporter = crate::progress::VerboseProgress::new();
         let result = cleaner.clean(false, &reporter).unwrap();
         assert_eq!(result.bytes_freed, 0);
+    }
+
+    struct Mixed;
+    impl CommandRunner for Mixed {
+        fn run(&self, _: &str, args: &[&str]) -> anyhow::Result<std::process::Output> {
+            if args.contains(&"listlocalsnapshots") {
+                return Ok(ok_output(
+                    b"com.apple.TimeMachine.2026-05-10-120000.local\ncom.apple.TimeMachine.2026-05-11-120000.local\n",
+                ));
+            }
+            let code = if args.contains(&"2026-05-10-120000") {
+                0
+            } else {
+                1
+            };
+            Ok(std::process::Output {
+                status: std::process::ExitStatus::from_raw(code << 8),
+                stdout: vec![],
+                stderr: vec![],
+            })
+        }
+        fn exists(&self, _: &str) -> bool {
+            true
+        }
+    }
+
+    #[test]
+    fn clean_all_failed_reports_zero_bytes_and_exit_code_1() {
+        let runner = Recording {
+            calls: Arc::new(Mutex::new(vec![])),
+            delete_status: 1,
+        };
+        let (probe, _) = scripted_free_space(vec![Some(100), Some(500)]);
+        let cleaner = ApfsSnapshotCleaner::new(Box::new(runner))
+            .with_all(true)
+            .with_free_space(probe);
+        let reporter = crate::progress::VerboseProgress::new();
+        let result = cleaner.clean(false, &reporter).unwrap();
+        assert_eq!(result.bytes_freed, 0);
+        assert_eq!(result.skipped.len(), 1);
+        assert_eq!(result.exit_code(), 1);
+    }
+
+    #[test]
+    fn clean_partial_success_reports_delta_and_skips_failed() {
+        let (probe, _) = scripted_free_space(vec![Some(100), Some(400)]);
+        let cleaner = ApfsSnapshotCleaner::new(Box::new(Mixed))
+            .with_all(true)
+            .with_free_space(probe);
+        let reporter = crate::progress::VerboseProgress::new();
+        let result = cleaner.clean(false, &reporter).unwrap();
+        assert_eq!(result.bytes_freed, 300);
+        assert_eq!(result.skipped.len(), 1);
+        assert!(result.skipped[0].reason.contains("2026-05-11-120000"));
+        assert_eq!(result.exit_code(), 0);
+    }
+
+    #[test]
+    fn parse_mixed_input_keeps_only_time_machine_lines() {
+        let out = "Snapshots for disk /:\ncom.apple.TimeMachine.2026-05-10-120000.local\ncom.apple.os.update-ABC123\ncom.apple.TimeMachine.bogus.local\n";
+        assert_eq!(
+            parse_snapshot_names(out),
+            vec!["com.apple.TimeMachine.2026-05-10-120000.local".to_string()]
+        );
     }
 
     #[test]
