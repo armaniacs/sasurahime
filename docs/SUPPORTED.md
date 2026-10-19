@@ -62,7 +62,7 @@ and packages are never touched.
 | `library-logs` | `~/Library/Logs/` (heuristic, interactive) |
 | `downloads` | `~/Downloads/` old files |
 | `ios-backup` | iOS backups — interactive only, never in `--yes` |
-| `apfs-snapshot` | APFS local Time Machine snapshots — interactive only |
+| `apfs-snapshot` | APFS local Time Machine snapshots — interactive, or `--all` |
 | `trash` | Reports `~/.Trash` size (scan only) |
 
 ---
@@ -1147,29 +1147,39 @@ UUID-named subdirectory containing backup data (Manifest.db, etc.).
 **Category:** Sprint 6
 
 **What it removes:** APFS local Time Machine snapshots via
-`tmutil deletelocalsnapshot / <name>`.
+`tmutil deletelocalsnapshots <date>` (`<date>` is `YYYY-MM-DD-HHMMSS`).
 
 **How detect works:**
 1. Checks if `tmutil` is available on the system.
 2. Runs `tmutil listlocalsnapshots /` and parses output via
-   `parse_snapshot_names` (lines trimmed, empty lines filtered).
+   `parse_snapshot_names` (only `com.apple.TimeMachine.<date>.local` lines are
+   kept; the `Snapshots for disk /:` header is ignored).
 3. Measures `/.MobileBackups` disk usage (if present) as a size estimate.
 4. Returns `Pruneable` with the measured size (or 0 if `/.MobileBackups` does
    not exist).
 
 **How clean works:**
 1. Lists all local snapshots from `tmutil listlocalsnapshots`.
-2. Opens an interactive `dialoguer::MultiSelect` prompt (unless `--dry-run`).
-3. Runs `tmutil deletelocalsnapshot / <name>` for each selected snapshot.
-4. Reports 0 freed bytes (APFS block-sharing space cannot be measured
-   reliably after deletion).
+2. Without `--all`, opens an interactive `dialoguer::MultiSelect` prompt
+   (unless `--dry-run`). With `--all`, every snapshot is selected without
+   prompting, and a non-TTY invocation is allowed.
+3. Runs `tmutil deletelocalsnapshots <date>` for each selected snapshot.
+4. Reports freed bytes as the increase in free space on `/` between before and
+   after the deletion. The value can be smaller than the real amount because
+   purgeable space is reflected with a delay.
+
+**Privileges:** `tmutil deletelocalsnapshots` requires root. sasurahime never
+runs `sudo`; for each snapshot that fails to delete, it prints the
+`sudo tmutil deletelocalsnapshots <date>` command to run manually. Names
+without a parsable date are reported with a warning and skipped.
 
 **Safety:**
 - Deleting snapshots disables local Time Machine protection until the next
   backup.
-- **Interactive only:** never runs in `--yes` mode. Non-TTY invocations are
-  safely skipped with a message.
-- In `--dry-run` mode, snapshots are listed but never removed.
+- **Interactive by default:** never runs in `--yes` mode. Without `--all`,
+  non-TTY invocations are safely skipped with a message.
+- In `--dry-run` mode (with or without `--all`), snapshots are listed but never
+  removed.
 
 ---
 
@@ -1388,7 +1398,7 @@ sasurahime は **49 のクリーンターゲット** を提供しています。
 | `library-logs` | `~/Library/Logs/`（ヒューリスティック、対話的） |
 | `downloads` | `~/Downloads/` の古いファイル |
 | `ios-backup` | iOS バックアップ — 対話的のみ、`--yes` では非実行 |
-| `apfs-snapshot` | APFS ローカル Time Machine スナップショット — 対話的のみ |
+| `apfs-snapshot` | APFS ローカル Time Machine スナップショット — 対話的、または `--all` |
 | `trash` | `~/.Trash` のサイズを報告（スキャンのみ） |
 
 ---
@@ -2347,13 +2357,14 @@ sasurahime は **49 のクリーンターゲット** を提供しています。
 
 **カテゴリ:** Sprint 6
 
-**削除対象:** `tmutil deletelocalsnapshot / <name>` による APFS ローカル
-Time Machine スナップショット。
+**削除対象:** `tmutil deletelocalsnapshots <date>` による APFS ローカル
+Time Machine スナップショット（`<date>` は `YYYY-MM-DD-HHMMSS`）。
 
 **detect の動作:**
 1. `tmutil` がシステムで利用可能か確認します。
 2. `tmutil listlocalsnapshots /` を実行し、出力を `parse_snapshot_names`
-   でパースします（行のトリミング、空行のフィルタリング）。
+   でパースします（`com.apple.TimeMachine.<date>.local` 形式の行のみを残し、
+   `Snapshots for disk /:` のヘッダ行は無視します）。
 3. `/.MobileBackups` のディスク使用量（存在する場合）をサイズ見積もりとして
    測定します。
 4. 測定サイズ付きで `Pruneable` を返します（`/.MobileBackups` が存在しない
@@ -2361,20 +2372,26 @@ Time Machine スナップショット。
 
 **clean の動作:**
 1. `tmutil listlocalsnapshots` からローカルスナップショットを一覧表示します。
-2. 対話的な `dialoguer::MultiSelect` プロンプトを開きます（`--dry-run` 時を
-   除く）。
-3. 選択されたスナップショットごとに `tmutil deletelocalsnapshot / <name>`
+2. `--all` なしの場合は対話的な `dialoguer::MultiSelect` プロンプトを開きます
+   （`--dry-run` 時を除く）。`--all` ありの場合はプロンプトなしで全件を選択し、
+   非 TTY でも実行できます。
+3. 選択されたスナップショットごとに `tmutil deletelocalsnapshots <date>`
    を実行します。
-4. 解放バイト数として 0 を報告します（APFS ブロック共有領域は削除後に
-   確実に測定できません）。
+4. 解放バイト数は、削除前後の `/` の空き容量の増加分として報告します。
+   purgeable 領域の反映が遅れるため、実際より小さい値になることがあります。
+
+**権限:** `tmutil deletelocalsnapshots` は root 権限が必要です。sasurahime は
+`sudo` を実行しません。削除に失敗したスナップショットごとに、手動で実行する
+`sudo tmutil deletelocalsnapshots <date>` を表示します。日付をパースできない
+名前は警告を表示してスキップします。
 
 **安全性:**
 - スナップショットの削除は、次回のバックアップまでローカル Time Machine
   保護を無効にします。
-- **インタラクティブのみ:** `--yes` モードでは決して実行されません。非 TTY
-  の呼び出しは安全にスキップされます。
-- `--dry-run` モードではスナップショットが一覧表示されるのみで削除は
-  行われません。
+- **既定はインタラクティブ:** `--yes` モードでは決して実行されません。
+  `--all` なしの非 TTY 呼び出しは安全にスキップされます。
+- `--dry-run` モードでは（`--all` の有無にかかわらず）スナップショットが
+  一覧表示されるのみで削除は行われません。
 
 ---
 
