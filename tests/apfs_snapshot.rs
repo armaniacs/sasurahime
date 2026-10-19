@@ -22,8 +22,8 @@ fn clean_apfs_snapshot_dry_run_does_not_crash() {
 }
 
 #[test]
-fn clean_apfs_snapshot_no_crash_without_tmutil() {
-    // Restrict PATH so tmutil is not available
+fn clean_apfs_snapshot_restricted_path_does_not_crash() {
+    // Restrict PATH; tmutil may or may not be reachable from it
     let tmp = TempDir::new().unwrap();
     let output = Command::cargo_bin("sasurahime")
         .unwrap()
@@ -39,11 +39,17 @@ fn clean_apfs_snapshot_no_crash_without_tmutil() {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    // Snapshot count decides the message: none -> stdout, some -> stderr
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
     assert!(
-        stderr.contains("not found")
-            || stderr.contains("not a terminal")
-            || stderr.contains("running"),
-        "expected 'not found', 'not a terminal', or 'running' in stderr: {stderr}"
+        combined.contains("not found")
+            || combined.contains("not a terminal")
+            || combined.contains("running")
+            || combined.contains("no local snapshots found"),
+        "expected a skip/no-snapshot message in output: {combined}"
     );
 }
