@@ -143,9 +143,9 @@ impl Cleaner for ApfsSnapshotCleaner {
             });
         }
 
-        let failed = self.delete_snapshots(&selected);
-        if !failed.is_empty() {
-            eprint!("{}", sudo_hint(&failed));
+        let report = self.delete_snapshots(&selected);
+        if !report.failed_dates.is_empty() {
+            eprint!("{}", sudo_hint(&report.failed_dates));
         }
         // Snapshot size cannot be measured after deletion; report 0.
         println!("[apfs-snapshot] done");
@@ -169,20 +169,30 @@ pub fn sudo_hint(failed_dates: &[String]) -> String {
     s
 }
 
+#[derive(Debug, Default, PartialEq)]
+struct DeleteReport {
+    /// Dates `tmutil` could not delete; these get the sudo hint.
+    failed_dates: Vec<String>,
+    /// Names with no parseable date. They are not deleted and the user must
+    /// be told, since silently skipping would look like a successful cleanup.
+    unparsed_names: Vec<String>,
+}
+
 impl ApfsSnapshotCleaner {
-    /// Returns the dates that failed to delete.
-    fn delete_snapshots(&self, names: &[String]) -> Vec<String> {
-        let mut failed = vec![];
+    fn delete_snapshots(&self, names: &[String]) -> DeleteReport {
+        let mut report = DeleteReport::default();
         for name in names {
             let Some(date) = snapshot_date(name) else {
+                eprintln!("[apfs-snapshot] warning: cannot parse date, not deleted: {name}");
+                report.unparsed_names.push(name.clone());
                 continue;
             };
             match self.runner.run("tmutil", &["deletelocalsnapshots", &date]) {
                 Ok(o) if o.status.success() => println!("[apfs-snapshot] deleted: {name}"),
-                Ok(_) | Err(_) => failed.push(date),
+                Ok(_) | Err(_) => report.failed_dates.push(date),
             }
         }
-        failed
+        report
     }
 
     fn interactive_select(&self, names: &[String]) -> Result<Vec<String>> {
@@ -362,10 +372,12 @@ mod tests {
         assert_eq!(snapshot_date("com.apple.os.update-ABCDEF"), None);
     }
 
-    use std::sync::Mutex;
+    use std::sync::{Arc, Mutex};
+
+    type Calls = Arc<Mutex<Vec<Vec<String>>>>;
 
     struct Recording {
-        calls: Mutex<Vec<Vec<String>>>,
+        calls: Calls,
         delete_status: i32,
     }
     impl CommandRunner for Recording {
@@ -390,33 +402,85 @@ mod tests {
         }
     }
 
+    struct ErrRunner;
+    impl CommandRunner for ErrRunner {
+        fn run(&self, _: &str, _: &[&str]) -> anyhow::Result<std::process::Output> {
+            anyhow::bail!("failed to spawn `tmutil`")
+        }
+        fn exists(&self, _: &str) -> bool {
+            true
+        }
+    }
+
     #[test]
     fn delete_uses_date_and_reports_success() {
+        let calls: Calls = Arc::new(Mutex::new(vec![]));
         let runner = Recording {
-            calls: Mutex::new(vec![]),
+            calls: Arc::clone(&calls),
             delete_status: 0,
         };
         let cleaner = ApfsSnapshotCleaner::new(Box::new(runner));
         let names = vec!["com.apple.TimeMachine.2026-05-10-120000.local".to_string()];
-        let failed = cleaner.delete_snapshots(&names);
-        assert!(failed.is_empty());
+        let report = cleaner.delete_snapshots(&names);
+        assert_eq!(report, DeleteReport::default());
+        assert_eq!(
+            *calls.lock().unwrap(),
+            vec![vec![
+                "deletelocalsnapshots".to_string(),
+                "2026-05-10-120000".to_string()
+            ]]
+        );
     }
 
     #[test]
     fn delete_failure_returns_sudo_hint_list() {
         let runner = Recording {
-            calls: Mutex::new(vec![]),
+            calls: Arc::new(Mutex::new(vec![])),
             delete_status: 1,
         };
         let cleaner = ApfsSnapshotCleaner::new(Box::new(runner));
         let names = vec!["com.apple.TimeMachine.2026-05-10-120000.local".to_string()];
-        let failed = cleaner.delete_snapshots(&names);
-        assert_eq!(failed, vec!["2026-05-10-120000".to_string()]);
+        let report = cleaner.delete_snapshots(&names);
+        assert_eq!(report.failed_dates, vec!["2026-05-10-120000".to_string()]);
+        assert!(report.unparsed_names.is_empty());
+    }
+
+    #[test]
+    fn delete_runner_error_counts_as_failure() {
+        let cleaner = ApfsSnapshotCleaner::new(Box::new(ErrRunner));
+        let names = vec!["com.apple.TimeMachine.2026-05-10-120000.local".to_string()];
+        let report = cleaner.delete_snapshots(&names);
+        assert_eq!(report.failed_dates, vec!["2026-05-10-120000".to_string()]);
+    }
+
+    #[test]
+    fn delete_unparseable_name_is_reported_not_silently_skipped() {
+        let calls: Calls = Arc::new(Mutex::new(vec![]));
+        let runner = Recording {
+            calls: Arc::clone(&calls),
+            delete_status: 0,
+        };
+        let cleaner = ApfsSnapshotCleaner::new(Box::new(runner));
+        let names = vec!["com.apple.os.update-ABCDEF".to_string()];
+        let report = cleaner.delete_snapshots(&names);
+        assert_eq!(report.unparsed_names, names);
+        assert!(report.failed_dates.is_empty());
+        assert!(calls.lock().unwrap().is_empty());
     }
 
     #[test]
     fn sudo_hint_lists_each_failed_date() {
         let hint = sudo_hint(&["2026-05-10-120000".to_string()]);
         assert!(hint.contains("sudo tmutil deletelocalsnapshots 2026-05-10-120000"));
+    }
+
+    #[test]
+    fn sudo_hint_lists_multiple_dates_on_separate_lines() {
+        let hint = sudo_hint(&[
+            "2026-05-10-120000".to_string(),
+            "2026-05-11-120000".to_string(),
+        ]);
+        assert!(hint.contains("  sudo tmutil deletelocalsnapshots 2026-05-10-120000\n"));
+        assert!(hint.contains("  sudo tmutil deletelocalsnapshots 2026-05-11-120000\n"));
     }
 }
