@@ -1170,8 +1170,10 @@ UUID-named subdirectory containing backup data (Manifest.db, etc.).
 
 **Privileges:** `tmutil deletelocalsnapshots` requires root. sasurahime never
 runs `sudo`; for each snapshot that fails to delete, it prints the
-`sudo tmutil deletelocalsnapshots <date>` command to run manually. Names
-without a parsable date are reported with a warning and skipped.
+`sudo tmutil deletelocalsnapshots <date>` command to run manually. Only
+Time Machine snapshots (`com.apple.TimeMachine.<date>.local`) are listed; other
+snapshots are ignored. Failed deletions are returned as skipped entries, and the
+exit code is 1 when no snapshot could be deleted.
 
 **Safety:**
 - Deleting snapshots disables local Time Machine protection until the next
@@ -2382,8 +2384,9 @@ Time Machine スナップショット（`<date>` は `YYYY-MM-DD-HHMMSS`）。
 
 **権限:** `tmutil deletelocalsnapshots` は root 権限が必要です。sasurahime は
 `sudo` を実行しません。削除に失敗したスナップショットごとに、手動で実行する
-`sudo tmutil deletelocalsnapshots <date>` を表示します。日付をパースできない
-名前は警告を表示してスキップします。
+`sudo tmutil deletelocalsnapshots <date>` を表示します。Time Machine 形式
+（`com.apple.TimeMachine.<date>.local`）以外のスナップショットは一覧に含めません。
+削除に失敗したものは skipped として返し、1 件も削除できなかった場合の終了コードは 1 です。
 
 **安全性:**
 - スナップショットの削除は、次回のバックアップまでローカル Time Machine
