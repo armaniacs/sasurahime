@@ -143,14 +143,9 @@ impl Cleaner for ApfsSnapshotCleaner {
             });
         }
 
-        for name in &selected {
-            match self
-                .runner
-                .run("tmutil", &["deletelocalsnapshot", "/", name])
-            {
-                Ok(_) => println!("[apfs-snapshot] deleted: {}", name),
-                Err(e) => log::error!("[apfs-snapshot] error deleting {}: {e}", name),
-            }
+        let failed = self.delete_snapshots(&selected);
+        if !failed.is_empty() {
+            eprint!("{}", sudo_hint(&failed));
         }
         // Snapshot size cannot be measured after deletion; report 0.
         println!("[apfs-snapshot] done");
@@ -164,7 +159,32 @@ impl Cleaner for ApfsSnapshotCleaner {
     }
 }
 
+pub fn sudo_hint(failed_dates: &[String]) -> String {
+    let mut s = String::from(
+        "[apfs-snapshot] some snapshots could not be deleted (root privileges are required). Run:\n",
+    );
+    for d in failed_dates {
+        s.push_str(&format!("  sudo tmutil deletelocalsnapshots {d}\n"));
+    }
+    s
+}
+
 impl ApfsSnapshotCleaner {
+    /// Returns the dates that failed to delete.
+    fn delete_snapshots(&self, names: &[String]) -> Vec<String> {
+        let mut failed = vec![];
+        for name in names {
+            let Some(date) = snapshot_date(name) else {
+                continue;
+            };
+            match self.runner.run("tmutil", &["deletelocalsnapshots", &date]) {
+                Ok(o) if o.status.success() => println!("[apfs-snapshot] deleted: {name}"),
+                Ok(_) | Err(_) => failed.push(date),
+            }
+        }
+        failed
+    }
+
     fn interactive_select(&self, names: &[String]) -> Result<Vec<String>> {
         use dialoguer::MultiSelect;
         let defaults = vec![true; names.len()];
@@ -340,5 +360,63 @@ mod tests {
         );
         assert_eq!(snapshot_date("Snapshots for disk /:"), None);
         assert_eq!(snapshot_date("com.apple.os.update-ABCDEF"), None);
+    }
+
+    use std::sync::Mutex;
+
+    struct Recording {
+        calls: Mutex<Vec<Vec<String>>>,
+        delete_status: i32,
+    }
+    impl CommandRunner for Recording {
+        fn run(&self, _: &str, args: &[&str]) -> anyhow::Result<std::process::Output> {
+            self.calls
+                .lock()
+                .unwrap()
+                .push(args.iter().map(|s| s.to_string()).collect());
+            if args.contains(&"listlocalsnapshots") {
+                return Ok(ok_output(
+                    b"Snapshots for disk /:\ncom.apple.TimeMachine.2026-05-10-120000.local\n",
+                ));
+            }
+            Ok(std::process::Output {
+                status: std::process::ExitStatus::from_raw(self.delete_status << 8),
+                stdout: vec![],
+                stderr: b"must be root".to_vec(),
+            })
+        }
+        fn exists(&self, _: &str) -> bool {
+            true
+        }
+    }
+
+    #[test]
+    fn delete_uses_date_and_reports_success() {
+        let runner = Recording {
+            calls: Mutex::new(vec![]),
+            delete_status: 0,
+        };
+        let cleaner = ApfsSnapshotCleaner::new(Box::new(runner));
+        let names = vec!["com.apple.TimeMachine.2026-05-10-120000.local".to_string()];
+        let failed = cleaner.delete_snapshots(&names);
+        assert!(failed.is_empty());
+    }
+
+    #[test]
+    fn delete_failure_returns_sudo_hint_list() {
+        let runner = Recording {
+            calls: Mutex::new(vec![]),
+            delete_status: 1,
+        };
+        let cleaner = ApfsSnapshotCleaner::new(Box::new(runner));
+        let names = vec!["com.apple.TimeMachine.2026-05-10-120000.local".to_string()];
+        let failed = cleaner.delete_snapshots(&names);
+        assert_eq!(failed, vec!["2026-05-10-120000".to_string()]);
+    }
+
+    #[test]
+    fn sudo_hint_lists_each_failed_date() {
+        let hint = sudo_hint(&["2026-05-10-120000".to_string()]);
+        assert!(hint.contains("sudo tmutil deletelocalsnapshots 2026-05-10-120000"));
     }
 }
