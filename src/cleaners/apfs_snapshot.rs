@@ -6,11 +6,19 @@ use std::io::IsTerminal;
 
 pub struct ApfsSnapshotCleaner {
     pub runner: Box<dyn CommandRunner>,
+    all: bool,
 }
 
 impl ApfsSnapshotCleaner {
     pub fn new(runner: Box<dyn CommandRunner>) -> Self {
-        Self { runner }
+        Self { runner, all: false }
+    }
+
+    // Unused by the binary until the CLI passes `--all`; remove this allow with that wiring.
+    #[allow(dead_code)]
+    pub fn with_all(mut self, all: bool) -> Self {
+        self.all = all;
+        self
     }
 }
 
@@ -117,10 +125,12 @@ impl Cleaner for ApfsSnapshotCleaner {
             });
         }
 
-        if !std::io::stdin().is_terminal() {
+        // `--all` is an explicit opt-in, so it skips the TTY guard that exists
+        // only to stop an interactive prompt from being hit in a pipeline.
+        if !self.all && !std::io::stdin().is_terminal() {
             eprintln!(
                 "[apfs-snapshot] not a terminal — skipping. Use `sasurahime clean apfs-snapshot` \
-                 for interactive selection."
+                 for interactive selection, or `--all` to delete everything."
             );
             return Ok(CleanResult {
                 name: self.name(),
@@ -131,7 +141,11 @@ impl Cleaner for ApfsSnapshotCleaner {
             });
         }
 
-        let selected = self.interactive_select(&names)?;
+        let selected = if self.all {
+            names.clone()
+        } else {
+            self.interactive_select(&names)?
+        };
         if selected.is_empty() {
             println!("[apfs-snapshot] nothing selected");
             return Ok(CleanResult {
@@ -482,5 +496,46 @@ mod tests {
         ]);
         assert!(hint.contains("  sudo tmutil deletelocalsnapshots 2026-05-10-120000\n"));
         assert!(hint.contains("  sudo tmutil deletelocalsnapshots 2026-05-11-120000\n"));
+    }
+
+    #[test]
+    fn all_flag_deletes_without_terminal() {
+        let calls: Calls = Arc::new(Mutex::new(vec![]));
+        let runner = Recording {
+            calls: Arc::clone(&calls),
+            delete_status: 0,
+        };
+        let cleaner = ApfsSnapshotCleaner::new(Box::new(runner)).with_all(true);
+        let reporter = crate::progress::VerboseProgress::new();
+        // Non-TTY under `cargo test`: the deletion path must run, not the skip path.
+        let result = cleaner.clean(false, &reporter).unwrap();
+        assert_eq!(result.name, "apfs-snapshot");
+        assert_eq!(
+            *calls.lock().unwrap(),
+            vec![
+                vec!["listlocalsnapshots".to_string(), "/".to_string()],
+                vec![
+                    "deletelocalsnapshots".to_string(),
+                    "2026-05-10-120000".to_string()
+                ],
+            ]
+        );
+    }
+
+    #[test]
+    fn all_flag_dry_run_never_calls_delete() {
+        let calls: Calls = Arc::new(Mutex::new(vec![]));
+        let runner = Recording {
+            calls: Arc::clone(&calls),
+            delete_status: 0,
+        };
+        let cleaner = ApfsSnapshotCleaner::new(Box::new(runner)).with_all(true);
+        let reporter = crate::progress::VerboseProgress::new();
+        cleaner.clean(true, &reporter).unwrap();
+        assert!(!calls
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|c| c.contains(&"deletelocalsnapshots".to_string())));
     }
 }
