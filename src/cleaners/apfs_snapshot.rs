@@ -14,11 +14,29 @@ impl ApfsSnapshotCleaner {
     }
 }
 
+const TM_PREFIX: &str = "com.apple.TimeMachine.";
+
+/// Returns the `YYYY-MM-DD-HHMMSS` part of a Time Machine local snapshot name.
+/// `tmutil deletelocalsnapshots` accepts only this date form.
+pub fn snapshot_date(name: &str) -> Option<String> {
+    let rest = name.trim().strip_prefix(TM_PREFIX)?;
+    let date = rest.strip_suffix(".local").unwrap_or(rest);
+    let valid = date.len() == 17
+        && date.chars().enumerate().all(|(i, c)| {
+            if matches!(i, 4 | 7 | 10) {
+                c == '-'
+            } else {
+                c.is_ascii_digit()
+            }
+        });
+    valid.then(|| date.to_string())
+}
+
 pub fn parse_snapshot_names(output: &str) -> Vec<String> {
     output
         .lines()
         .map(|l| l.trim())
-        .filter(|l| !l.is_empty())
+        .filter(|l| snapshot_date(l).is_some())
         .map(|l| l.to_string())
         .collect()
 }
@@ -298,5 +316,29 @@ mod tests {
             result.primary_target.is_none(),
             "ApfsSnapshotCleaner has no primary target"
         );
+    }
+
+    #[test]
+    fn parse_ignores_header_line() {
+        let input = "Snapshots for disk /:\ncom.apple.TimeMachine.2026-05-10-120000.local\n";
+        assert_eq!(
+            parse_snapshot_names(input),
+            vec!["com.apple.TimeMachine.2026-05-10-120000.local".to_string()]
+        );
+    }
+
+    #[test]
+    fn parse_header_only_returns_empty() {
+        assert!(parse_snapshot_names("Snapshots for disk /:\n").is_empty());
+    }
+
+    #[test]
+    fn snapshot_date_extracts_timestamp() {
+        assert_eq!(
+            snapshot_date("com.apple.TimeMachine.2026-05-10-120000.local"),
+            Some("2026-05-10-120000".to_string())
+        );
+        assert_eq!(snapshot_date("Snapshots for disk /:"), None);
+        assert_eq!(snapshot_date("com.apple.os.update-ABCDEF"), None);
     }
 }
