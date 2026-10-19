@@ -53,3 +53,19 @@ fn clean_apfs_snapshot_restricted_path_does_not_crash() {
         "expected a skip/no-snapshot message in output: {combined}"
     );
 }
+
+#[test]
+fn clean_apfs_snapshot_all_dry_run_succeeds() {
+    let tmp = TempDir::new().unwrap();
+    let output = Command::cargo_bin("sasurahime")
+        .unwrap()
+        .env("HOME", tmp.path())
+        .args(["clean", "apfs-snapshot", "--all", "--dry-run"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}

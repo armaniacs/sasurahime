@@ -19,8 +19,6 @@ impl ApfsSnapshotCleaner {
         }
     }
 
-    // Unused by the binary until the CLI passes `--all`; remove this allow with that wiring.
-    #[allow(dead_code)]
     pub fn with_all(mut self, all: bool) -> Self {
         self.all = all;
         self

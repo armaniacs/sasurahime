@@ -275,6 +275,9 @@ define_cleaners! {
     ApfsSnapshot {
         #[arg(long)]
         dry_run: bool,
+        /// Delete every local snapshot without prompting
+        #[arg(long)]
+        all: bool,
     },
 }
 
@@ -380,7 +383,8 @@ impl CleanTarget {
             | CleanTarget::LibraryLogs { dry_run, .. } => *dry_run,
             CleanTarget::Logs { dry_run, .. } => *dry_run,
             CleanTarget::DeviceSupport { dry_run, .. } => *dry_run,
-            CleanTarget::IosBackup { dry_run } | CleanTarget::ApfsSnapshot { dry_run } => *dry_run,
+            CleanTarget::IosBackup { dry_run } => *dry_run,
+            CleanTarget::ApfsSnapshot { dry_run, .. } => *dry_run,
             _ => self.dispatch_dry_run(),
         }
     }
@@ -879,10 +883,11 @@ fn main() -> anyhow::Result<()> {
                             reporter.as_ref(),
                         )?;
                     }
-                    CleanTarget::ApfsSnapshot { dry_run } => {
+                    CleanTarget::ApfsSnapshot { dry_run, all } => {
                         let cleaner = cleaners::apfs_snapshot::ApfsSnapshotCleaner::new(Box::new(
                             SystemCommandRunner,
-                        ));
+                        ))
+                        .with_all(all);
                         run_and_exit(
                             "apfs-snapshot",
                             move |dry, rep| cleaner.clean(dry, rep),
