@@ -7,11 +7,16 @@ use std::io::IsTerminal;
 pub struct ApfsSnapshotCleaner {
     pub runner: Box<dyn CommandRunner>,
     all: bool,
+    free_space: Box<dyn Fn() -> Option<u64> + Send + Sync>,
 }
 
 impl ApfsSnapshotCleaner {
     pub fn new(runner: Box<dyn CommandRunner>) -> Self {
-        Self { runner, all: false }
+        Self {
+            runner,
+            all: false,
+            free_space: Box::new(root_free_space),
+        }
     }
 
     // Unused by the binary until the CLI passes `--all`; remove this allow with that wiring.
@@ -20,6 +25,20 @@ impl ApfsSnapshotCleaner {
         self.all = all;
         self
     }
+
+    #[cfg(test)]
+    fn with_free_space(mut self, f: impl Fn() -> Option<u64> + Send + Sync + 'static) -> Self {
+        self.free_space = Box::new(f);
+        self
+    }
+}
+
+fn freed_bytes(before: u64, after: u64) -> u64 {
+    after.saturating_sub(before)
+}
+
+fn root_free_space() -> Option<u64> {
+    fs2::available_space("/").ok()
 }
 
 const TM_PREFIX: &str = "com.apple.TimeMachine.";
@@ -157,15 +176,23 @@ impl Cleaner for ApfsSnapshotCleaner {
             });
         }
 
+        // Snapshot sizes are not reported by tmutil, so the freed amount is the
+        // free-space delta. Purgeable space is updated lazily, so this can
+        // under-report right after deletion.
+        let before = (self.free_space)();
         let report = self.delete_snapshots(&selected);
+        let after = (self.free_space)();
         if !report.failed_dates.is_empty() {
             eprint!("{}", sudo_hint(&report.failed_dates));
         }
-        // Snapshot size cannot be measured after deletion; report 0.
+        let bytes_freed = match (before, after) {
+            (Some(b), Some(a)) => freed_bytes(b, a),
+            _ => 0,
+        };
         println!("[apfs-snapshot] done");
         Ok(CleanResult {
             name: self.name(),
-            bytes_freed: 0,
+            bytes_freed,
             uses_trash: false,
             skipped: vec![],
             deleted_paths: vec![],
@@ -386,6 +413,7 @@ mod tests {
         assert_eq!(snapshot_date("com.apple.os.update-ABCDEF"), None);
     }
 
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
 
     type Calls = Arc<Mutex<Vec<Vec<String>>>>;
@@ -480,6 +508,73 @@ mod tests {
         assert_eq!(report.unparsed_names, names);
         assert!(report.failed_dates.is_empty());
         assert!(calls.lock().unwrap().is_empty());
+    }
+
+    /// Free-space probe that returns the scripted values in call order.
+    fn scripted_free_space(
+        values: Vec<Option<u64>>,
+    ) -> (impl Fn() -> Option<u64> + Send + Sync, Arc<AtomicUsize>) {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let values = Mutex::new(values.into_iter());
+        let counter = Arc::clone(&calls);
+        let probe = move || {
+            counter.fetch_add(1, Ordering::SeqCst);
+            values.lock().unwrap().next().flatten()
+        };
+        (probe, calls)
+    }
+
+    #[test]
+    fn clean_all_reports_free_space_delta_as_bytes_freed() {
+        let runner = Recording {
+            calls: Arc::new(Mutex::new(vec![])),
+            delete_status: 0,
+        };
+        let (probe, _) = scripted_free_space(vec![Some(100), Some(350)]);
+        let cleaner = ApfsSnapshotCleaner::new(Box::new(runner))
+            .with_all(true)
+            .with_free_space(probe);
+        let reporter = crate::progress::VerboseProgress::new();
+        let result = cleaner.clean(false, &reporter).unwrap();
+        assert_eq!(result.bytes_freed, 250);
+    }
+
+    #[test]
+    fn clean_all_reports_zero_when_free_space_unavailable() {
+        let runner = Recording {
+            calls: Arc::new(Mutex::new(vec![])),
+            delete_status: 0,
+        };
+        // Only the "after" reading failing must not be read as the whole disk being freed.
+        let (probe, _) = scripted_free_space(vec![None, Some(350)]);
+        let cleaner = ApfsSnapshotCleaner::new(Box::new(runner))
+            .with_all(true)
+            .with_free_space(probe);
+        let reporter = crate::progress::VerboseProgress::new();
+        let result = cleaner.clean(false, &reporter).unwrap();
+        assert_eq!(result.bytes_freed, 0);
+    }
+
+    #[test]
+    fn clean_dry_run_does_not_measure_free_space() {
+        let runner = Recording {
+            calls: Arc::new(Mutex::new(vec![])),
+            delete_status: 0,
+        };
+        let (probe, probe_calls) = scripted_free_space(vec![Some(100), Some(350)]);
+        let cleaner = ApfsSnapshotCleaner::new(Box::new(runner))
+            .with_all(true)
+            .with_free_space(probe);
+        let reporter = crate::progress::VerboseProgress::new();
+        let result = cleaner.clean(true, &reporter).unwrap();
+        assert_eq!(result.bytes_freed, 0);
+        assert_eq!(probe_calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn freed_bytes_is_free_space_delta() {
+        assert_eq!(freed_bytes(100, 350), 250);
+        assert_eq!(freed_bytes(350, 100), 0);
     }
 
     #[test]
