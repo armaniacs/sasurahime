@@ -55,6 +55,10 @@ That's it. The macro auto-generates:
 No manual edits to `CleanTarget`, `SUPPORTED_TARGETS`, `all_cleaners()`, or
 `main()` match are needed for standard cleaners.
 
+New standard targets appear in scan automatically but are excluded from --yes;
+add the cleaner's name() to AUTO_CLEAN_TARGETS in src/main.rs only if it is safe
+to run unattended.
+
 ### Path B: Special dispatch cleaner
 
 Some cleaners need custom dispatch logic beyond what the macro provides:
@@ -144,6 +148,8 @@ MyNewTarget : "my-new-target" => "このクリーナーの説明";
 - `command_name()` / `dry_run()` ディスパッチヘルパー
 
 標準クリーナーでは `CleanTarget`、`SUPPORTED_TARGETS`、`all_cleaners()`、`main()` のマッチへの手動編集は不要です。
+
+新しい標準ターゲットは自動で scan に出ますが --yes の対象外です。無人実行しても安全な場合だけ、src/main.rs の AUTO_CLEAN_TARGETS に name() を追加してください。
 
 ### パス B：特別ディスパッチクリーナー
 

@@ -7,7 +7,7 @@ permalink: /SUPPORTED
 <details open markdown="1">
 <summary markdown="0"><strong>🇺🇸 English</strong></summary>
 
-sasurahime provides **49 clean targets**. Every target supports both `detect`
+sasurahime provides **48 clean targets**. Every target supports both `detect`
 (read-only, no side effects) and `clean` (removal). All `clean` subcommands
 accept `--dry-run`. Only caches and old versions are removed — active runtimes
 and packages are never touched.
@@ -561,6 +561,17 @@ Checks if `docker` is in `PATH`. Reports as pruneable if found (unknown size).
 2. Runs `docker system prune -f` (dangling images only — tagged images are
    preserved).
 3. Reports 0 freed bytes.
+
+**Virtual disk note:**
+`sasurahime scan` prints the size of the Docker Desktop virtual disk
+(`~/Library/Containers/com.docker.docker/Data/vms/0/data/Docker.raw`, plus the
+older layouts) under the table: bytes actually on disk and the maximum size.
+`docker system prune` frees space inside the VM but the file does not always
+shrink. After `clean docker` the on-disk size is compared before and after; if
+it did not shrink, shrink it from Docker Desktop > Settings > Resources > Disk
+image size, or Troubleshoot > Clean / Purge data (deletes all images,
+containers and volumes). Detect never talks to the Docker daemon, so scan does
+not hang when the daemon is stopped.
 
 **Safety:** Only dangling (untagged) images are removed. Explicitly avoids `-a`
 flag to preserve tagged unused images.
@@ -1336,7 +1347,7 @@ Runs `detect()` on every cleaner and prints a formatted table via
 | Mode | Behavior |
 |------|----------|
 | `sasurahime` (no args, TTY) | Opens an interactive checkbox list. Select targets, confirm, and selected targets are cleaned. |
-| `sasurahime --yes` (no args, any) | Cleans every pruneable target without prompting. Exits with 0 if nothing is found. |
+| `sasurahime --yes` (no args, any) | Cleans every pruneable target in the unattended set (uv, brew, mise, browsers, xcode, logs, act, huggingface, pre-commit, library-logs, colima, ollama, device-support, ios-backup, apfs-snapshot) without prompting. All other targets (docker, npm, cargo, downloads, ...) appear in `scan` and the interactive list but are never run by `--yes`. Exits with 0 if nothing is found. |
 | `sasurahime scan` (non-TTY) | Prints the scan table only. |
 | `sasurahime clean <target>` | Cleans a specific target directly. |
 
@@ -1345,7 +1356,7 @@ Runs `detect()` on every cleaner and prints a formatted table via
 <details markdown="1">
 <summary markdown="0"><strong>🇯🇵 日本語</strong></summary>
 
-sasurahime は **49 のクリーンターゲット** を提供しています。すべてのターゲットは
+sasurahime は **48 のクリーンターゲット** を提供しています。すべてのターゲットは
 `detect`（読み取り専用、副作用なし）と `clean`（削除）の両方に対応しており、
 すべての `clean` サブコマンドは `--dry-run` をサポートしています。
 削除されるのはキャッシュや古いバージョンのみで、現在使用中のランタイムやパッケージには触れません。
@@ -1836,6 +1847,16 @@ sasurahime は **49 のクリーンターゲット** を提供しています。
 1. `docker` が見つからない場合、メッセージを表示して終了します (0)。
 2. `docker system prune -f` を実行します（dangling イメージのみ — タグ付きイメージは保持）。
 3. 解放バイト数として 0 を報告します。
+
+**仮想ディスクの注意:**
+`sasurahime scan` は表の下に Docker Desktop の仮想ディスク
+(`~/Library/Containers/com.docker.docker/Data/vms/0/data/Docker.raw` と旧版の配置)
+の実際のディスク使用量と最大サイズを表示します。`docker system prune` は VM 内の
+領域を空けますが、ファイルは必ずしも縮みません。`clean docker` の前後でディスク
+使用量を比較し、縮まなかった場合は Docker Desktop の Settings > Resources > Disk
+image size を小さくするか、Troubleshoot > Clean / Purge data (全イメージ、コンテナ、
+ボリュームを削除) を案内します。detect は docker デーモンに問い合わせないため、
+デーモン停止中でも scan はハングしません。
 
 **安全性:** dangling（タグなし）イメージのみ削除します。明示的に `-a` フラグを避け、タグ付きの未使用イメージを保持します。
 
@@ -2541,7 +2562,7 @@ sasurahime scan --config /path/to/config.toml
 | モード | 動作 |
 |--------|------|
 | `sasurahime`（引数なし、TTY） | インタラクティブなチェックボックスリストを起動します。ターゲットを選択して確認すると、選択したターゲットがクリーンされます。 |
-| `sasurahime --yes`（引数なし） | 確認なしですべての削除可能ターゲットをクリーンします。何もなければ 0 で終了します。 |
+| `sasurahime --yes`（引数なし、任意） | 無人実行の対象 (uv, brew, mise, browsers, xcode, logs, act, huggingface, pre-commit, library-logs, colima, ollama, device-support, ios-backup, apfs-snapshot) のうち pruneable なものを確認なしで削除します。それ以外のターゲット (docker, npm, cargo, downloads など) は `scan` と対話リストには表示されますが、`--yes` では実行されません。何も見つからなければ 0 で終了します。 |
 | `sasurahime scan`（非 TTY） | スキャン結果の一覧のみを表示します。 |
 | `sasurahime clean <target>` | 特定のターゲットを直接クリーンします。 |
 

@@ -54,7 +54,7 @@ sasurahime clean logs
 sasurahime stats                   # show deletion history and statistics
 sasurahime history                 # alias for stats
 sasurahime clean uv --dry-run      # preview without deleting
-sasurahime --yes                   # non-interactive full clean (CI / scripting)
+sasurahime --yes                   # non-interactive clean of the unattended target set (CI / scripting)
 sasurahime clean uv --permanent    # permanently delete (bypass Trash)
 sasurahime --version
 ```
@@ -89,6 +89,7 @@ sasurahime operates entirely locally on your machine. It does **not**:
 sasurahime reads the following directories to identify cleanable cache data:
 - `~/.cache/`, `~/Library/Caches/`, `~/.local/share/`, `~/Library/Application Support/`
 - `~/Library/Application Support/MobileSync/Backup/` (iOS backups — only with `sasurahime clean ios-backup`)
+- `~/Library/Containers/com.docker.docker/Data/` and `~/.colima/` (size of the virtual disk image files only, shown by `sasurahime scan`)
 
 The tool reads file and directory metadata (names, sizes, modification times) to determine what can be cleaned. It reads the contents of only the following files, and only to decide what can be cleaned:
 
@@ -169,7 +170,7 @@ sasurahime clean logs
 sasurahime stats                   # 削除履歴と統計を表示
 sasurahime history                 # stats のエイリアス
 sasurahime clean uv --dry-run      # 削除せずに確認だけ（dry-run）
-sasurahime --yes                   # 確認なしで全削除（CI・スクリプト向け）
+sasurahime --yes                   # 確認なしで無人実行対象のみ削除（CI・スクリプト向け）
 sasurahime clean uv --permanent    # 完全削除（ゴミ箱を経由しない）
 sasurahime --version
 ```
@@ -203,6 +204,7 @@ sasurahime はあなたのマシン上で完全にローカルに動作します
 sasurahime は以下のディレクトリを読み取り、クリーニング可能なキャッシュデータを特定します:
 - `~/.cache/`、`~/Library/Caches/`、`~/.local/share/`、`~/Library/Application Support/`
 - `~/Library/Application Support/MobileSync/Backup/`（iOS バックアップ — `sasurahime clean ios-backup` でのみアクセス）
+- `~/Library/Containers/com.docker.docker/Data/` と `~/.colima/`（仮想ディスクイメージのファイルサイズのみ。`sasurahime scan` で表示）
 
 ツールはファイルとディレクトリのメタデータ（名前、サイズ、更新日時）を読み取り、削除できるものを判断します。ファイルの内容を読み取るのは次のファイルだけで、目的は削除できるものの判断に限ります:
 

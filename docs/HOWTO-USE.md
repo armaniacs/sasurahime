@@ -244,6 +244,7 @@ Requires a TTY (terminal). In CI or scripting use `--yes` instead.
 ### `sasurahime --yes`
 
 Non-interactive mode — cleans every pruneable target without prompting.
+Only the unattended target set is cleaned; docker, npm, cargo, downloads and the other targets are shown by scan but never run by --yes.
 
 ```bash
 # Clean everything, no questions asked
@@ -808,6 +809,7 @@ TTY（ターミナル）が必要です。CI やスクリプトでは代わり�
 ### `sasurahime --yes`
 
 非インタラクティブモード — 確認なしですべての削除可能ターゲットをクリーンします。
+削除されるのは無人実行対象のみです。docker、npm、cargo、downloads などは scan に表示されますが、--yes では実行されません。
 
 ```bash
 # すべてクリーン、確認なし
