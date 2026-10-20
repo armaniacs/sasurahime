@@ -9,6 +9,7 @@ use std::collections::HashSet;
 use std::fs;
 use std::io::IsTerminal;
 use std::path::{Component, Path, PathBuf};
+use std::time::SystemTime;
 
 pub const DEFAULT_MIN_APP_BYTES: u64 = 64 * 1024 * 1024;
 
@@ -714,6 +715,65 @@ pub fn collect_installed_apps(roots: &[PathBuf], runner: &dyn CommandRunner) -> 
         bundle_ids.push(app.bundle_id);
     }
     InstalledApps::from_parts(names, bundle_ids)
+}
+
+pub const MIN_LEFTOVER_BYTES: u64 = 1024 * 1024;
+pub const RECENT_DAYS: u64 = 30;
+
+#[derive(Debug, Clone)]
+pub struct Leftover {
+    pub path: PathBuf,
+    pub size: u64,
+}
+
+fn newest_mtime(path: &Path) -> Option<SystemTime> {
+    let mut newest = fs::symlink_metadata(path).ok()?.modified().ok()?;
+    for e in fs::read_dir(path).ok()?.flatten() {
+        if let Ok(m) = fs::symlink_metadata(e.path()).and_then(|m| m.modified()) {
+            newest = newest.max(m);
+        }
+    }
+    Some(newest)
+}
+
+pub fn find_leftovers(
+    base: &Path,
+    installed: &InstalledApps,
+    now: SystemTime,
+    min_bytes: u64,
+    recent_days: u64,
+) -> Vec<Leftover> {
+    let Ok(rd) = fs::read_dir(base) else {
+        return vec![];
+    };
+    let mut out = Vec::new();
+    for e in rd.flatten() {
+        let name = e.file_name().to_string_lossy().to_string();
+        if is_excluded_dir_name(&name) {
+            continue;
+        }
+        if !e.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+            continue;
+        }
+        if matches_installed(&name, installed) {
+            continue;
+        }
+        let path = e.path();
+        let size = dir_size(&path);
+        if size < min_bytes {
+            continue;
+        }
+        let Some(newest) = newest_mtime(&path) else {
+            continue;
+        };
+        match now.duration_since(newest) {
+            Ok(age) if age.as_secs() / 86_400 >= recent_days => {}
+            _ => continue,
+        }
+        out.push(Leftover { path, size });
+    }
+    out.sort_by_key(|l| std::cmp::Reverse(l.size));
+    out
 }
 
 #[cfg(test)]
@@ -1560,5 +1620,123 @@ mod tests {
             fake.calls(),
             vec![format!("plutil -convert xml1 -o - {}", plist.display())]
         );
+    }
+
+    use filetime::{set_file_mtime, FileTime};
+    use std::time::{Duration, SystemTime};
+
+    fn age(path: &Path, days: u64) {
+        let t = SystemTime::now() - Duration::from_secs(days * 86_400);
+        set_file_mtime(path, FileTime::from_system_time(t)).unwrap();
+    }
+
+    /// Creates `<base>/<name>/data.bin` of `bytes` bytes, all aged `days` days.
+    fn make_folder(base: &Path, name: &str, bytes: usize, days: u64) -> PathBuf {
+        let d = base.join(name);
+        fs::create_dir_all(&d).unwrap();
+        let f = d.join("data.bin");
+        fs::write(&f, vec![1u8; bytes]).unwrap();
+        age(&f, days);
+        age(&d, days);
+        d
+    }
+
+    const MIB: usize = 1024 * 1024;
+
+    #[test]
+    fn leftovers_lists_uninstalled_old_folder() {
+        let tmp = TempDir::new().unwrap();
+        let base = base_of(&tmp);
+        let d = make_folder(&base, "GoneApp", 2 * MIB, 200);
+        let l = find_leftovers(&base, &installed(&[], &[]), SystemTime::now(), 1 << 20, 30);
+        assert_eq!(l.len(), 1);
+        assert_eq!(l[0].path, d);
+        assert!(l[0].size >= 2 * MIB as u64);
+    }
+
+    #[test]
+    fn leftovers_skips_installed_by_name_and_by_bundle_tail() {
+        let tmp = TempDir::new().unwrap();
+        let base = base_of(&tmp);
+        make_folder(&base, "Spotify", 2 * MIB, 200);
+        make_folder(&base, "slackmacgap", 2 * MIB, 200);
+        let i = installed(&["Spotify"], &["com.tinyspeck.slackmacgap"]);
+        assert!(find_leftovers(&base, &i, SystemTime::now(), 1 << 20, 30).is_empty());
+    }
+
+    #[test]
+    fn leftovers_skips_excluded_names() {
+        let tmp = TempDir::new().unwrap();
+        let base = base_of(&tmp);
+        for n in [
+            "AddressBook",
+            "CloudDocs",
+            "MobileSync",
+            "com.apple.foo",
+            "Google",
+            "Slack",
+            "Code",
+            ".hidden",
+        ] {
+            make_folder(&base, n, 2 * MIB, 200);
+        }
+        assert!(
+            find_leftovers(&base, &installed(&[], &[]), SystemTime::now(), 1 << 20, 30).is_empty()
+        );
+    }
+
+    #[test]
+    fn leftovers_skips_small_and_recent_and_future() {
+        let tmp = TempDir::new().unwrap();
+        let base = base_of(&tmp);
+        make_folder(&base, "Small", 100, 200);
+        make_folder(&base, "Recent", 2 * MIB, 3);
+        let fut = make_folder(&base, "Future", 2 * MIB, 200);
+        let t = SystemTime::now() + Duration::from_secs(86_400);
+        set_file_mtime(&fut, FileTime::from_system_time(t)).unwrap();
+        assert!(
+            find_leftovers(&base, &installed(&[], &[]), SystemTime::now(), 1 << 20, 30).is_empty()
+        );
+    }
+
+    #[test]
+    fn leftovers_skips_files_and_symlinks() {
+        let tmp = TempDir::new().unwrap();
+        let base = base_of(&tmp);
+        let real = make_folder(&tmp.path().join("elsewhere"), "Real", 2 * MIB, 200);
+        std::os::unix::fs::symlink(&real, base.join("LinkedApp")).unwrap();
+        fs::write(base.join("loose.bin"), vec![1u8; 2 * MIB]).unwrap();
+        assert!(
+            find_leftovers(&base, &installed(&[], &[]), SystemTime::now(), 1 << 20, 30).is_empty()
+        );
+    }
+
+    #[test]
+    fn leftovers_sorted_by_size_descending_and_missing_base_is_empty() {
+        let tmp = TempDir::new().unwrap();
+        let base = base_of(&tmp);
+        make_folder(&base, "Small", 2 * MIB, 200);
+        make_folder(&base, "Big", 4 * MIB, 200);
+        let l = find_leftovers(&base, &installed(&[], &[]), SystemTime::now(), 1 << 20, 30);
+        assert_eq!(l.len(), 2);
+        assert!(l[0].size >= l[1].size);
+        assert!(l[0].path.ends_with("Big"));
+        assert!(find_leftovers(
+            &tmp.path().join("nope"),
+            &installed(&[], &[]),
+            SystemTime::now(),
+            1,
+            1
+        )
+        .is_empty());
+    }
+
+    #[test]
+    fn leftovers_never_modify_anything() {
+        let tmp = TempDir::new().unwrap();
+        let base = base_of(&tmp);
+        let d = make_folder(&base, "GoneApp", 2 * MIB, 200);
+        find_leftovers(&base, &installed(&[], &[]), SystemTime::now(), 1 << 20, 30);
+        assert!(d.join("data.bin").exists());
     }
 }
