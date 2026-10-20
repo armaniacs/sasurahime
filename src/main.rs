@@ -231,6 +231,9 @@ define_cleaners! {
     LibraryCaches : "library-caches" => "Per-app ~/Library/Caches/ listing; known app caches removable (interactive)";
     (|home, _config| cleaners::library_caches::LibraryCachesCleaner::new(home, Box::new(SystemCommandRunner))),
 
+    AppSupport : "app-support" => "Cache dirs of known apps in ~/Library/Application Support (interactive)";
+    (|home, _config| cleaners::app_support::AppSupportCleaner::new(home, Box::new(SystemCommandRunner))),
+
     ;
     /// Clean all generic caches (bun, go, pip, node-gyp, npm, yarn, pnpm)
     Caches {
@@ -1177,5 +1180,14 @@ mod tests {
             "library-caches"
         );
         assert!(CleanTarget::LibraryCaches { dry_run: true }.dry_run());
+    }
+
+    #[test]
+    fn app_support_is_registered_but_not_auto_cleaned() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cleaners = all_cleaners(tmp.path(), &config::Config::default());
+        assert!(names_of(&cleaners).contains(&"app-support"));
+        let c = cleaners.iter().find(|c| c.name() == "app-support").unwrap();
+        assert!(!c.auto_clean_allowed());
     }
 }
