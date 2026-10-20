@@ -547,6 +547,76 @@ fn freed_message(bytes_freed: u64, uses_trash: bool, trash_mode: bool) -> String
     }
 }
 
+/// Cleaners that accept `[cleaner.<name>]` filters, keyed by `Cleaner::name()`.
+fn filter_support(
+    home: &std::path::Path,
+    config: &config::Config,
+) -> Vec<(String, cleaner::PerCleanerFilters)> {
+    let mut support: Vec<(String, cleaner::PerCleanerFilters)> = standard_cleaners(home, config)
+        .into_iter()
+        .chain(special_cleaners(home, config))
+        .map(|c| (c.name().to_string(), c.per_cleaner_filters()))
+        .collect();
+    for ct in &config.custom {
+        support.push((ct.name.clone(), cleaner::PerCleanerFilters::None));
+    }
+    support
+}
+
+fn cleaner_name_for_setting(key: &str) -> &str {
+    match key {
+        "cocoa-pods" => "cocoapods",
+        other => other,
+    }
+}
+
+/// Lists `[cleaner.*]` settings that no cleaner will apply. Pure so the wording
+/// can be tested without capturing stderr.
+fn ineffective_per_cleaner_settings(
+    config: &config::Config,
+    support: &[(String, cleaner::PerCleanerFilters)],
+) -> Vec<String> {
+    let mut keys: Vec<&String> = config.per_cleaner.keys().collect();
+    keys.sort();
+    let mut out = Vec::new();
+    for key in keys {
+        let pcc = &config.per_cleaner[key];
+        let wanted = cleaner_name_for_setting(key);
+        let Some((_, capability)) = support.iter().find(|(n, _)| n == wanted) else {
+            out.push(format!("[{key}] unknown cleaner name"));
+            continue;
+        };
+        let mut fields = Vec::new();
+        if pcc.older_than_days.is_some() && *capability == cleaner::PerCleanerFilters::None {
+            fields.push("older_than_days");
+        }
+        if pcc.larger_than_mb.is_some() && *capability != cleaner::PerCleanerFilters::Both {
+            fields.push("larger_than_mb");
+        }
+        if fields.is_empty() {
+            continue;
+        }
+        let why = match capability {
+            cleaner::PerCleanerFilters::None => "this cleaner has no per-cleaner filters",
+            cleaner::PerCleanerFilters::OlderThanDays => "only older_than_days applies",
+            cleaner::PerCleanerFilters::Both => "no effect",
+        };
+        out.push(format!("[{key}] {}: {why}", fields.join(", ")));
+    }
+    out
+}
+
+fn warn_ineffective_per_cleaner_settings(home: &std::path::Path, config: &config::Config) {
+    let lines = ineffective_per_cleaner_settings(config, &filter_support(home, config));
+    if lines.is_empty() {
+        return;
+    }
+    eprintln!("[config] some [cleaner.*] settings have no effect:");
+    for line in lines {
+        eprintln!("  - {line}");
+    }
+}
+
 /// Runs a single-target clean and prints freed bytes.
 fn run_clean_target<F>(
     label: &str,
@@ -680,6 +750,10 @@ fn main() -> anyhow::Result<()> {
             std::process::exit(1);
         }
     };
+    if !config.per_cleaner.is_empty() {
+        warn_ineffective_per_cleaner_settings(&home, &config);
+    }
+
     let reporter = build_reporter(&cli, &config);
 
     // Set global context flags before any subcommand runs.
@@ -1249,5 +1323,107 @@ mod tests {
             freed_message(bytes, false, false),
             format!("Freed: {shown}")
         );
+    }
+
+    fn pcc(older: Option<u32>, larger: Option<u64>) -> config::PerCleanerConfig {
+        config::PerCleanerConfig {
+            older_than_days: older,
+            larger_than_mb: larger,
+        }
+    }
+
+    fn support(
+        names: &[(&str, cleaner::PerCleanerFilters)],
+    ) -> Vec<(String, cleaner::PerCleanerFilters)> {
+        names.iter().map(|(n, s)| (n.to_string(), *s)).collect()
+    }
+
+    fn cfg_with(entries: &[(&str, config::PerCleanerConfig)]) -> config::Config {
+        let mut per_cleaner = std::collections::HashMap::new();
+        for (k, v) in entries {
+            per_cleaner.insert(k.to_string(), v.clone());
+        }
+        config::Config {
+            per_cleaner,
+            ..config::Config::default()
+        }
+    }
+
+    #[test]
+    fn ineffective_settings_empty_when_no_per_cleaner_config() {
+        let s = support(&[("docker", cleaner::PerCleanerFilters::None)]);
+        assert!(ineffective_per_cleaner_settings(&config::Config::default(), &s).is_empty());
+    }
+
+    #[test]
+    fn ineffective_settings_names_the_ignored_fields_of_a_command_cleaner() {
+        let cfg = cfg_with(&[("docker", pcc(Some(30), Some(10)))]);
+        let s = support(&[("docker", cleaner::PerCleanerFilters::None)]);
+        assert_eq!(
+            ineffective_per_cleaner_settings(&cfg, &s),
+            vec![
+                "[docker] older_than_days, larger_than_mb: this cleaner has no per-cleaner filters"
+            ]
+        );
+    }
+
+    #[test]
+    fn ineffective_settings_accepted_filters_are_silent() {
+        let cfg = cfg_with(&[("act", pcc(Some(30), Some(10)))]);
+        let s = support(&[("act", cleaner::PerCleanerFilters::Both)]);
+        assert!(ineffective_per_cleaner_settings(&cfg, &s).is_empty());
+    }
+
+    #[test]
+    fn ineffective_settings_logs_reject_larger_than_only() {
+        let s = support(&[("logs", cleaner::PerCleanerFilters::OlderThanDays)]);
+        let ok = cfg_with(&[("logs", pcc(Some(14), None))]);
+        assert!(ineffective_per_cleaner_settings(&ok, &s).is_empty());
+        let bad = cfg_with(&[("logs", pcc(Some(14), Some(10)))]);
+        assert_eq!(
+            ineffective_per_cleaner_settings(&bad, &s),
+            vec!["[logs] larger_than_mb: only older_than_days applies"]
+        );
+    }
+
+    #[test]
+    fn ineffective_settings_reports_unknown_cleaner_names() {
+        let cfg = cfg_with(&[("no-such", pcc(None, Some(10)))]);
+        let s = support(&[("docker", cleaner::PerCleanerFilters::None)]);
+        assert_eq!(
+            ineffective_per_cleaner_settings(&cfg, &s),
+            vec!["[no-such] unknown cleaner name"]
+        );
+    }
+
+    #[test]
+    fn ineffective_settings_maps_the_cocoa_pods_alias() {
+        let cfg = cfg_with(&[("cocoa-pods", pcc(Some(30), None))]);
+        let s = support(&[("cocoapods", cleaner::PerCleanerFilters::None)]);
+        assert_eq!(
+            ineffective_per_cleaner_settings(&cfg, &s),
+            vec!["[cocoa-pods] older_than_days: this cleaner has no per-cleaner filters"]
+        );
+    }
+
+    #[test]
+    fn ineffective_settings_ignores_entries_without_filters() {
+        let cfg = cfg_with(&[("docker", pcc(None, None))]);
+        let s = support(&[("docker", cleaner::PerCleanerFilters::None)]);
+        assert!(ineffective_per_cleaner_settings(&cfg, &s).is_empty());
+    }
+
+    #[test]
+    fn ineffective_settings_use_real_cleaner_capabilities() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cfg = cfg_with(&[
+            ("logs", pcc(None, Some(10))),
+            ("act", pcc(Some(30), None)),
+            ("docker", pcc(Some(30), None)),
+        ]);
+        let lines = ineffective_per_cleaner_settings(&cfg, &filter_support(tmp.path(), &cfg));
+        assert_eq!(lines.len(), 2, "{lines:?}");
+        assert!(lines[0].starts_with("[docker]"), "{lines:?}");
+        assert!(lines[1].starts_with("[logs]"), "{lines:?}");
     }
 }

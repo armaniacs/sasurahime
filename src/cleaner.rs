@@ -114,6 +114,15 @@ pub fn is_skippable_error(e: &anyhow::Error) -> bool {
         || msg.starts_with("Resource busy")
 }
 
+/// Which `[cleaner.<name>]` filters a cleaner actually honours. Command-based
+/// cleaners never look at them; `logs` only reads `older_than_days`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PerCleanerFilters {
+    None,
+    OlderThanDays,
+    Both,
+}
+
 pub trait Cleaner: Send + Sync {
     fn name(&self) -> &'static str;
     /// Read-only. Never deletes anything.
@@ -145,6 +154,12 @@ pub trait Cleaner: Send + Sync {
     /// Read-only note shown under the scan table. Must not run external commands.
     fn advisory(&self) -> Option<String> {
         None
+    }
+
+    /// Which per-cleaner filters this cleaner honours, for startup warnings
+    /// about `[cleaner.<name>]` settings that would otherwise be ignored.
+    fn per_cleaner_filters(&self) -> PerCleanerFilters {
+        PerCleanerFilters::None
     }
 
     /// Returns sub-targets with display names and sizes (for TUI/CLI).

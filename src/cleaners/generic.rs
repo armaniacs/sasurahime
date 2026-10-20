@@ -1,4 +1,6 @@
-use crate::cleaner::{CleanCancelled, CleanResult, Cleaner, ScanResult, ScanStatus};
+use crate::cleaner::{
+    CleanCancelled, CleanResult, Cleaner, PerCleanerFilters, ScanResult, ScanStatus,
+};
 use crate::command::CommandRunner;
 #[cfg(test)]
 use crate::command::SystemCommandRunner;
@@ -371,9 +373,6 @@ impl GenericCleaner {
     /// Looks up `self.name()` in `config.per_cleaner` and applies
     /// `older_than_days` and `larger_than_mb` if present.
     pub fn with_config(self, config: &Config) -> Self {
-        if let Some(msg) = self.unsupported_filter_warning(config) {
-            log::warn!("{msg}");
-        }
         let name = self.name();
         if let Some(pcc) = config.per_cleaner.get(name) {
             let mut c = self;
@@ -389,26 +388,6 @@ impl GenericCleaner {
         }
     }
 
-    /// Command-based cleaners never look at `older_than_days` /
-    /// `larger_than_mb`, so a configured filter is reported instead of being
-    /// silently ignored.
-    fn unsupported_filter_warning(&self, config: &Config) -> Option<String> {
-        let pcc = config.per_cleaner.get(self.name())?;
-        let has_filter = pcc.older_than_days.is_some() || pcc.larger_than_mb.is_some();
-        let command_based = matches!(
-            self.method,
-            CleanMethod::Command { .. } | CleanMethod::CommandWithDetectDir { .. }
-        );
-        if has_filter && command_based {
-            Some(format!(
-                "per-cleaner filters not supported for '{}': command-based cleaner",
-                self.name()
-            ))
-        } else {
-            None
-        }
-    }
-
     fn primary_target_display(&self) -> Option<String> {
         match &self.method {
             CleanMethod::Command { .. } => None,
@@ -421,6 +400,13 @@ impl GenericCleaner {
 }
 
 impl Cleaner for GenericCleaner {
+    fn per_cleaner_filters(&self) -> PerCleanerFilters {
+        match &self.method {
+            CleanMethod::DeleteDirs(_) => PerCleanerFilters::Both,
+            _ => PerCleanerFilters::None,
+        }
+    }
+
     fn is_available(&self) -> bool {
         match &self.method {
             CleanMethod::Command { program, .. } => self.runner.exists(program),
@@ -1417,43 +1403,6 @@ mod tests {
             per_cleaner,
             ..crate::config::Config::default()
         }
-    }
-
-    #[test]
-    fn colima_with_filter_config_takes_the_warning_branch() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        let cleaner = GenericCleaner::colima_prune(tmp.path(), Box::new(MissingToolRunner));
-        let msg = cleaner
-            .unsupported_filter_warning(&colima_filter_config())
-            .expect("colima ignores per-cleaner filters, so a warning is expected");
-        assert_eq!(
-            msg,
-            "per-cleaner filters not supported for 'colima': command-based cleaner"
-        );
-    }
-
-    #[test]
-    fn unsupported_filter_warning_is_none_without_entry_or_for_delete_dirs() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        let colima = GenericCleaner::colima_prune(tmp.path(), Box::new(MissingToolRunner));
-        assert!(colima
-            .unsupported_filter_warning(&crate::config::Config::default())
-            .is_none());
-
-        let mut per_cleaner = std::collections::HashMap::new();
-        per_cleaner.insert(
-            "dirs-only".to_string(),
-            crate::config::PerCleanerConfig {
-                older_than_days: Some(30),
-                larger_than_mb: None,
-            },
-        );
-        let config = crate::config::Config {
-            per_cleaner,
-            ..crate::config::Config::default()
-        };
-        let dirs = GenericCleaner::delete_dirs("dirs-only", tmp.path().join("data"));
-        assert!(dirs.unsupported_filter_warning(&config).is_none());
     }
 
     #[test]

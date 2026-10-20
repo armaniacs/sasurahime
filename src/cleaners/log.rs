@@ -124,6 +124,11 @@ impl Cleaner for LogCleaner {
         "logs"
     }
 
+    // Only the age filter reaches this cleaner (see Config::effective_logs_keep_days).
+    fn per_cleaner_filters(&self) -> crate::cleaner::PerCleanerFilters {
+        crate::cleaner::PerCleanerFilters::OlderThanDays
+    }
+
     fn detect(&self) -> ScanResult {
         let any_found = self.all_targets().any(|t| t.path.exists());
         if !any_found {
