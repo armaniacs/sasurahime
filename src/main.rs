@@ -533,6 +533,20 @@ fn all_cleaners(home: &std::path::Path, config: &config::Config) -> Vec<Box<dyn 
     cleaners
 }
 
+/// Message shown after a clean. `uses_trash` is the cleaner's own report: a
+/// cleaner that deletes outside the Trash (tmutil, rustup, ...) must not claim
+/// its bytes can be restored.
+fn freed_message(bytes_freed: u64, uses_trash: bool, trash_mode: bool) -> String {
+    if trash_mode && uses_trash && bytes_freed > 0 {
+        format!(
+            "Freed: 0 B ({} moved to Trash)",
+            crate::format::format_bytes(bytes_freed)
+        )
+    } else {
+        format!("Freed: {}", crate::format::format_bytes(bytes_freed))
+    }
+}
+
 /// Runs a single-target clean and prints freed bytes.
 fn run_clean_target<F>(
     label: &str,
@@ -588,14 +602,14 @@ where
     };
 
     if reporter.show_spinner() {
-        if crate::trash::is_trash_mode() && result.bytes_freed > 0 {
-            println!(
-                "Freed: 0 B ({} moved to Trash)",
-                crate::format::format_bytes(result.bytes_freed)
-            );
-        } else {
-            println!("Freed: {}", crate::format::format_bytes(result.bytes_freed));
-        }
+        println!(
+            "{}",
+            freed_message(
+                result.bytes_freed,
+                result.uses_trash,
+                crate::trash::is_trash_mode()
+            )
+        );
     }
 
     if !result.skipped.is_empty() {
@@ -1216,5 +1230,24 @@ mod tests {
         assert!(names_of(&cleaners).contains(&"app-support"));
         let c = cleaners.iter().find(|c| c.name() == "app-support").unwrap();
         assert!(!c.auto_clean_allowed());
+    }
+
+    #[test]
+    fn freed_message_reports_trash_only_when_the_cleaner_used_it() {
+        use crate::format::format_bytes;
+        let bytes = 2048;
+        let shown = format_bytes(bytes);
+        assert_eq!(freed_message(0, false, true), "Freed: 0 B");
+        assert_eq!(freed_message(0, true, true), "Freed: 0 B");
+        assert_eq!(
+            freed_message(bytes, true, true),
+            format!("Freed: 0 B ({shown} moved to Trash)")
+        );
+        assert_eq!(freed_message(bytes, false, true), format!("Freed: {shown}"));
+        assert_eq!(freed_message(bytes, true, false), format!("Freed: {shown}"));
+        assert_eq!(
+            freed_message(bytes, false, false),
+            format!("Freed: {shown}")
+        );
     }
 }

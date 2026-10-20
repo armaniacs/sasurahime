@@ -8,6 +8,15 @@ fn sasurahime(home: &std::path::Path) -> Command {
     cmd
 }
 
+fn install_gradle_fixture(home: &std::path::Path) -> std::path::PathBuf {
+    let caches = home.join(".gradle/caches");
+    std::fs::create_dir_all(caches.join("8.12.0")).unwrap();
+    std::fs::create_dir_all(caches.join("8.8.0")).unwrap();
+    std::fs::write(caches.join("8.12.0/cache.dat"), b"data").unwrap();
+    std::fs::write(caches.join("8.8.0/cache.dat"), b"data").unwrap();
+    caches
+}
+
 fn install_fake_uv(bin_dir: &std::path::Path) {
     let script = bin_dir.join("uv");
     fs::write(&script, "#!/bin/sh\nexit 0\n").unwrap();
@@ -51,24 +60,12 @@ fn dry_run_with_default_trash_mode_deletes_nothing() {
 #[test]
 fn clean_shows_moved_to_trash_message() {
     let tmp = TempDir::new().unwrap();
-    let bin_dir = tmp.path().join("bin");
-    fs::create_dir_all(&bin_dir).unwrap();
-    install_fake_uv(&bin_dir);
-
-    // Create two simple-vN dirs so the cleaner deletes the older one.
-    let uv_cache = tmp.path().join(".cache/uv");
-    fs::create_dir_all(uv_cache.join("simple-v16")).unwrap();
-    fs::create_dir_all(uv_cache.join("simple-v21")).unwrap();
-    // Put some content in the old one so bytes_freed > 0
-    fs::write(uv_cache.join("simple-v16/pack.seq"), [0u8; 100]).unwrap();
-
-    let original_path = std::env::var("PATH").unwrap_or_default();
-    let new_path = format!("{}:{}", bin_dir.display(), original_path);
+    // GradleCleaner moves old version caches to the Trash, so the note must appear.
+    let caches = install_gradle_fixture(tmp.path());
 
     // Default: trash mode on — no --trash flag needed.
     let output = sasurahime(tmp.path())
-        .env("PATH", &new_path)
-        .args(["clean", "uv"])
+        .args(["clean", "gradle"])
         .output()
         .unwrap();
 
@@ -83,10 +80,8 @@ fn clean_shows_moved_to_trash_message() {
         stdout.contains("moved to Trash"),
         "stdout:\n{stdout}\nstderr:\n{stderr}"
     );
-    assert!(
-        !uv_cache.join("simple-v16").exists(),
-        "source must be removed"
-    );
+    assert!(!caches.join("8.8.0").exists(), "old cache must be removed");
+    assert!(caches.join("8.12.0").exists(), "newest cache must stay");
 }
 
 #[test]
@@ -132,7 +127,7 @@ fn yes_permanent_requires_confirmation() {
 }
 
 #[test]
-fn clean_shows_trash_note_when_trash_mode() {
+fn trash_mode_with_permanent_cleaner_does_not_claim_trash() {
     let tmp = TempDir::new().unwrap();
     let bin_dir = tmp.path().join("bin");
     fs::create_dir_all(&bin_dir).unwrap();
@@ -158,9 +153,11 @@ fn clean_shows_trash_note_when_trash_mode() {
         output.status.success(),
         "stdout: {stdout}\nstderr: {stderr}",
     );
+    // uv deletes the old index directories outright, so claiming Trash would lie.
+    assert!(stdout.contains("Freed:"), "stdout:\n{stdout}");
     assert!(
-        stdout.contains("moved to Trash"),
-        "trash mode should show trash note:\n{stdout}"
+        !stdout.contains("moved to Trash"),
+        "a permanent cleaner must not claim Trash:\n{stdout}"
     );
     assert!(
         !uv_cache.join("simple-v16").exists(),
@@ -282,19 +279,10 @@ fn config_trash_mode_true_still_works() {
     fs::create_dir_all(&config_dir).unwrap();
     fs::write(config_dir.join("config.toml"), "trash_mode = true\n").unwrap();
 
-    let bin_dir = tmp.path().join("bin");
-    fs::create_dir_all(&bin_dir).unwrap();
-    install_fake_uv(&bin_dir);
+    install_gradle_fixture(tmp.path());
 
-    let uv_cache = tmp.path().join(".cache/uv");
-    fs::create_dir_all(uv_cache.join("simple-v16")).unwrap();
-    fs::create_dir_all(uv_cache.join("simple-v21")).unwrap();
-    fs::write(uv_cache.join("simple-v16/pack.seq"), [0u8; 100]).unwrap();
-
-    let original_path = std::env::var("PATH").unwrap_or_default();
     let output = sasurahime(tmp.path())
-        .env("PATH", format!("{}:{}", bin_dir.display(), original_path))
-        .args(["clean", "uv"])
+        .args(["clean", "gradle"])
         .output()
         .unwrap();
 
