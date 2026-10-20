@@ -524,6 +524,143 @@ impl Cleaner for AppSupportCleaner {
     }
 }
 
+// ── Stage 2: leftovers of uninstalled apps (display only) ──
+
+const EXCLUDED_EXACT: &[&str] = &[
+    "AddressBook",
+    "CloudDocs",
+    "MobileSync",
+    "CallHistoryDB",
+    "CallHistoryTransactions",
+    "CrashReporter",
+    "Dock",
+    "FileProvider",
+    "Knowledge",
+    "SyncServices",
+    "iCloud",
+    "DifferentialPrivacy",
+    "AskPermission",
+    "Animoji",
+    "Siri",
+    "App Store",
+    "DiskImages",
+    "Spotlight",
+    "Quick Look",
+    "FaceTime",
+    "Notes",
+    "networkserviceproxy",
+    "icdd",
+    "Homebrew",
+    "pypoetry",
+    "rustup",
+];
+
+const EXCLUDED_PREFIXES: &[&str] = &["com.apple.", "Apple"];
+
+/// Folders shared by several apps; the name alone cannot tell if one is installed.
+const VENDOR_PARENT_DIRS: &[&str] = &[
+    "Google",
+    "Microsoft",
+    "Adobe",
+    "JetBrains",
+    "BraveSoftware",
+    "Mozilla",
+    "Autodesk",
+    "Oracle",
+    "Blackmagic Design",
+];
+
+pub fn normalize_name(s: &str) -> String {
+    s.chars()
+        .filter(|c| c.is_alphanumeric())
+        .flat_map(|c| c.to_lowercase())
+        .collect()
+}
+
+pub fn is_excluded_dir_name(name: &str) -> bool {
+    if name.starts_with('.') {
+        return true;
+    }
+    let lower = name.to_lowercase();
+    if EXCLUDED_EXACT
+        .iter()
+        .chain(VENDOR_PARENT_DIRS.iter())
+        .any(|e| e.to_lowercase() == lower)
+    {
+        return true;
+    }
+    if EXCLUDED_PREFIXES
+        .iter()
+        .any(|p| lower.starts_with(&p.to_lowercase()))
+    {
+        return true;
+    }
+    // Known apps are handled by the allowlist, not by name matching.
+    TARGETS.iter().any(|t| {
+        t.root
+            .split('/')
+            .next()
+            .is_some_and(|first| first.to_lowercase() == lower)
+    })
+}
+
+pub struct InstalledApps {
+    names: HashSet<String>,
+    bundle_ids: HashSet<String>,
+    bundle_tails: HashSet<String>,
+}
+
+impl InstalledApps {
+    pub fn from_parts(
+        names: impl IntoIterator<Item = String>,
+        bundle_ids: impl IntoIterator<Item = String>,
+    ) -> Self {
+        let names = names
+            .into_iter()
+            .map(|n| normalize_name(&n))
+            .filter(|n| !n.is_empty())
+            .collect();
+        let bundle_ids: HashSet<String> =
+            bundle_ids.into_iter().map(|b| b.to_lowercase()).collect();
+        let bundle_tails = bundle_ids
+            .iter()
+            .filter_map(|b| b.rsplit('.').next())
+            .map(normalize_name)
+            .filter(|t| t.len() >= 3)
+            .collect();
+        Self {
+            names,
+            bundle_ids,
+            bundle_tails,
+        }
+    }
+}
+
+pub fn matches_installed(dir_name: &str, installed: &InstalledApps) -> bool {
+    let n = normalize_name(dir_name);
+    if n.is_empty() {
+        return true;
+    }
+    if installed.names.contains(&n)
+        || installed.bundle_ids.contains(&dir_name.to_lowercase())
+        || (n.len() >= 3 && installed.bundle_tails.contains(&n))
+    {
+        return true;
+    }
+    if dir_name.matches('.').count() >= 2 {
+        if let Some(last) = dir_name.rsplit('.').next() {
+            let l = normalize_name(last);
+            if !l.is_empty()
+                && (installed.names.contains(&l)
+                    || (l.len() >= 3 && installed.bundle_tails.contains(&l)))
+            {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1183,5 +1320,94 @@ mod tests {
         };
         assert_eq!(bundle_id, "com.example.app");
         assert!(name.is_none() && display_name.is_none());
+    }
+
+    fn installed(names: &[&str], ids: &[&str]) -> InstalledApps {
+        InstalledApps::from_parts(
+            names.iter().map(|s| s.to_string()),
+            ids.iter().map(|s| s.to_string()),
+        )
+    }
+
+    #[test]
+    fn normalize_name_cases() {
+        assert_eq!(normalize_name("Google Chrome"), "googlechrome");
+        assert_eq!(normalize_name("zoom.us"), "zoomus");
+        assert_eq!(normalize_name("1Password 7"), "1password7");
+        assert_eq!(normalize_name(" - . "), "");
+    }
+
+    #[test]
+    fn excluded_names() {
+        for n in [
+            ".DS_Store",
+            "AddressBook",
+            "addressbook",
+            "CloudDocs",
+            "MobileSync",
+            "com.apple.sharedfilelist",
+            "AppleIntelligence",
+            "Google",
+            "Microsoft",
+            "JetBrains",
+            "Slack",
+            "obsidian",
+            "Code",
+            "Claude",
+        ] {
+            assert!(is_excluded_dir_name(n), "{n}");
+        }
+        for n in ["Spotify", "Zoom", "Figma", "com.foo.bar"] {
+            assert!(!is_excluded_dir_name(n), "{n}");
+        }
+    }
+
+    #[test]
+    fn match_by_app_name() {
+        let i = installed(&["Spotify", "Google Chrome"], &[]);
+        assert!(matches_installed("Spotify", &i));
+        assert!(matches_installed("spotify", &i));
+        assert!(matches_installed("Google-Chrome", &i));
+        assert!(!matches_installed("Figma", &i));
+    }
+
+    #[test]
+    fn match_by_full_bundle_id_case_insensitive() {
+        let i = installed(&[], &["com.foo.Bar"]);
+        assert!(matches_installed("com.foo.bar", &i));
+        assert!(matches_installed("COM.FOO.BAR", &i));
+    }
+
+    #[test]
+    fn match_by_bundle_id_tail() {
+        let i = installed(&[], &["com.tinyspeck.slackmacgap"]);
+        assert!(matches_installed("slackmacgap", &i));
+        assert!(!matches_installed("slack", &i));
+    }
+
+    #[test]
+    fn match_bundle_id_shaped_folder_by_its_last_component() {
+        let i = installed(&["Foo"], &[]);
+        assert!(matches_installed("com.example.Foo", &i));
+        let j = installed(&[], &["org.other.widget"]);
+        assert!(matches_installed("com.example.widget", &j));
+    }
+
+    #[test]
+    fn unmatchable_empty_normalized_name_is_treated_as_installed() {
+        let i = installed(&[], &[]);
+        assert!(matches_installed("---", &i));
+    }
+
+    #[test]
+    fn short_bundle_tail_is_not_used() {
+        let i = installed(&[], &["com.foo.ab"]);
+        assert!(!matches_installed("ab", &i));
+    }
+
+    #[test]
+    fn duplicate_app_names_still_match_once_or_more() {
+        let i = installed(&["Foo", "Foo"], &["com.a.foo", "com.b.foo"]);
+        assert!(matches_installed("Foo", &i));
     }
 }
