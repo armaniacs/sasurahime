@@ -75,6 +75,12 @@ impl Cleaner for ApfsSnapshotCleaner {
         "apfs-snapshot"
     }
 
+    // Snapshots are deleted on the system volume via tmutil and cannot be
+    // restored from the Trash, so `--yes` must never pick this target.
+    fn auto_clean_allowed(&self) -> bool {
+        false
+    }
+
     fn detect(&self) -> ScanResult {
         if !self.runner.exists("tmutil") {
             return ScanResult::new(self.name(), ScanStatus::NotFound);
@@ -721,5 +727,11 @@ mod tests {
             .unwrap()
             .iter()
             .any(|c| c.contains(&"deletelocalsnapshots".to_string())));
+    }
+
+    #[test]
+    fn apfs_snapshot_is_never_auto_cleaned() {
+        let cleaner = ApfsSnapshotCleaner::new(Box::new(NoSnapshots));
+        assert!(!cleaner.auto_clean_allowed());
     }
 }

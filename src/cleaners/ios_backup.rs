@@ -25,6 +25,12 @@ impl Cleaner for IosCleaner {
         "ios-backup"
     }
 
+    // Deleting an iOS backup is irreversible, and its selection prompt would
+    // otherwise accept exactly one Enter, so `--yes` must never pick it.
+    fn auto_clean_allowed(&self) -> bool {
+        false
+    }
+
     fn detect(&self) -> ScanResult {
         if !self.backup_dir.exists() {
             return ScanResult::new(self.name(), ScanStatus::NotFound);
@@ -294,5 +300,11 @@ mod tests {
         let reporter = crate::progress::VerboseProgress::new();
         let result = make_cleaner(&tmp).clean(true, &reporter).unwrap();
         assert_eq!(result.bytes_freed, 0);
+    }
+
+    #[test]
+    fn ios_backup_is_never_auto_cleaned() {
+        let tmp = TempDir::new().unwrap();
+        assert!(!make_cleaner(&tmp).auto_clean_allowed());
     }
 }

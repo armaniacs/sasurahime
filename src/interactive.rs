@@ -113,6 +113,25 @@ pub fn run_auto(cleaners: &[Box<dyn Cleaner>]) -> Result<()> {
 
     let pruneable_indices = auto_clean_indices(&results, cleaners);
 
+    // Irreversible cleaners (ios-backup, apfs-snapshot) are only reachable by
+    // an explicit selection, so tell the user they were left out.
+    let skipped: Vec<&str> = results
+        .iter()
+        .enumerate()
+        .filter(|(i, r)| {
+            matches!(r.status, ScanStatus::Pruneable(b) if b > 0)
+                && !cleaners[*i].auto_clean_allowed()
+        })
+        .map(|(i, _)| cleaners[i].name())
+        .collect();
+    if !skipped.is_empty() {
+        println!(
+            "Skipped {} target(s) that need an explicit selection: {}",
+            skipped.len(),
+            skipped.join(", ")
+        );
+    }
+
     if pruneable_indices.is_empty() {
         println!("Nothing to clean.");
         return Ok(());
@@ -446,5 +465,46 @@ mod tests {
         ];
         let results: Vec<ScanResult> = cleaners.iter().map(|c| c.detect()).collect();
         assert_eq!(auto_clean_indices(&results, &cleaners), vec![0]);
+    }
+
+    #[test]
+    fn run_auto_does_not_clean_manual_only_targets() {
+        use crate::cleaners::manual_only::ManualOnly;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+
+        struct Counting(Arc<AtomicUsize>);
+
+        impl Cleaner for Counting {
+            fn name(&self) -> &'static str {
+                "counting"
+            }
+            fn detect(&self) -> ScanResult {
+                ScanResult::new("counting", ScanStatus::Pruneable(10))
+            }
+            fn clean(
+                &self,
+                _dry_run: bool,
+                _reporter: &dyn ProgressReporter,
+            ) -> Result<CleanResult> {
+                self.0.fetch_add(1, Ordering::SeqCst);
+                Ok(CleanResult {
+                    name: "counting",
+                    bytes_freed: 0,
+                    uses_trash: false,
+                    skipped: vec![],
+                    deleted_paths: vec![],
+                })
+            }
+        }
+
+        let calls = Arc::new(AtomicUsize::new(0));
+        let cleaners: Vec<Box<dyn Cleaner>> = vec![Box::new(ManualOnly::new(Box::new(Counting(
+            Arc::clone(&calls),
+        ))))];
+
+        run_auto(&cleaners).unwrap();
+
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
     }
 }

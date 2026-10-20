@@ -459,8 +459,6 @@ const AUTO_CLEAN_TARGETS: &[&str] = &[
     "colima",
     "ollama",
     "device-support",
-    "ios-backup",
-    "apfs-snapshot",
 ];
 
 fn special_cleaners(
@@ -1084,8 +1082,26 @@ mod tests {
         }
     }
 
+    // Irreversible cleaners (ios-backup, apfs-snapshot) stay registered and
+    // scanned, but must never be chosen by `--yes`.
+    const AUTO_CLEAN_EXPECTED: &[&str] = &[
+        "uv",
+        "brew",
+        "mise",
+        "browsers",
+        "xcode",
+        "logs",
+        "act",
+        "huggingface",
+        "pre-commit",
+        "library-logs",
+        "colima",
+        "ollama",
+        "device-support",
+    ];
+
     #[test]
-    fn only_legacy_targets_are_auto_clean_allowed() {
+    fn only_auto_clean_targets_are_auto_clean_allowed() {
         let tmp = tempfile::TempDir::new().unwrap();
         let cleaners = all_cleaners(tmp.path(), &config::Config::default());
         for c in &cleaners {
@@ -1103,7 +1119,18 @@ mod tests {
                 "AUTO_CLEAN_TARGETS has unknown name: {t}"
             );
         }
-        assert_eq!(AUTO_CLEAN_TARGETS, LEGACY_SCAN_TARGETS);
+        assert_eq!(AUTO_CLEAN_TARGETS, AUTO_CLEAN_EXPECTED);
+        for irreversible in ["ios-backup", "apfs-snapshot"] {
+            assert!(
+                names.contains(&irreversible),
+                "{irreversible} must stay registered"
+            );
+            let c = cleaners.iter().find(|c| c.name() == irreversible).unwrap();
+            assert!(
+                !c.auto_clean_allowed(),
+                "{irreversible} must never run under --yes"
+            );
+        }
     }
 
     #[test]

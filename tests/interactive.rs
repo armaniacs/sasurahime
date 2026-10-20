@@ -411,3 +411,34 @@ fn yes_flag_never_runs_manual_only_targets() {
     );
     assert!(!calls.exists(), "docker prune must never run under --yes");
 }
+
+#[test]
+fn yes_flag_never_runs_ios_backup() {
+    let tmp = TempDir::new().unwrap();
+    let backup = tmp
+        .path()
+        .join("Library/Application Support/MobileSync/Backup/00008110-001A2B");
+    fs::create_dir_all(&backup).unwrap();
+    fs::write(backup.join("Manifest.db"), vec![1u8; 4096]).unwrap();
+
+    let output = sasurahime(tmp.path())
+        .env("PATH", "/usr/bin:/bin")
+        .args(["--permanent", "--yes"])
+        .write_stdin("y\n")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    assert!(
+        backup.join("Manifest.db").exists(),
+        "backup must survive --yes"
+    );
+
+    let scan = sasurahime(tmp.path())
+        .env("PATH", "/usr/bin:/bin")
+        .arg("scan")
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&scan.stdout);
+    assert!(stdout.contains("ios-backup"), "stdout:\n{stdout}");
+}
