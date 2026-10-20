@@ -23,8 +23,9 @@ use dirs::home_dir;
 use progress::{build_reporter_from_flags, merge_suppress_flags, ProgressReporter};
 use std::path::PathBuf;
 
-/// Macro that generates CleanTarget enum, SUPPORTED_TARGETS, dispatch helpers,
-/// and all_cleaners() from a single definition table.
+/// Macro that generates the CleanTarget enum, SUPPORTED_TARGETS, the dispatch
+/// helpers and standard_cleaners() from a single definition table.
+/// all_cleaners() composes standard_cleaners() with special_cleaners().
 ///
 /// Usage:
 /// ```ignore
@@ -62,6 +63,15 @@ macro_rules! define_cleaners {
         const SUPPORTED_TARGETS: &[(&str, &str)] = &[
             $( ($cli_name, $desc) ),*
         ];
+
+        fn standard_cleaners(
+            home: &std::path::Path,
+            config: &config::Config,
+        ) -> Vec<Box<dyn cleaner::Cleaner>> {
+            vec![
+                $( Box::new(($factory)(home, config)) as Box<dyn cleaner::Cleaner>, )*
+            ]
+        }
 
         fn dispatch_clean(
             home: &std::path::Path,
@@ -146,7 +156,7 @@ define_cleaners! {
     (|_home, _config| cleaners::generic::GenericCleaner::cocoapods(Box::new(SystemCommandRunner))),
 
     Colima : "colima" => "Colima VM disk images (inactive) prune";
-    (|home, _config| cleaners::generic::GenericCleaner::colima_prune(home, Box::new(SystemCommandRunner))),
+    (|home, config| cleaners::generic::GenericCleaner::colima_prune(home, Box::new(SystemCommandRunner)).with_config(config)),
 
     SwiftPM : "spm" => "SwiftPM cache directory";
     (|home, config| cleaners::generic::GenericCleaner::spm_cache(home, Box::new(SystemCommandRunner)).with_config(config)),
@@ -423,31 +433,33 @@ fn home() -> PathBuf {
         .unwrap_or_else(|_| home_dir().expect("cannot determine HOME directory"))
 }
 
-fn all_cleaners(home: &std::path::Path, config: &config::Config) -> Vec<Box<dyn cleaner::Cleaner>> {
-    // Apply per-cleaner `older_than_days` for logs if set; fall back to
-    // `config.logs_keep_days` (which itself defaults to 7).
-    let logs_keep_days = config.effective_logs_keep_days();
+/// Targets that `--yes` may clean. Every other registered target is wrapped in
+/// ManualOnly so it runs only when selected in the TUI or via `clean <target>`.
+const AUTO_CLEAN_TARGETS: &[&str] = &[
+    "uv",
+    "brew",
+    "mise",
+    "browsers",
+    "xcode",
+    "logs",
+    "act",
+    "huggingface",
+    "pre-commit",
+    "library-logs",
+    "colima",
+    "ollama",
+    "device-support",
+    "ios-backup",
+    "apfs-snapshot",
+];
 
-    let mut cleaners: Vec<Box<dyn cleaner::Cleaner>> = vec![
-        // Sprint 1
-        Box::new(cleaners::uv::UvCleaner::new(
-            home,
-            Box::new(SystemCommandRunner),
-        )),
-        Box::new(cleaners::brew::BrewCleaner::new(
-            home,
-            Box::new(SystemCommandRunner),
-        )),
-        // Sprint 2
-        Box::new(cleaners::mise::MiseCleaner::new(
-            home,
-            Box::new(SystemCommandRunner),
-        )),
-        Box::new(cleaners::browser::BrowserCleaner::new(
-            home,
-            Box::new(SystemCommandRunner),
-        )),
-        // Sprint 3 — logs / xcode (added by Tasks 3 and 4)
+fn special_cleaners(
+    home: &std::path::Path,
+    config: &config::Config,
+) -> Vec<Box<dyn cleaner::Cleaner>> {
+    // Per-cleaner `older_than_days` for logs falls back to `config.logs_keep_days`.
+    let logs_keep_days = config.effective_logs_keep_days();
+    vec![
         Box::new(cleaners::xcode::XcodeCleaner::new(
             home,
             Box::new(SystemCommandRunner),
@@ -465,28 +477,10 @@ fn all_cleaners(home: &std::path::Path, config: &config::Config) -> Vec<Box<dyn 
                 })
                 .collect(),
         )),
-        // Sprint 5 — act / huggingface / pre-commit
-        Box::new(
-            cleaners::generic::GenericCleaner::act(home, Box::new(SystemCommandRunner))
-                .with_config(config),
-        ),
-        Box::new(cleaners::huggingface::HuggingFaceCleaner::new(
-            home,
-            Box::new(SystemCommandRunner),
-        )),
-        Box::new(cleaners::pre_commit::PreCommitCleaner::new(
-            home,
-            Box::new(SystemCommandRunner),
-        )),
-        // Sprint 5 — library-logs
         Box::new(cleaners::library_logs::LibraryLogsCleaner::new(
             home,
             Box::new(SystemCommandRunner),
         )),
-        Box::new(
-            cleaners::generic::GenericCleaner::colima_prune(home, Box::new(SystemCommandRunner))
-                .with_config(config),
-        ),
         Box::new(cleaners::ollama::OllamaCleaner::new(
             home,
             Box::new(SystemCommandRunner),
@@ -503,7 +497,21 @@ fn all_cleaners(home: &std::path::Path, config: &config::Config) -> Vec<Box<dyn 
         Box::new(cleaners::apfs_snapshot::ApfsSnapshotCleaner::new(Box::new(
             SystemCommandRunner,
         ))),
-    ];
+    ]
+}
+
+fn all_cleaners(home: &std::path::Path, config: &config::Config) -> Vec<Box<dyn cleaner::Cleaner>> {
+    let mut cleaners: Vec<Box<dyn cleaner::Cleaner>> = standard_cleaners(home, config)
+        .into_iter()
+        .chain(special_cleaners(home, config))
+        .map(|c| -> Box<dyn cleaner::Cleaner> {
+            if AUTO_CLEAN_TARGETS.contains(&c.name()) {
+                c
+            } else {
+                Box::new(cleaners::manual_only::ManualOnly::new(c))
+            }
+        })
+        .collect();
     // Apply exclude filter
     cleaners.retain(|c| !config.exclude.iter().any(|e| e == c.name()));
     // Add custom cleaners (always included since user defined them)
@@ -1015,5 +1023,116 @@ mod tests {
             names.len(),
             "duplicate cleaner names: {names:?}"
         );
+    }
+
+    const NOT_SCANNED: &[&str] = &["caches", "trash"];
+
+    // The only target whose Cleaner::name() differs from its CLI name.
+    fn cleaner_name_for(cli_name: &str) -> &str {
+        match cli_name {
+            "cocoa-pods" => "cocoapods",
+            other => other,
+        }
+    }
+
+    #[test]
+    fn every_clean_target_is_registered_in_all_cleaners() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cleaners = all_cleaners(tmp.path(), &config::Config::default());
+        let names = names_of(&cleaners);
+        let missing: Vec<&str> = SUPPORTED_TARGETS
+            .iter()
+            .chain(extra_targets())
+            .map(|(cli, _)| *cli)
+            .filter(|cli| !NOT_SCANNED.contains(cli))
+            .filter(|cli| !names.iter().any(|n| *n == cleaner_name_for(cli)))
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "targets missing from all_cleaners: {missing:?}"
+        );
+    }
+
+    #[test]
+    fn standard_cleaners_follow_the_macro_table_order() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cleaners = standard_cleaners(tmp.path(), &config::Config::default());
+        assert_eq!(cleaners.len(), SUPPORTED_TARGETS.len());
+        for ((cli, _), c) in SUPPORTED_TARGETS.iter().zip(&cleaners) {
+            assert_eq!(c.name(), cleaner_name_for(cli));
+        }
+    }
+
+    #[test]
+    fn standard_and_special_cleaners_do_not_overlap() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cfg = config::Config::default();
+        let standard = names_of(&standard_cleaners(tmp.path(), &cfg));
+        let special = names_of(&special_cleaners(tmp.path(), &cfg));
+        for s in &special {
+            assert!(!standard.contains(s), "registered twice: {s}");
+        }
+    }
+
+    #[test]
+    fn only_legacy_targets_are_auto_clean_allowed() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cleaners = all_cleaners(tmp.path(), &config::Config::default());
+        for c in &cleaners {
+            assert_eq!(
+                c.auto_clean_allowed(),
+                AUTO_CLEAN_TARGETS.contains(&c.name()),
+                "auto policy mismatch for {}",
+                c.name()
+            );
+        }
+        let names = names_of(&cleaners);
+        for t in AUTO_CLEAN_TARGETS {
+            assert!(
+                names.contains(t),
+                "AUTO_CLEAN_TARGETS has unknown name: {t}"
+            );
+        }
+        assert_eq!(AUTO_CLEAN_TARGETS, LEGACY_SCAN_TARGETS);
+    }
+
+    #[test]
+    fn destructive_targets_are_not_auto_clean_allowed() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cleaners = all_cleaners(tmp.path(), &config::Config::default());
+        for danger in [
+            "docker",
+            "orbstack",
+            "npm",
+            "yarn",
+            "pnpm",
+            "gem",
+            "bundle",
+            "conda",
+            "poetry",
+            "downloads",
+            "vscode-extensions",
+            "cargo",
+            "rustup",
+            "simulator",
+            "maven",
+            "sbt",
+        ] {
+            let c = cleaners.iter().find(|c| c.name() == danger).expect(danger);
+            assert!(!c.auto_clean_allowed(), "{danger} must not run under --yes");
+        }
+    }
+
+    #[test]
+    fn config_exclude_removes_generated_targets() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cfg = config::Config {
+            exclude: vec!["docker".to_string(), "cocoapods".to_string()],
+            ..config::Config::default()
+        };
+        let names = names_of(&all_cleaners(tmp.path(), &cfg));
+        assert!(!names.contains(&"docker"));
+        assert!(!names.contains(&"cocoapods"));
+        assert!(names.contains(&"npm"));
     }
 }
