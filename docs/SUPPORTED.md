@@ -7,7 +7,7 @@ permalink: /SUPPORTED
 <details open markdown="1">
 <summary markdown="0"><strong>🇺🇸 English</strong></summary>
 
-sasurahime provides **49 clean targets**. Every target supports both `detect`
+sasurahime provides **50 clean targets**. Every target supports both `detect`
 (read-only, no side effects) and `clean` (removal). All `clean` subcommands
 accept `--dry-run`. Only caches and old versions are removed — active runtimes
 and packages are never touched.
@@ -64,6 +64,7 @@ and packages are never touched.
 | `ios-backup` | iOS backups — interactive only, never in `--yes` |
 | `apfs-snapshot` | APFS local Time Machine snapshots — interactive, or `--all` |
 | `orphan-containers` | Leftover `~/Library/Containers` and `~/Library/Group Containers` of uninstalled apps - interactive only, never in `--yes` |
+| `library-caches` | `~/Library/Caches/` per-app listing; known app caches removable - interactive only, never in `--yes` |
 | `trash` | Reports `~/.Trash` size (scan only) |
 
 ---
@@ -1290,7 +1291,61 @@ selecting.
 
 ---
 
-## 50. `sasurahime stats`
+## 50. `sasurahime clean library-caches`
+
+**Category:** Sprint 6
+
+**What it removes:** Caches of known apps under `~/Library/Caches/` (the entries
+in the built-in app table whose base directory is `Caches`, for example
+`typescript`, `gopls`, `electron`, `Microsoft Edge`, `BraveSoftware`).
+**Interactive only.** Unknown apps are listed but never removed.
+
+**Difference from `caches`:** `sasurahime clean caches` runs the CLI-based
+cleaners (bun, go, pip, node-gyp, npm, yarn, pnpm). `library-caches` looks at
+the per-app directories directly under `~/Library/Caches/`.
+
+**How detect works:**
+1. Reads the immediate children of `~/Library/Caches/`.
+2. Skips dot-entries, symlinks, and directories owned by another cleaner
+   (see below). Only known apps are measured.
+3. Reports the sum of known caches larger than their threshold (64 MB)
+   as pruneable. Unknown apps are not counted.
+
+**How clean works:**
+1. Lists every entry by size, with tags `[running]`, `[below threshold]`,
+   `[display only]`.
+2. **If `--dry-run`:** prints `would remove:` for each deletable entry and stops.
+3. If stdin is not a terminal, prints a message and removes nothing.
+4. Otherwise opens `dialoguer::MultiSelect` with nothing pre-selected, then
+   moves the selected entries to the Trash (`--permanent` deletes them).
+5. Entries whose app is running are skipped and reported; the app is never
+   quit automatically.
+
+**Excluded (owned by other cleaners, never listed):**
+
+| Directory | Cleaner |
+|---|---|
+| `Homebrew` | `brew` |
+| `ms-playwright*` | `browsers` |
+| `node-gyp` | `node-gyp` |
+| `org.swift.swiftpm` | `spm` |
+| `JetBrains` | `jetbrains` |
+| `CocoaPods` | `cocoa-pods` |
+| `Yarn` | `yarn` |
+| `pip` | `pip` |
+| `go-build` | `go` |
+| `pypoetry` | `poetry` |
+| `deno` | `deno` |
+| `com.apple.*` | OS managed |
+
+**Safety:**
+- Nothing is selected by default; `--yes` never runs this cleaner.
+- Unknown apps are display-only.
+- `--dry-run` guarantees zero side effects.
+
+---
+
+## 51. `sasurahime stats`
 
 **Category:** Sprint 5
 
@@ -1403,7 +1458,7 @@ Runs `detect()` on every cleaner and prints a formatted table via
 <details markdown="1">
 <summary markdown="0"><strong>🇯🇵 日本語</strong></summary>
 
-sasurahime は **49 のクリーンターゲット** を提供しています。すべてのターゲットは
+sasurahime は **50 のクリーンターゲット** を提供しています。すべてのターゲットは
 `detect`（読み取り専用、副作用なし）と `clean`（削除）の両方に対応しており、
 すべての `clean` サブコマンドは `--dry-run` をサポートしています。
 削除されるのはキャッシュや古いバージョンのみで、現在使用中のランタイムやパッケージには触れません。
@@ -1460,6 +1515,7 @@ sasurahime は **49 のクリーンターゲット** を提供しています。
 | `ios-backup` | iOS バックアップ — 対話的のみ、`--yes` では非実行 |
 | `apfs-snapshot` | APFS ローカル Time Machine スナップショット — 対話的、または `--all` |
 | `orphan-containers` | アンインストール済みアプリの `~/Library/Containers` と `~/Library/Group Containers` の残骸 - 対話的のみ、`--yes` では実行しない |
+| `library-caches` | `~/Library/Caches/` のアプリ別一覧。既知アプリのキャッシュのみ削除可能 - 対話的のみ、`--yes` では非実行 |
 | `trash` | `~/.Trash` のサイズを報告（スキャンのみ） |
 
 ---
@@ -2552,7 +2608,51 @@ Time Machine スナップショット（`<date>` は `YYYY-MM-DD-HHMMSS`）。
 
 ---
 
-## 50. `sasurahime stats`
+## 50. `sasurahime clean library-caches`
+
+**カテゴリ:** Sprint 6
+
+**削除対象:** `~/Library/Caches/` 直下の既知アプリのキャッシュ (内蔵のアプリ表のうち基準ディレクトリが `Caches` のもの。例: `typescript`、`gopls`、`electron`、`Microsoft Edge`、`BraveSoftware`)。**対話的のみ。** 未知のアプリは一覧に表示しますが、削除はしません。
+
+**`caches` との違い:** `sasurahime clean caches` は CLI ベースの cleaner (bun、go、pip、node-gyp、npm、yarn、pnpm) をまとめて実行します。`library-caches` は `~/Library/Caches/` 直下のアプリ別ディレクトリを直接扱います。
+
+**detect の動作:**
+1. `~/Library/Caches/` の直下を読み取ります。
+2. ドットエントリ、シンボリックリンク、他の cleaner が担当するディレクトリ (下表) を除外します。サイズを測るのは既知アプリだけです。
+3. 閾値 (64 MB) を超える既知アプリのキャッシュ合計を pruneable として報告します。未知アプリは合計に含めません。
+
+**clean の動作:**
+1. すべてのエントリをサイズ順に表示します。タグは `[running]`、`[below threshold]`、`[display only]` です。
+2. `--dry-run`: 削除可能なエントリごとに `would remove:` を表示して終了します。
+3. stdin が端末でない場合は、メッセージを表示して何も削除しません。
+4. それ以外は `dialoguer::MultiSelect` を (何も選択しない状態で) 表示し、選択したものをゴミ箱へ移動します (`--permanent` では完全削除)。
+5. 対象アプリが実行中のエントリはスキップして報告します。アプリの自動終了は行いません。
+
+**除外 (他の cleaner が担当。一覧に出さない):**
+
+| ディレクトリ | 担当 cleaner |
+|---|---|
+| `Homebrew` | `brew` |
+| `ms-playwright*` | `browsers` |
+| `node-gyp` | `node-gyp` |
+| `org.swift.swiftpm` | `spm` |
+| `JetBrains` | `jetbrains` |
+| `CocoaPods` | `cocoa-pods` |
+| `Yarn` | `yarn` |
+| `pip` | `pip` |
+| `go-build` | `go` |
+| `pypoetry` | `poetry` |
+| `deno` | `deno` |
+| `com.apple.*` | OS 管理 |
+
+**安全性:**
+- 既定では何も選択されません。`--yes` ではこの cleaner は実行されません。
+- 未知のアプリは表示のみです。
+- `--dry-run` は副作用ゼロを保証します。
+
+---
+
+## 51. `sasurahime stats`
 
 **カテゴリ:** Sprint 5
 

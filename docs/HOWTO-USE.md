@@ -118,6 +118,7 @@ Clean a single cache target. Replace `<target>` with one of the names below.
 | `huggingface`   | Hugging Face model cache (`hub/`) via CLI or fallback                  |
 | `ios-backup`    | iOS device backups (interactive only — never in --yes mode)           |
 | `jetbrains`     | JetBrains IDE caches (old versions)                                   |
+| `library-caches` | Per-app `~/Library/Caches/` listing; known app caches removable (interactive only) |
 | `library-logs`  | `~/Library/Logs/` — interactive heuristic scan (suggested cleanables) |
 | `logs`          | Log files older than N days (see `--keep-days`)                       |
 | `maven`         | Maven local repo (`mvn dependency:purge-local-repository`)            |
@@ -692,6 +693,7 @@ Tip ブロックはサイズ降順で最大 **5 件** 表示します。64 MB �
 | `huggingface`   | Hugging Face モデルキャッシュ（`hub/`）CLI またはフォールバック          |
 | `ios-backup`    | iOS デバイスバックアップ（インタラクティブのみ — --yes では非実行）     |
 | `jetbrains`     | JetBrains IDE キャッシュ（古いバージョン）                              |
+| `library-caches` | `~/Library/Caches/` のアプリ別一覧。既知アプリのキャッシュのみ削除可能（対話的のみ） |
 | `library-logs`  | `~/Library/Logs/` — インタラクティブヒューリスティックスキャン         |
 | `logs`          | N 日より古いログファイル（`--keep-days` を参照）                        |
 | `maven`         | Maven ローカルリポジトリ（`mvn dependency:purge-local-repository`）     |
