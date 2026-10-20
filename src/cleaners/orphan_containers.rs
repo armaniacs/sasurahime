@@ -1,4 +1,5 @@
 use crate::command::CommandRunner;
+use crate::format::dir_size;
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -247,6 +248,130 @@ pub fn default_app_dirs(home: &Path) -> Vec<PathBuf> {
         home.join("Applications"),
         PathBuf::from("/System/Applications"),
     ]
+}
+
+#[derive(Debug, Clone)]
+pub struct OrphanCandidate {
+    pub path: PathBuf,
+    pub name: String,
+    pub kind: ContainerKind,
+    pub size: u64,
+}
+
+#[derive(Debug, Default)]
+pub struct OrphanScan {
+    /// Sorted by size, largest first.
+    pub candidates: Vec<OrphanCandidate>,
+    /// Folders (or whole roots) that could not be listed. Without Full Disk
+    /// Access, macOS denies access to other apps' containers.
+    pub unreadable: usize,
+}
+
+/// Names of real sub-directories. Symlinks and plain files are skipped:
+/// `DirEntry::file_type` does not follow symlinks.
+fn child_dir_names(dir: &Path) -> std::io::Result<Vec<String>> {
+    let mut names = Vec::new();
+    for entry in fs::read_dir(dir)?.flatten() {
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if !file_type.is_dir() {
+            continue;
+        }
+        if let Some(name) = entry.file_name().to_str() {
+            names.push(name.to_string());
+        }
+    }
+    Ok(names)
+}
+
+pub fn scan_roots(roots: &[(ContainerKind, PathBuf)], installed: &HashSet<String>) -> OrphanScan {
+    let mut scan = OrphanScan::default();
+    for (kind, root) in roots {
+        let names = match child_dir_names(root) {
+            Ok(names) => names,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(_) => {
+                scan.unreadable += 1;
+                continue;
+            }
+        };
+        for name in find_orphan_names(*kind, &names, installed) {
+            let path = root.join(&name);
+            if fs::read_dir(&path).is_err() {
+                scan.unreadable += 1;
+                continue;
+            }
+            let size = dir_size(&path);
+            if size == 0 {
+                continue;
+            }
+            scan.candidates.push(OrphanCandidate {
+                path,
+                name,
+                kind: *kind,
+                size,
+            });
+        }
+    }
+    scan.candidates
+        .sort_by(|a, b| b.size.cmp(&a.size).then_with(|| a.name.cmp(&b.name)));
+    scan
+}
+
+pub fn status_from_scan(scan: &OrphanScan) -> crate::cleaner::ScanStatus {
+    let total: u64 = scan.candidates.iter().map(|c| c.size).sum();
+    if total > 0 {
+        crate::cleaner::ScanStatus::Pruneable(total)
+    } else {
+        crate::cleaner::ScanStatus::Clean
+    }
+}
+
+pub struct OrphanContainersCleaner {
+    home: PathBuf,
+    app_dirs: Vec<PathBuf>,
+    runner: Box<dyn CommandRunner>,
+}
+
+impl OrphanContainersCleaner {
+    pub fn new(home: &Path, runner: Box<dyn CommandRunner>) -> Self {
+        Self {
+            home: home.to_path_buf(),
+            app_dirs: default_app_dirs(home),
+            runner,
+        }
+    }
+
+    /// Replaces the install locations searched for `.app` bundles, so tests
+    /// never read the real `/Applications`.
+    #[cfg(test)]
+    pub fn with_app_dirs(mut self, app_dirs: Vec<PathBuf>) -> Self {
+        self.app_dirs = app_dirs;
+        self
+    }
+
+    fn roots(&self) -> Vec<(ContainerKind, PathBuf)> {
+        vec![
+            (
+                ContainerKind::Containers,
+                self.home.join("Library/Containers"),
+            ),
+            (
+                ContainerKind::GroupContainers,
+                self.home.join("Library/Group Containers"),
+            ),
+        ]
+    }
+
+    fn any_root_exists(&self) -> bool {
+        self.roots().iter().any(|(_, dir)| dir.exists())
+    }
+
+    pub fn scan(&self) -> OrphanScan {
+        let installed = collect_installed_ids(&self.app_dirs, self.runner.as_ref());
+        scan_roots(&self.roots(), &installed)
+    }
 }
 
 #[cfg(test)]
@@ -683,5 +808,167 @@ mod tests {
                 PathBuf::from("/System/Applications"),
             ]
         );
+    }
+
+    fn write_container(home: &Path, sub: &str, name: &str) -> PathBuf {
+        let dir = home.join("Library").join(sub).join(name);
+        fs::create_dir_all(dir.join("Data")).unwrap();
+        fs::write(dir.join("Data/blob.bin"), vec![1u8; 8192]).unwrap();
+        dir
+    }
+
+    fn cleaner_for(tmp: &TempDir) -> OrphanContainersCleaner {
+        OrphanContainersCleaner::new(tmp.path(), Box::new(MockRunner::new().with_not_found()))
+            .with_app_dirs(vec![tmp.path().join("Applications")])
+    }
+
+    #[test]
+    fn scan_reports_only_orphans_in_containers() {
+        let tmp = TempDir::new().unwrap();
+        write_app(
+            &tmp.path().join("Applications"),
+            "Keep.app",
+            "com.example.keep",
+        );
+        write_container(tmp.path(), "Containers", "com.example.keep");
+        write_container(tmp.path(), "Containers", "com.example.keep.Helper");
+        write_container(tmp.path(), "Containers", "com.apple.Safari");
+        let gone = write_container(tmp.path(), "Containers", "com.example.gone");
+
+        let scan = cleaner_for(&tmp).scan();
+
+        assert_eq!(scan.unreadable, 0);
+        assert_eq!(scan.candidates.len(), 1);
+        assert_eq!(scan.candidates[0].path, gone);
+        assert_eq!(scan.candidates[0].name, "com.example.gone");
+        assert_eq!(scan.candidates[0].kind, ContainerKind::Containers);
+        assert!(scan.candidates[0].size > 0);
+    }
+
+    #[test]
+    fn scan_keeps_group_containers_of_a_team_with_an_installed_app() {
+        let tmp = TempDir::new().unwrap();
+        write_app(
+            &tmp.path().join("Applications"),
+            "Slack.app",
+            "com.tinyspeck.slackmacgap",
+        );
+        write_container(
+            tmp.path(),
+            "Group Containers",
+            "BQR82RBBHL.com.tinyspeck.slackmacgap",
+        );
+        write_container(tmp.path(), "Group Containers", "BQR82RBBHL.slack");
+        write_container(
+            tmp.path(),
+            "Group Containers",
+            "243LU875E5.groups.com.apple.podcasts",
+        );
+        write_container(tmp.path(), "Group Containers", "com.apple.Home.group");
+        let gone = write_container(
+            tmp.path(),
+            "Group Containers",
+            "ZZZZZ99999.group.com.example.gone",
+        );
+
+        let scan = cleaner_for(&tmp).scan();
+
+        assert_eq!(scan.candidates.len(), 1);
+        assert_eq!(scan.candidates[0].path, gone);
+        assert_eq!(scan.candidates[0].kind, ContainerKind::GroupContainers);
+    }
+
+    #[test]
+    fn scan_of_missing_or_empty_roots_is_empty() {
+        let tmp = TempDir::new().unwrap();
+        let scan = cleaner_for(&tmp).scan();
+        assert!(scan.candidates.is_empty());
+        assert_eq!(scan.unreadable, 0);
+
+        fs::create_dir_all(tmp.path().join("Library/Containers")).unwrap();
+        fs::create_dir_all(tmp.path().join("Library/Group Containers")).unwrap();
+        let scan = cleaner_for(&tmp).scan();
+        assert!(scan.candidates.is_empty());
+        assert_eq!(scan.unreadable, 0);
+    }
+
+    #[test]
+    fn scan_skips_symlinks_files_and_zero_size_folders() {
+        let tmp = TempDir::new().unwrap();
+        let real = write_container(tmp.path(), "Containers", "com.example.real");
+        let containers = tmp.path().join("Library/Containers");
+        std::os::unix::fs::symlink(&real, containers.join("com.example.link")).unwrap();
+        fs::write(containers.join("com.example.file"), vec![1u8; 8192]).unwrap();
+        fs::create_dir_all(containers.join("com.example.empty")).unwrap();
+
+        let scan = cleaner_for(&tmp).scan();
+
+        let names: Vec<&str> = scan.candidates.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(names, vec!["com.example.real"]);
+    }
+
+    #[test]
+    fn scan_counts_unreadable_folders_without_listing_them() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = TempDir::new().unwrap();
+        let locked = write_container(tmp.path(), "Containers", "com.example.locked");
+        write_container(tmp.path(), "Containers", "com.example.open");
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o000)).unwrap();
+
+        let scan = cleaner_for(&tmp).scan();
+
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).unwrap();
+        assert_eq!(scan.unreadable, 1);
+        let names: Vec<&str> = scan.candidates.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(names, vec!["com.example.open"]);
+    }
+
+    #[test]
+    fn scan_sorts_candidates_by_size_descending() {
+        let tmp = TempDir::new().unwrap();
+        let small = write_container(tmp.path(), "Containers", "com.example.small");
+        let big = write_container(tmp.path(), "Containers", "com.example.big");
+        fs::write(big.join("Data/more.bin"), vec![1u8; 65536]).unwrap();
+        assert!(small.exists());
+
+        let scan = cleaner_for(&tmp).scan();
+
+        let names: Vec<&str> = scan.candidates.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(names, vec!["com.example.big", "com.example.small"]);
+    }
+
+    #[test]
+    fn status_from_scan_maps_total_size() {
+        use crate::cleaner::ScanStatus;
+        let empty = OrphanScan::default();
+        assert!(matches!(status_from_scan(&empty), ScanStatus::Clean));
+        let one = OrphanScan {
+            candidates: vec![OrphanCandidate {
+                path: PathBuf::from("/x"),
+                name: "x".into(),
+                kind: ContainerKind::Containers,
+                size: 4096,
+            }],
+            unreadable: 3,
+        };
+        assert!(matches!(
+            status_from_scan(&one),
+            ScanStatus::Pruneable(4096)
+        ));
+    }
+
+    #[test]
+    fn scan_counts_an_unreadable_root_once() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = TempDir::new().unwrap();
+        write_container(tmp.path(), "Containers", "com.example.gone");
+        let root = tmp.path().join("Library/Containers");
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o000)).unwrap();
+
+        let scan = cleaner_for(&tmp).scan();
+
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o755)).unwrap();
+        assert_eq!(scan.unreadable, 1);
+        assert!(scan.candidates.is_empty());
     }
 }
