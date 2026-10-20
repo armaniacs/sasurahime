@@ -31,6 +31,7 @@ mod tests {
 
     #[test]
     fn delete_path_defaults_to_trash_mode() {
+        let _lock = crate::context::TEST_LOCK.lock().unwrap();
         set_trash_mode(true);
         let tmp = TempDir::new().unwrap();
         let d = tmp.path().join("default_dir");
@@ -41,6 +42,7 @@ mod tests {
 
     #[test]
     fn delete_path_in_normal_mode_removes_directory() {
+        let _lock = crate::context::TEST_LOCK.lock().unwrap();
         set_trash_mode(false);
         let tmp = TempDir::new().unwrap();
         let d = tmp.path().join("testdir");
@@ -51,6 +53,7 @@ mod tests {
 
     #[test]
     fn delete_path_in_trash_mode_removes_file_from_source() {
+        let _lock = crate::context::TEST_LOCK.lock().unwrap();
         set_trash_mode(true);
         let tmp = TempDir::new().unwrap();
         let f = tmp.path().join("test.txt");
@@ -61,6 +64,7 @@ mod tests {
 
     #[test]
     fn delete_path_in_trash_mode_returns_error_on_failure() {
+        let _lock = crate::context::TEST_LOCK.lock().unwrap();
         set_trash_mode(true);
         let result = delete_path(Path::new("/nonexistent/path/that/cannot/be/trashed"));
         assert!(result.is_err(), "trash of nonexistent path must return Err");
@@ -73,12 +77,14 @@ mod tests {
 
     #[test]
     fn is_trash_mode_defaults_to_true() {
+        let _lock = crate::context::TEST_LOCK.lock().unwrap();
         set_trash_mode(true);
         assert!(is_trash_mode(), "default must be true");
     }
 
     #[test]
     fn is_trash_mode_reflects_set_trash_mode() {
+        let _lock = crate::context::TEST_LOCK.lock().unwrap();
         set_trash_mode(true);
         assert!(is_trash_mode(), "must be true after set(true)");
         set_trash_mode(false);
@@ -87,6 +93,7 @@ mod tests {
 
     #[test]
     fn delete_path_in_normal_mode_removes_file() {
+        let _lock = crate::context::TEST_LOCK.lock().unwrap();
         set_trash_mode(false);
         let tmp = TempDir::new().unwrap();
         let f = tmp.path().join("test.txt");

@@ -644,6 +644,7 @@ mod tests {
 
     #[test]
     fn delete_entries_removes_and_sums_bytes() {
+        let _lock = crate::context::TEST_LOCK.lock().unwrap();
         crate::trash::set_trash_mode(false);
         let tmp = TempDir::new().unwrap();
         let c = caches(&tmp);
@@ -665,6 +666,7 @@ mod tests {
 
     #[test]
     fn delete_entries_records_failures_as_skipped() {
+        let _lock = crate::context::TEST_LOCK.lock().unwrap();
         crate::trash::set_trash_mode(false);
         let tmp = TempDir::new().unwrap();
         let ghost = entry("ghost", 100, Disposition::Deletable, None);
