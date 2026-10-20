@@ -219,6 +219,19 @@ pub fn format_candidate_label(c: &Candidate, running: bool) -> String {
     )
 }
 
+pub fn format_leftover_line(l: &Leftover) -> String {
+    format!("  {}  {}", l.path.display(), format_bytes(l.size))
+}
+
+/// Up to this many leftovers are opened in Finder without asking. Selecting
+/// is already the user's decision, but a long selection would flood the
+/// screen with Finder windows, so more than this asks once first.
+pub const OPEN_CONFIRM_THRESHOLD: usize = 5;
+
+pub fn open_needs_confirmation(selected: usize) -> bool {
+    selected > OPEN_CONFIRM_THRESHOLD
+}
+
 enum AppState {
     Ready,
     Quit,
@@ -229,6 +242,7 @@ pub struct AppSupportCleaner {
     home: PathBuf,
     runner: Box<dyn CommandRunner>,
     min_app_bytes: Option<u64>,
+    app_roots: Vec<PathBuf>,
 }
 
 impl AppSupportCleaner {
@@ -237,6 +251,13 @@ impl AppSupportCleaner {
             home: home.to_path_buf(),
             runner,
             min_app_bytes: None,
+            app_roots: vec![
+                PathBuf::from("/Applications"),
+                PathBuf::from("/Applications/Utilities"),
+                PathBuf::from("/System/Applications"),
+                PathBuf::from("/System/Applications/Utilities"),
+                home.join("Applications"),
+            ],
         }
     }
 
@@ -244,6 +265,86 @@ impl AppSupportCleaner {
     fn with_min_app_bytes(mut self, n: u64) -> Self {
         self.min_app_bytes = Some(n);
         self
+    }
+
+    #[cfg(test)]
+    fn with_app_roots(mut self, roots: Vec<PathBuf>) -> Self {
+        self.app_roots = roots;
+        self
+    }
+
+    fn leftovers(&self) -> Vec<Leftover> {
+        let installed = collect_installed_apps(&self.app_roots, self.runner.as_ref());
+        find_leftovers(
+            &self.base(),
+            &installed,
+            SystemTime::now(),
+            MIN_LEFTOVER_BYTES,
+            RECENT_DAYS,
+        )
+    }
+
+    /// Display only. Selected entries are opened in Finder; nothing is deleted.
+    fn show_leftovers(&self, dry_run: bool) -> Result<()> {
+        use dialoguer::{Confirm, MultiSelect};
+        if !self.base().exists() {
+            return Ok(());
+        }
+        if !dry_run && !std::io::stdin().is_terminal() {
+            return Ok(());
+        }
+        let left = self.leftovers();
+        if left.is_empty() {
+            return Ok(());
+        }
+        println!(
+            "[{NAME}] possible leftovers of uninstalled apps (display only, nothing is deleted):"
+        );
+        for l in &left {
+            println!("{}", format_leftover_line(l));
+        }
+        if dry_run {
+            return Ok(());
+        }
+        let items: Vec<String> = left.iter().map(format_leftover_line).collect();
+        let defaults = vec![false; items.len()];
+        let picked = MultiSelect::new()
+            .with_prompt("Select leftovers to reveal in Finder (space to toggle, enter to confirm)")
+            .items(&items)
+            .defaults(&defaults)
+            .interact()?;
+        if picked.is_empty() {
+            return Ok(());
+        }
+        if open_needs_confirmation(picked.len()) {
+            let ok = Confirm::new()
+                .with_prompt(format!(
+                    "This opens {} Finder windows. Continue?",
+                    picked.len()
+                ))
+                .default(false)
+                .interact()?;
+            if !ok {
+                println!("[{NAME}] nothing opened");
+                return Ok(());
+            }
+        }
+        let paths: Vec<PathBuf> = picked.into_iter().map(|i| left[i].path.clone()).collect();
+        self.reveal_paths(&paths);
+        Ok(())
+    }
+
+    /// Goes through the injected runner (not `explorer::open_in_finder`) so
+    /// that tests can count the `open` calls without launching Finder.
+    fn reveal_paths(&self, paths: &[PathBuf]) {
+        for p in paths {
+            let path = p.to_string_lossy().to_string();
+            match self.runner.run("open", &[path.as_str()]) {
+                Ok(o) if o.status.success() => {}
+                Ok(o) => eprintln!("[{NAME}] open returned {:?} for {path}", o.status.code()),
+                Err(e) => eprintln!("[{NAME}] error opening Finder: {e}"),
+            }
+        }
     }
 
     fn base(&self) -> PathBuf {
@@ -455,6 +556,43 @@ impl AppSupportCleaner {
             deleted_paths: deleted,
         }
     }
+
+    fn clean_cache_dirs(
+        &self,
+        dry_run: bool,
+        reporter: &dyn ProgressReporter,
+    ) -> Result<CleanResult> {
+        let base = self.base();
+        if !base.exists() {
+            return Ok(Self::empty_result());
+        }
+        let cands = scan_candidates(&base, self.min_app_bytes);
+        if dry_run {
+            self.print_dry_run(&cands);
+            return Ok(Self::empty_result());
+        }
+        if cands.is_empty() {
+            println!("[{NAME}] nothing to clean");
+            return Ok(Self::empty_result());
+        }
+        if !std::io::stdin().is_terminal() {
+            eprintln!(
+                "[{NAME}] not a terminal - skipping. Run `sasurahime clean app-support` \
+                 interactively to choose what to remove."
+            );
+            return Ok(Self::empty_result());
+        }
+        let running = self.running_apps(&cands);
+        let selected = self.interactive_select(&cands, &running)?;
+        if selected.is_empty() {
+            println!("[{NAME}] nothing selected");
+            return Ok(Self::empty_result());
+        }
+        let approved = self.confirm_quits(&selected, &running)?;
+        let result = self.apply_selection(&selected, &approved, reporter);
+        println!("[{NAME}] total freed: {}", format_bytes(result.bytes_freed));
+        Ok(result)
+    }
 }
 
 impl Cleaner for AppSupportCleaner {
@@ -486,35 +624,8 @@ impl Cleaner for AppSupportCleaner {
     }
 
     fn clean(&self, dry_run: bool, reporter: &dyn ProgressReporter) -> Result<CleanResult> {
-        let base = self.base();
-        if !base.exists() {
-            return Ok(Self::empty_result());
-        }
-        let cands = scan_candidates(&base, self.min_app_bytes);
-        if dry_run {
-            self.print_dry_run(&cands);
-            return Ok(Self::empty_result());
-        }
-        if cands.is_empty() {
-            println!("[{NAME}] nothing to clean");
-            return Ok(Self::empty_result());
-        }
-        if !std::io::stdin().is_terminal() {
-            eprintln!(
-                "[{NAME}] not a terminal - skipping. Run `sasurahime clean app-support` \
-                 interactively to choose what to remove."
-            );
-            return Ok(Self::empty_result());
-        }
-        let running = self.running_apps(&cands);
-        let selected = self.interactive_select(&cands, &running)?;
-        if selected.is_empty() {
-            println!("[{NAME}] nothing selected");
-            return Ok(Self::empty_result());
-        }
-        let approved = self.confirm_quits(&selected, &running)?;
-        let result = self.apply_selection(&selected, &approved, reporter);
-        println!("[{NAME}] total freed: {}", format_bytes(result.bytes_freed));
+        let result = self.clean_cache_dirs(dry_run, reporter)?;
+        self.show_leftovers(dry_run)?;
         Ok(result)
     }
 
@@ -1196,7 +1307,9 @@ mod tests {
     }
 
     fn cleaner_for(tmp: &TempDir, fake: &Fake) -> AppSupportCleaner {
-        AppSupportCleaner::new(tmp.path(), Box::new(fake.clone())).with_min_app_bytes(0)
+        AppSupportCleaner::new(tmp.path(), Box::new(fake.clone()))
+            .with_min_app_bytes(0)
+            .with_app_roots(vec![])
     }
 
     #[test]
@@ -1738,5 +1851,97 @@ mod tests {
         let d = make_folder(&base, "GoneApp", 2 * MIB, 200);
         find_leftovers(&base, &installed(&[], &[]), SystemTime::now(), 1 << 20, 30);
         assert!(d.join("data.bin").exists());
+    }
+
+    #[test]
+    fn leftover_line_shows_path_and_size() {
+        let l = Leftover {
+            path: PathBuf::from("/x/Application Support/GoneApp"),
+            size: 2 * 1024 * 1024,
+        };
+        let s = format_leftover_line(&l);
+        assert!(s.contains("/x/Application Support/GoneApp"));
+        assert!(s.contains("2.0 MB"));
+    }
+
+    #[test]
+    fn cleaner_leftovers_use_injected_app_roots() {
+        let tmp = TempDir::new().unwrap();
+        let base = base_of(&tmp);
+        make_folder(&base, "GoneApp", 2 * MIB, 200);
+        make_folder(&base, "Foo", 2 * MIB, 200);
+        let apps = tmp.path().join("Apps");
+        fs::create_dir_all(apps.join("Foo.app")).unwrap();
+        let c = cleaner_for(&tmp, &Fake::default()).with_app_roots(vec![apps]);
+        let names: Vec<String> = c
+            .leftovers()
+            .iter()
+            .map(|l| l.path.file_name().unwrap().to_string_lossy().to_string())
+            .collect();
+        assert_eq!(names, vec!["GoneApp"]);
+    }
+
+    #[test]
+    fn detect_ignores_leftovers() {
+        let tmp = TempDir::new().unwrap();
+        let base = base_of(&tmp);
+        make_folder(&base, "GoneApp", 2 * MIB, 200);
+        let c = cleaner_for(&tmp, &Fake::default());
+        assert!(matches!(c.detect().status, ScanStatus::Clean));
+    }
+
+    #[test]
+    fn dry_run_with_leftovers_runs_no_destructive_commands() {
+        let tmp = TempDir::new().unwrap();
+        let base = base_of(&tmp);
+        let d = make_folder(&base, "GoneApp", 2 * MIB, 200);
+        let fake = Fake::default();
+        let apps = tmp.path().join("Apps");
+        fs::create_dir_all(&apps).unwrap();
+        let c = cleaner_for(&tmp, &fake).with_app_roots(vec![apps]);
+        let r = c.clean(true, &DeepSuppressReporter).unwrap();
+        assert_eq!(r.bytes_freed, 0);
+        assert!(d.join("data.bin").exists());
+        assert!(fake
+            .calls()
+            .iter()
+            .all(|c| c.starts_with("plutil") || c.starts_with("pgrep")));
+    }
+
+    #[test]
+    fn open_confirmation_is_needed_only_above_five() {
+        assert_eq!(OPEN_CONFIRM_THRESHOLD, 5);
+        assert!(!open_needs_confirmation(0));
+        assert!(!open_needs_confirmation(1));
+        assert!(!open_needs_confirmation(5));
+        assert!(open_needs_confirmation(6));
+        assert!(open_needs_confirmation(40));
+    }
+
+    #[test]
+    fn reveal_paths_runs_open_once_per_path_through_runner() {
+        let tmp = TempDir::new().unwrap();
+        for n in [5usize, 6] {
+            let fake = Fake::default();
+            let c = cleaner_for(&tmp, &fake);
+            let paths: Vec<PathBuf> = (0..n)
+                .map(|i| tmp.path().join(format!("Gone{i}")))
+                .collect();
+            c.reveal_paths(&paths);
+            let expected: Vec<String> = paths
+                .iter()
+                .map(|p| format!("open {}", p.display()))
+                .collect();
+            assert_eq!(fake.calls(), expected, "n={n}");
+        }
+    }
+
+    #[test]
+    fn reveal_paths_with_nothing_selected_runs_no_command() {
+        let tmp = TempDir::new().unwrap();
+        let fake = Fake::default();
+        let c = cleaner_for(&tmp, &fake);
+        c.reveal_paths(&[]);
+        assert!(fake.calls().is_empty(), "calls: {:?}", fake.calls());
     }
 }

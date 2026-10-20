@@ -91,3 +91,54 @@ fn scan_includes_app_support() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("app-support"), "stdout:\n{stdout}");
 }
+
+#[test]
+fn dry_run_shows_leftovers_without_deleting() {
+    use filetime::{set_file_mtime, FileTime};
+    use std::time::{Duration, SystemTime};
+
+    let tmp = TempDir::new().unwrap();
+    put(tmp.path(), "ZzzNoSuchApp12345/data.bin", 2 * 1024 * 1024);
+    let dir = tmp
+        .path()
+        .join("Library/Application Support/ZzzNoSuchApp12345");
+    let old = FileTime::from_system_time(SystemTime::now() - Duration::from_secs(200 * 86_400));
+    set_file_mtime(dir.join("data.bin"), old).unwrap();
+    set_file_mtime(&dir, old).unwrap();
+
+    let output = sasurahime(tmp.path())
+        .args(["clean", "app-support", "--dry-run"])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("ZzzNoSuchApp12345"), "stdout:\n{stdout}");
+    assert!(stdout.contains("display only"), "stdout:\n{stdout}");
+    assert!(dir.join("data.bin").exists());
+}
+
+#[test]
+fn non_interactive_clean_does_not_list_leftovers() {
+    use filetime::{set_file_mtime, FileTime};
+    use std::time::{Duration, SystemTime};
+
+    let tmp = TempDir::new().unwrap();
+    put(tmp.path(), "Slack/Cache/big.bin", OVER_THRESHOLD);
+    put(tmp.path(), "ZzzNoSuchApp12345/data.bin", 2 * 1024 * 1024);
+    let dir = tmp
+        .path()
+        .join("Library/Application Support/ZzzNoSuchApp12345");
+    let old = FileTime::from_system_time(SystemTime::now() - Duration::from_secs(200 * 86_400));
+    set_file_mtime(dir.join("data.bin"), old).unwrap();
+    set_file_mtime(&dir, old).unwrap();
+
+    let output = sasurahime(tmp.path())
+        .args(["clean", "app-support"])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("ZzzNoSuchApp12345"));
+    assert!(dir.join("data.bin").exists());
+}
