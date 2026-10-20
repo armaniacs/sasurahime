@@ -661,6 +661,61 @@ pub fn matches_installed(dir_name: &str, installed: &InstalledApps) -> bool {
     false
 }
 
+fn is_app_bundle(p: &Path) -> bool {
+    p.extension().is_some_and(|e| e == "app")
+}
+
+/// `.app` bundles directly under each root, plus one level of subfolders
+/// (for example `/Applications/Setapp/*.app`). Symlinked folders are not followed.
+fn list_app_bundles(roots: &[PathBuf]) -> Vec<PathBuf> {
+    let mut found = Vec::new();
+    for root in roots {
+        let Ok(rd) = fs::read_dir(root) else {
+            continue;
+        };
+        for entry in rd.flatten() {
+            let path = entry.path();
+            if is_app_bundle(&path) {
+                found.push(path);
+                continue;
+            }
+            let is_real_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
+            if !is_real_dir {
+                continue;
+            }
+            if let Ok(sub) = fs::read_dir(&path) {
+                for s in sub.flatten() {
+                    if is_app_bundle(&s.path()) {
+                        found.push(s.path());
+                    }
+                }
+            }
+        }
+    }
+    found
+}
+
+/// Bundle file names still identify an app whose `Info.plist` cannot be read.
+fn app_bundle_stems(roots: &[PathBuf]) -> Vec<String> {
+    list_app_bundles(roots)
+        .iter()
+        .filter_map(|app| app.file_stem().and_then(|s| s.to_str()).map(str::to_string))
+        .collect()
+}
+
+/// `Info.plist` values come only from the orphan-containers collector, which
+/// hands out nothing but the bundle ID and the two app names (README promise).
+pub fn collect_installed_apps(roots: &[PathBuf], runner: &dyn CommandRunner) -> InstalledApps {
+    let mut names = app_bundle_stems(roots);
+    let mut bundle_ids = Vec::new();
+    for app in crate::cleaners::orphan_containers::collect_app_identities(roots, runner) {
+        names.extend(app.name);
+        names.extend(app.display_name);
+        bundle_ids.push(app.bundle_id);
+    }
+    InstalledApps::from_parts(names, bundle_ids)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1409,5 +1464,101 @@ mod tests {
     fn duplicate_app_names_still_match_once_or_more() {
         let i = installed(&["Foo", "Foo"], &["com.a.foo", "com.b.foo"]);
         assert!(matches_installed("Foo", &i));
+    }
+
+    fn write_plist(app: &Path, xml: &str) {
+        let contents = app.join("Contents");
+        fs::create_dir_all(&contents).unwrap();
+        fs::write(contents.join("Info.plist"), xml).unwrap();
+    }
+
+    #[test]
+    fn list_app_bundles_finds_top_level_and_one_level_nested() {
+        let tmp = TempDir::new().unwrap();
+        let apps = tmp.path().join("Applications");
+        fs::create_dir_all(apps.join("Foo Bar.app/Contents")).unwrap();
+        fs::create_dir_all(apps.join("Setapp/Baz.app")).unwrap();
+        fs::create_dir_all(apps.join("Setapp/deep/Qux.app")).unwrap();
+        fs::create_dir_all(apps.join("NotAnApp")).unwrap();
+        let mut found: Vec<String> = list_app_bundles(&[apps.clone(), tmp.path().join("missing")])
+            .iter()
+            .map(|p| p.file_name().unwrap().to_string_lossy().to_string())
+            .collect();
+        found.sort();
+        assert_eq!(found, vec!["Baz.app", "Foo Bar.app"]);
+    }
+
+    #[test]
+    fn collect_installed_apps_uses_file_stem_and_app_identity() {
+        let tmp = TempDir::new().unwrap();
+        let apps = tmp.path().join("Applications");
+        write_plist(
+            &apps.join("Visual Studio Code.app"),
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<plist version=\"1.0\">\n<dict>\n\t<key>CFBundleIdentifier</key>\n\t<string>com.microsoft.VSCode</string>\n\t<key>CFBundleName</key>\n\t<string>Code</string>\n</dict>\n</plist>\n",
+        );
+        fs::create_dir_all(apps.join("Plain.app/Contents")).unwrap();
+        let fake = Fake::default();
+        let installed = collect_installed_apps(&[apps], &fake);
+        let mut names: Vec<String> = installed.names.iter().cloned().collect();
+        names.sort();
+        assert_eq!(names, vec!["code", "plain", "visualstudiocode"]);
+        assert!(installed.bundle_ids.contains("com.microsoft.vscode"));
+        assert!(matches_installed("Code", &installed));
+        assert!(matches_installed("vscode", &installed));
+        assert!(fake.calls().is_empty(), "XML plists need no command");
+    }
+
+    #[test]
+    fn collect_installed_apps_never_takes_other_plist_values() {
+        let tmp = TempDir::new().unwrap();
+        let apps = tmp.path().join("Applications");
+        write_plist(
+            &apps.join("Keeper.app"),
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0">
+<dict>
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>SasurahimeSecretScheme7f3a</string>
+            </array>
+        </dict>
+    </array>
+    <key>CFBundleExecutable</key>
+    <string>SasurahimeSecretExec7f3a</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.example.keeper</string>
+</dict>
+</plist>
+"#,
+        );
+        let installed = collect_installed_apps(&[apps], &Fake::default());
+        let names: Vec<String> = installed.names.iter().cloned().collect();
+        assert_eq!(names, vec!["keeper"]);
+        let ids: Vec<String> = installed.bundle_ids.iter().cloned().collect();
+        assert_eq!(ids, vec!["com.example.keeper"]);
+        assert!(!matches_installed("SasurahimeSecretScheme7f3a", &installed));
+        assert!(!matches_installed("SasurahimeSecretExec7f3a", &installed));
+    }
+
+    #[test]
+    fn collect_installed_apps_falls_back_to_stem_when_plutil_fails() {
+        let tmp = TempDir::new().unwrap();
+        let apps = tmp.path().join("Applications");
+        let app = apps.join("Binary Tool.app");
+        fs::create_dir_all(app.join("Contents")).unwrap();
+        let plist = app.join("Contents/Info.plist");
+        fs::write(&plist, b"bplist00\x00\x01\x02").unwrap();
+        let fake = Fake::default();
+        let installed = collect_installed_apps(&[apps], &fake);
+        let names: Vec<String> = installed.names.iter().cloned().collect();
+        assert_eq!(names, vec!["binarytool"]);
+        assert!(installed.bundle_ids.is_empty());
+        assert_eq!(
+            fake.calls(),
+            vec![format!("plutil -convert xml1 -o - {}", plist.display())]
+        );
     }
 }
