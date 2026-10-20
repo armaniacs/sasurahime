@@ -136,7 +136,7 @@ fn dry_run_does_not_record_history() {
 
     sasurahime(tmp.path())
         .env("PATH", &new_path)
-        .args(["clean", "uv", "--dry-run"])
+        .args(["--permanent", "clean", "uv", "--dry-run"])
         .assert()
         .success();
 
@@ -167,7 +167,7 @@ fn clean_creates_history_json() {
 
     sasurahime(tmp.path())
         .env("PATH", &new_path)
-        .args(["clean", "uv"])
+        .args(["--permanent", "clean", "uv"])
         .assert()
         .success();
 

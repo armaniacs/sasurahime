@@ -17,7 +17,7 @@ fn cargo_detect_reports_registry_cache_size() {
     fs::write(reg.join("dummy.crate"), b"x".repeat(4096)).unwrap();
 
     let output = sasurahime(tmp.path())
-        .args(["clean", "cargo", "--dry-run"])
+        .args(["--permanent", "clean", "cargo", "--dry-run"])
         .output()
         .unwrap();
     assert!(output.status.success());
@@ -33,7 +33,7 @@ fn cargo_dry_run_does_not_delete() {
     fs::write(reg.join("dummy.crate"), b"x").unwrap();
 
     let output = sasurahime(tmp.path())
-        .args(["clean", "cargo", "--dry-run"])
+        .args(["--permanent", "clean", "cargo", "--dry-run"])
         .output()
         .unwrap();
     assert!(output.status.success());

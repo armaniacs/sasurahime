@@ -17,7 +17,7 @@ fn clean_pre_commit_dry_run_does_not_delete() {
 
     let output = sasurahime(tmp.path())
         .env("PATH", "/usr/bin:/bin")
-        .args(["clean", "pre-commit", "--dry-run"])
+        .args(["--permanent", "clean", "pre-commit", "--dry-run"])
         .output()
         .unwrap();
 
@@ -38,7 +38,7 @@ fn clean_pre_commit_fallback_deletes_cache_dir() {
 
     let output = sasurahime(tmp.path())
         .env("PATH", "/usr/bin:/bin")
-        .args(["clean", "pre-commit"])
+        .args(["--permanent", "clean", "pre-commit"])
         .output()
         .unwrap();
 
@@ -53,7 +53,7 @@ fn clean_pre_commit_fallback_deletes_cache_dir() {
 fn clean_pre_commit_not_found_exits_zero() {
     let tmp = TempDir::new().unwrap();
     let output = sasurahime(tmp.path())
-        .args(["clean", "pre-commit"])
+        .args(["--permanent", "clean", "pre-commit"])
         .output()
         .unwrap();
     assert!(output.status.success());
@@ -69,7 +69,7 @@ fn clean_pre_commit_rejects_unsafe_pre_commit_home() {
     let output = sasurahime(tmp.path())
         .env("PRE_COMMIT_HOME", "/")
         .env("PATH", "/usr/bin:/bin")
-        .args(["clean", "pre-commit"])
+        .args(["--permanent", "clean", "pre-commit"])
         .output()
         .unwrap();
 
@@ -104,7 +104,7 @@ fn clean_pre_commit_prefers_cli_when_available() {
 
     let output = sasurahime(tmp.path())
         .env("PATH", &new_path)
-        .args(["clean", "pre-commit"])
+        .args(["--permanent", "clean", "pre-commit"])
         .output()
         .unwrap();
 

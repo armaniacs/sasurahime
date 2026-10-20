@@ -78,6 +78,7 @@ fn exclude_does_not_block_direct_clean() {
     fs::write(config_dir.join("config.toml"), "exclude = [\"act\"]\n").unwrap();
 
     let output = sasurahime(tmp.path())
+        .arg("--permanent")
         .arg("clean")
         .arg("act")
         .arg("--dry-run")

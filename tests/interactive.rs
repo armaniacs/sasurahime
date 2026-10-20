@@ -162,7 +162,7 @@ fn version_display_on_targets() {
 fn version_display_on_clean_dry_run() {
     let tmp = TempDir::new().unwrap();
     let output = sasurahime(tmp.path())
-        .args(["clean", "uv", "--dry-run"])
+        .args(["--permanent", "clean", "uv", "--dry-run"])
         .output()
         .unwrap();
 
@@ -363,7 +363,7 @@ fn clean_uv_subcommand_shows_spinner() {
     let original_path = std::env::var("PATH").unwrap_or_default();
     let output = sasurahime(tmp.path())
         .env("PATH", format!("{}:{original_path}", bin_dir.display()))
-        .args(["clean", "uv", "--dry-run"])
+        .args(["--permanent", "clean", "uv", "--dry-run"])
         .output()
         .unwrap();
 

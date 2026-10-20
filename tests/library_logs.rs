@@ -28,7 +28,7 @@ fn clean_library_logs_dry_run_shows_entries() {
 
     let output = sasurahime(tmp.path())
         .env("PATH", "/usr/bin:/bin")
-        .args(["clean", "library-logs", "--dry-run"])
+        .args(["--permanent", "clean", "library-logs", "--dry-run"])
         .output()
         .unwrap();
 
@@ -45,7 +45,7 @@ fn clean_library_logs_dry_run_shows_entries() {
 fn clean_library_logs_not_found_exits_zero() {
     let tmp = TempDir::new().unwrap();
     let output = sasurahime(tmp.path())
-        .args(["clean", "library-logs"])
+        .args(["--permanent", "clean", "library-logs"])
         .output()
         .unwrap();
     assert!(output.status.success());
@@ -58,7 +58,7 @@ fn clean_library_logs_all_deletes_entries() {
 
     let output = sasurahime(tmp.path())
         .env("PATH", "/usr/bin:/bin")
-        .args(["clean", "library-logs", "--all"])
+        .args(["--permanent", "clean", "library-logs", "--all"])
         .output()
         .unwrap();
 

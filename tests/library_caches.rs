@@ -26,7 +26,7 @@ fn dry_run_lists_deletable_and_hides_excluded() {
     let tmp = TempDir::new().unwrap();
     fixture(tmp.path());
     let out = sasurahime(tmp.path())
-        .args(["clean", "library-caches", "--dry-run"])
+        .args(["--permanent", "clean", "library-caches", "--dry-run"])
         .output()
         .unwrap();
     assert!(out.status.success());
@@ -54,7 +54,7 @@ fn non_tty_clean_deletes_nothing() {
     let tmp = TempDir::new().unwrap();
     fixture(tmp.path());
     let out = sasurahime(tmp.path())
-        .args(["clean", "library-caches"])
+        .args(["--permanent", "clean", "library-caches"])
         .output()
         .unwrap();
     assert!(out.status.success());
@@ -72,7 +72,7 @@ fn non_tty_clean_deletes_nothing() {
 fn missing_caches_dir_exits_zero() {
     let tmp = TempDir::new().unwrap();
     let out = sasurahime(tmp.path())
-        .args(["clean", "library-caches", "--dry-run"])
+        .args(["--permanent", "clean", "library-caches", "--dry-run"])
         .output()
         .unwrap();
     assert!(out.status.success());

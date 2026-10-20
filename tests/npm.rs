@@ -37,7 +37,7 @@ fn clean_npm_calls_cache_clean_force() {
     let original_path = std::env::var("PATH").unwrap_or_default();
     let output = sasurahime(tmp.path())
         .env("PATH", format!("{}:{original_path}", bin_dir.display()))
-        .args(["clean", "npm"])
+        .args(["--permanent", "clean", "npm"])
         .output()
         .unwrap();
 
@@ -63,7 +63,7 @@ fn clean_yarn_calls_cache_clean() {
     let original_path = std::env::var("PATH").unwrap_or_default();
     let output = sasurahime(tmp.path())
         .env("PATH", format!("{}:{original_path}", bin_dir.display()))
-        .args(["clean", "yarn"])
+        .args(["--permanent", "clean", "yarn"])
         .output()
         .unwrap();
 
@@ -85,7 +85,7 @@ fn clean_pnpm_calls_store_prune() {
     let original_path = std::env::var("PATH").unwrap_or_default();
     let output = sasurahime(tmp.path())
         .env("PATH", format!("{}:{original_path}", bin_dir.display()))
-        .args(["clean", "pnpm"])
+        .args(["--permanent", "clean", "pnpm"])
         .output()
         .unwrap();
 
@@ -102,7 +102,7 @@ fn clean_npm_not_found_exits_zero() {
     let tmp = TempDir::new().unwrap();
     let output = sasurahime(tmp.path())
         .env("PATH", "/usr/bin:/bin")
-        .args(["clean", "npm"])
+        .args(["--permanent", "clean", "npm"])
         .output()
         .unwrap();
 

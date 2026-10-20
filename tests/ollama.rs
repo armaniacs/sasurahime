@@ -14,7 +14,7 @@ fn clean_ollama_not_found_exits_zero() {
     let tmp = TempDir::new().unwrap();
     let output = sasurahime(tmp.path())
         .env("PATH", "/usr/bin:/bin")
-        .args(["clean", "ollama"])
+        .args(["--permanent", "clean", "ollama"])
         .output()
         .unwrap();
     assert!(output.status.success());
@@ -33,7 +33,7 @@ fn clean_ollama_dry_run_no_models_shows_nothing() {
     let original_path = std::env::var("PATH").unwrap_or_default();
     let output = sasurahime(tmp.path())
         .env("PATH", format!("{}:{original_path}", bin_dir.display()))
-        .args(["clean", "ollama", "--dry-run"])
+        .args(["--permanent", "clean", "ollama", "--dry-run"])
         .output()
         .unwrap();
     assert!(output.status.success());

@@ -22,7 +22,7 @@ fn all_targets_are_valid_cli_subcommands() {
     // All targets should be recognized as clean subcommands
     for target in &targets {
         let help_out = sasurahime()
-            .args(["clean", target, "--help"])
+            .args(["--permanent", "clean", target, "--help"])
             .output()
             .unwrap();
         assert!(

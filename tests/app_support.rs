@@ -25,7 +25,7 @@ fn dry_run_lists_cache_dirs_and_deletes_nothing() {
     put(tmp.path(), "Slack/IndexedDB/keep.bin", 4096);
 
     let output = sasurahime(tmp.path())
-        .args(["clean", "app-support", "--dry-run"])
+        .args(["--permanent", "clean", "app-support", "--dry-run"])
         .output()
         .unwrap();
 
@@ -44,7 +44,7 @@ fn dry_run_lists_cache_dirs_and_deletes_nothing() {
 fn dry_run_without_application_support_exits_zero() {
     let tmp = TempDir::new().unwrap();
     let output = sasurahime(tmp.path())
-        .args(["clean", "app-support", "--dry-run"])
+        .args(["--permanent", "clean", "app-support", "--dry-run"])
         .output()
         .unwrap();
     assert!(output.status.success());
@@ -56,7 +56,7 @@ fn non_interactive_clean_deletes_nothing() {
     put(tmp.path(), "Slack/Cache/big.bin", OVER_THRESHOLD);
 
     let output = sasurahime(tmp.path())
-        .args(["clean", "app-support"])
+        .args(["--permanent", "clean", "app-support"])
         .output()
         .unwrap();
 
@@ -107,7 +107,7 @@ fn dry_run_shows_leftovers_without_deleting() {
     set_file_mtime(&dir, old).unwrap();
 
     let output = sasurahime(tmp.path())
-        .args(["clean", "app-support", "--dry-run"])
+        .args(["--permanent", "clean", "app-support", "--dry-run"])
         .output()
         .unwrap();
 
@@ -134,7 +134,7 @@ fn non_interactive_clean_does_not_list_leftovers() {
     set_file_mtime(&dir, old).unwrap();
 
     let output = sasurahime(tmp.path())
-        .args(["clean", "app-support"])
+        .args(["--permanent", "clean", "app-support"])
         .output()
         .unwrap();
 

@@ -16,7 +16,7 @@ fn clean_act_removes_cache_dir() {
     fs::write(act_cache.join("action.tar.gz"), b"dummy").unwrap();
 
     let output = sasurahime(tmp.path())
-        .args(["clean", "act"])
+        .args(["--permanent", "clean", "act"])
         .output()
         .unwrap();
 
@@ -32,7 +32,7 @@ fn clean_act_dry_run_does_not_delete() {
     fs::write(act_cache.join("action.tar.gz"), b"dummy").unwrap();
 
     let output = sasurahime(tmp.path())
-        .args(["clean", "act", "--dry-run"])
+        .args(["--permanent", "clean", "act", "--dry-run"])
         .output()
         .unwrap();
 
@@ -49,7 +49,7 @@ fn clean_act_not_found_exits_zero() {
     // No .cache/act directory at all
 
     let output = sasurahime(tmp.path())
-        .args(["clean", "act"])
+        .args(["--permanent", "clean", "act"])
         .output()
         .unwrap();
 
@@ -63,7 +63,7 @@ fn clean_act_rejects_unsafe_env_var_path() {
     // to the default ~/.cache/act, which doesn't exist in this test.
     let output = sasurahime(tmp.path())
         .env("ACT_CACHE_DIR", "/")
-        .args(["clean", "act"])
+        .args(["--permanent", "clean", "act"])
         .output()
         .unwrap();
 
@@ -75,7 +75,7 @@ fn clean_act_rejects_usr_path() {
     let tmp = TempDir::new().unwrap();
     let output = sasurahime(tmp.path())
         .env("ACT_CACHE_DIR", "/usr/local")
-        .args(["clean", "act"])
+        .args(["--permanent", "clean", "act"])
         .output()
         .unwrap();
     assert!(output.status.success());
@@ -91,7 +91,7 @@ fn clean_act_rejects_symlink_to_system_path() {
     }
     let output = sasurahime(tmp.path())
         .env("ACT_CACHE_DIR", &symlink)
-        .args(["clean", "act"])
+        .args(["--permanent", "clean", "act"])
         .output()
         .unwrap();
 
@@ -104,7 +104,7 @@ fn clean_act_rejects_system_path_env_var() {
     // Set ACT_CACHE_DIR to a system path — safety guard should reject
     let output = sasurahime(tmp.path())
         .env("ACT_CACHE_DIR", "/System/Library")
-        .args(["clean", "act"])
+        .args(["--permanent", "clean", "act"])
         .output()
         .unwrap();
 

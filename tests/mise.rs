@@ -43,7 +43,7 @@ fn clean_mise_removes_unused_version() {
     let original_path = std::env::var("PATH").unwrap_or_default();
     let output = sasurahime(tmp.path())
         .env("PATH", format!("{}:{original_path}", bin_dir.display()))
-        .args(["clean", "mise"])
+        .args(["--permanent", "clean", "mise"])
         .output()
         .unwrap();
 
@@ -76,7 +76,7 @@ fn clean_mise_dry_run_deletes_nothing() {
     let original_path = std::env::var("PATH").unwrap_or_default();
     let output = sasurahime(tmp.path())
         .env("PATH", format!("{}:{original_path}", bin_dir.display()))
-        .args(["clean", "mise", "--dry-run"])
+        .args(["--permanent", "clean", "mise", "--dry-run"])
         .output()
         .unwrap();
 
@@ -96,7 +96,7 @@ fn clean_mise_not_found_exits_zero() {
     let tmp = TempDir::new().unwrap();
     let output = sasurahime(tmp.path())
         .env("PATH", "/usr/bin:/bin")
-        .args(["clean", "mise"])
+        .args(["--permanent", "clean", "mise"])
         .output()
         .unwrap();
 
@@ -121,7 +121,7 @@ fn clean_mise_active_version_is_never_deleted() {
     let original_path = std::env::var("PATH").unwrap_or_default();
     let output = sasurahime(tmp.path())
         .env("PATH", format!("{}:{original_path}", bin_dir.display()))
-        .args(["clean", "mise"])
+        .args(["--permanent", "clean", "mise"])
         .output()
         .unwrap();
 
@@ -168,7 +168,7 @@ fn clean_mise_pinned_version_not_deleted() {
     let original_path = std::env::var("PATH").unwrap_or_default();
     let output = sasurahime(tmp.path())
         .env("PATH", format!("{}:{original_path}", bin_dir.display()))
-        .args(["clean", "mise"])
+        .args(["--permanent", "clean", "mise"])
         .output()
         .unwrap();
 

@@ -13,7 +13,7 @@ fn sasurahime(home: &Path) -> Command {
 fn gradle_not_found_skips() {
     let tmp = TempDir::new().unwrap();
     let output = sasurahime(tmp.path())
-        .args(["clean", "gradle"])
+        .args(["--permanent", "clean", "gradle"])
         .output()
         .unwrap();
     assert!(output.status.success());
@@ -28,7 +28,7 @@ fn gradle_keeps_highest_version() {
     fs::create_dir_all(caches.join("8.8.0")).unwrap();
 
     let output = sasurahime(tmp.path())
-        .args(["clean", "gradle", "--dry-run"])
+        .args(["--permanent", "clean", "gradle", "--dry-run"])
         .output()
         .unwrap();
     assert!(output.status.success());
@@ -48,7 +48,7 @@ fn jetbrains_keeps_highest_per_ide() {
     fs::create_dir_all(jb.join("IntelliJIdea2025.1")).unwrap();
 
     let output = sasurahime(tmp.path())
-        .args(["clean", "jetbrains", "--dry-run"])
+        .args(["--permanent", "clean", "jetbrains", "--dry-run"])
         .output()
         .unwrap();
     assert!(output.status.success());

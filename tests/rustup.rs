@@ -22,7 +22,7 @@ fn rustup_not_found_skips() {
     let tmp = TempDir::new().unwrap();
     let output = sasurahime(tmp.path())
         .env("PATH", "/usr/bin:/bin")
-        .args(["clean", "rustup"])
+        .args(["--permanent", "clean", "rustup"])
         .output()
         .unwrap();
     assert!(output.status.success());
@@ -46,7 +46,7 @@ fn rustup_dry_run_shows_unused() {
     let original_path = std::env::var("PATH").unwrap_or_default();
     let output = sasurahime(tmp.path())
         .env("PATH", format!("{}:{original_path}", bin_dir.display()))
-        .args(["clean", "rustup", "--dry-run"])
+        .args(["--permanent", "clean", "rustup", "--dry-run"])
         .output()
         .unwrap();
     assert!(output.status.success());

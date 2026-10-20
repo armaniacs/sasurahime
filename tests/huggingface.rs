@@ -16,7 +16,7 @@ fn clean_huggingface_dry_run_does_not_delete() {
     fs::write(hub.join("model.bin"), b"dummy").unwrap();
 
     let output = sasurahime(tmp.path())
-        .args(["clean", "huggingface", "--dry-run"])
+        .args(["--permanent", "clean", "huggingface", "--dry-run"])
         .output()
         .unwrap();
 
@@ -38,7 +38,7 @@ fn clean_huggingface_fallback_deletes_hub_contents() {
     // Restrict PATH so huggingface-cli is not found (forces fallback path)
     let output = sasurahime(tmp.path())
         .env("PATH", "/usr/bin:/bin")
-        .args(["clean", "huggingface"])
+        .args(["--permanent", "clean", "huggingface"])
         .output()
         .unwrap();
 
@@ -63,7 +63,7 @@ fn clean_huggingface_rejects_unsafe_hf_home_and_falls_back() {
     let output = sasurahime(tmp.path())
         .env("HF_HOME", "/etc")
         .env("PATH", "/usr/bin:/bin")
-        .args(["clean", "huggingface"])
+        .args(["--permanent", "clean", "huggingface"])
         .output()
         .unwrap();
 
@@ -80,7 +80,7 @@ fn clean_huggingface_rejects_unsafe_hf_home_and_falls_back() {
 fn clean_huggingface_not_found_exits_zero() {
     let tmp = TempDir::new().unwrap();
     let output = sasurahime(tmp.path())
-        .args(["clean", "huggingface"])
+        .args(["--permanent", "clean", "huggingface"])
         .output()
         .unwrap();
     assert!(output.status.success());
@@ -109,7 +109,7 @@ fn clean_huggingface_prefers_cli_when_available() {
 
     let output = sasurahime(tmp.path())
         .env("PATH", &new_path)
-        .args(["clean", "huggingface"])
+        .args(["--permanent", "clean", "huggingface"])
         .output()
         .unwrap();
 

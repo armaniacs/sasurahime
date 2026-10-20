@@ -36,7 +36,7 @@ fn clean_uv_dry_run_does_not_delete_old_indexes() {
 
     let output = sasurahime(tmp.path())
         .env("PATH", &new_path)
-        .args(["clean", "uv", "--dry-run"])
+        .args(["--permanent", "clean", "uv", "--dry-run"])
         .output()
         .unwrap();
 
@@ -69,7 +69,7 @@ fn clean_uv_removes_old_simple_indexes() {
 
     let output = sasurahime(tmp.path())
         .env("PATH", &new_path)
-        .args(["clean", "uv"])
+        .args(["--permanent", "clean", "uv"])
         .output()
         .unwrap();
 
@@ -94,7 +94,7 @@ fn clean_uv_not_found_exits_zero() {
     // PATH with no uv binary
     let output = sasurahime(tmp.path())
         .env("PATH", "/usr/bin:/bin")
-        .args(["clean", "uv"])
+        .args(["--permanent", "clean", "uv"])
         .output()
         .unwrap();
 

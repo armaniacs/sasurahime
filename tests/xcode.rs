@@ -21,7 +21,7 @@ fn clean_xcode_deletes_project_dirs_not_root() {
     touch(&derived.join("ProjectB-ghijkl"));
 
     let output = sasurahime(tmp.path())
-        .args(["clean", "xcode"])
+        .args(["--permanent", "clean", "xcode"])
         .output()
         .unwrap();
 
@@ -48,7 +48,7 @@ fn clean_xcode_dry_run_deletes_nothing() {
     touch(&derived.join("ProjectA-abcdef"));
 
     let output = sasurahime(tmp.path())
-        .args(["clean", "xcode", "--dry-run"])
+        .args(["--permanent", "clean", "xcode", "--dry-run"])
         .output()
         .unwrap();
 
@@ -72,7 +72,7 @@ fn clean_xcode_derived_data_only_via_sub() {
     fs::write(arch.join("archive.xcarchive"), b"data").unwrap();
 
     let output = sasurahime(tmp.path())
-        .args(["clean", "xcode", "--sub", "derived-data"])
+        .args(["--permanent", "clean", "xcode", "--sub", "derived-data"])
         .output()
         .unwrap();
     assert!(
@@ -98,7 +98,7 @@ fn clean_xcode_archives_only_via_sub() {
     fs::write(arch.join("archive.xcarchive"), b"data").unwrap();
 
     let output = sasurahime(tmp.path())
-        .args(["clean", "xcode", "--sub", "archives"])
+        .args(["--permanent", "clean", "xcode", "--sub", "archives"])
         .output()
         .unwrap();
     assert!(output.status.success());
@@ -110,7 +110,7 @@ fn clean_xcode_archives_only_via_sub() {
 fn clean_xcode_missing_derived_data_exits_zero() {
     let tmp = TempDir::new().unwrap();
     let output = sasurahime(tmp.path())
-        .args(["clean", "xcode"])
+        .args(["--permanent", "clean", "xcode"])
         .output()
         .unwrap();
     assert!(output.status.success());

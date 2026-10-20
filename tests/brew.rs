@@ -40,7 +40,7 @@ fn clean_brew_dry_run_shows_would_free() {
 
     let output = sasurahime(tmp.path())
         .env("PATH", &new_path)
-        .args(["clean", "brew", "--dry-run"])
+        .args(["--permanent", "clean", "brew", "--dry-run"])
         .output()
         .unwrap();
 
@@ -78,7 +78,7 @@ fn clean_brew_calls_cleanup_with_correct_flags() {
 
     let output = sasurahime(tmp.path())
         .env("PATH", &new_path)
-        .args(["clean", "brew"])
+        .args(["--permanent", "clean", "brew"])
         .output()
         .unwrap();
 
@@ -105,7 +105,7 @@ fn clean_brew_not_found_exits_zero() {
 
     let output = sasurahime(tmp.path())
         .env("PATH", "/usr/bin:/bin")
-        .args(["clean", "brew"])
+        .args(["--permanent", "clean", "brew"])
         .output()
         .unwrap();
 

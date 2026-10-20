@@ -28,7 +28,7 @@ fn clean_orphan_containers_dry_run_lists_orphans_and_keeps_files() {
     make_container(tmp.path(), "Containers", "com.apple.sasurahimetest");
 
     let output = sasurahime(tmp.path())
-        .args(["clean", "orphan-containers", "--dry-run"])
+        .args(["--permanent", "clean", "orphan-containers", "--dry-run"])
         .output()
         .unwrap();
 
@@ -53,7 +53,7 @@ fn clean_orphan_containers_dry_run_lists_orphans_and_keeps_files() {
 fn clean_orphan_containers_without_library_exits_zero() {
     let tmp = TempDir::new().unwrap();
     let output = sasurahime(tmp.path())
-        .args(["clean", "orphan-containers", "--dry-run"])
+        .args(["--permanent", "clean", "orphan-containers", "--dry-run"])
         .output()
         .unwrap();
     assert!(output.status.success());
@@ -72,7 +72,7 @@ fn targets_lists_orphan_containers() {
 fn clean_orphan_containers_rejects_all_flag() {
     let tmp = TempDir::new().unwrap();
     let output = sasurahime(tmp.path())
-        .args(["clean", "orphan-containers", "--all"])
+        .args(["--permanent", "clean", "orphan-containers", "--all"])
         .output()
         .unwrap();
     assert!(!output.status.success());
@@ -119,7 +119,7 @@ fn info_plist_values_other_than_identity_never_reach_output_or_logs() {
 
     let output = sasurahime(tmp.path())
         .env("RUST_LOG", "trace")
-        .args(["clean", "orphan-containers", "--dry-run"])
+        .args(["--permanent", "clean", "orphan-containers", "--dry-run"])
         .output()
         .unwrap();
 

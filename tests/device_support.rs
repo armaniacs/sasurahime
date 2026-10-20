@@ -12,7 +12,7 @@ fn sasurahime(home: &std::path::Path) -> Command {
 fn clean_device_support_not_found_exits_zero() {
     let tmp = TempDir::new().unwrap();
     let output = sasurahime(tmp.path())
-        .args(["clean", "device-support"])
+        .args(["--permanent", "clean", "device-support"])
         .output()
         .unwrap();
     assert!(output.status.success());
@@ -27,7 +27,7 @@ fn clean_device_support_keeps_n_versions() {
         fs::write(ios.join(v).join("dummy"), b"x").unwrap();
     }
     let output = sasurahime(tmp.path())
-        .args(["clean", "device-support"])
+        .args(["--permanent", "clean", "device-support"])
         .output()
         .unwrap();
     assert!(output.status.success());

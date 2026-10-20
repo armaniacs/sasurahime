@@ -21,7 +21,7 @@ fn clean_browsers_removes_old_puppeteer_chrome() {
     touch(&chrome.join("mac_arm-140.0.7339.80"));
 
     let output = sasurahime(tmp.path())
-        .args(["clean", "browsers"])
+        .args(["--permanent", "clean", "browsers"])
         .output()
         .unwrap();
 
@@ -48,7 +48,7 @@ fn clean_browsers_removes_old_playwright_build() {
     touch(&playwright.join("chromium-1217"));
 
     let output = sasurahime(tmp.path())
-        .args(["clean", "browsers"])
+        .args(["--permanent", "clean", "browsers"])
         .output()
         .unwrap();
 
@@ -71,7 +71,7 @@ fn clean_browsers_dry_run_deletes_nothing() {
     touch(&chrome.join("mac_arm-140.0.7339.80"));
 
     let output = sasurahime(tmp.path())
-        .args(["clean", "browsers", "--dry-run"])
+        .args(["--permanent", "clean", "browsers", "--dry-run"])
         .output()
         .unwrap();
 
@@ -90,7 +90,7 @@ fn clean_browsers_dry_run_deletes_nothing() {
 fn clean_browsers_missing_dirs_exits_zero() {
     let tmp = TempDir::new().unwrap();
     let output = sasurahime(tmp.path())
-        .args(["clean", "browsers"])
+        .args(["--permanent", "clean", "browsers"])
         .output()
         .unwrap();
 
@@ -109,7 +109,7 @@ fn clean_browsers_single_version_is_kept() {
     touch(&chrome.join("mac_arm-140.0.7339.80"));
 
     let output = sasurahime(tmp.path())
-        .args(["clean", "browsers"])
+        .args(["--permanent", "clean", "browsers"])
         .output()
         .unwrap();
 

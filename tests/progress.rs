@@ -27,7 +27,13 @@ fn suppress_flag_hides_eta() {
     create_large_log(tmp.path());
 
     let output = sasurahime(tmp.path())
-        .args(["--suppress", "clean", "library-logs", "--all"])
+        .args([
+            "--permanent",
+            "--suppress",
+            "clean",
+            "library-logs",
+            "--all",
+        ])
         .output()
         .unwrap();
 
@@ -51,7 +57,13 @@ fn deep_suppress_flag_hides_freed_line() {
     create_large_log(tmp.path());
 
     let output = sasurahime(tmp.path())
-        .args(["--deep-suppress", "clean", "library-logs", "--all"])
+        .args([
+            "--permanent",
+            "--deep-suppress",
+            "clean",
+            "library-logs",
+            "--all",
+        ])
         .output()
         .unwrap();
 
@@ -70,7 +82,7 @@ fn default_shows_freed_line() {
     create_large_log(tmp.path());
 
     let output = sasurahime(tmp.path())
-        .args(["clean", "library-logs", "--all"])
+        .args(["--permanent", "clean", "library-logs", "--all"])
         .output()
         .unwrap();
 
@@ -91,7 +103,7 @@ fn config_suppress_hides_progress_bar() {
     create_large_log(tmp.path());
 
     let output = sasurahime(tmp.path())
-        .args(["clean", "library-logs", "--all"])
+        .args(["--permanent", "clean", "library-logs", "--all"])
         .output()
         .unwrap();
 
@@ -116,7 +128,7 @@ fn config_deep_suppress_hides_freed_line() {
     create_large_log(tmp.path());
 
     let output = sasurahime(tmp.path())
-        .args(["clean", "library-logs", "--all"])
+        .args(["--permanent", "clean", "library-logs", "--all"])
         .output()
         .unwrap();
 
@@ -137,7 +149,13 @@ fn cli_suppress_stacks_with_config_suppress() {
     create_large_log(tmp.path());
 
     let output = sasurahime(tmp.path())
-        .args(["--suppress", "clean", "library-logs", "--all"])
+        .args([
+            "--permanent",
+            "--suppress",
+            "clean",
+            "library-logs",
+            "--all",
+        ])
         .output()
         .unwrap();
 
@@ -159,7 +177,7 @@ fn dry_run_shows_per_entry_output() {
     create_log_app(tmp.path(), "MyApp", 100 * 1024 * 1024);
 
     let output = sasurahime(tmp.path())
-        .args(["clean", "library-logs", "--dry-run"])
+        .args(["--permanent", "clean", "library-logs", "--dry-run"])
         .output()
         .unwrap();
 
@@ -213,7 +231,7 @@ fn clean_all_with_progress_succeeds() {
     .unwrap();
 
     let output = sasurahime(tmp.path())
-        .args(["clean", "library-logs", "--all"])
+        .args(["--permanent", "clean", "library-logs", "--all"])
         .output()
         .unwrap();
 

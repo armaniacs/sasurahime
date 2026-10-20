@@ -26,7 +26,7 @@ fn clean_logs_removes_old_kilo_logs() {
     write_aged(&log_dir.join("recent.log"), 3);
 
     let output = sasurahime(tmp.path())
-        .args(["clean", "logs"])
+        .args(["--permanent", "clean", "logs"])
         .output()
         .unwrap();
 
@@ -55,7 +55,7 @@ fn clean_logs_keeps_dev_log() {
     write_aged(&log_dir.join("old.log"), 30);
 
     let output = sasurahime(tmp.path())
-        .args(["clean", "logs"])
+        .args(["--permanent", "clean", "logs"])
         .output()
         .unwrap();
 
@@ -78,7 +78,7 @@ fn clean_logs_dry_run_deletes_nothing() {
     write_aged(&log_dir.join("old.log"), 10);
 
     let output = sasurahime(tmp.path())
-        .args(["clean", "logs", "--dry-run"])
+        .args(["--permanent", "clean", "logs", "--dry-run"])
         .output()
         .unwrap();
 
@@ -99,7 +99,7 @@ fn clean_logs_keep_days_flag_overrides_default() {
     write_aged(&log_dir.join("recent.log"), 3);
 
     let output = sasurahime(tmp.path())
-        .args(["clean", "logs", "--keep-days", "5"])
+        .args(["--permanent", "clean", "logs", "--keep-days", "5"])
         .output()
         .unwrap();
 
@@ -118,7 +118,7 @@ fn clean_logs_keep_days_flag_overrides_default() {
 fn clean_logs_missing_dirs_exits_zero() {
     let tmp = TempDir::new().unwrap();
     let output = sasurahime(tmp.path())
-        .args(["clean", "logs"])
+        .args(["--permanent", "clean", "logs"])
         .output()
         .unwrap();
     assert!(output.status.success());
@@ -138,7 +138,7 @@ fn clean_logs_config_keep_days_used_when_no_flag() {
     write_aged(&log_dir.join("one_day.log"), 1);
 
     let output = sasurahime(tmp.path())
-        .args(["clean", "logs"])
+        .args(["--permanent", "clean", "logs"])
         .output()
         .unwrap();
 

@@ -38,7 +38,7 @@ fn clean_bun_calls_pm_cache_rm() {
     let original_path = std::env::var("PATH").unwrap_or_default();
     let output = sasurahime(tmp.path())
         .env("PATH", format!("{}:{original_path}", bin_dir.display()))
-        .args(["clean", "bun"])
+        .args(["--permanent", "clean", "bun"])
         .output()
         .unwrap();
 
@@ -69,7 +69,7 @@ fn clean_tool_not_found_skips(#[case] tool: &str, #[case] path: &str, #[case] ch
     let tmp = TempDir::new().unwrap();
     let output = sasurahime(tmp.path())
         .env("PATH", path)
-        .args(["clean", tool])
+        .args(["--permanent", "clean", tool])
         .output()
         .unwrap();
     assert!(output.status.success());
@@ -92,7 +92,7 @@ fn clean_go_calls_clean_cache() {
     let original_path = std::env::var("PATH").unwrap_or_default();
     let output = sasurahime(tmp.path())
         .env("PATH", format!("{}:{original_path}", bin_dir.display()))
-        .args(["clean", "go"])
+        .args(["--permanent", "clean", "go"])
         .output()
         .unwrap();
 
@@ -114,7 +114,7 @@ fn clean_pip_calls_cache_purge() {
     let original_path = std::env::var("PATH").unwrap_or_default();
     let output = sasurahime(tmp.path())
         .env("PATH", format!("{}:{original_path}", bin_dir.display()))
-        .args(["clean", "pip"])
+        .args(["--permanent", "clean", "pip"])
         .output()
         .unwrap();
 
@@ -134,7 +134,7 @@ fn clean_node_gyp_removes_cache_dir() {
     fs::write(node_gyp.join("dummy"), b"x").unwrap();
 
     let output = sasurahime(tmp.path())
-        .args(["clean", "node-gyp"])
+        .args(["--permanent", "clean", "node-gyp"])
         .output()
         .unwrap();
 
@@ -153,7 +153,7 @@ fn clean_caches_continues_past_missing_tools() {
     let original_path = std::env::var("PATH").unwrap_or_default();
     let output = sasurahime(tmp.path())
         .env("PATH", format!("{}:{original_path}", bin_dir.display()))
-        .args(["clean", "caches"])
+        .args(["--permanent", "clean", "caches"])
         .output()
         .unwrap();
 
@@ -171,7 +171,7 @@ fn clean_spm_cache_dry_run_deletes_nothing() {
     std::fs::write(spm_dir.join("Package.resolved"), b"dummy").unwrap();
 
     let output = sasurahime(tmp.path())
-        .args(["clean", "spm", "--dry-run"])
+        .args(["--permanent", "clean", "spm", "--dry-run"])
         .output()
         .unwrap();
     assert!(output.status.success());
@@ -191,7 +191,7 @@ fn clean_bun_dry_run_does_not_invoke_tool() {
     let original_path = std::env::var("PATH").unwrap_or_default();
     let output = sasurahime(tmp.path())
         .env("PATH", format!("{}:{original_path}", bin_dir.display()))
-        .args(["clean", "bun", "--dry-run"])
+        .args(["--permanent", "clean", "bun", "--dry-run"])
         .output()
         .unwrap();
 
@@ -210,7 +210,7 @@ fn trash_dry_run_shows_size() {
     std::fs::write(trash.join("old-file.txt"), b"x".repeat(1024)).unwrap();
 
     let output = sasurahime(tmp.path())
-        .args(["clean", "trash", "--dry-run"])
+        .args(["--permanent", "clean", "trash", "--dry-run"])
         .output()
         .unwrap();
     assert!(output.status.success());
@@ -224,7 +224,7 @@ fn downloads_dry_run_deletes_nothing() {
     std::fs::write(dl.join("readme.pdf"), b"dummy").unwrap();
 
     let output = sasurahime(tmp.path())
-        .args(["clean", "downloads", "--dry-run"])
+        .args(["--permanent", "clean", "downloads", "--dry-run"])
         .output()
         .unwrap();
     assert!(output.status.success());
@@ -243,7 +243,7 @@ fn clean_colima_calls_prune_all() {
     let original_path = std::env::var("PATH").unwrap_or_default();
     let output = sasurahime(tmp.path())
         .env("PATH", format!("{}:{original_path}", bin_dir.display()))
-        .args(["clean", "colima"])
+        .args(["--permanent", "clean", "colima"])
         .output()
         .unwrap();
 
@@ -266,7 +266,7 @@ fn clean_colima_dry_run_does_not_invoke() {
     let original_path = std::env::var("PATH").unwrap_or_default();
     let output = sasurahime(tmp.path())
         .env("PATH", format!("{}:{original_path}", bin_dir.display()))
-        .args(["clean", "colima", "--dry-run"])
+        .args(["--permanent", "clean", "colima", "--dry-run"])
         .output()
         .unwrap();
 
@@ -298,7 +298,7 @@ fn clean_terraform_rejects_unsafe_env_var() {
     let tmp = TempDir::new().unwrap();
     let output = sasurahime(tmp.path())
         .env("TF_PLUGIN_CACHE_DIR", "/")
-        .args(["clean", "terraform"])
+        .args(["--permanent", "clean", "terraform"])
         .output()
         .unwrap();
     assert!(output.status.success());
@@ -309,7 +309,7 @@ fn clean_flutter_rejects_unsafe_env_var() {
     let tmp = TempDir::new().unwrap();
     let output = sasurahime(tmp.path())
         .env("PUB_CACHE", "/")
-        .args(["clean", "flutter"])
+        .args(["--permanent", "clean", "flutter"])
         .output()
         .unwrap();
     assert!(output.status.success());
@@ -325,7 +325,7 @@ fn clean_gem_calls_cleanup() {
     let original_path = std::env::var("PATH").unwrap_or_default();
     let output = sasurahime(tmp.path())
         .env("PATH", format!("{}:{original_path}", bin_dir.display()))
-        .args(["clean", "gem"])
+        .args(["--permanent", "clean", "gem"])
         .output()
         .unwrap();
 
@@ -347,7 +347,7 @@ fn clean_bundle_calls_clean() {
     let original_path = std::env::var("PATH").unwrap_or_default();
     let output = sasurahime(tmp.path())
         .env("PATH", format!("{}:{original_path}", bin_dir.display()))
-        .args(["clean", "bundle"])
+        .args(["--permanent", "clean", "bundle"])
         .output()
         .unwrap();
 
@@ -366,7 +366,7 @@ fn clean_dotnet_calls_nuget_locals_clear() {
     let original_path = std::env::var("PATH").unwrap_or_default();
     let output = sasurahime(tmp.path())
         .env("PATH", format!("{}:{original_path}", bin_dir.display()))
-        .args(["clean", "dotnet"])
+        .args(["--permanent", "clean", "dotnet"])
         .output()
         .unwrap();
 

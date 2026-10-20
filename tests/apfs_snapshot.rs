@@ -9,7 +9,7 @@ fn clean_apfs_snapshot_dry_run_does_not_crash() {
     let output = Command::cargo_bin("sasurahime")
         .unwrap()
         .env("HOME", tmp.path())
-        .args(["clean", "apfs-snapshot", "--dry-run"])
+        .args(["--permanent", "clean", "apfs-snapshot", "--dry-run"])
         .output()
         .unwrap();
     // Should exit successfully even if tmutil is missing or no snapshots exist
@@ -29,7 +29,7 @@ fn clean_apfs_snapshot_restricted_path_does_not_crash() {
         .unwrap()
         .env("HOME", tmp.path())
         .env("PATH", "/usr/bin:/bin")
-        .args(["clean", "apfs-snapshot"])
+        .args(["--permanent", "clean", "apfs-snapshot"])
         .output()
         .unwrap();
     // Should exit 0; "not found, skipping" is the expected behavior
@@ -60,7 +60,13 @@ fn clean_apfs_snapshot_all_dry_run_succeeds() {
     let output = Command::cargo_bin("sasurahime")
         .unwrap()
         .env("HOME", tmp.path())
-        .args(["clean", "apfs-snapshot", "--all", "--dry-run"])
+        .args([
+            "--permanent",
+            "clean",
+            "apfs-snapshot",
+            "--all",
+            "--dry-run",
+        ])
         .output()
         .unwrap();
     assert!(
