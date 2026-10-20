@@ -971,4 +971,49 @@ mod tests {
         assert_eq!(clean_result.bytes_freed, 100);
         assert_eq!(clean_result.skipped.len(), 1);
     }
+
+    const LEGACY_SCAN_TARGETS: &[&str] = &[
+        "uv",
+        "brew",
+        "mise",
+        "browsers",
+        "xcode",
+        "logs",
+        "act",
+        "huggingface",
+        "pre-commit",
+        "library-logs",
+        "colima",
+        "ollama",
+        "device-support",
+        "ios-backup",
+        "apfs-snapshot",
+    ];
+
+    fn names_of(cleaners: &[Box<dyn cleaner::Cleaner>]) -> Vec<&'static str> {
+        cleaners.iter().map(|c| c.name()).collect()
+    }
+
+    #[test]
+    fn all_cleaners_keeps_legacy_targets() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cleaners = all_cleaners(tmp.path(), &config::Config::default());
+        let names = names_of(&cleaners);
+        for legacy in LEGACY_SCAN_TARGETS {
+            assert!(names.contains(legacy), "missing legacy target: {legacy}");
+        }
+    }
+
+    #[test]
+    fn all_cleaners_names_are_unique() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cleaners = all_cleaners(tmp.path(), &config::Config::default());
+        let names = names_of(&cleaners);
+        let unique: std::collections::HashSet<_> = names.iter().collect();
+        assert_eq!(
+            unique.len(),
+            names.len(),
+            "duplicate cleaner names: {names:?}"
+        );
+    }
 }
