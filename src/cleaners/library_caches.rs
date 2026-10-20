@@ -1,5 +1,9 @@
-use crate::format::dir_size;
+use crate::cleaner::{CleanResult, Cleaner, ScanResult, ScanStatus, SkippedEntry};
+use crate::command::CommandRunner;
+use crate::format::{dir_size, format_bytes};
 use crate::hint::{apps::KNOWN_ENTRIES, BaseDir, HintEntry};
+use crate::progress::ProgressReporter;
+use anyhow::Result;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -128,6 +132,137 @@ pub fn scan_caches(
     }
     entries.sort_by(|a, b| b.size.cmp(&a.size).then_with(|| a.name.cmp(&b.name)));
     entries
+}
+
+pub fn mark_running(entries: &mut [CacheEntry], runner: &dyn CommandRunner) {
+    for e in entries.iter_mut() {
+        if e.disposition != Disposition::Deletable {
+            continue;
+        }
+        if let Some(p) = e.process_name {
+            e.running = crate::hint::is_running(p, runner);
+        }
+    }
+}
+
+pub fn render_listing(entries: &[CacheEntry]) -> Vec<String> {
+    entries
+        .iter()
+        .map(|e| {
+            let tag = match (e.disposition, e.running) {
+                (Disposition::Deletable, true) => "  [running]",
+                (Disposition::Deletable, false) => "",
+                (Disposition::BelowThreshold, _) => "  [below threshold]",
+                (Disposition::Unknown, _) => "  [display only]",
+            };
+            format!("  {:<32} {:>10}{}", e.name, format_bytes(e.size), tag)
+        })
+        .collect()
+}
+
+pub fn render_item(entry: &CacheEntry) -> String {
+    let running = if entry.running {
+        "  [running: will be skipped]"
+    } else {
+        ""
+    };
+    format!(
+        "{:<32} {:>10}  {}{}",
+        entry.name,
+        format_bytes(entry.size),
+        entry.display_name,
+        running
+    )
+}
+
+pub fn split_running(selected: Vec<CacheEntry>) -> (Vec<CacheEntry>, Vec<SkippedEntry>) {
+    let mut to_delete = Vec::new();
+    let mut skipped = Vec::new();
+    for e in selected {
+        if e.running {
+            skipped.push(SkippedEntry {
+                reason: format!("{} is running: quit it first", e.display_name),
+                path: e.path,
+            });
+        } else {
+            to_delete.push(e);
+        }
+    }
+    (to_delete, skipped)
+}
+
+fn empty_result(name: &'static str) -> CleanResult {
+    CleanResult {
+        name,
+        bytes_freed: 0,
+        uses_trash: false,
+        skipped: vec![],
+        deleted_paths: vec![],
+    }
+}
+
+pub struct LibraryCachesCleaner {
+    pub home: PathBuf,
+    pub runner: Box<dyn CommandRunner>,
+    pub threshold_override: Option<u64>,
+}
+
+impl LibraryCachesCleaner {
+    pub fn new(home: &Path, runner: Box<dyn CommandRunner>) -> Self {
+        Self {
+            home: home.to_path_buf(),
+            runner,
+            threshold_override: None,
+        }
+    }
+
+    fn caches_dir(&self) -> PathBuf {
+        self.home.join("Library/Caches")
+    }
+
+    pub(crate) fn scan(&self, include_unknown: bool) -> Vec<CacheEntry> {
+        scan_caches(&self.caches_dir(), include_unknown, self.threshold_override)
+    }
+}
+
+impl Cleaner for LibraryCachesCleaner {
+    fn name(&self) -> &'static str {
+        "library-caches"
+    }
+
+    fn detect(&self) -> ScanResult {
+        let dir = self.caches_dir();
+        if !dir.exists() {
+            return ScanResult::new(self.name(), ScanStatus::NotFound);
+        }
+        let total: u64 = self
+            .scan(false)
+            .iter()
+            .filter(|e| e.disposition == Disposition::Deletable)
+            .map(|e| e.size)
+            .sum();
+        let mut r = ScanResult::new(
+            self.name(),
+            if total > 0 {
+                ScanStatus::Pruneable(total)
+            } else {
+                ScanStatus::Clean
+            },
+        );
+        if crate::context::is_verbose() {
+            r = r.with_target(dir.to_string_lossy().to_string());
+        }
+        r
+    }
+
+    fn clean(&self, _dry_run: bool, _reporter: &dyn ProgressReporter) -> Result<CleanResult> {
+        Ok(empty_result(self.name()))
+    }
+
+    // Removing an app cache is an explicit per-app choice; `--yes` must never pick it.
+    fn auto_clean_allowed(&self) -> bool {
+        false
+    }
 }
 
 #[cfg(test)]
@@ -264,5 +399,142 @@ mod tests {
         let r = scan_caches(&c, false, Some(1));
         assert_eq!(r[0].process_name, Some("Microsoft Edge Helper"));
         assert!(!r[0].running);
+    }
+
+    use crate::cleaner::{Cleaner, ScanStatus};
+    use crate::test_helpers::MockRunner;
+
+    fn entry(name: &str, size: u64, d: Disposition, proc_name: Option<&'static str>) -> CacheEntry {
+        CacheEntry {
+            path: PathBuf::from("/x").join(name),
+            name: name.to_string(),
+            display_name: name.to_string(),
+            size,
+            disposition: d,
+            process_name: proc_name,
+            running: false,
+        }
+    }
+
+    #[test]
+    fn render_listing_tags_each_disposition() {
+        let mut running = entry("A", 3 << 20, Disposition::Deletable, Some("A"));
+        running.running = true;
+        let v = vec![
+            running,
+            entry("B", 2 << 20, Disposition::Deletable, None),
+            entry("C", 1 << 20, Disposition::BelowThreshold, None),
+            entry("D", 512, Disposition::Unknown, None),
+        ];
+        let lines = render_listing(&v);
+        assert_eq!(lines.len(), 4);
+        assert!(lines[0].contains("[running]"), "{}", lines[0]);
+        assert!(lines[0].contains("3.0 MB"));
+        assert!(!lines[1].contains('['), "{}", lines[1]);
+        assert!(lines[2].contains("[below threshold]"));
+        assert!(lines[3].contains("[display only]"));
+    }
+
+    #[test]
+    fn render_item_mentions_running() {
+        let mut e = entry("A", 1 << 20, Disposition::Deletable, Some("A"));
+        assert!(!render_item(&e).contains("running"));
+        e.running = true;
+        assert!(render_item(&e).contains("running"));
+    }
+
+    #[test]
+    fn mark_running_uses_pgrep_for_entries_with_process_name() {
+        let mut v = vec![
+            entry("A", 10, Disposition::Deletable, Some("A")),
+            entry("B", 10, Disposition::Deletable, None),
+            entry("C", 10, Disposition::Unknown, Some("C")),
+        ];
+        // MockRunner: a program registered with with_success exits 0 (= running).
+        mark_running(&mut v, &MockRunner::new().with_success("pgrep"));
+        assert!(v[0].running);
+        assert!(!v[1].running, "no process_name => cannot be judged");
+        assert!(!v[2].running, "only deletable entries are checked");
+    }
+
+    #[test]
+    fn mark_running_false_when_pgrep_unavailable() {
+        let mut v = vec![entry("A", 10, Disposition::Deletable, Some("A"))];
+        mark_running(&mut v, &MockRunner::new().with_not_found());
+        assert!(!v[0].running);
+    }
+
+    #[test]
+    fn split_running_moves_running_entries_to_skipped() {
+        let mut r = entry("A", 10, Disposition::Deletable, Some("A"));
+        r.running = true;
+        let ok = entry("B", 10, Disposition::Deletable, None);
+        let (to_delete, skipped) = split_running(vec![r, ok]);
+        assert_eq!(to_delete.len(), 1);
+        assert_eq!(to_delete[0].name, "B");
+        assert_eq!(skipped.len(), 1);
+        assert!(skipped[0].reason.contains("running"));
+    }
+
+    fn cleaner(tmp: &TempDir) -> LibraryCachesCleaner {
+        LibraryCachesCleaner::new(tmp.path(), Box::new(MockRunner::new().with_not_found()))
+    }
+
+    #[test]
+    fn name_is_library_caches() {
+        let tmp = TempDir::new().unwrap();
+        assert_eq!(cleaner(&tmp).name(), "library-caches");
+    }
+
+    #[test]
+    fn detect_not_found_when_dir_missing() {
+        let tmp = TempDir::new().unwrap();
+        assert!(matches!(
+            cleaner(&tmp).detect().status,
+            ScanStatus::NotFound
+        ));
+    }
+
+    #[test]
+    fn detect_clean_when_only_unknown_apps() {
+        let tmp = TempDir::new().unwrap();
+        put(&caches(&tmp), "SomeUnknownApp", 50_000);
+        assert!(matches!(cleaner(&tmp).detect().status, ScanStatus::Clean));
+    }
+
+    #[test]
+    fn detect_sums_only_deletable_entries() {
+        let tmp = TempDir::new().unwrap();
+        let c = caches(&tmp);
+        put(&c, "typescript", 20_000);
+        put(&c, "gopls", 1_000);
+        put(&c, "SomeUnknownApp", 90_000);
+        put(&c, "Homebrew", 90_000);
+        let mut cl = cleaner(&tmp);
+        cl.threshold_override = Some(10_000);
+        let expected = scan_caches(&c, false, Some(10_000))
+            .iter()
+            .filter(|e| e.disposition == Disposition::Deletable)
+            .map(|e| e.size)
+            .sum::<u64>();
+        assert!(expected > 0);
+        assert_eq!(cl.detect().bytes_for_test(), expected);
+        assert_eq!(
+            cl.detect().bytes_for_test(),
+            scan_caches(&c, false, Some(10_000))[0].size
+        );
+    }
+
+    #[test]
+    fn sub_targets_is_empty() {
+        let tmp = TempDir::new().unwrap();
+        put(&caches(&tmp), "typescript", 20_000);
+        assert!(cleaner(&tmp).sub_targets().is_empty());
+    }
+
+    #[test]
+    fn library_caches_is_never_auto_cleaned() {
+        let tmp = TempDir::new().unwrap();
+        assert!(!cleaner(&tmp).auto_clean_allowed());
     }
 }
