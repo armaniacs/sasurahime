@@ -1167,7 +1167,9 @@ UUID-named subdirectory containing backup data (Manifest.db, etc.).
 1. Checks if `tmutil` is available on the system.
 2. Runs `tmutil listlocalsnapshots /` and parses output via
    `parse_snapshot_names` (only `com.apple.TimeMachine.<date>.local` lines are
-   kept; the `Snapshots for disk /:` header is ignored).
+   kept; the `Snapshots for disk /:` header is ignored). Dates outside the
+   calendar ranges (month 1-12, day 1-31, hour 0-23, minute/second 0-59) are
+   dropped.
 3. Measures `/.MobileBackups` disk usage (if present) as a size estimate.
 4. Returns `Pruneable` with the measured size (or 0 if `/.MobileBackups` does
    not exist).
@@ -1186,8 +1188,9 @@ UUID-named subdirectory containing backup data (Manifest.db, etc.).
 runs `sudo`; for each snapshot that fails to delete, it prints the
 `sudo tmutil deletelocalsnapshots <date>` command to run manually. Only
 Time Machine snapshots (`com.apple.TimeMachine.<date>.local`) are listed; other
-snapshots are ignored. Failed deletions are returned as skipped entries, and the
-exit code is 1 when no snapshot could be deleted.
+snapshots are ignored. Failed deletions are returned as skipped entries whose
+reason is `tmutil`'s own error output (or the spawn error), and the exit code
+is 1 when no snapshot could be deleted.
 
 **Safety:**
 - Deleting snapshots disables local Time Machine protection until the next
@@ -2531,7 +2534,8 @@ Time Machine スナップショット（`<date>` は `YYYY-MM-DD-HHMMSS`）。
 1. `tmutil` がシステムで利用可能か確認します。
 2. `tmutil listlocalsnapshots /` を実行し、出力を `parse_snapshot_names`
    でパースします（`com.apple.TimeMachine.<date>.local` 形式の行のみを残し、
-   `Snapshots for disk /:` のヘッダ行は無視します）。
+   `Snapshots for disk /:` のヘッダ行は無視します）。暦の範囲外（月 1-12、
+   日 1-31、時 0-23、分秒 0-59）の日付は除外します。
 3. `/.MobileBackups` のディスク使用量（存在する場合）をサイズ見積もりとして
    測定します。
 4. 測定サイズ付きで `Pruneable` を返します（`/.MobileBackups` が存在しない
@@ -2551,7 +2555,9 @@ Time Machine スナップショット（`<date>` は `YYYY-MM-DD-HHMMSS`）。
 `sudo` を実行しません。削除に失敗したスナップショットごとに、手動で実行する
 `sudo tmutil deletelocalsnapshots <date>` を表示します。Time Machine 形式
 （`com.apple.TimeMachine.<date>.local`）以外のスナップショットは一覧に含めません。
-削除に失敗したものは skipped として返し、1 件も削除できなかった場合の終了コードは 1 です。
+削除に失敗したものは skipped として返し、reason には `tmutil` のエラー出力
+（起動に失敗した場合はそのエラー）が入ります。1 件も削除できなかった場合の
+終了コードは 1 です。
 
 **安全性:**
 - スナップショットの削除は、次回のバックアップまでローカル Time Machine
