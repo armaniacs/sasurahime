@@ -1,3 +1,4 @@
+use crate::format::dir_size;
 use crate::hint::apps::KNOWN_ENTRIES;
 use crate::hint::{BaseDir, HintEntry};
 use std::fs;
@@ -8,6 +9,7 @@ pub const DEFAULT_MIN_APP_BYTES: u64 = 64 * 1024 * 1024;
 /// One application whose cache subdirectories may be removed.
 /// Only paths listed in `subpaths` are ever deletable; everything else under
 /// `root` (settings, logins, IndexedDB, Local Storage, workspaces) is user data.
+#[derive(Debug)]
 pub struct AppSupportTarget {
     pub hint_name: &'static str,
     pub root: &'static str,
@@ -156,6 +158,46 @@ pub fn resolve_allowed(
         return Err(GuardError::OutsideBase);
     }
     Ok(cur)
+}
+
+#[derive(Debug, Clone)]
+pub struct Candidate {
+    pub target: &'static AppSupportTarget,
+    pub sub: &'static str,
+    /// For display only. Deletion re-resolves via `resolve_allowed`.
+    pub path: PathBuf,
+    pub size: u64,
+}
+
+pub fn scan_candidates(base: &Path, min_app_bytes: Option<u64>) -> Vec<Candidate> {
+    let mut all = Vec::new();
+    for target in TARGETS {
+        let mut found = Vec::new();
+        for sub in target.subpaths {
+            let Ok(path) = resolve_allowed(base, target, sub) else {
+                continue;
+            };
+            let size = dir_size(&path);
+            if size == 0 {
+                continue;
+            }
+            found.push(Candidate {
+                target,
+                sub: *sub,
+                path,
+                size,
+            });
+        }
+        let total: u64 = found.iter().map(|c| c.size).sum();
+        let threshold = min_app_bytes
+            .or_else(|| hint_entry(target).map(|e| e.threshold_bytes))
+            .unwrap_or(DEFAULT_MIN_APP_BYTES);
+        if total > threshold {
+            all.extend(found);
+        }
+    }
+    all.sort_by_key(|c| std::cmp::Reverse(c.size));
+    all
 }
 
 #[cfg(test)]
@@ -427,5 +469,90 @@ mod tests {
         let r = resolve_allowed(&base, target("Slack"), "Cache");
         fs::set_permissions(base.join("Slack"), fs::Permissions::from_mode(0o755)).unwrap();
         assert_eq!(r, Err(GuardError::Unreadable));
+    }
+
+    fn put(base: &Path, rel: &str, bytes: usize) {
+        let p = base.join(rel);
+        fs::create_dir_all(p.parent().unwrap()).unwrap();
+        fs::write(p, vec![1u8; bytes]).unwrap();
+    }
+
+    #[test]
+    fn scan_returns_only_allowlisted_dirs() {
+        let tmp = TempDir::new().unwrap();
+        let base = base_of(&tmp);
+        put(&base, "Slack/Cache/a.bin", 10_000);
+        put(&base, "Slack/Local Storage/b.bin", 10_000);
+        put(&base, "Slack/IndexedDB/c.bin", 10_000);
+        put(&base, "Slack/Partitions/d.bin", 10_000);
+        let c = scan_candidates(&base, Some(0));
+        assert_eq!(c.len(), 1);
+        assert_eq!(c[0].path, base.join("Slack/Cache"));
+        assert_eq!(c[0].sub, "Cache");
+        assert!(c[0].size > 0);
+    }
+
+    #[test]
+    fn scan_skips_app_below_threshold() {
+        let tmp = TempDir::new().unwrap();
+        let base = base_of(&tmp);
+        put(&base, "Slack/Cache/a.bin", 10_000);
+        assert!(scan_candidates(&base, Some(u64::MAX)).is_empty());
+    }
+
+    #[test]
+    fn scan_uses_hint_threshold_by_default() {
+        let tmp = TempDir::new().unwrap();
+        let base = base_of(&tmp);
+        put(&base, "Slack/Cache/a.bin", 10_000);
+        assert!(scan_candidates(&base, None).is_empty());
+    }
+
+    #[test]
+    fn scan_excludes_symlinked_cache_dir() {
+        let tmp = TempDir::new().unwrap();
+        let base = base_of(&tmp);
+        let outside = tmp.path().join("Documents");
+        put(&outside, "Cache/big.bin", 50_000);
+        fs::create_dir_all(base.join("Slack")).unwrap();
+        std::os::unix::fs::symlink(outside.join("Cache"), base.join("Slack/Cache")).unwrap();
+        assert!(scan_candidates(&base, Some(0)).is_empty());
+    }
+
+    #[test]
+    fn scan_skips_empty_dirs_and_missing_base() {
+        let tmp = TempDir::new().unwrap();
+        let base = base_of(&tmp);
+        fs::create_dir_all(base.join("Slack/Cache")).unwrap();
+        assert!(scan_candidates(&base, Some(0)).is_empty());
+        assert!(scan_candidates(&tmp.path().join("nope"), Some(0)).is_empty());
+    }
+
+    #[test]
+    fn scan_sorts_by_size_descending_across_apps() {
+        let tmp = TempDir::new().unwrap();
+        let base = base_of(&tmp);
+        put(&base, "Slack/Cache/a.bin", 8_192);
+        put(&base, "Code/CachedData/b.bin", 81_920);
+        put(&base, "Code/logs/c.log", 4_096);
+        let c = scan_candidates(&base, Some(0));
+        let sizes: Vec<u64> = c.iter().map(|x| x.size).collect();
+        let mut sorted = sizes.clone();
+        sorted.sort_by(|a, b| b.cmp(a));
+        assert_eq!(sizes, sorted);
+        assert_eq!(c.len(), 3);
+    }
+
+    #[test]
+    fn scan_threshold_is_per_app_total() {
+        let tmp = TempDir::new().unwrap();
+        let base = base_of(&tmp);
+        put(&base, "Code/Cache/a.bin", 40_000);
+        put(&base, "Code/CachedData/b.bin", 40_000);
+        put(&base, "Slack/Cache/c.bin", 40_000);
+        let one = crate::format::dir_size(&base.join("Slack/Cache"));
+        let c = scan_candidates(&base, Some(one + 1));
+        assert!(c.iter().all(|x| x.target.hint_name == "VSCode caches"));
+        assert_eq!(c.len(), 2);
     }
 }
