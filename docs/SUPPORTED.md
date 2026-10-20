@@ -1488,7 +1488,7 @@ Runs `detect()` on every cleaner and prints a formatted table via
 | Mode | Behavior |
 |------|----------|
 | `sasurahime` (no args, TTY) | Opens an interactive checkbox list. Select targets, confirm, and selected targets are cleaned. |
-| `sasurahime --yes` (no args, any) | Cleans every pruneable target in the unattended set (uv, brew, mise, browsers, xcode, logs, act, huggingface, pre-commit, library-logs, colima, ollama, device-support, ios-backup, apfs-snapshot) without prompting. All other targets (docker, npm, cargo, downloads, ...) appear in `scan` and the interactive list but are never run by `--yes`. Exits with 0 if nothing is found. |
+| `sasurahime --yes` (no args, any) | Cleans every pruneable target in the unattended set (uv, brew, mise, browsers, xcode, logs, act, huggingface, pre-commit, library-logs, colima, ollama, device-support) without prompting. All other targets (docker, npm, cargo, downloads, ...) appear in `scan` and the interactive list but are never run by `--yes`. Exits with 0 if nothing is found. |
 | `sasurahime scan` (non-TTY) | Prints the scan table only. |
 | `sasurahime clean <target>` | Cleans a specific target directly. |
 
@@ -2825,7 +2825,7 @@ sasurahime scan --config /path/to/config.toml
 | モード | 動作 |
 |--------|------|
 | `sasurahime`（引数なし、TTY） | インタラクティブなチェックボックスリストを起動します。ターゲットを選択して確認すると、選択したターゲットがクリーンされます。 |
-| `sasurahime --yes`（引数なし、任意） | 無人実行の対象 (uv, brew, mise, browsers, xcode, logs, act, huggingface, pre-commit, library-logs, colima, ollama, device-support, ios-backup, apfs-snapshot) のうち pruneable なものを確認なしで削除します。それ以外のターゲット (docker, npm, cargo, downloads など) は `scan` と対話リストには表示されますが、`--yes` では実行されません。何も見つからなければ 0 で終了します。 |
+| `sasurahime --yes`（引数なし、任意） | 無人実行の対象 (uv, brew, mise, browsers, xcode, logs, act, huggingface, pre-commit, library-logs, colima, ollama, device-support) のうち pruneable なものを確認なしで削除します。それ以外のターゲット (docker, npm, cargo, downloads など) は `scan` と対話リストには表示されますが、`--yes` では実行されません。何も見つからなければ 0 で終了します。 |
 | `sasurahime scan`（非 TTY） | スキャン結果の一覧のみを表示します。 |
 | `sasurahime clean <target>` | 特定のターゲットを直接クリーンします。 |
 
