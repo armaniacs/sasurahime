@@ -1,7 +1,13 @@
-use crate::format::dir_size;
+use crate::cleaner::{CleanResult, Cleaner, ScanResult, ScanStatus, SkippedEntry};
+use crate::command::CommandRunner;
+use crate::format::{dir_size, format_bytes};
 use crate::hint::apps::KNOWN_ENTRIES;
-use crate::hint::{BaseDir, HintEntry};
+use crate::hint::{is_running, quit_app_and_wait, relaunch_app, BaseDir, HintEntry};
+use crate::progress::ProgressReporter;
+use anyhow::Result;
+use std::collections::HashSet;
 use std::fs;
+use std::io::IsTerminal;
 use std::path::{Component, Path, PathBuf};
 
 pub const DEFAULT_MIN_APP_BYTES: u64 = 64 * 1024 * 1024;
@@ -198,6 +204,324 @@ pub fn scan_candidates(base: &Path, min_app_bytes: Option<u64>) -> Vec<Candidate
     }
     all.sort_by_key(|c| std::cmp::Reverse(c.size));
     all
+}
+
+const NAME: &str = "app-support";
+
+pub fn format_candidate_label(c: &Candidate, running: bool) -> String {
+    format!(
+        "{:<18} {:<44} {:>10}{}",
+        c.target.hint_name,
+        format!("{}/{}", c.target.root, c.sub),
+        format_bytes(c.size),
+        if running { "  [running]" } else { "" }
+    )
+}
+
+enum AppState {
+    Ready,
+    Quit,
+    Blocked(String),
+}
+
+pub struct AppSupportCleaner {
+    home: PathBuf,
+    runner: Box<dyn CommandRunner>,
+    min_app_bytes: Option<u64>,
+}
+
+impl AppSupportCleaner {
+    pub fn new(home: &Path, runner: Box<dyn CommandRunner>) -> Self {
+        Self {
+            home: home.to_path_buf(),
+            runner,
+            min_app_bytes: None,
+        }
+    }
+
+    #[cfg(test)]
+    fn with_min_app_bytes(mut self, n: u64) -> Self {
+        self.min_app_bytes = Some(n);
+        self
+    }
+
+    fn base(&self) -> PathBuf {
+        self.home.join("Library/Application Support")
+    }
+
+    fn empty_result() -> CleanResult {
+        CleanResult {
+            name: NAME,
+            bytes_freed: 0,
+            uses_trash: false,
+            skipped: vec![],
+            deleted_paths: vec![],
+        }
+    }
+
+    fn running_apps(&self, cands: &[Candidate]) -> HashSet<&'static str> {
+        let mut running = HashSet::new();
+        for c in cands {
+            if running.contains(c.target.hint_name) {
+                continue;
+            }
+            let up = hint_entry(c.target)
+                .and_then(|e| e.process_name)
+                .map(|n| is_running(n, self.runner.as_ref()))
+                .unwrap_or(false);
+            if up {
+                running.insert(c.target.hint_name);
+            }
+        }
+        running
+    }
+
+    fn print_dry_run(&self, cands: &[Candidate]) {
+        if cands.is_empty() {
+            println!("[{NAME}] nothing to clean");
+            return;
+        }
+        println!(
+            "[{NAME}] dry-run: {} cleanable cache directories",
+            cands.len()
+        );
+        for c in cands {
+            println!(
+                "  would remove: {}  ({}, {})",
+                c.path.display(),
+                c.target.hint_name,
+                format_bytes(c.size)
+            );
+        }
+    }
+
+    fn interactive_select(
+        &self,
+        cands: &[Candidate],
+        running: &HashSet<&'static str>,
+    ) -> Result<Vec<Candidate>> {
+        use dialoguer::MultiSelect;
+        let items: Vec<String> = cands
+            .iter()
+            .map(|c| format_candidate_label(c, running.contains(c.target.hint_name)))
+            .collect();
+        let defaults = vec![false; items.len()];
+        println!("\nCache directories under ~/Library/Application Support/ (none selected by default):\n");
+        let picked = MultiSelect::new()
+            .items(&items)
+            .defaults(&defaults)
+            .interact()?;
+        Ok(picked.into_iter().map(|i| cands[i].clone()).collect())
+    }
+
+    fn confirm_quits(
+        &self,
+        selected: &[Candidate],
+        running: &HashSet<&'static str>,
+    ) -> Result<HashSet<&'static str>> {
+        use dialoguer::Confirm;
+        let mut approved = HashSet::new();
+        for c in selected {
+            let name = c.target.hint_name;
+            if !running.contains(name) || approved.contains(name) {
+                continue;
+            }
+            let ok = Confirm::new()
+                .with_prompt(format!(
+                    "{name} is running. Quit it now? (its own save dialogs apply)"
+                ))
+                .default(false)
+                .interact()?;
+            if ok {
+                approved.insert(name);
+            }
+        }
+        Ok(approved)
+    }
+
+    fn prepare_app(
+        &self,
+        target: &'static AppSupportTarget,
+        approved: &HashSet<&'static str>,
+    ) -> AppState {
+        let Some(entry) = hint_entry(target) else {
+            return AppState::Blocked("no hint entry".to_string());
+        };
+        let up = entry
+            .process_name
+            .map(|n| is_running(n, self.runner.as_ref()))
+            .unwrap_or(false);
+        if !up {
+            return AppState::Ready;
+        }
+        if !approved.contains(target.hint_name) {
+            return AppState::Blocked(format!("{} is running", target.hint_name));
+        }
+        match quit_app_and_wait(entry, self.runner.as_ref()) {
+            Ok(()) => AppState::Quit,
+            Err(e) => AppState::Blocked(format!("{e}")),
+        }
+    }
+
+    /// Deletes the selected candidates. The paths come from `resolve_allowed`,
+    /// never from `Candidate::path`, so a forged or stale candidate cannot
+    /// reach outside the allowlist.
+    pub(crate) fn apply_selection(
+        &self,
+        selected: &[Candidate],
+        quit_approved: &HashSet<&'static str>,
+        reporter: &dyn ProgressReporter,
+    ) -> CleanResult {
+        let base = self.base();
+        let mut states: Vec<(&'static str, AppState)> = Vec::new();
+        let mut freed = 0u64;
+        let mut skipped = Vec::new();
+        let mut deleted = Vec::new();
+
+        reporter.progress_init(NAME, selected.len());
+        for (i, cand) in selected.iter().enumerate() {
+            reporter.progress_tick(&cand.path, i + 1, cand.size);
+            let name = cand.target.hint_name;
+            let idx = match states.iter().position(|(n, _)| *n == name) {
+                Some(i) => i,
+                None => {
+                    let st = self.prepare_app(cand.target, quit_approved);
+                    states.push((name, st));
+                    states.len() - 1
+                }
+            };
+            if let AppState::Blocked(reason) = &states[idx].1 {
+                skipped.push(SkippedEntry {
+                    path: cand.path.clone(),
+                    reason: reason.clone(),
+                });
+                continue;
+            }
+            let path = match resolve_allowed(&base, cand.target, cand.sub) {
+                Ok(p) => p,
+                Err(e) => {
+                    skipped.push(SkippedEntry {
+                        path: cand.path.clone(),
+                        reason: e.to_string(),
+                    });
+                    continue;
+                }
+            };
+            let _ = self
+                .runner
+                .run("chflags", &["-R", "nouchg", &path.to_string_lossy()]);
+            match crate::trash::delete_path(&path) {
+                Ok(()) => {
+                    freed += cand.size;
+                    println!(
+                        "[{NAME}] removed: {} (freed {})",
+                        path.display(),
+                        format_bytes(cand.size)
+                    );
+                    deleted.push(path);
+                }
+                Err(e) => {
+                    eprintln!("[{NAME}] error removing {}: {e}", path.display());
+                    skipped.push(SkippedEntry {
+                        path: cand.path.clone(),
+                        reason: format!("{e}"),
+                    });
+                }
+            }
+        }
+        reporter.progress_finish();
+
+        for (name, state) in &states {
+            if !matches!(state, AppState::Quit) {
+                continue;
+            }
+            let entry = TARGETS
+                .iter()
+                .find(|t| t.hint_name == *name)
+                .and_then(hint_entry);
+            if let Some(entry) = entry {
+                if let Err(e) = relaunch_app(entry, self.runner.as_ref()) {
+                    eprintln!("[{NAME}] failed to relaunch {name}: {e}");
+                }
+            }
+        }
+
+        CleanResult {
+            name: NAME,
+            bytes_freed: freed,
+            uses_trash: true,
+            skipped,
+            deleted_paths: deleted,
+        }
+    }
+}
+
+impl Cleaner for AppSupportCleaner {
+    fn name(&self) -> &'static str {
+        NAME
+    }
+
+    fn detect(&self) -> ScanResult {
+        let base = self.base();
+        if !base.exists() {
+            return ScanResult::new(NAME, ScanStatus::NotFound);
+        }
+        let total: u64 = scan_candidates(&base, self.min_app_bytes)
+            .iter()
+            .map(|c| c.size)
+            .sum();
+        let mut r = ScanResult::new(
+            NAME,
+            if total > 0 {
+                ScanStatus::Pruneable(total)
+            } else {
+                ScanStatus::Clean
+            },
+        );
+        if crate::context::is_verbose() {
+            r = r.with_target(base.to_string_lossy().to_string());
+        }
+        r
+    }
+
+    fn clean(&self, dry_run: bool, reporter: &dyn ProgressReporter) -> Result<CleanResult> {
+        let base = self.base();
+        if !base.exists() {
+            return Ok(Self::empty_result());
+        }
+        let cands = scan_candidates(&base, self.min_app_bytes);
+        if dry_run {
+            self.print_dry_run(&cands);
+            return Ok(Self::empty_result());
+        }
+        if cands.is_empty() {
+            println!("[{NAME}] nothing to clean");
+            return Ok(Self::empty_result());
+        }
+        if !std::io::stdin().is_terminal() {
+            eprintln!(
+                "[{NAME}] not a terminal - skipping. Run `sasurahime clean app-support` \
+                 interactively to choose what to remove."
+            );
+            return Ok(Self::empty_result());
+        }
+        let running = self.running_apps(&cands);
+        let selected = self.interactive_select(&cands, &running)?;
+        if selected.is_empty() {
+            println!("[{NAME}] nothing selected");
+            return Ok(Self::empty_result());
+        }
+        let approved = self.confirm_quits(&selected, &running)?;
+        let result = self.apply_selection(&selected, &approved, reporter);
+        println!("[{NAME}] total freed: {}", format_bytes(result.bytes_freed));
+        Ok(result)
+    }
+
+    // Deleting app caches may require quitting running apps, so it is never
+    // done unattended; `--yes` skips this cleaner even on a terminal.
+    fn auto_clean_allowed(&self) -> bool {
+        false
+    }
 }
 
 #[cfg(test)]
@@ -554,5 +878,291 @@ mod tests {
         let c = scan_candidates(&base, Some(one + 1));
         assert!(c.iter().all(|x| x.target.hint_name == "VSCode caches"));
         assert_eq!(c.len(), 2);
+    }
+
+    use crate::cleaner::{Cleaner, ScanStatus};
+    use crate::command::CommandRunner;
+    use crate::progress::DeepSuppressReporter;
+    use std::os::unix::process::ExitStatusExt;
+    use std::process::Output;
+    use std::sync::{Arc, Mutex};
+
+    fn out(code: i32) -> Output {
+        Output {
+            status: std::process::ExitStatus::from_raw(code),
+            stdout: vec![],
+            stderr: vec![],
+        }
+    }
+
+    #[derive(Default)]
+    struct Inner {
+        running: Mutex<HashSet<String>>,
+        calls: Mutex<Vec<String>>,
+    }
+
+    #[derive(Clone, Default)]
+    struct Fake(Arc<Inner>);
+
+    impl Fake {
+        fn with_running(names: &[&str]) -> Self {
+            let f = Fake::default();
+            for n in names {
+                f.0.running.lock().unwrap().insert(n.to_string());
+            }
+            f
+        }
+        fn calls(&self) -> Vec<String> {
+            self.0.calls.lock().unwrap().clone()
+        }
+    }
+
+    impl CommandRunner for Fake {
+        fn run(&self, program: &str, args: &[&str]) -> anyhow::Result<Output> {
+            self.0
+                .calls
+                .lock()
+                .unwrap()
+                .push(format!("{program} {}", args.join(" ")));
+            match program {
+                "pgrep" => {
+                    let n = args.last().copied().unwrap_or("");
+                    let up = self.0.running.lock().unwrap().contains(n);
+                    Ok(out(if up { 0 } else { 256 }))
+                }
+                "osascript" => {
+                    self.0.running.lock().unwrap().clear();
+                    Ok(out(0))
+                }
+                "open" | "chflags" => Ok(out(0)),
+                _ => anyhow::bail!("unexpected command {program}"),
+            }
+        }
+        fn exists(&self, _: &str) -> bool {
+            true
+        }
+    }
+
+    fn cleaner_for(tmp: &TempDir, fake: &Fake) -> AppSupportCleaner {
+        AppSupportCleaner::new(tmp.path(), Box::new(fake.clone())).with_min_app_bytes(0)
+    }
+
+    #[test]
+    fn detect_is_not_found_without_application_support() {
+        let tmp = TempDir::new().unwrap();
+        let c = cleaner_for(&tmp, &Fake::default());
+        assert!(matches!(c.detect().status, ScanStatus::NotFound));
+        assert_eq!(c.name(), "app-support");
+    }
+
+    #[test]
+    fn detect_sums_only_allowlisted_dirs() {
+        let tmp = TempDir::new().unwrap();
+        let base = base_of(&tmp);
+        put(&base, "Slack/Cache/a.bin", 10_000);
+        put(&base, "Slack/Local Storage/b.bin", 99_999);
+        let c = cleaner_for(&tmp, &Fake::default());
+        let r = c.detect();
+        assert_eq!(r.bytes_for_test(), dir_size(&base.join("Slack/Cache")));
+    }
+
+    #[test]
+    fn detect_is_clean_when_only_user_data_exists() {
+        let tmp = TempDir::new().unwrap();
+        let base = base_of(&tmp);
+        put(&base, "Slack/Local Storage/b.bin", 10_000);
+        let c = cleaner_for(&tmp, &Fake::default());
+        assert!(matches!(c.detect().status, ScanStatus::Clean));
+    }
+
+    #[test]
+    fn dry_run_touches_nothing_and_runs_no_commands() {
+        let tmp = TempDir::new().unwrap();
+        let base = base_of(&tmp);
+        put(&base, "Slack/Cache/a.bin", 10_000);
+        let fake = Fake::with_running(&["Slack"]);
+        let c = cleaner_for(&tmp, &fake);
+        let r = c.clean(true, &DeepSuppressReporter).unwrap();
+        assert_eq!(r.bytes_freed, 0);
+        assert!(base.join("Slack/Cache/a.bin").exists());
+        assert!(fake.calls().is_empty(), "calls: {:?}", fake.calls());
+    }
+
+    #[test]
+    fn apply_deletes_only_selected_candidates() {
+        crate::trash::set_trash_mode(false);
+        let tmp = TempDir::new().unwrap();
+        let base = base_of(&tmp);
+        put(&base, "Slack/Cache/a.bin", 10_000);
+        put(&base, "Slack/logs/l.log", 10_000);
+        put(&base, "Slack/Local Storage/u.bin", 10_000);
+        let fake = Fake::default();
+        let c = cleaner_for(&tmp, &fake);
+        let all = scan_candidates(&base, Some(0));
+        let sel: Vec<Candidate> = all.into_iter().filter(|x| x.sub == "Cache").collect();
+        let r = c.apply_selection(&sel, &HashSet::new(), &DeepSuppressReporter);
+        assert!(!base.join("Slack/Cache").exists());
+        assert!(base.join("Slack/logs/l.log").exists());
+        assert!(base.join("Slack/Local Storage/u.bin").exists());
+        assert_eq!(r.bytes_freed, sel[0].size);
+        assert!(r.skipped.is_empty());
+        assert_eq!(r.exit_code(), 0);
+        crate::trash::set_trash_mode(true);
+    }
+
+    #[test]
+    fn apply_blocks_running_app_without_approval() {
+        crate::trash::set_trash_mode(false);
+        let tmp = TempDir::new().unwrap();
+        let base = base_of(&tmp);
+        put(&base, "Slack/Cache/a.bin", 10_000);
+        let fake = Fake::with_running(&["Slack"]);
+        let c = cleaner_for(&tmp, &fake);
+        let sel = scan_candidates(&base, Some(0));
+        let r = c.apply_selection(&sel, &HashSet::new(), &DeepSuppressReporter);
+        assert!(base.join("Slack/Cache/a.bin").exists());
+        assert_eq!(r.bytes_freed, 0);
+        assert_eq!(r.skipped.len(), 1);
+        assert!(r.skipped[0].reason.contains("running"));
+        assert!(!fake.calls().iter().any(|c| c.starts_with("osascript")));
+        assert_eq!(r.exit_code(), 1);
+        crate::trash::set_trash_mode(true);
+    }
+
+    #[test]
+    fn apply_quits_approved_running_app_then_deletes_and_relaunches() {
+        crate::trash::set_trash_mode(false);
+        let tmp = TempDir::new().unwrap();
+        let base = base_of(&tmp);
+        put(&base, "obsidian/Cache/a.bin", 10_000);
+        let fake = Fake::with_running(&["Obsidian"]);
+        let c = cleaner_for(&tmp, &fake);
+        let sel = scan_candidates(&base, Some(0));
+        let approved: HashSet<&'static str> = HashSet::from(["Obsidian"]);
+        let r = c.apply_selection(&sel, &approved, &DeepSuppressReporter);
+        assert!(!base.join("obsidian/Cache").exists());
+        assert!(r.bytes_freed > 0);
+        let calls = fake.calls();
+        let q = calls
+            .iter()
+            .position(|c| c == "osascript -e quit app \"Obsidian\"")
+            .expect("quit call");
+        let o = calls
+            .iter()
+            .position(|c| c == "open -a Obsidian")
+            .expect("relaunch call");
+        assert!(q < o);
+        crate::trash::set_trash_mode(true);
+    }
+
+    #[test]
+    fn apply_does_not_relaunch_app_that_was_not_running() {
+        crate::trash::set_trash_mode(false);
+        let tmp = TempDir::new().unwrap();
+        let base = base_of(&tmp);
+        put(&base, "obsidian/Cache/a.bin", 10_000);
+        let fake = Fake::default();
+        let c = cleaner_for(&tmp, &fake);
+        let sel = scan_candidates(&base, Some(0));
+        c.apply_selection(&sel, &HashSet::new(), &DeepSuppressReporter);
+        assert!(!fake.calls().iter().any(|c| c.starts_with("open")));
+        crate::trash::set_trash_mode(true);
+    }
+
+    #[test]
+    fn apply_never_deletes_forged_unlisted_sub() {
+        crate::trash::set_trash_mode(false);
+        let tmp = TempDir::new().unwrap();
+        let base = base_of(&tmp);
+        put(&base, "Slack/Local Storage/u.bin", 10_000);
+        let c = cleaner_for(&tmp, &Fake::default());
+        let forged = Candidate {
+            target: target("Slack"),
+            sub: "Local Storage",
+            path: base.join("Slack/Local Storage"),
+            size: 1,
+        };
+        let r = c.apply_selection(&[forged], &HashSet::new(), &DeepSuppressReporter);
+        assert!(base.join("Slack/Local Storage/u.bin").exists());
+        assert_eq!(r.bytes_freed, 0);
+        assert_eq!(r.skipped.len(), 1);
+        assert_eq!(r.exit_code(), 1);
+        crate::trash::set_trash_mode(true);
+    }
+
+    #[test]
+    fn apply_ignores_forged_path_field() {
+        crate::trash::set_trash_mode(false);
+        let tmp = TempDir::new().unwrap();
+        let base = base_of(&tmp);
+        put(&base, "Slack/Cache/a.bin", 10_000);
+        put(&base, "Slack/Local Storage/u.bin", 10_000);
+        let c = cleaner_for(&tmp, &Fake::default());
+        let forged = Candidate {
+            target: target("Slack"),
+            sub: "Cache",
+            path: base.join("Slack/Local Storage"),
+            size: 5,
+        };
+        c.apply_selection(&[forged], &HashSet::new(), &DeepSuppressReporter);
+        assert!(!base.join("Slack/Cache").exists());
+        assert!(base.join("Slack/Local Storage/u.bin").exists());
+        crate::trash::set_trash_mode(true);
+    }
+
+    #[test]
+    fn apply_does_not_follow_symlinks_inside_cache() {
+        crate::trash::set_trash_mode(false);
+        let tmp = TempDir::new().unwrap();
+        let base = base_of(&tmp);
+        let outside = tmp.path().join("Documents");
+        put(&outside, "keep.txt", 100);
+        put(&outside, "dir/keep2.txt", 100);
+        put(&base, "Slack/Cache/a.bin", 10_000);
+        std::os::unix::fs::symlink(outside.join("keep.txt"), base.join("Slack/Cache/f")).unwrap();
+        std::os::unix::fs::symlink(outside.join("dir"), base.join("Slack/Cache/d")).unwrap();
+        let c = cleaner_for(&tmp, &Fake::default());
+        let sel = scan_candidates(&base, Some(0));
+        c.apply_selection(&sel, &HashSet::new(), &DeepSuppressReporter);
+        assert!(!base.join("Slack/Cache").exists());
+        assert!(outside.join("keep.txt").exists());
+        assert!(outside.join("dir/keep2.txt").exists());
+        crate::trash::set_trash_mode(true);
+    }
+
+    #[test]
+    fn apply_rejects_dir_replaced_by_symlink_after_scan() {
+        crate::trash::set_trash_mode(false);
+        let tmp = TempDir::new().unwrap();
+        let base = base_of(&tmp);
+        put(&base, "Slack/Cache/a.bin", 10_000);
+        let c = cleaner_for(&tmp, &Fake::default());
+        let sel = scan_candidates(&base, Some(0));
+        let outside = tmp.path().join("Documents");
+        put(&outside, "keep.txt", 100);
+        fs::remove_dir_all(base.join("Slack/Cache")).unwrap();
+        std::os::unix::fs::symlink(&outside, base.join("Slack/Cache")).unwrap();
+        let r = c.apply_selection(&sel, &HashSet::new(), &DeepSuppressReporter);
+        assert!(outside.join("keep.txt").exists());
+        assert_eq!(r.bytes_freed, 0);
+        assert_eq!(r.skipped.len(), 1);
+        crate::trash::set_trash_mode(true);
+    }
+
+    #[test]
+    fn label_marks_running_apps() {
+        let tmp = TempDir::new().unwrap();
+        let base = base_of(&tmp);
+        put(&base, "Slack/Cache/a.bin", 10_000);
+        let sel = scan_candidates(&base, Some(0));
+        assert!(format_candidate_label(&sel[0], true).contains("[running]"));
+        assert!(!format_candidate_label(&sel[0], false).contains("[running]"));
+        assert!(format_candidate_label(&sel[0], false).contains("Slack/Cache"));
+    }
+
+    #[test]
+    fn app_support_is_never_auto_cleaned() {
+        let tmp = TempDir::new().unwrap();
+        assert!(!cleaner_for(&tmp, &Fake::default()).auto_clean_allowed());
     }
 }
