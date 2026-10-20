@@ -1,4 +1,7 @@
+use crate::command::CommandRunner;
 use std::collections::HashSet;
+use std::fs;
+use std::path::{Path, PathBuf};
 
 /// Vendors whose containers are never reported as orphans. Apple data is
 /// managed by the OS, and Docker has its own cleaner.
@@ -128,6 +131,122 @@ pub fn find_orphan_names(
         })
         .map(|(n, _)| n.clone())
         .collect()
+}
+
+/// The only values taken from an app's `Info.plist`. README promises that
+/// nothing else is read out of it, so do not add fields here.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AppIdentity {
+    pub bundle_id: String,
+    pub name: Option<String>,
+    pub display_name: Option<String>,
+}
+
+const PLIST_KEY_BUNDLE_ID: &str = "CFBundleIdentifier";
+const PLIST_KEY_NAME: &str = "CFBundleName";
+const PLIST_KEY_DISPLAY_NAME: &str = "CFBundleDisplayName";
+
+/// Value of `<key>{key}</key>` when it is directly followed by a non-blank
+/// `<string>`. A different `<key>` in between means the value is not a string.
+fn xml_string_value(xml: &str, key: &str) -> Option<String> {
+    const OPEN: &str = "<string>";
+    const CLOSE: &str = "</string>";
+    let key_tag = format!("<key>{key}</key>");
+    let after = &xml[xml.find(&key_tag)? + key_tag.len()..];
+    let open_at = after.find(OPEN)?;
+    if after.find("<key>").is_some_and(|k| k < open_at) {
+        return None;
+    }
+    let rest = &after[open_at + OPEN.len()..];
+    let value = rest[..rest.find(CLOSE)?].trim();
+    if value.is_empty() {
+        None
+    } else {
+        Some(value.to_string())
+    }
+}
+
+/// `None` when `CFBundleIdentifier` is missing; the two names are optional.
+pub fn parse_app_identity_from_xml(xml: &str) -> Option<AppIdentity> {
+    Some(AppIdentity {
+        bundle_id: xml_string_value(xml, PLIST_KEY_BUNDLE_ID)?,
+        name: xml_string_value(xml, PLIST_KEY_NAME),
+        display_name: xml_string_value(xml, PLIST_KEY_DISPLAY_NAME),
+    })
+}
+
+/// Reads an `Info.plist`. Binary plists (magic `bplist00`) are turned into XML
+/// on stdout by `plutil`, which ships with macOS, so no plist crate is needed.
+/// `-o -` matters: without it `plutil -convert` rewrites the file in place.
+pub fn read_app_identity(plist: &Path, runner: &dyn CommandRunner) -> Option<AppIdentity> {
+    let bytes = fs::read(plist).ok()?;
+    if bytes.starts_with(b"bplist00") {
+        let path = plist.to_str()?;
+        let out = runner
+            .run("plutil", &["-convert", "xml1", "-o", "-", path])
+            .ok()?;
+        if !out.status.success() {
+            return None;
+        }
+        return parse_app_identity_from_xml(std::str::from_utf8(&out.stdout).ok()?);
+    }
+    parse_app_identity_from_xml(std::str::from_utf8(&bytes).ok()?)
+}
+
+fn is_app_bundle(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case("app"))
+        && path.is_dir()
+}
+
+/// Lists `*.app` directly under `dir` and one level of sub-folders
+/// (for example `/Applications/Utilities`). `.app` bundles are not entered.
+fn list_app_bundles(dir: &Path) -> Vec<PathBuf> {
+    let mut apps = Vec::new();
+    let Ok(read) = fs::read_dir(dir) else {
+        return apps;
+    };
+    for entry in read.flatten() {
+        let path = entry.path();
+        if is_app_bundle(&path) {
+            apps.push(path);
+        } else if path.is_dir() {
+            if let Ok(sub) = fs::read_dir(&path) {
+                apps.extend(sub.flatten().map(|e| e.path()).filter(|p| is_app_bundle(p)));
+            }
+        }
+    }
+    apps
+}
+
+/// Identities of the apps found under `app_dirs`, in directory order.
+/// Bundles whose `Info.plist` cannot be read are skipped.
+pub fn collect_app_identities(
+    app_dirs: &[PathBuf],
+    runner: &dyn CommandRunner,
+) -> Vec<AppIdentity> {
+    app_dirs
+        .iter()
+        .flat_map(|dir| list_app_bundles(dir.as_path()))
+        .filter_map(|app| read_app_identity(&app.join("Contents/Info.plist"), runner))
+        .collect()
+}
+
+/// Lowercase bundle IDs of the apps found under `app_dirs`.
+pub fn collect_installed_ids(app_dirs: &[PathBuf], runner: &dyn CommandRunner) -> HashSet<String> {
+    collect_app_identities(app_dirs, runner)
+        .into_iter()
+        .map(|app| app.bundle_id.to_ascii_lowercase())
+        .collect()
+}
+
+pub fn default_app_dirs(home: &Path) -> Vec<PathBuf> {
+    vec![
+        PathBuf::from("/Applications"),
+        home.join("Applications"),
+        PathBuf::from("/System/Applications"),
+    ]
 }
 
 #[cfg(test)]
@@ -262,5 +381,307 @@ mod tests {
     #[test]
     fn find_orphan_names_empty_input() {
         assert!(find_orphan_names(ContainerKind::Containers, &[], &set(&[])).is_empty());
+    }
+
+    use crate::test_helpers::MockRunner;
+    use std::os::unix::process::ExitStatusExt;
+    use std::sync::Mutex;
+    use tempfile::TempDir;
+
+    const SECRET_URL_SCHEME: &str = "sasurahime-secret-url-scheme-7f3a";
+    const SECRET_VALUE: &str = "SasurahimeSecretValue7f3a";
+
+    /// Answers every `plutil` call with the same stdout and records the arguments.
+    struct PlutilStub {
+        stdout: String,
+        exit_code: i32,
+        calls: Mutex<Vec<Vec<String>>>,
+    }
+
+    impl PlutilStub {
+        fn new(stdout: &str, exit_code: i32) -> Self {
+            Self {
+                stdout: stdout.to_string(),
+                exit_code,
+                calls: Mutex::new(vec![]),
+            }
+        }
+    }
+
+    impl CommandRunner for PlutilStub {
+        fn run(&self, program: &str, args: &[&str]) -> anyhow::Result<std::process::Output> {
+            if program != "plutil" {
+                anyhow::bail!("unexpected program {program}");
+            }
+            self.calls
+                .lock()
+                .unwrap()
+                .push(args.iter().map(|s| s.to_string()).collect());
+            Ok(std::process::Output {
+                status: std::process::ExitStatus::from_raw(self.exit_code << 8),
+                stdout: self.stdout.as_bytes().to_vec(),
+                stderr: vec![],
+            })
+        }
+
+        fn exists(&self, program: &str) -> bool {
+            program == "plutil"
+        }
+    }
+
+    fn plist_xml(bundle_id: &str) -> String {
+        format!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<plist version=\"1.0\">\n<dict>\n\t<key>CFBundleName</key>\n\t<string>X</string>\n\t<key>CFBundleIdentifier</key>\n\t<string>{bundle_id}</string>\n</dict>\n</plist>\n"
+        )
+    }
+
+    /// A plist whose other keys hold values that must never come out of the
+    /// reader. They are placed before the three keys on purpose.
+    fn plist_xml_with_other_keys(bundle_id: &str) -> String {
+        format!(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0">
+<dict>
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>{SECRET_URL_SCHEME}</string>
+            </array>
+        </dict>
+    </array>
+    <key>SasurahimeDummyKey</key>
+    <string>{SECRET_VALUE}</string>
+    <key>CFBundleIdentifier</key>
+    <string>{bundle_id}</string>
+    <key>CFBundleName</key>
+    <string>Keeper</string>
+    <key>CFBundleDisplayName</key>
+    <string>Keeper Display</string>
+</dict>
+</plist>
+"#
+        )
+    }
+
+    fn write_app(apps_dir: &Path, rel: &str, bundle_id: &str) {
+        let contents = apps_dir.join(rel).join("Contents");
+        fs::create_dir_all(&contents).unwrap();
+        fs::write(contents.join("Info.plist"), plist_xml(bundle_id)).unwrap();
+    }
+
+    #[test]
+    fn parse_app_identity_from_xml_reads_three_keys() {
+        assert_eq!(
+            parse_app_identity_from_xml(&plist_xml("com.foo.App")),
+            Some(AppIdentity {
+                bundle_id: "com.foo.App".to_string(),
+                name: Some("X".to_string()),
+                display_name: None,
+            })
+        );
+    }
+
+    #[test]
+    fn parse_app_identity_from_xml_missing_bundle_id_is_none() {
+        let xml = "<dict><key>CFBundleName</key><string>X</string></dict>";
+        assert_eq!(parse_app_identity_from_xml(xml), None);
+    }
+
+    #[test]
+    fn parse_app_identity_from_xml_key_without_string_is_none() {
+        let xml =
+            "<dict><key>CFBundleIdentifier</key><true/><key>Other</key><string>y</string></dict>";
+        assert_eq!(parse_app_identity_from_xml(xml), None);
+    }
+
+    #[test]
+    fn parse_app_identity_from_xml_empty_bundle_id_is_none() {
+        let xml = "<dict><key>CFBundleIdentifier</key><string>  </string></dict>";
+        assert_eq!(parse_app_identity_from_xml(xml), None);
+    }
+
+    #[test]
+    fn parse_app_identity_from_xml_ignores_other_keys() {
+        let identity =
+            parse_app_identity_from_xml(&plist_xml_with_other_keys("com.foo.Keeper")).unwrap();
+        assert_eq!(
+            identity,
+            AppIdentity {
+                bundle_id: "com.foo.Keeper".to_string(),
+                name: Some("Keeper".to_string()),
+                display_name: Some("Keeper Display".to_string()),
+            }
+        );
+        let shown = format!("{identity:?}");
+        assert!(!shown.contains(SECRET_URL_SCHEME), "{shown}");
+        assert!(!shown.contains(SECRET_VALUE), "{shown}");
+    }
+
+    #[test]
+    fn app_identity_has_exactly_three_fields() {
+        // No `..` in the pattern: adding a field to AppIdentity breaks this
+        // test on purpose, because README promises only these three values.
+        let AppIdentity {
+            bundle_id,
+            name,
+            display_name,
+        } = AppIdentity {
+            bundle_id: "com.foo.App".to_string(),
+            name: None,
+            display_name: None,
+        };
+        assert_eq!(bundle_id, "com.foo.App");
+        assert!(name.is_none() && display_name.is_none());
+    }
+
+    #[test]
+    fn read_app_identity_reads_xml_file() {
+        let tmp = TempDir::new().unwrap();
+        let p = tmp.path().join("Info.plist");
+        fs::write(&p, plist_xml("com.foo.App")).unwrap();
+        let runner = MockRunner::new().with_not_found();
+        assert_eq!(
+            read_app_identity(&p, &runner).map(|a| a.bundle_id),
+            Some("com.foo.App".to_string())
+        );
+    }
+
+    #[test]
+    fn read_app_identity_garbage_is_none() {
+        let tmp = TempDir::new().unwrap();
+        let p = tmp.path().join("Info.plist");
+        fs::write(&p, [0xffu8, 0xfe, 0x00, 0x01]).unwrap();
+        let runner = MockRunner::new().with_not_found();
+        assert_eq!(read_app_identity(&p, &runner), None);
+    }
+
+    #[test]
+    fn read_app_identity_missing_file_is_none() {
+        let tmp = TempDir::new().unwrap();
+        let runner = MockRunner::new().with_not_found();
+        assert_eq!(
+            read_app_identity(&tmp.path().join("nope.plist"), &runner),
+            None
+        );
+    }
+
+    #[test]
+    fn read_app_identity_binary_plist_converts_with_plutil() {
+        let tmp = TempDir::new().unwrap();
+        let p = tmp.path().join("Info.plist");
+        fs::write(&p, b"bplist00\x00\x01\x02").unwrap();
+        let runner = PlutilStub::new(&plist_xml_with_other_keys("com.example.bin"), 0);
+        let identity = read_app_identity(&p, &runner).unwrap();
+        assert_eq!(identity.bundle_id, "com.example.bin");
+        assert_eq!(identity.name.as_deref(), Some("Keeper"));
+        let shown = format!("{identity:?}");
+        assert!(!shown.contains(SECRET_URL_SCHEME), "{shown}");
+        assert!(!shown.contains(SECRET_VALUE), "{shown}");
+        let path = p.to_str().unwrap().to_string();
+        assert_eq!(
+            *runner.calls.lock().unwrap(),
+            vec![vec![
+                "-convert".to_string(),
+                "xml1".to_string(),
+                "-o".to_string(),
+                "-".to_string(),
+                path,
+            ]]
+        );
+    }
+
+    #[test]
+    fn read_app_identity_binary_plist_plutil_failure_is_none() {
+        let tmp = TempDir::new().unwrap();
+        let p = tmp.path().join("Info.plist");
+        fs::write(&p, b"bplist00\x00\x01\x02").unwrap();
+        let failing = PlutilStub::new("", 1);
+        assert_eq!(read_app_identity(&p, &failing), None);
+        let not_found = MockRunner::new().with_not_found();
+        assert_eq!(read_app_identity(&p, &not_found), None);
+    }
+
+    #[test]
+    fn collect_installed_ids_scans_top_level_and_one_subfolder() {
+        let tmp = TempDir::new().unwrap();
+        let apps = tmp.path().join("Applications");
+        write_app(&apps, "Foo.app", "com.foo.App");
+        write_app(&apps, "Utilities/Bar.app", "com.bar.Tool");
+        write_app(&apps, "Utilities/Deep/Baz.app", "com.baz.TooDeep");
+        let runner = MockRunner::new().with_not_found();
+        let ids = collect_installed_ids(&[apps], &runner);
+        assert_eq!(ids, set(&["com.foo.app", "com.bar.tool"]));
+    }
+
+    #[test]
+    fn collect_installed_ids_ignores_broken_and_non_app_entries() {
+        let tmp = TempDir::new().unwrap();
+        let apps = tmp.path().join("Applications");
+        fs::create_dir_all(apps.join("Broken.app/Contents")).unwrap();
+        fs::create_dir_all(apps.join("NotAnApp/Contents")).unwrap();
+        fs::write(
+            apps.join("NotAnApp/Contents/Info.plist"),
+            plist_xml("com.no.App"),
+        )
+        .unwrap();
+        fs::write(apps.join("file.app"), b"plain file").unwrap();
+        write_app(&apps, "Good.app", "com.good.App");
+        let runner = MockRunner::new().with_not_found();
+        let ids = collect_installed_ids(&[apps], &runner);
+        assert_eq!(ids, set(&["com.good.app"]));
+    }
+
+    #[test]
+    fn collect_installed_ids_handles_missing_dirs_and_multiple_roots() {
+        let tmp = TempDir::new().unwrap();
+        let a = tmp.path().join("A");
+        let b = tmp.path().join("B");
+        write_app(&a, "One.app", "com.one.App");
+        write_app(&b, "Two.app", "com.two.App");
+        let missing = tmp.path().join("missing");
+        let runner = MockRunner::new().with_not_found();
+        let ids = collect_installed_ids(&[a, missing, b], &runner);
+        assert_eq!(ids, set(&["com.one.app", "com.two.app"]));
+    }
+
+    #[test]
+    fn collect_app_identities_returns_only_the_three_values() {
+        let tmp = TempDir::new().unwrap();
+        let apps = tmp.path().join("Applications");
+        let contents = apps.join("Keeper.app/Contents");
+        fs::create_dir_all(&contents).unwrap();
+        fs::write(
+            contents.join("Info.plist"),
+            plist_xml_with_other_keys("com.foo.Keeper"),
+        )
+        .unwrap();
+        let runner = MockRunner::new().with_not_found();
+        let found = collect_app_identities(&[apps], &runner);
+        assert_eq!(
+            found,
+            vec![AppIdentity {
+                bundle_id: "com.foo.Keeper".to_string(),
+                name: Some("Keeper".to_string()),
+                display_name: Some("Keeper Display".to_string()),
+            }]
+        );
+        let shown = format!("{found:?}");
+        assert!(!shown.contains(SECRET_URL_SCHEME), "{shown}");
+        assert!(!shown.contains(SECRET_VALUE), "{shown}");
+    }
+
+    #[test]
+    fn default_app_dirs_lists_three_roots() {
+        let dirs = default_app_dirs(Path::new("/Users/x"));
+        assert_eq!(
+            dirs,
+            vec![
+                PathBuf::from("/Applications"),
+                PathBuf::from("/Users/x/Applications"),
+                PathBuf::from("/System/Applications"),
+            ]
+        );
     }
 }
