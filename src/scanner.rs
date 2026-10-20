@@ -48,4 +48,12 @@ pub fn run_scan(cleaners: &[Box<dyn Cleaner>]) {
     if total > 0 {
         println!("\nTotal reclaimable: {}", format_bytes(total));
     }
+
+    let notes: Vec<String> = available.iter().filter_map(|c| c.advisory()).collect();
+    if !notes.is_empty() {
+        println!("\nNotes:");
+        for note in notes {
+            println!("{note}");
+        }
+    }
 }
