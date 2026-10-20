@@ -90,10 +90,12 @@ sasurahime reads the following directories to identify cleanable cache data:
 - `~/.cache/`, `~/Library/Caches/`, `~/.local/share/`, `~/Library/Application Support/`
 - `~/Library/Application Support/MobileSync/Backup/` (iOS backups — only with `sasurahime clean ios-backup`)
 - `~/Library/Containers/com.docker.docker/Data/` and `~/.colima/` (size of the virtual disk image files only, shown by `sasurahime scan`)
+- `~/Library/Containers/` and `~/Library/Group Containers/` (folder names and sizes only; `sasurahime clean orphan-containers`)
 
 The tool reads file and directory metadata (names, sizes, modification times) to determine what can be cleaned. It reads the contents of only the following files, and only to decide what can be cleaned:
 
 - mise configuration files (`~/.config/mise/config.toml` and every `.mise.toml` within 5 directory levels of your home directory), to find runtime versions that are still in use so that they are not deleted
+- the `Info.plist` of installed apps (`.app` bundles in `/Applications`, `~/Applications` and `/System/Applications`, and one folder level below them); only the bundle ID and the app name are taken from it, to tell leftovers of uninstalled apps from the data of installed apps
 
 Values read from these files are not written to logs or to the deletion history. sasurahime also reads its own configuration file (`~/.config/sasurahime/config.toml`, or the file given with `--config`) and its deletion history (`~/.local/share/sasurahime/history.json`). It does **not** read the contents of any other file.
 
@@ -205,10 +207,12 @@ sasurahime は以下のディレクトリを読み取り、クリーニング可
 - `~/.cache/`、`~/Library/Caches/`、`~/.local/share/`、`~/Library/Application Support/`
 - `~/Library/Application Support/MobileSync/Backup/`（iOS バックアップ — `sasurahime clean ios-backup` でのみアクセス）
 - `~/Library/Containers/com.docker.docker/Data/` と `~/.colima/`（仮想ディスクイメージのファイルサイズのみ。`sasurahime scan` で表示）
+- `~/Library/Containers/` と `~/Library/Group Containers/`（フォルダ名とサイズのみ。`sasurahime clean orphan-containers` で使用）
 
 ツールはファイルとディレクトリのメタデータ（名前、サイズ、更新日時）を読み取り、削除できるものを判断します。ファイルの内容を読み取るのは次のファイルだけで、目的は削除できるものの判断に限ります:
 
 - mise の設定ファイル（`~/.config/mise/config.toml` と、ホームディレクトリから 5 階層以内にあるすべての `.mise.toml`）。使用中の runtime のバージョンを特定し、削除しないようにするため
+- インストール済みアプリの `Info.plist`（`/Applications`、`~/Applications`、`/System/Applications` の直下と 1 階層下にある `.app`）。取り出すのは bundle ID とアプリ名だけで、アンインストール済みアプリの残骸とインストール済みアプリのデータを見分けるため
 
 これらのファイルから読み取った値は、ログにも削除履歴にも書き出しません。このほか、sasurahime 自身の設定ファイル（`~/.config/sasurahime/config.toml`、または `--config` で指定したファイル）と削除履歴（`~/.local/share/sasurahime/history.json`）を読み取ります。それ以外のファイルの内容は読み取りません。
 

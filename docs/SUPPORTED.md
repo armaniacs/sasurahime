@@ -7,7 +7,7 @@ permalink: /SUPPORTED
 <details open markdown="1">
 <summary markdown="0"><strong>🇺🇸 English</strong></summary>
 
-sasurahime provides **48 clean targets**. Every target supports both `detect`
+sasurahime provides **49 clean targets**. Every target supports both `detect`
 (read-only, no side effects) and `clean` (removal). All `clean` subcommands
 accept `--dry-run`. Only caches and old versions are removed — active runtimes
 and packages are never touched.
@@ -63,6 +63,7 @@ and packages are never touched.
 | `downloads` | `~/Downloads/` old files |
 | `ios-backup` | iOS backups — interactive only, never in `--yes` |
 | `apfs-snapshot` | APFS local Time Machine snapshots — interactive, or `--all` |
+| `orphan-containers` | Leftover `~/Library/Containers` and `~/Library/Group Containers` of uninstalled apps - interactive only, never in `--yes` |
 | `trash` | Reports `~/.Trash` size (scan only) |
 
 ---
@@ -1243,7 +1244,53 @@ are removed; `Gemfile.lock` is not modified.
 
 ---
 
-## 49. `sasurahime stats`
+## 49. `sasurahime clean orphan-containers`
+
+**Category:** Sprint 6
+
+**What it removes:** Folders under `~/Library/Containers` and
+`~/Library/Group Containers` whose app is not installed. Selected folders are
+moved to the Trash (use `--permanent` to delete them instead).
+
+**How detect works:**
+1. Collects the `CFBundleIdentifier` of every `*.app` directly under
+   `/Applications`, `~/Applications` and `/System/Applications`, plus one level
+   of sub-folders (for example `/Applications/Utilities`). Bundles whose
+   `Info.plist` cannot be read are ignored.
+2. A `Containers` folder is kept when its name equals an installed ID or is a
+   dot-separated child of one (`com.foo.App.Helper` belongs to `com.foo.App`;
+   `com.foo.AppX` does not). Matching is case-insensitive.
+3. For `Group Containers`, a leading team ID (10 uppercase letters or digits
+   plus `.`) and then a leading `group.` / `groups.` are removed before the same
+   matching. If any folder of a team matches an installed app, every folder of
+   that team is kept.
+4. `com.apple.*` (including `group.com.apple.*`) and `com.docker.*` are never
+   reported.
+5. Returns `Pruneable` with the total size of the candidates, or `Clean` when
+   there are none. Folders that cannot be read (no Full Disk Access) are not
+   counted.
+
+**How clean works:**
+1. `--dry-run` lists the candidates and removes nothing.
+2. Without `--dry-run`, a `dialoguer::MultiSelect` prompt opens with nothing
+   selected. Only the chosen folders are moved to the Trash.
+3. There is no `--all`. With a non-TTY stdin, or under `--yes`, nothing is
+   removed.
+4. When some folders could not be read, the number of them is printed together
+   with a hint to grant Full Disk Access to your terminal. sasurahime never
+   changes permissions.
+
+**Limits:** Containers of iOS apps running on Apple silicon (`Wrapper/*.app`)
+are not matched to an installed app and may be listed; review the list before
+selecting.
+
+**Safety:**
+- Nothing is selected by default; `--yes` never runs this cleaner.
+- `--dry-run` has no side effects.
+
+---
+
+## 50. `sasurahime stats`
 
 **Category:** Sprint 5
 
@@ -1356,7 +1403,7 @@ Runs `detect()` on every cleaner and prints a formatted table via
 <details markdown="1">
 <summary markdown="0"><strong>🇯🇵 日本語</strong></summary>
 
-sasurahime は **48 のクリーンターゲット** を提供しています。すべてのターゲットは
+sasurahime は **49 のクリーンターゲット** を提供しています。すべてのターゲットは
 `detect`（読み取り専用、副作用なし）と `clean`（削除）の両方に対応しており、
 すべての `clean` サブコマンドは `--dry-run` をサポートしています。
 削除されるのはキャッシュや古いバージョンのみで、現在使用中のランタイムやパッケージには触れません。
@@ -1412,6 +1459,7 @@ sasurahime は **48 のクリーンターゲット** を提供しています。
 | `downloads` | `~/Downloads/` の古いファイル |
 | `ios-backup` | iOS バックアップ — 対話的のみ、`--yes` では非実行 |
 | `apfs-snapshot` | APFS ローカル Time Machine スナップショット — 対話的、または `--all` |
+| `orphan-containers` | アンインストール済みアプリの `~/Library/Containers` と `~/Library/Group Containers` の残骸 - 対話的のみ、`--yes` では実行しない |
 | `trash` | `~/.Trash` のサイズを報告（スキャンのみ） |
 
 ---
@@ -2465,7 +2513,46 @@ Time Machine スナップショット（`<date>` は `YYYY-MM-DD-HHMMSS`）。
 
 ---
 
-## 49. `sasurahime stats`
+## 49. `sasurahime clean orphan-containers`
+
+**カテゴリ:** Sprint 6
+
+**削除対象:** 対応するアプリがインストールされていない `~/Library/Containers` と
+`~/Library/Group Containers` 配下のフォルダ。選択したフォルダはゴミ箱へ移動します
+（`--permanent` を付けると完全削除します）。
+
+**detect の動作:**
+1. `/Applications`、`~/Applications`、`/System/Applications` の直下と、その 1 段下の
+   サブフォルダ（例 `/Applications/Utilities`）にある `*.app` の `CFBundleIdentifier`
+   を集めます。`Info.plist` を読めない .app は無視します。
+2. `Containers` のフォルダは、名前がインストール済み ID と一致するか、そのドット区切り
+   の子（`com.foo.App.Helper` は `com.foo.App` に属します。`com.foo.AppX` は属しません）
+   であれば除外します。大文字小文字は区別しません。
+3. `Group Containers` は、先頭のチーム ID（英数字大文字 10 文字 + `.`）と、続く
+   `group.` / `groups.` を外してから同じ照合をします。あるチームのフォルダが 1 つでも
+   インストール済みアプリと一致する場合、そのチームの全フォルダを除外します。
+4. `com.apple.*`（`group.com.apple.*` を含む）と `com.docker.*` は報告しません。
+5. 候補の合計サイズで `Pruneable` を返します。候補がなければ `Clean` です。
+   読み取れないフォルダ（Full Disk Access なし）は数えません。
+
+**clean の動作:**
+1. `--dry-run` は候補を一覧表示するだけで、何も削除しません。
+2. `--dry-run` なしでは `dialoguer::MultiSelect` を開きます。既定では何も選択されて
+   いません。選択したフォルダだけをゴミ箱へ移動します。
+3. `--all` はありません。非 TTY の場合と `--yes` では何も削除しません。
+4. 読み取れなかったフォルダがあるときは、その件数と、ターミナルに Full Disk Access を
+   付与すると全件を調べられる旨を表示します。sasurahime が権限を変更することはありません。
+
+**制限:** Apple シリコンで動作する iOS アプリ（`Wrapper/*.app`）のコンテナは、
+インストール済みアプリと対応付けられず候補に出ることがあります。選択前に一覧を確認してください。
+
+**安全性:**
+- 既定では何も選択されません。`--yes` ではこの cleaner は実行されません。
+- `--dry-run` は副作用ゼロです。
+
+---
+
+## 50. `sasurahime stats`
 
 **カテゴリ:** Sprint 5
 

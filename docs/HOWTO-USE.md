@@ -125,6 +125,7 @@ Clean a single cache target. Replace `<target>` with one of the names below.
 | `node-gyp`      | Deletes `~/.cache/node-gyp/`                                          |
 | `npm`           | `npm cache clean --force`                                             |
 | `ollama`        | Ollama model cache — interactive selection or directory deletion       |
+| `orphan-containers` | Leftover `~/Library/Containers` / `~/Library/Group Containers` of uninstalled apps (interactive only) |
 | `orbstack`      | `orb prune`                                                           |
 | `pip`           | `pip cache purge`                                                     |
 | `pipx`          | `pipx cache purge`                                                    |
@@ -698,6 +699,7 @@ Tip ブロックはサイズ降順で最大 **5 件** 表示します。64 MB �
 | `node-gyp`      | `~/.cache/node-gyp/` を削除                                          |
 | `npm`           | `npm cache clean --force`                                            |
 | `ollama`        | Ollama モデルキャッシュ — 対話的選択またはディレクトリ削除                |
+| `orphan-containers` | アンインストール済みアプリの `~/Library/Containers` / `~/Library/Group Containers` の残骸（対話的のみ） |
 | `orbstack`      | `orb prune`                                                          |
 | `pip`           | `pip cache purge`                                                    |
 | `pipx`          | `pipx cache purge`                                                   |
