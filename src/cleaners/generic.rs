@@ -3,6 +3,9 @@ use crate::command::CommandRunner;
 #[cfg(test)]
 use crate::command::SystemCommandRunner;
 use crate::config::Config;
+use crate::disk_image::{
+    colima_candidates, docker_desktop_candidates, DiskImageNotice, COLIMA_REMEDY, DOCKER_REMEDY,
+};
 use crate::format::dir_size;
 use crate::progress::ProgressReporter;
 use anyhow::Result;
@@ -48,6 +51,8 @@ pub struct GenericCleaner {
     older_than_days: Option<u32>,
     /// Skip entries with total size below this many MiB (None = no filter).
     larger_than_mb: Option<u64>,
+    /// Sparse VM disk image that pruning inside the VM may not shrink.
+    notice: Option<DiskImageNotice>,
 }
 
 impl GenericCleaner {
@@ -64,6 +69,7 @@ impl GenericCleaner {
             fallback_delete: false,
             older_than_days: None,
             larger_than_mb: None,
+            notice: None,
         }
     }
 
@@ -74,6 +80,11 @@ impl GenericCleaner {
         runner: Box<dyn CommandRunner>,
     ) -> Self {
         Self::base_cleaner(display_name, CleanMethod::Command { program, args }, runner)
+    }
+
+    pub fn with_notice(mut self, notice: DiskImageNotice) -> Self {
+        self.notice = Some(notice);
+        self
     }
 
     pub fn bun(runner: Box<dyn CommandRunner>) -> Self {
@@ -108,8 +119,10 @@ impl GenericCleaner {
         Self::command_cleaner("pipx", "pipx", &["cache", "purge"], runner)
     }
 
-    pub fn docker(runner: Box<dyn CommandRunner>) -> Self {
-        Self::command_cleaner("docker", "docker", &["system", "prune", "-f"], runner)
+    pub fn docker(home: &Path, runner: Box<dyn CommandRunner>) -> Self {
+        Self::command_cleaner("docker", "docker", &["system", "prune", "-f"], runner).with_notice(
+            DiskImageNotice::new("docker", docker_desktop_candidates(home), DOCKER_REMEDY),
+        )
     }
 
     pub fn orbstack(runner: Box<dyn CommandRunner>) -> Self {
@@ -159,6 +172,11 @@ impl GenericCleaner {
                 runner,
             )
         }
+        .with_notice(DiskImageNotice::new(
+            "colima",
+            colima_candidates(home),
+            COLIMA_REMEDY,
+        ))
     }
 
     pub fn cocoapods(runner: Box<dyn CommandRunner>) -> Self {
@@ -417,6 +435,10 @@ impl Cleaner for GenericCleaner {
         }
     }
 
+    fn advisory(&self) -> Option<String> {
+        self.notice.as_ref().and_then(|n| n.render())
+    }
+
     fn name(&self) -> &'static str {
         self.display_name
     }
@@ -505,7 +527,27 @@ impl Cleaner for GenericCleaner {
                     });
                 }
                 println!("$ {program} {}", args.join(" "));
-                self.runner.run(program, args)?;
+                let image_before = self.notice.as_ref().map_or(0, |n| n.physical_total());
+                let output = self.runner.run(program, args)?;
+                if !output.status.success() {
+                    eprintln!(
+                        "[{}] warning: `{} {}` exited with code {:?}",
+                        self.display_name,
+                        program,
+                        args.join(" "),
+                        output.status.code()
+                    );
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    if !stderr.is_empty() {
+                        eprintln!("[{}] stderr: {stderr}", self.display_name);
+                    }
+                } else if let Some(msg) = self
+                    .notice
+                    .as_ref()
+                    .and_then(|n| n.after_clean_message(image_before, n.physical_total()))
+                {
+                    println!("{msg}");
+                }
                 Ok(CleanResult {
                     name: self.name(),
                     bytes_freed: 0,
@@ -1238,6 +1280,7 @@ mod tests {
             fallback_delete: false,
             older_than_days: Some(30),
             larger_than_mb: None,
+            notice: None,
         };
         let result = cleaner.detect();
         assert!(matches!(result.status, ScanStatus::Pruneable(_)));
@@ -1271,6 +1314,7 @@ mod tests {
             fallback_delete: false,
             older_than_days: None,
             larger_than_mb: Some(1),
+            notice: None,
         };
         let result = cleaner.detect();
         assert!(matches!(result.status, ScanStatus::Pruneable(_)));
@@ -1298,6 +1342,7 @@ mod tests {
             fallback_delete: false,
             older_than_days: Some(30),
             larger_than_mb: None,
+            notice: None,
         };
         let result = cleaner.detect();
         assert!(matches!(result.status, ScanStatus::NotFound));
@@ -1425,5 +1470,70 @@ mod tests {
         assert!(matches!(plain.status, ScanStatus::Pruneable(_)));
         assert!(matches!(configured.status, ScanStatus::Pruneable(_)));
         assert_eq!(plain.bytes_for_test(), configured.bytes_for_test());
+    }
+
+    fn write_sparse_image(path: &Path) {
+        use std::io::Write;
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let mut f = fs::File::create(path).unwrap();
+        f.write_all(&vec![1u8; 2 * 1024 * 1024]).unwrap();
+        f.set_len(64 * 1024 * 1024).unwrap();
+    }
+
+    #[test]
+    fn docker_advisory_reports_virtual_disk() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        write_sparse_image(
+            &tmp.path()
+                .join("Library/Containers/com.docker.docker/Data/vms/0/data/Docker.raw"),
+        );
+        let runner = crate::test_helpers::MockRunner::new().with_success("docker");
+        let cleaner = GenericCleaner::docker(tmp.path(), Box::new(runner));
+        let text = cleaner.advisory().expect("advisory when Docker.raw exists");
+        assert!(text.contains("Docker.raw"), "{text}");
+        assert!(text.contains("Disk image size"), "{text}");
+    }
+
+    #[test]
+    fn docker_advisory_is_none_without_virtual_disk() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let runner = crate::test_helpers::MockRunner::new().with_success("docker");
+        assert!(GenericCleaner::docker(tmp.path(), Box::new(runner))
+            .advisory()
+            .is_none());
+    }
+
+    #[test]
+    fn docker_detect_does_not_run_commands_and_stays_pruneable_zero() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        struct ExistsOnlyRunner;
+        impl CommandRunner for ExistsOnlyRunner {
+            fn run(&self, _: &str, _: &[&str]) -> anyhow::Result<std::process::Output> {
+                unreachable!("detect must not execute external commands")
+            }
+            fn exists(&self, _: &str) -> bool {
+                true
+            }
+        }
+        let cleaner = GenericCleaner::docker(tmp.path(), Box::new(ExistsOnlyRunner));
+        assert!(matches!(cleaner.detect().status, ScanStatus::Pruneable(0)));
+    }
+
+    #[test]
+    fn colima_advisory_reports_disk_images() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        write_sparse_image(&tmp.path().join(".colima/_lima/colima/disk"));
+        let cleaner = GenericCleaner::colima_prune(tmp.path(), Box::new(MissingToolRunner));
+        let text = cleaner
+            .advisory()
+            .expect("advisory when colima disk exists");
+        assert!(text.contains("[colima]"), "{text}");
+        assert!(text.contains("fstrim"), "{text}");
+    }
+
+    #[test]
+    fn non_vm_cleaner_has_no_advisory() {
+        let cleaner = GenericCleaner::npm(Box::new(MissingToolRunner));
+        assert!(cleaner.advisory().is_none());
     }
 }

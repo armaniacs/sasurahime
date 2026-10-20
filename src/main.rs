@@ -148,7 +148,7 @@ define_cleaners! {
     (|home, _config| cleaners::cargo::CargoCleaner::new(home, Box::new(SystemCommandRunner))),
 
     Docker : "docker" => "Docker system prune (images, containers, build cache)";
-    (|_home, _config| cleaners::generic::GenericCleaner::docker(Box::new(SystemCommandRunner))),
+    (|home, _config| cleaners::generic::GenericCleaner::docker(home, Box::new(SystemCommandRunner))),
 
     Orbstack : "orbstack" => "Orbstack prune";
     (|_home, _config| cleaners::generic::GenericCleaner::orbstack(Box::new(SystemCommandRunner))),
