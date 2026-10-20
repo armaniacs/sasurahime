@@ -1,6 +1,7 @@
 use crate::hint::apps::KNOWN_ENTRIES;
 use crate::hint::{BaseDir, HintEntry};
-use std::path::Path;
+use std::fs;
+use std::path::{Component, Path, PathBuf};
 
 pub const DEFAULT_MIN_APP_BYTES: u64 = 64 * 1024 * 1024;
 
@@ -94,6 +95,67 @@ pub fn hint_entry(target: &AppSupportTarget) -> Option<&'static HintEntry> {
     KNOWN_ENTRIES
         .iter()
         .find(|e| e.base_dir == BaseDir::AppSupport && e.display_name == target.hint_name)
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum GuardError {
+    NotAllowed,
+    NotFound,
+    Symlink,
+    NotDirectory,
+    Unreadable,
+    OutsideBase,
+}
+
+impl std::fmt::Display for GuardError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            GuardError::NotAllowed => "path is not in the allowlist",
+            GuardError::NotFound => "path does not exist",
+            GuardError::Symlink => "path contains a symbolic link",
+            GuardError::NotDirectory => "path is not a directory",
+            GuardError::Unreadable => "path is not readable",
+            GuardError::OutsideBase => "path resolves outside Application Support",
+        };
+        f.write_str(s)
+    }
+}
+
+/// The only way to obtain a deletable path. `sub` must equal one of
+/// `target.subpaths` verbatim, and no component below `base` may be a symlink.
+pub fn resolve_allowed(
+    base: &Path,
+    target: &AppSupportTarget,
+    sub: &str,
+) -> Result<PathBuf, GuardError> {
+    if !target.subpaths.iter().any(|s| *s == sub) {
+        return Err(GuardError::NotAllowed);
+    }
+    let rel = Path::new(target.root).join(sub);
+    if rel.components().any(|c| !matches!(c, Component::Normal(_))) {
+        return Err(GuardError::NotAllowed);
+    }
+    let mut cur = base.to_path_buf();
+    for comp in rel.components() {
+        cur.push(comp);
+        let meta = match fs::symlink_metadata(&cur) {
+            Ok(m) => m,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Err(GuardError::NotFound),
+            Err(_) => return Err(GuardError::Unreadable),
+        };
+        if meta.file_type().is_symlink() {
+            return Err(GuardError::Symlink);
+        }
+        if !meta.is_dir() {
+            return Err(GuardError::NotDirectory);
+        }
+    }
+    let canonical_base = base.canonicalize().map_err(|_| GuardError::Unreadable)?;
+    let canonical = cur.canonicalize().map_err(|_| GuardError::Unreadable)?;
+    if !canonical.starts_with(&canonical_base) {
+        return Err(GuardError::OutsideBase);
+    }
+    Ok(cur)
 }
 
 #[cfg(test)]
@@ -212,5 +274,158 @@ mod tests {
                 }
             }
         }
+    }
+    use std::fs;
+    use tempfile::TempDir;
+
+    fn target(name: &str) -> &'static AppSupportTarget {
+        TARGETS.iter().find(|t| t.hint_name == name).unwrap()
+    }
+
+    fn base_of(tmp: &TempDir) -> PathBuf {
+        let b = tmp.path().join("Library/Application Support");
+        fs::create_dir_all(&b).unwrap();
+        b
+    }
+
+    #[test]
+    fn resolve_allows_listed_existing_dir() {
+        let tmp = TempDir::new().unwrap();
+        let base = base_of(&tmp);
+        fs::create_dir_all(base.join("Slack/Cache")).unwrap();
+        let p = resolve_allowed(&base, target("Slack"), "Cache").unwrap();
+        assert_eq!(p, base.join("Slack/Cache"));
+    }
+
+    #[test]
+    fn resolve_allows_nested_chrome_path() {
+        let tmp = TempDir::new().unwrap();
+        let base = base_of(&tmp);
+        fs::create_dir_all(base.join("Google/Chrome/Default/Service Worker/CacheStorage")).unwrap();
+        let p = resolve_allowed(
+            &base,
+            target("Google Chrome"),
+            "Default/Service Worker/CacheStorage",
+        );
+        assert!(p.is_ok());
+    }
+
+    #[test]
+    fn resolve_rejects_unlisted_user_data_even_if_it_exists() {
+        let tmp = TempDir::new().unwrap();
+        let base = base_of(&tmp);
+        for d in ["Local Storage", "IndexedDB", "Partitions", "Service Worker"] {
+            fs::create_dir_all(base.join("Slack").join(d)).unwrap();
+            assert_eq!(
+                resolve_allowed(&base, target("Slack"), d),
+                Err(GuardError::NotAllowed),
+                "{d}"
+            );
+        }
+    }
+
+    #[test]
+    fn resolve_rejects_path_traversal_and_absolute() {
+        let tmp = TempDir::new().unwrap();
+        let base = base_of(&tmp);
+        fs::create_dir_all(base.join("Slack/Cache")).unwrap();
+        fs::create_dir_all(base.join("Code/Cache")).unwrap();
+        for sub in [
+            "../Code/Cache",
+            "Cache/..",
+            "Cache/../Local Storage",
+            "../../..",
+            "/etc",
+            "",
+            ".",
+            "./Cache",
+            "Cache/",
+        ] {
+            assert_eq!(
+                resolve_allowed(&base, target("Slack"), sub),
+                Err(GuardError::NotAllowed),
+                "sub = {sub:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn resolve_rejects_symlinked_root() {
+        let tmp = TempDir::new().unwrap();
+        let base = base_of(&tmp);
+        let outside = tmp.path().join("outside");
+        fs::create_dir_all(outside.join("Cache")).unwrap();
+        std::os::unix::fs::symlink(&outside, base.join("Slack")).unwrap();
+        assert_eq!(
+            resolve_allowed(&base, target("Slack"), "Cache"),
+            Err(GuardError::Symlink)
+        );
+    }
+
+    #[test]
+    fn resolve_rejects_symlinked_leaf() {
+        let tmp = TempDir::new().unwrap();
+        let base = base_of(&tmp);
+        let outside = tmp.path().join("Documents");
+        fs::create_dir_all(&outside).unwrap();
+        fs::create_dir_all(base.join("Slack")).unwrap();
+        std::os::unix::fs::symlink(&outside, base.join("Slack/Cache")).unwrap();
+        assert_eq!(
+            resolve_allowed(&base, target("Slack"), "Cache"),
+            Err(GuardError::Symlink)
+        );
+    }
+
+    #[test]
+    fn resolve_rejects_symlinked_middle_component() {
+        let tmp = TempDir::new().unwrap();
+        let base = base_of(&tmp);
+        let outside = tmp.path().join("elsewhere");
+        fs::create_dir_all(outside.join("CacheStorage")).unwrap();
+        fs::create_dir_all(base.join("Slack")).unwrap();
+        std::os::unix::fs::symlink(&outside, base.join("Slack/Service Worker")).unwrap();
+        assert_eq!(
+            resolve_allowed(&base, target("Slack"), "Service Worker/CacheStorage"),
+            Err(GuardError::Symlink)
+        );
+    }
+
+    #[test]
+    fn resolve_rejects_file_where_dir_expected() {
+        let tmp = TempDir::new().unwrap();
+        let base = base_of(&tmp);
+        fs::create_dir_all(base.join("Slack")).unwrap();
+        fs::write(base.join("Slack/Cache"), b"x").unwrap();
+        assert_eq!(
+            resolve_allowed(&base, target("Slack"), "Cache"),
+            Err(GuardError::NotDirectory)
+        );
+    }
+
+    #[test]
+    fn resolve_reports_not_found_for_missing() {
+        let tmp = TempDir::new().unwrap();
+        let base = base_of(&tmp);
+        assert_eq!(
+            resolve_allowed(&base, target("Slack"), "Cache"),
+            Err(GuardError::NotFound)
+        );
+        let missing_base = tmp.path().join("nope");
+        assert_eq!(
+            resolve_allowed(&missing_base, target("Slack"), "Cache"),
+            Err(GuardError::NotFound)
+        );
+    }
+
+    #[test]
+    fn resolve_reports_unreadable_parent() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = TempDir::new().unwrap();
+        let base = base_of(&tmp);
+        fs::create_dir_all(base.join("Slack/Cache")).unwrap();
+        fs::set_permissions(base.join("Slack"), fs::Permissions::from_mode(0o000)).unwrap();
+        let r = resolve_allowed(&base, target("Slack"), "Cache");
+        fs::set_permissions(base.join("Slack"), fs::Permissions::from_mode(0o755)).unwrap();
+        assert_eq!(r, Err(GuardError::Unreadable));
     }
 }
