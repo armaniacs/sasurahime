@@ -7,7 +7,7 @@ permalink: /SUPPORTED
 <details open markdown="1">
 <summary markdown="0"><strong>🇺🇸 English</strong></summary>
 
-sasurahime provides **50 clean targets**. Every target supports both `detect`
+sasurahime provides **51 clean targets**. Every target supports both `detect`
 (read-only, no side effects) and `clean` (removal). All `clean` subcommands
 accept `--dry-run`. Only caches and old versions are removed — active runtimes
 and packages are never touched.
@@ -65,6 +65,7 @@ and packages are never touched.
 | `apfs-snapshot` | APFS local Time Machine snapshots — interactive, or `--all` |
 | `orphan-containers` | Leftover `~/Library/Containers` and `~/Library/Group Containers` of uninstalled apps - interactive only, never in `--yes` |
 | `library-caches` | `~/Library/Caches/` per-app listing; known app caches removable - interactive only, never in `--yes` |
+| `app-support` | Cache dirs of known apps in `~/Library/Application Support/` - interactive only, never in `--yes` |
 | `trash` | Reports `~/.Trash` size (scan only) |
 
 ---
@@ -1345,7 +1346,41 @@ the per-app directories directly under `~/Library/Caches/`.
 
 ---
 
-## 51. `sasurahime stats`
+## 51. `sasurahime clean app-support`
+
+**Category:** Sprint 6
+
+**What it removes:** Cache subdirectories of known apps (Slack, Claude desktop,
+Obsidian, VS Code, Google Chrome) under `~/Library/Application Support/`.
+Only paths on a fixed allowlist can be removed (`Cache`, `Code Cache`,
+`GPUCache`, `Service Worker/CacheStorage`, `logs`, and similar). Settings,
+logins, IndexedDB, Local Storage and workspaces are never touched.
+
+**How detect works:** Sums the allowlisted directories per app. An app is
+reported only when its total exceeds 64 MiB. The leftover list described below
+is not included in the total.
+
+**How clean works:**
+1. `--dry-run` prints the candidate directories and exits.
+2. Otherwise a `dialoguer::MultiSelect` opens with nothing selected.
+3. For a running app, a confirmation asks whether to quit it. Without
+   approval the app's directories are skipped. After deletion, an app that
+   sasurahime quit is relaunched if its hint entry configures a relaunch app.
+4. Selected directories are moved to the Trash (`--permanent` deletes).
+
+**Leftovers (display only):** Folders directly under `Application Support`
+that match no installed `.app` by name or bundle ID tail are listed. Nothing
+is deleted; selected entries are opened in Finder. Selecting more than 5
+entries asks for confirmation before any window is opened.
+
+**Safety:**
+- Allowlist only; `..`, absolute paths and symbolic links are rejected.
+- Never runs under `--yes`; a non-TTY invocation does nothing.
+- `--dry-run` has no side effects.
+
+---
+
+## 52. `sasurahime stats`
 
 **Category:** Sprint 5
 
@@ -1458,7 +1493,7 @@ Runs `detect()` on every cleaner and prints a formatted table via
 <details markdown="1">
 <summary markdown="0"><strong>🇯🇵 日本語</strong></summary>
 
-sasurahime は **50 のクリーンターゲット** を提供しています。すべてのターゲットは
+sasurahime は **51 のクリーンターゲット** を提供しています。すべてのターゲットは
 `detect`（読み取り専用、副作用なし）と `clean`（削除）の両方に対応しており、
 すべての `clean` サブコマンドは `--dry-run` をサポートしています。
 削除されるのはキャッシュや古いバージョンのみで、現在使用中のランタイムやパッケージには触れません。
@@ -1516,6 +1551,7 @@ sasurahime は **50 のクリーンターゲット** を提供しています。
 | `apfs-snapshot` | APFS ローカル Time Machine スナップショット — 対話的、または `--all` |
 | `orphan-containers` | アンインストール済みアプリの `~/Library/Containers` と `~/Library/Group Containers` の残骸 - 対話的のみ、`--yes` では実行しない |
 | `library-caches` | `~/Library/Caches/` のアプリ別一覧。既知アプリのキャッシュのみ削除可能 - 対話的のみ、`--yes` では非実行 |
+| `app-support` | `~/Library/Application Support/` 内の既知アプリのキャッシュ、対話的のみ、`--yes` では非実行 |
 | `trash` | `~/.Trash` のサイズを報告（スキャンのみ） |
 
 ---
@@ -2652,7 +2688,40 @@ Time Machine スナップショット（`<date>` は `YYYY-MM-DD-HHMMSS`）。
 
 ---
 
-## 51. `sasurahime stats`
+## 51. `sasurahime clean app-support`
+
+**カテゴリ:** Sprint 6
+
+**削除対象:** `~/Library/Application Support/` 下の既知アプリ(Slack、Claude
+デスクトップ、Obsidian、VS Code、Google Chrome)のキャッシュ用サブディレクトリ。
+固定の許可リスト(`Cache`、`Code Cache`、`GPUCache`、`Service Worker/CacheStorage`、
+`logs` など)にあるパスだけが削除できます。設定、ログイン情報、IndexedDB、
+Local Storage、ワークスペースには一切触れません。
+
+**detect の動作:** アプリごとに許可リストのディレクトリ合計を測ります。合計が
+64 MiB を超えたアプリだけを対象にします。後述の残骸一覧は合計に含めません。
+
+**clean の動作:**
+1. `--dry-run` は候補ディレクトリを表示して終了します。
+2. それ以外は `dialoguer::MultiSelect` を開きます。既定は全部未選択です。
+3. 実行中のアプリは、終了してよいか確認します。承認がなければそのアプリの
+   ディレクトリはスキップします。sasurahime が終了させたアプリは、hint 機能で
+   再起動が設定されているものに限り、削除後に再起動します。
+4. 選択したディレクトリはゴミ箱へ移動します(`--permanent` では完全削除)。
+
+**残骸の表示(表示のみ):** `Application Support` 直下のフォルダのうち、インストール済み
+`.app` の名前にも bundle ID の末尾要素にも一致しないものを一覧にします。削除は
+しません。選択したものを Finder で開きます。6 件以上を選んだ場合は、ウィンドウを
+開く前に確認します。
+
+**安全性:**
+- 許可リストのみ。`..`、絶対パス、シンボリックリンクは拒否します。
+- `--yes` では決して実行しません。非 TTY 呼び出しは何もしません。
+- `--dry-run` は副作用ゼロです。
+
+---
+
+## 52. `sasurahime stats`
 
 **カテゴリ:** Sprint 5
 

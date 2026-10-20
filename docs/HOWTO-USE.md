@@ -100,6 +100,7 @@ Clean a single cache target. Replace `<target>` with one of the names below.
 |-----------------|-----------------------------------------------------------------------|
 | `act`           | `~/.cache/act/` (GitHub Actions runner)                               |
 | `apfs-snapshot` | APFS local Time Machine snapshots (tmutil deletelocalsnapshot)         |
+| `app-support`   | Cache dirs of known apps in `~/Library/Application Support/` (interactive only) |
 | `brew`          | `brew cleanup -s --prune=all`                                         |
 | `browsers`      | Old Puppeteer Chrome / Playwright (`ms-playwright*`) builds            |
 | `bun`           | `bun pm cache rm`                                                     |
@@ -675,6 +676,7 @@ Tip ブロックはサイズ降順で最大 **5 件** 表示します。64 MB �
 |-----------------|----------------------------------------------------------------------|
 | `act`           | `~/.cache/act/`（GitHub Actions ランナー）                             |
 | `apfs-snapshot` | APFS ローカル Time Machine スナップショット（tmutil deletelocalsnapshot）|
+| `app-support`   | `~/Library/Application Support/` 内の既知アプリのキャッシュ(対話的のみ) |
 | `brew`          | `brew cleanup -s --prune=all`                                        |
 | `browsers`      | 古い Puppeteer Chrome / Playwright（`ms-playwright*`）ビルド           |
 | `bun`           | `bun pm cache rm`                                                    |
