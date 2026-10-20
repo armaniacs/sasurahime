@@ -77,3 +77,98 @@ fn scan_does_not_hang_when_docker_daemon_is_unresponsive() {
 
     assert!(output.status.success());
 }
+
+const FAKE_TOOLS: &[&str] = &[
+    "uv", "brew", "mise", "bun", "go", "pip", "npm", "yarn", "pnpm", "deno", "pipx", "docker",
+    "orb", "gem", "bundle", "dotnet", "pod", "conda", "poetry", "colima", "xcrun", "mvn", "dart",
+    "rustup",
+];
+
+const STANDARD_SCAN_NAMES: &[&str] = &[
+    "act",
+    "uv",
+    "brew",
+    "mise",
+    "browsers",
+    "bun",
+    "go",
+    "pip",
+    "node-gyp",
+    "npm",
+    "yarn",
+    "pnpm",
+    "cargo",
+    "docker",
+    "orbstack",
+    "cocoapods",
+    "colima",
+    "spm",
+    "conda",
+    "poetry",
+    "pipx",
+    "deno",
+    "dotnet",
+    "gem",
+    "bundle",
+    "rustup",
+    "simulator",
+    "gradle",
+    "huggingface",
+    "pre-commit",
+    "jetbrains",
+    "downloads",
+    "vscode-extensions",
+    "maven",
+    "terraform",
+    "flutter",
+    "volta",
+    "sbt",
+    "tree-sitter",
+];
+
+fn first_cells(stdout: &str) -> Vec<String> {
+    stdout
+        .lines()
+        .filter(|l| l.trim_start().starts_with('|'))
+        .filter_map(|l| l.split('|').nth(1).map(|c| c.trim().to_string()))
+        .collect()
+}
+
+fn scan_with_fake_tools(home: &Path) -> String {
+    let bin = home.join("bin");
+    for tool in FAKE_TOOLS {
+        install_script(&bin, tool, "exit 0");
+    }
+    let output = sasurahime(home)
+        .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+        .args(["--no-unicode", "scan"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    String::from_utf8_lossy(&output.stdout).to_string()
+}
+
+#[test]
+fn scan_lists_every_standard_target() {
+    let tmp = TempDir::new().unwrap();
+    let stdout = scan_with_fake_tools(tmp.path());
+    let cells = first_cells(&stdout);
+    let missing: Vec<&&str> = STANDARD_SCAN_NAMES
+        .iter()
+        .filter(|n| !cells.iter().any(|c| c == **n))
+        .collect();
+    assert!(
+        missing.is_empty(),
+        "missing from scan: {missing:?}\n{stdout}"
+    );
+}
+
+#[test]
+fn scan_does_not_print_cargo_progress_lines() {
+    let tmp = TempDir::new().unwrap();
+    let target = tmp.path().join("proj/target");
+    fs::create_dir_all(&target).unwrap();
+    fs::write(target.join("artifact"), vec![1u8; 4096]).unwrap();
+    let stdout = scan_with_fake_tools(tmp.path());
+    assert!(!stdout.contains("[cargo]"), "stdout: {stdout}");
+}

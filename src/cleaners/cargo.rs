@@ -57,7 +57,7 @@ impl Cleaner for CargoCleaner {
         let reg = self.home.join(".cargo/registry/cache");
         let reg_size = if reg.exists() {
             let s = dir_size(&reg);
-            println!("[cargo] registry cache: {}", crate::format::format_bytes(s));
+            log::info!("[cargo] registry cache: {}", crate::format::format_bytes(s));
             s
         } else {
             0
@@ -66,7 +66,7 @@ impl Cleaner for CargoCleaner {
         let targets = self.get_target_dirs();
         let target_size: u64 = targets.iter().map(|(_, s)| s).sum();
         if !targets.is_empty() {
-            println!("[cargo] found {} target/ directory(ies)", targets.len());
+            log::info!("[cargo] found {} target/ directory(ies)", targets.len());
         }
 
         let total = reg_size + target_size;
