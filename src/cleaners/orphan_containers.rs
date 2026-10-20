@@ -1,7 +1,11 @@
+use crate::cleaner::{CleanResult, Cleaner, ScanResult, ScanStatus, SkippedEntry};
 use crate::command::CommandRunner;
-use crate::format::dir_size;
+use crate::format::{dir_size, format_bytes};
+use crate::progress::ProgressReporter;
+use anyhow::Result;
 use std::collections::HashSet;
 use std::fs;
+use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 
 /// Vendors whose containers are never reported as orphans. Apple data is
@@ -371,6 +375,181 @@ impl OrphanContainersCleaner {
     pub fn scan(&self) -> OrphanScan {
         let installed = collect_installed_ids(&self.app_dirs, self.runner.as_ref());
         scan_roots(&self.roots(), &installed)
+    }
+}
+
+pub fn format_item(c: &OrphanCandidate) -> String {
+    format!(
+        "{:<56}  {:>10}  [{}]",
+        c.name,
+        format_bytes(c.size),
+        c.kind.label()
+    )
+}
+
+/// Message shown when some folders could not be examined. `None` when all were readable.
+pub fn unreadable_hint(count: usize) -> Option<String> {
+    if count == 0 {
+        return None;
+    }
+    Some(format!(
+        "[orphan-containers] {count} folder(s) could not be read and were not checked. \
+         Grant Full Disk Access to your terminal \
+         (System Settings > Privacy & Security > Full Disk Access) to check all of them."
+    ))
+}
+
+fn empty_result(name: &'static str) -> CleanResult {
+    CleanResult {
+        name,
+        bytes_freed: 0,
+        uses_trash: false,
+        skipped: vec![],
+        deleted_paths: vec![],
+    }
+}
+
+fn print_unreadable_hint(count: usize) {
+    if let Some(hint) = unreadable_hint(count) {
+        eprintln!("{hint}");
+    }
+}
+
+impl OrphanContainersCleaner {
+    fn interactive_select(candidates: &[OrphanCandidate]) -> Result<Vec<OrphanCandidate>> {
+        use dialoguer::MultiSelect;
+
+        let items: Vec<String> = candidates.iter().map(format_item).collect();
+        println!("\nContainers of apps that are not installed (nothing is selected by default):\n");
+        let selections = MultiSelect::new()
+            .with_prompt("Select folders to move to Trash  [space to toggle, enter to confirm]")
+            .items(&items)
+            .interact()?;
+        Ok(selections
+            .into_iter()
+            .map(|i| candidates[i].clone())
+            .collect())
+    }
+
+    fn delete_selected(
+        &self,
+        selected: &[OrphanCandidate],
+        reporter: &dyn ProgressReporter,
+    ) -> CleanResult {
+        let mut freed: u64 = 0;
+        let mut skipped = Vec::new();
+        let mut deleted_paths = Vec::new();
+        reporter.progress_init(self.name(), selected.len());
+        for (i, c) in selected.iter().enumerate() {
+            reporter.progress_tick(&c.path, i + 1, c.size);
+            let path_str = c.path.to_string_lossy();
+            let _ = self.runner.run("chflags", &["-R", "nouchg", &path_str]);
+            match crate::trash::delete_path(&c.path) {
+                Ok(()) => {
+                    freed += c.size;
+                    deleted_paths.push(c.path.clone());
+                    println!(
+                        "[orphan-containers] removed: {} (freed {})",
+                        c.path.display(),
+                        format_bytes(c.size)
+                    );
+                }
+                Err(e) => {
+                    eprintln!(
+                        "[orphan-containers] error removing {}: {e}",
+                        c.path.display()
+                    );
+                    skipped.push(SkippedEntry {
+                        path: c.path.clone(),
+                        reason: format!("{e:#}"),
+                    });
+                }
+            }
+        }
+        reporter.progress_finish();
+        println!("[orphan-containers] total freed: {}", format_bytes(freed));
+        CleanResult {
+            name: self.name(),
+            bytes_freed: freed,
+            uses_trash: crate::trash::is_trash_mode(),
+            skipped,
+            deleted_paths,
+        }
+    }
+}
+
+impl Cleaner for OrphanContainersCleaner {
+    fn name(&self) -> &'static str {
+        "orphan-containers"
+    }
+
+    fn detect(&self) -> ScanResult {
+        if !self.any_root_exists() {
+            return ScanResult::new(self.name(), ScanStatus::NotFound);
+        }
+        let mut r = ScanResult::new(self.name(), status_from_scan(&self.scan()));
+        if crate::context::is_verbose() {
+            r = r.with_target(self.home.join("Library/Containers").to_string_lossy());
+        }
+        r
+    }
+
+    fn clean(&self, dry_run: bool, reporter: &dyn ProgressReporter) -> Result<CleanResult> {
+        if !self.any_root_exists() {
+            println!("[orphan-containers] nothing to clean");
+            return Ok(empty_result(self.name()));
+        }
+
+        let scan = self.scan();
+        if scan.candidates.is_empty() {
+            println!("[orphan-containers] nothing to clean");
+            print_unreadable_hint(scan.unreadable);
+            return Ok(empty_result(self.name()));
+        }
+
+        if dry_run {
+            println!(
+                "[orphan-containers] dry-run: {} orphan candidate(s)",
+                scan.candidates.len()
+            );
+            for c in &scan.candidates {
+                println!(
+                    "  would remove: {}  ({}, {})",
+                    c.path.display(),
+                    format_bytes(c.size),
+                    c.kind.label()
+                );
+            }
+            print_unreadable_hint(scan.unreadable);
+            return Ok(empty_result(self.name()));
+        }
+
+        // Which folders are safe to remove is a judgement call that only the
+        // user can make, so there is no non-interactive path (no `--all`).
+        if !std::io::stdin().is_terminal() {
+            eprintln!(
+                "[orphan-containers] not a terminal - skipping. Run \
+                 `sasurahime clean orphan-containers` to choose folders interactively."
+            );
+            return Ok(empty_result(self.name()));
+        }
+
+        let selected = Self::interactive_select(&scan.candidates)?;
+        if selected.is_empty() {
+            println!("[orphan-containers] nothing selected");
+            print_unreadable_hint(scan.unreadable);
+            return Ok(empty_result(self.name()));
+        }
+
+        let result = self.delete_selected(&selected, reporter);
+        print_unreadable_hint(scan.unreadable);
+        Ok(result)
+    }
+
+    // Which folders are leftovers is a human judgement, so `--yes` must skip this
+    // cleaner even on a terminal where the prompt would otherwise appear.
+    fn auto_clean_allowed(&self) -> bool {
+        false
     }
 }
 
@@ -970,5 +1149,110 @@ mod tests {
         fs::set_permissions(&root, fs::Permissions::from_mode(0o755)).unwrap();
         assert_eq!(scan.unreadable, 1);
         assert!(scan.candidates.is_empty());
+    }
+
+    use crate::progress::SuppressReporter;
+
+    #[test]
+    fn format_item_contains_name_size_and_kind() {
+        let c = OrphanCandidate {
+            path: PathBuf::from("/x/com.example.gone"),
+            name: "com.example.gone".into(),
+            kind: ContainerKind::GroupContainers,
+            size: 2048,
+        };
+        let s = format_item(&c);
+        assert!(s.contains("com.example.gone"), "{s}");
+        assert!(s.contains("2.0 KB"), "{s}");
+        assert!(s.contains("[Group Containers]"), "{s}");
+    }
+
+    #[test]
+    fn unreadable_hint_is_none_for_zero_and_mentions_full_disk_access() {
+        assert_eq!(unreadable_hint(0), None);
+        let hint = unreadable_hint(3).unwrap();
+        assert!(hint.contains("3 folder(s)"), "{hint}");
+        assert!(hint.contains("Full Disk Access"), "{hint}");
+    }
+
+    #[test]
+    fn name_is_orphan_containers() {
+        let tmp = TempDir::new().unwrap();
+        assert_eq!(cleaner_for(&tmp).name(), "orphan-containers");
+    }
+
+    #[test]
+    fn detect_without_roots_is_not_found() {
+        let tmp = TempDir::new().unwrap();
+        let r = cleaner_for(&tmp).detect();
+        assert!(matches!(r.status, ScanStatus::NotFound));
+    }
+
+    #[test]
+    fn detect_with_only_installed_containers_is_clean() {
+        let tmp = TempDir::new().unwrap();
+        write_app(
+            &tmp.path().join("Applications"),
+            "Keep.app",
+            "com.example.keep",
+        );
+        write_container(tmp.path(), "Containers", "com.example.keep");
+        let r = cleaner_for(&tmp).detect();
+        assert!(matches!(r.status, ScanStatus::Clean));
+    }
+
+    #[test]
+    fn detect_with_orphans_is_pruneable_with_total_size() {
+        let tmp = TempDir::new().unwrap();
+        write_container(tmp.path(), "Containers", "com.example.gone");
+        write_container(
+            tmp.path(),
+            "Group Containers",
+            "ZZZZZ99999.group.com.example.gone",
+        );
+        let c = cleaner_for(&tmp);
+        let expected: u64 = c.scan().candidates.iter().map(|x| x.size).sum();
+        let r = c.detect();
+        assert!(expected > 0);
+        assert_eq!(r.bytes_for_test(), expected);
+    }
+
+    #[test]
+    fn dry_run_lists_without_deleting() {
+        let tmp = TempDir::new().unwrap();
+        let gone = write_container(tmp.path(), "Containers", "com.example.gone");
+        let result = cleaner_for(&tmp).clean(true, &SuppressReporter).unwrap();
+        assert_eq!(result.bytes_freed, 0);
+        assert!(result.skipped.is_empty());
+        assert!(gone.join("Data/blob.bin").exists());
+    }
+
+    #[test]
+    fn clean_without_roots_is_empty_success() {
+        let tmp = TempDir::new().unwrap();
+        let result = cleaner_for(&tmp).clean(false, &SuppressReporter).unwrap();
+        assert_eq!(result.bytes_freed, 0);
+        assert_eq!(result.exit_code(), 0);
+    }
+
+    #[test]
+    fn delete_selected_records_failures_as_skipped() {
+        let tmp = TempDir::new().unwrap();
+        let missing = OrphanCandidate {
+            path: tmp.path().join("does-not-exist"),
+            name: "does-not-exist".into(),
+            kind: ContainerKind::Containers,
+            size: 4096,
+        };
+        let result = cleaner_for(&tmp).delete_selected(&[missing], &SuppressReporter);
+        assert_eq!(result.bytes_freed, 0);
+        assert_eq!(result.skipped.len(), 1);
+        assert_eq!(result.exit_code(), 1);
+    }
+
+    #[test]
+    fn orphan_containers_is_never_auto_cleaned() {
+        let tmp = TempDir::new().unwrap();
+        assert!(!cleaner_for(&tmp).auto_clean_allowed());
     }
 }
