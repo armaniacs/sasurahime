@@ -54,7 +54,23 @@ pub fn snapshot_date(name: &str) -> Option<String> {
                 c.is_ascii_digit()
             }
         });
-    valid.then(|| date.to_string())
+    if !valid {
+        return None;
+    }
+    // `tmutil deletelocalsnapshots` accepts a date-shaped string, not a real
+    // date, so an impossible timestamp would fail only after the user picked it.
+    let part = |range: std::ops::Range<usize>| date[range].parse::<u32>().ok();
+    let in_range =
+        |value: Option<u32>, lo: u32, hi: u32| value.is_some_and(|v| (lo..=hi).contains(&v));
+    if !in_range(part(5..7), 1, 12)
+        || !in_range(part(8..10), 1, 31)
+        || !in_range(part(11..13), 0, 23)
+        || !in_range(part(13..15), 0, 59)
+        || !in_range(part(15..17), 0, 59)
+    {
+        return None;
+    }
+    Some(date.to_string())
 }
 
 pub fn parse_snapshot_names(output: &str) -> Vec<String> {
@@ -195,15 +211,16 @@ impl Cleaner for ApfsSnapshotCleaner {
                 _ => 0,
             }
         };
-        if !report.failed_dates.is_empty() {
-            eprint!("{}", sudo_hint(&report.failed_dates));
+        if !report.failed.is_empty() {
+            let dates: Vec<String> = report.failed.iter().map(|(d, _)| d.clone()).collect();
+            eprint!("{}", sudo_hint(&dates));
         }
         let skipped = report
-            .failed_dates
+            .failed
             .iter()
-            .map(|d| SkippedEntry {
+            .map(|(d, reason)| SkippedEntry {
                 path: std::path::PathBuf::from(d),
-                reason: format!("requires root: sudo tmutil deletelocalsnapshots {d}"),
+                reason: reason.clone(),
             })
             .collect();
         if report.deleted == 0 {
@@ -233,8 +250,10 @@ pub fn sudo_hint(failed_dates: &[String]) -> String {
 
 #[derive(Debug, Default, PartialEq)]
 struct DeleteReport {
-    /// Dates `tmutil` could not delete; these get the sudo hint.
-    failed_dates: Vec<String>,
+    /// (date, reason) for snapshots `tmutil` could not delete. The reason is
+    /// tmutil's first stderr line, or the spawn error, so skipped entries can
+    /// say more than "requires root".
+    failed: Vec<(String, String)>,
     deleted: usize,
     /// Names with no parseable date. They are not deleted and the user must
     /// be told, since silently skipping would look like a successful cleanup.
@@ -255,7 +274,17 @@ impl ApfsSnapshotCleaner {
                     println!("[apfs-snapshot] deleted: {name}");
                     report.deleted += 1;
                 }
-                Ok(_) | Err(_) => report.failed_dates.push(date),
+                Ok(o) => {
+                    let stderr = String::from_utf8_lossy(&o.stderr);
+                    let first = stderr.lines().next().unwrap_or("").trim();
+                    let reason = if first.is_empty() {
+                        format!("tmutil exited with {:?}", o.status.code())
+                    } else {
+                        first.to_string()
+                    };
+                    report.failed.push((date, reason));
+                }
+                Err(e) => report.failed.push((date, format!("{e}"))),
             }
         }
         report
@@ -514,7 +543,9 @@ mod tests {
         let cleaner = ApfsSnapshotCleaner::new(Box::new(runner));
         let names = vec!["com.apple.TimeMachine.2026-05-10-120000.local".to_string()];
         let report = cleaner.delete_snapshots(&names);
-        assert_eq!(report.failed_dates, vec!["2026-05-10-120000".to_string()]);
+        assert_eq!(report.failed.len(), 1);
+        assert_eq!(report.failed[0].0, "2026-05-10-120000");
+        assert!(report.failed[0].1.contains("must be root"));
         assert!(report.unparsed_names.is_empty());
     }
 
@@ -523,7 +554,9 @@ mod tests {
         let cleaner = ApfsSnapshotCleaner::new(Box::new(ErrRunner));
         let names = vec!["com.apple.TimeMachine.2026-05-10-120000.local".to_string()];
         let report = cleaner.delete_snapshots(&names);
-        assert_eq!(report.failed_dates, vec!["2026-05-10-120000".to_string()]);
+        assert_eq!(report.failed.len(), 1);
+        assert_eq!(report.failed[0].0, "2026-05-10-120000");
+        assert!(report.failed[0].1.contains("failed to spawn"));
     }
 
     #[test]
@@ -537,7 +570,7 @@ mod tests {
         let names = vec!["com.apple.os.update-ABCDEF".to_string()];
         let report = cleaner.delete_snapshots(&names);
         assert_eq!(report.unparsed_names, names);
-        assert!(report.failed_dates.is_empty());
+        assert!(report.failed.is_empty());
         assert!(calls.lock().unwrap().is_empty());
     }
 
@@ -637,7 +670,13 @@ mod tests {
         let result = cleaner.clean(false, &reporter).unwrap();
         assert_eq!(result.bytes_freed, 300);
         assert_eq!(result.skipped.len(), 1);
-        assert!(result.skipped[0].reason.contains("2026-05-11-120000"));
+        // The date lives in the path; the reason reports what tmutil said.
+        assert!(result.skipped[0].path.ends_with("2026-05-11-120000"));
+        assert!(
+            result.skipped[0].reason.contains("tmutil exited"),
+            "{:?}",
+            result.skipped[0].reason
+        );
         assert_eq!(result.exit_code(), 0);
     }
 
@@ -733,5 +772,83 @@ mod tests {
     fn apfs_snapshot_is_never_auto_cleaned() {
         let cleaner = ApfsSnapshotCleaner::new(Box::new(NoSnapshots));
         assert!(!cleaner.auto_clean_allowed());
+    }
+
+    #[test]
+    fn snapshot_date_rejects_out_of_range_parts() {
+        for bad in [
+            "com.apple.TimeMachine.2026-99-10-120000.local",
+            "com.apple.TimeMachine.2026-12-99-120000.local",
+            "com.apple.TimeMachine.2026-12-10-990000.local",
+            "com.apple.TimeMachine.2026-12-10-126000.local",
+            "com.apple.TimeMachine.2026-12-10-120060.local",
+            "com.apple.TimeMachine.2026-00-10-120000.local",
+            "com.apple.TimeMachine.2026-12-00-120000.local",
+        ] {
+            assert_eq!(snapshot_date(bad), None, "{bad}");
+        }
+    }
+
+    #[test]
+    fn snapshot_date_accepts_leap_day_and_bounds() {
+        for good in [
+            "com.apple.TimeMachine.2024-02-29-235959.local",
+            "com.apple.TimeMachine.2026-01-01-000000.local",
+            "com.apple.TimeMachine.2026-12-31-235959",
+        ] {
+            assert!(snapshot_date(good).is_some(), "{good}");
+        }
+    }
+
+    #[test]
+    fn delete_failure_keeps_reason_from_tmutil() {
+        let runner = Recording {
+            calls: Arc::new(Mutex::new(vec![])),
+            delete_status: 1,
+        };
+        let cleaner = ApfsSnapshotCleaner::new(Box::new(runner));
+        let names = vec!["com.apple.TimeMachine.2026-05-10-120000.local".to_string()];
+        let report = cleaner.delete_snapshots(&names);
+        assert_eq!(report.failed.len(), 1);
+        assert_eq!(report.failed[0].0, "2026-05-10-120000");
+        assert!(
+            report.failed[0].1.contains("must be root"),
+            "{:?}",
+            report.failed[0]
+        );
+    }
+
+    #[test]
+    fn delete_runner_error_keeps_the_error_as_reason() {
+        let cleaner = ApfsSnapshotCleaner::new(Box::new(ErrRunner));
+        let names = vec!["com.apple.TimeMachine.2026-05-10-120000.local".to_string()];
+        let report = cleaner.delete_snapshots(&names);
+        assert!(
+            report.failed[0].1.contains("failed to spawn"),
+            "{:?}",
+            report.failed[0]
+        );
+    }
+
+    #[test]
+    fn clean_all_puts_tmutil_output_into_skipped_reason() {
+        let runner = Recording {
+            calls: Arc::new(Mutex::new(vec![])),
+            delete_status: 1,
+        };
+        let (probe, _) = scripted_free_space(vec![Some(100), Some(100)]);
+        let cleaner = ApfsSnapshotCleaner::new(Box::new(runner))
+            .with_all(true)
+            .with_free_space(probe);
+        let result = cleaner
+            .clean(false, &crate::progress::DeepSuppressReporter)
+            .unwrap();
+        assert_eq!(result.skipped.len(), 1);
+        assert!(
+            result.skipped[0].reason.contains("must be root"),
+            "{:?}",
+            result.skipped[0].reason
+        );
+        assert_eq!(result.exit_code(), 1);
     }
 }

@@ -57,7 +57,7 @@ pub struct SkippedEntry {
 #[derive(Debug)]
 pub struct CleanResult {
     /// Cleaner name — pub field for downstream inspection.
-    #[expect(dead_code, reason = "pub API — callers may read")]
+    #[cfg_attr(not(test), expect(dead_code, reason = "pub API — callers may read"))]
     pub name: &'static str,
     pub bytes_freed: u64,
     /// Whether the operation used macOS Trash (vs permanent deletion).
