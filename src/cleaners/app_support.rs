@@ -136,7 +136,7 @@ pub fn resolve_allowed(
     target: &AppSupportTarget,
     sub: &str,
 ) -> Result<PathBuf, GuardError> {
-    if !target.subpaths.iter().any(|s| *s == sub) {
+    if !target.subpaths.contains(&sub) {
         return Err(GuardError::NotAllowed);
     }
     let rel = Path::new(target.root).join(sub);
@@ -189,7 +189,7 @@ pub fn scan_candidates(base: &Path, min_app_bytes: Option<u64>) -> Vec<Candidate
             }
             found.push(Candidate {
                 target,
-                sub: *sub,
+                sub,
                 path,
                 size,
             });
@@ -1164,5 +1164,24 @@ mod tests {
     fn app_support_is_never_auto_cleaned() {
         let tmp = TempDir::new().unwrap();
         assert!(!cleaner_for(&tmp, &Fake::default()).auto_clean_allowed());
+    }
+
+    #[test]
+    fn orphan_containers_identity_collector_is_available() {
+        use crate::cleaners::orphan_containers::{collect_app_identities, AppIdentity};
+        let apps: Vec<AppIdentity> = collect_app_identities(&[], &Fake::default());
+        assert!(apps.is_empty());
+        // No `..`: this stage relies on Info.plist giving exactly these three values.
+        let AppIdentity {
+            bundle_id,
+            name,
+            display_name,
+        } = AppIdentity {
+            bundle_id: "com.example.app".to_string(),
+            name: None,
+            display_name: None,
+        };
+        assert_eq!(bundle_id, "com.example.app");
+        assert!(name.is_none() && display_name.is_none());
     }
 }
