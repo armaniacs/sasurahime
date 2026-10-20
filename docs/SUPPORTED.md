@@ -1373,6 +1373,10 @@ that match no installed `.app` by name or bundle ID tail are listed. Nothing
 is deleted; selected entries are opened in Finder. Selecting more than 5
 entries asks for confirmation before any window is opened.
 
+Entries smaller than 1 MiB, modified within the last 30 days, symbolic links,
+Apple-provided folders and vendor parent folders (`Google`, `Microsoft`,
+`Adobe`, `JetBrains`, and similar) are not listed.
+
 **Safety:**
 - Allowlist only; `..`, absolute paths and symbolic links are rejected.
 - Never runs under `--yes`; a non-TTY invocation does nothing.
@@ -2713,6 +2717,9 @@ Local Storage、ワークスペースには一切触れません。
 `.app` の名前にも bundle ID の末尾要素にも一致しないものを一覧にします。削除は
 しません。選択したものを Finder で開きます。6 件以上を選んだ場合は、ウィンドウを
 開く前に確認します。
+
+1 MiB 未満のもの、直近 30 日以内に更新されたもの、シンボリックリンク、Apple 製のフォルダ、
+ベンダー親フォルダ(`Google`、`Microsoft`、`Adobe`、`JetBrains` など)は一覧に出しません。
 
 **安全性:**
 - 許可リストのみ。`..`、絶対パス、シンボリックリンクは拒否します。
