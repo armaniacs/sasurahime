@@ -228,6 +228,9 @@ define_cleaners! {
     OrphanContainers : "orphan-containers" => "Leftover Containers / Group Containers of uninstalled apps (interactive)";
     (|home, _config| cleaners::orphan_containers::OrphanContainersCleaner::new(home, Box::new(SystemCommandRunner))),
 
+    LibraryCaches : "library-caches" => "Per-app ~/Library/Caches/ listing; known app caches removable (interactive)";
+    (|home, _config| cleaners::library_caches::LibraryCachesCleaner::new(home, Box::new(SystemCommandRunner))),
+
     ;
     /// Clean all generic caches (bun, go, pip, node-gyp, npm, yarn, pnpm)
     Caches {
@@ -1150,5 +1153,29 @@ mod tests {
             .find(|c| c.name() == "orphan-containers")
             .unwrap();
         assert!(!c.auto_clean_allowed());
+    }
+
+    #[test]
+    fn library_caches_is_registered_and_distinct_from_caches() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cleaners = all_cleaners(tmp.path(), &config::Config::default());
+        assert!(names_of(&cleaners).contains(&"library-caches"));
+        let c = cleaners
+            .iter()
+            .find(|c| c.name() == "library-caches")
+            .unwrap();
+        assert!(!c.auto_clean_allowed());
+        let names: Vec<&str> = SUPPORTED_TARGETS
+            .iter()
+            .chain(extra_targets())
+            .map(|(n, _)| *n)
+            .collect();
+        assert!(names.contains(&"library-caches"));
+        assert!(names.contains(&"caches"));
+        assert_eq!(
+            CleanTarget::LibraryCaches { dry_run: true }.command_name(),
+            "library-caches"
+        );
+        assert!(CleanTarget::LibraryCaches { dry_run: true }.dry_run());
     }
 }
