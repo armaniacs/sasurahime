@@ -162,6 +162,7 @@ mod tests {
 
     #[test]
     fn detect_returns_pruneable_when_cache_exists() {
+        let _lock = crate::context::TEST_LOCK.lock().unwrap();
         let tmp = TempDir::new().unwrap();
         let cache = tmp.path().join(".cache/pre-commit");
         fs::create_dir_all(&cache).unwrap();
@@ -261,6 +262,7 @@ mod tests {
 
     #[test]
     fn cache_dir_uses_safe_default_when_pre_commit_home_is_unsafe() {
+        let _lock = crate::context::TEST_LOCK.lock().unwrap();
         let tmp = TempDir::new().unwrap();
         let _guard = EnvGuard::set("PRE_COMMIT_HOME", "/");
         let cleaner = PreCommitCleaner::new(tmp.path(), Box::new(SystemCommandRunner));
@@ -274,6 +276,7 @@ mod tests {
 
     #[test]
     fn cache_dir_uses_safe_default_when_xdg_cache_is_unsafe() {
+        let _lock = crate::context::TEST_LOCK.lock().unwrap();
         let tmp = TempDir::new().unwrap();
         let _pre_guard = EnvGuard::set("PRE_COMMIT_HOME", "");
         let _xdg_guard = EnvGuard::set("XDG_CACHE_HOME", "/etc");
@@ -288,6 +291,7 @@ mod tests {
 
     #[test]
     fn detect_uses_xdg_cache_home_unconditionally() {
+        let _lock = crate::context::TEST_LOCK.lock().unwrap();
         let tmp = TempDir::new().unwrap();
         let xdg_cache = tmp.path().join("xdg-cache");
         // Do NOT create the pre-commit subdirectory under XDG_CACHE_HOME

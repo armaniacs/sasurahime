@@ -1109,6 +1109,7 @@ mod tests {
 
     #[test]
     fn act_path_validates_env_var_and_falls_back() {
+        let _lock = crate::context::TEST_LOCK.lock().unwrap();
         let tmp = tempfile::TempDir::new().unwrap();
         let _guard = crate::test_helpers::EnvGuard::set("ACT_CACHE_DIR", "/");
         let cleaner =
