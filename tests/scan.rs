@@ -12,7 +12,30 @@ fn sasurahime(home: &std::path::Path) -> Command {
 fn scan_exits_zero_and_shows_categories() {
     let tmp = TempDir::new().unwrap();
 
-    let output = sasurahime(tmp.path()).arg("scan").output().unwrap();
+    // `scan` hides targets whose binary is missing, and CI runners do not
+    // install uv or brew, so provide deterministic stubs on PATH.
+    let bin = tmp.path().join("bin");
+    fs::create_dir_all(&bin).unwrap();
+    for tool in ["uv", "brew"] {
+        let stub = bin.join(tool);
+        fs::write(&stub, "#!/bin/sh\nexit 0\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&stub, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+    }
+    let path = format!(
+        "{}:{}",
+        bin.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+
+    let output = sasurahime(tmp.path())
+        .env("PATH", path)
+        .arg("scan")
+        .output()
+        .unwrap();
 
     assert!(output.status.success(), "exit code was not 0");
 
