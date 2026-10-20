@@ -13,7 +13,7 @@
   - 04 の S2: `Cleaner::auto_clean_allowed()` (本書の cleaner は `false` を返す)。
   - 04 の S3: `standard_cleaners()` と `ManualOnly`。本書はマクロ表に標準エントリを 1 つ足すだけで登録します。
   - 03 の Task 1: `src/hint/detector.rs` の `pub(crate) fn is_running` と、`src/hint/mod.rs` の `pub(crate) use detector::is_running;`。本書は `is_running` の可視性を変更しません。
-  - 02 の Task 2: `crate::cleaners::orphan_containers::collect_installed_ids(app_dirs: &[PathBuf], runner: &dyn CommandRunner) -> HashSet<String>`。
+  - 02 の Task 2: `crate::cleaners::orphan_containers::AppIdentity` (フィールドは `bundle_id: String`、`name: Option<String>`、`display_name: Option<String>` の 3 つだけ) と `crate::cleaners::orphan_containers::collect_app_identities(app_dirs: &[PathBuf], runner: &dyn CommandRunner) -> Vec<AppIdentity>`。本書は `Info.plist` を自分では読まず、この 2 つだけを使います (共通規約 11.2)。
 - `docs/SUPPORTED.md` は 03 の完了後の状態 (件数 50、`## 50. library-caches`、stats は `## 51.`) を前提にします。
 - 確認コマンド (どれか 1 つでも期待と違えば着手せず報告):
 
@@ -23,7 +23,9 @@
   grep -n "LibraryCaches :" src/main.rs                                  # 1 行出る
   grep -n "pub(crate) fn is_running" src/hint/detector.rs                # 1 行出る
   grep -n "pub(crate) use detector::is_running;" src/hint/mod.rs         # 1 行出る
-  grep -n "pub fn collect_installed_ids" src/cleaners/orphan_containers.rs   # 1 行出る
+  grep -n "pub struct AppIdentity" src/cleaners/orphan_containers.rs     # 1 行出る
+  grep -n "pub fn collect_app_identities" src/cleaners/orphan_containers.rs   # 1 行出る
+  grep -n "Info.plist" README.md                                         # 2 行出る (02 の Task 6)
   cargo run -q -- targets | wc -l                                        # 50
   ```
 
@@ -31,10 +33,11 @@
 
 - 本書のコード片はコンパイル未確認です。
 - Task 1 の抽出後も `auto_clean_hint` の呼び出し順と出力文言が変わらないこと (既存の hint テストが回帰テストになる前提)。`QUIT_TIMEOUT_SECS` と `QUIT_POLL_INTERVAL` が `src/hint/cleaner.rs` の既存定数であることは実コードで確認済みです。hint の `mod tests` に `RecordingRunner`、`VSCODE_ENTRY` (`relaunch_app: Some("Visual Studio Code")`)、`SLACK_ENTRY` (`relaunch_app: None`) があることも確認済みです。
-- `plutil -convert json -o - <Info.plist>` が実機の `.app` で JSON を返すこと (第 2 段)。
+- 第 2 段の `Info.plist` の読み取りは 02 の `collect_app_identities` に任せます。バイナリ plist の `plutil -convert xml1 -o -` の動作確認は 02 の「未検証の仮定」にあります。
 - 第 2 段の E2E (`dry_run_shows_leftovers_without_deleting` など) は実機の `/Applications` を読み取りだけ行い、`ZzzNoSuchApp12345` に一致するアプリが無い前提です。
-- `serde_json` は既存の依存 (`[dependencies]`)、`filetime` は既存の dev-dependency で、どちらも追加不要なことは `Cargo.toml` で確認済みです。
-- 02 の `collect_installed_ids` が返す ID は小文字化済みです (02 の Task 2 のコードで確認済み)。本書の `InstalledApps::from_parts` は再度小文字化するので、どちらでも動きます。
+- `filetime` は既存の dev-dependency で、追加不要なことは `Cargo.toml` で確認済みです。本書は `serde_json` を使いません。
+- 02 の `collect_app_identities` が返す `bundle_id` は plist に書かれた綴りのまま (小文字化しない) です。本書の `InstalledApps::from_parts` が小文字化します。
+- 第 2 段の Finder 起動の確認 (`dialoguer::Confirm`) は TTY が必要なので、単体テストも E2E もしません。確認が必要かどうかの判定 (`open_needs_confirmation`) と、runner 経由の `open` の呼び出し回数 (`reveal_paths`) だけを単体テストします (Task 12)。
 
 ## 1. 概要
 
@@ -49,7 +52,8 @@
 
 - ユーザーデータ(設定、ログイン情報、IndexedDB、Local Storage、Partitions、ワークスペース、Backups、User)の削除。許可リストに無いパスは一切削除できません。
 - Chrome の Default 以外のプロファイル(Profile 1 など)。許可リストに入れません。
-- 第2段の残骸の削除。`open <path>` で Finder を開くだけです。
+- 第2段の残骸の削除。`open <path>` で Finder を開くだけです (選択が 6 件以上のときは開く前に確認します)。
+- `src/explorer.rs` の Finder 起動 (`open_in_finder`) との共通化。別 PBI です (ロードマップ 8 章)。
 - `--yes` での削除実行。`--yes` では絶対に何も消えません(`auto_clean_allowed()` が `false`。4.3 節)。
 - hint 機能(`sasurahime scan` 後のヒント表示と `rm -rf` 自動実行)の挙動変更。
 - Linux / Windows 対応。
@@ -62,8 +66,8 @@
 | 削除 | する(ゴミ箱が既定、ユーザーが選んだものだけ) | しない |
 | detect() の合計 | 含める | 含めない |
 | dry-run | 一覧のみ | 一覧のみ(表示は同じ) |
-| 対話 | MultiSelect(既定は全部未選択) | MultiSelect で Finder を開く(既定は全部未選択) |
-| 前提 | hint/apps.rs | orphan-containers の bundle ID 収集関数 `collect_installed_ids` |
+| 対話 | MultiSelect(既定は全部未選択) | MultiSelect で Finder を開く(既定は全部未選択。6 件以上選ぶと開く前に Confirm、既定 No) |
+| 前提 | hint/apps.rs | orphan-containers の `AppIdentity` と `collect_app_identities`(`Info.plist` からは bundle ID とアプリ名だけ) |
 
 第2段のタスク群(Task 8 以降)は第1段の完了後に、同じセッションで続けて実装します。
 
@@ -88,7 +92,9 @@
 | 変更 | `docs/SUPPORTED.md` | 件数 50 -> 51、表の行、第 51 節の追加と stats の 51 -> 52(英語節と日本語節) |
 | 変更 | `docs/HOWTO-USE.md` | 対象表(英語と日本語)に1行ずつ |
 
-`src/explorer.rs`、`src/interactive.rs`、`src/cleaner.rs`、`README.md` は変更しません。Finder 起動は `explorer::open_in_finder` (中で `std::process::Command` を直接呼ぶ) を使わず、runner 経由の `open <path>` で行います(共通規約 3.1)。
+`src/explorer.rs`、`src/interactive.rs`、`src/cleaner.rs`、`README.md` は変更しません。Finder 起動は `explorer::open_in_finder` (中で `std::process::Command` を直接呼ぶ) を使わず、runner 経由の `open <path>` で行います(共通規約 3.1、4.3 節)。
+
+README を変更しない理由(共通規約 1.6、11.5): 本書が読むのは、README の Data access 節に列挙済みの `~/Library/Application Support/` のメタデータ(名前、サイズ、更新日時)と、02 の Task 6 が「内容を読むファイル」の一覧に加えた `Info.plist` の bundle ID とアプリ名(02 の `AppIdentity`)だけです。新しいファイル内容の読み取り、ネットワーク、保存のいずれも足さないので、README の約束は変わりません。Task 13 でこのことを grep で確認します。
 
 ## 3. 許可リスト
 
@@ -188,13 +194,22 @@ impl InstalledApps {
 pub fn normalize_name(s: &str) -> String;
 pub fn is_excluded_dir_name(name: &str) -> bool;
 pub fn matches_installed(dir_name: &str, installed: &InstalledApps) -> bool;
-pub fn parse_plist_names(json: &str) -> Vec<String>;
+fn list_app_bundles(roots: &[PathBuf]) -> Vec<PathBuf>;            // private。.app のファイル名の stem 用
+fn app_bundle_stems(roots: &[PathBuf]) -> Vec<String>;             // private
 pub fn collect_installed_apps(roots: &[PathBuf], runner: &dyn CommandRunner) -> InstalledApps;
 
 #[derive(Debug, Clone)]
 pub struct Leftover { pub path: PathBuf, pub size: u64 }
 pub fn find_leftovers(base: &Path, installed: &InstalledApps, now: SystemTime,
                       min_bytes: u64, recent_days: u64) -> Vec<Leftover>;
+pub fn format_leftover_line(l: &Leftover) -> String;
+
+/// 6 件以上を一度に開くときだけ確認する
+pub const OPEN_CONFIRM_THRESHOLD: usize = 5;
+pub fn open_needs_confirmation(selected: usize) -> bool;            // selected > OPEN_CONFIRM_THRESHOLD
+impl AppSupportCleaner {
+    fn reveal_paths(&self, paths: &[PathBuf]);                      // private。runner 経由で `open <path>` を 1 件 1 回
+}
 ```
 
 hint 側で使うもの:
@@ -208,13 +223,23 @@ pub(crate) fn relaunch_app(entry: &HintEntry, runner: &dyn CommandRunner) -> any
 // いずれも crate::hint:: から呼ぶ
 ```
 
-orphan-containers (02) が提供する関数(第2段の前提。Task 8 で存在を確認):
+orphan-containers (02) が提供する型と関数(第2段の前提。Task 8 で存在を確認):
 
 ```rust
 // src/cleaners/orphan_containers.rs (02 の Task 2 で実装済みの実シグネチャ)
-pub fn collect_installed_ids(app_dirs: &[PathBuf], runner: &dyn CommandRunner) -> HashSet<String>;
-// app_dirs の直下と 1 段下のサブフォルダにある *.app の Info.plist から CFBundleIdentifier を読み、小文字化して返す
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AppIdentity {
+    pub bundle_id: String,
+    pub name: Option<String>,
+    pub display_name: Option<String>,
+}
+pub fn collect_app_identities(app_dirs: &[PathBuf], runner: &dyn CommandRunner) -> Vec<AppIdentity>;
+// app_dirs の直下と 1 段下のサブフォルダにある *.app の Info.plist から
+// CFBundleIdentifier、CFBundleName、CFBundleDisplayName の 3 つだけを読んで返す。
+// Info.plist を読めない .app は返さない。bundle_id は小文字化しない。
 ```
+
+本書が `Info.plist` から得る値は `AppIdentity` の 3 項目だけです。README の Data access 節の「`Info.plist` からは bundle ID とアプリ名だけを取り出す」という約束は、02 のこの型で守られます (共通規約 1.6、11.2)。本書で `plutil` を呼んだり、`Info.plist` を `fs::read` したりしません。
 
 シグネチャが上と違う場合は、推測で合わせずに止まって報告します。
 
@@ -239,7 +264,10 @@ pub fn collect_installed_ids(app_dirs: &[PathBuf], runner: &dyn CommandRunner) -
 | `matches_installed("Spotify", names={"spotify"})` | `true` |
 | `matches_installed("slackmacgap", bundle_ids={"com.tinyspeck.slackmacgap"})` | `true`(末尾要素一致) |
 | `matches_installed("com.foo.bar", bundle_ids={"com.foo.bar"})` | `true`(完全一致) |
-| `parse_plist_names({"CFBundleName":"Code","CFBundleDisplayName":"Visual Studio Code"})` | `["Code","Visual Studio Code"]` |
+| `collect_installed_apps` で `Visual Studio Code.app` の `AppIdentity` が `{ bundle_id: "com.microsoft.VSCode", name: Some("Code"), display_name: Some("Visual Studio Code") }` | names に `visualstudiocode`(stem と display_name)と `code`、bundle_ids に `com.microsoft.vscode` |
+| `open_needs_confirmation(0)` | `false`(何も開かないので確認も出さない) |
+| `open_needs_confirmation(5)` | `false`(確認なしで 5 件開く) |
+| `open_needs_confirmation(6)` | `true`(開く前に Confirm) |
 
 ### 4.3 ふるまいの決定事項
 
@@ -250,7 +278,14 @@ pub fn collect_installed_ids(app_dirs: &[PathBuf], runner: &dyn CommandRunner) -
 - 実行中のアプリ: 候補の選択後、実行中のアプリごとに `Confirm`(既定 No)で終了の許可を取ります。許可が無ければそのアプリの候補は skipped(理由 "X is running")になり削除しません。許可があれば `quit_app_and_wait` を呼び、失敗(10秒で終了しない等)なら skipped。削除後、`relaunch_app` を、こちらが終了させたアプリにだけ呼びます。
 - 削除: 各候補で `resolve_allowed` を再実行して得たパスだけを使います(`Candidate.path` は使いません)。`chflags -R nouchg <path>` を runner 経由で実行(結果は無視)してから `crate::trash::delete_path`。失敗は skipped に積みます。
 - 終了コード: `CleanResult::exit_code()` に従います(解放 0 かつ skipped があれば 1)。
-- 第2段の Finder 起動: `explorer` の既存実装は未管理エントリを MultiSelect で選び、さらに Confirm で `open <path>` します。本機能は残骸一覧の MultiSelect(既定は未選択)で選んだものを、確認なしで `open <path>` します。理由: 開くだけで副作用が無く、選択自体が意思表示だからです。`open` は `explorer::open_in_finder` ではなく `self.runner.run("open", &[path])` で呼びます(cleaner から `std::process::Command` を直接呼ばない規約のため)。
+- 第2段の Finder 起動: 残骸一覧の MultiSelect(既定は未選択)で選んだものを `open <path>` で開きます。
+  - 選択が 0 件なら何もしません(確認も `open` も出しません)。
+  - 選択が 1 件から 5 件(`OPEN_CONFIRM_THRESHOLD`)なら、確認なしで選んだ全件を開きます。
+  - 選択が 6 件以上なら、開く前に `dialoguer::Confirm`(既定 No)で `This opens N Finder windows. Continue?` と 1 回だけ確認します(N は選択件数)。承認されたら選んだ全件を開き、承認されなければ 1 件も開かずに `[app-support] nothing opened` を出して終わります。一度に確認なしで開くのは最大 5 件です。
+  - 判定は純関数 `open_needs_confirmation(selected: usize) -> bool`(`selected > OPEN_CONFIRM_THRESHOLD`)に分け、閾値は定数 `OPEN_CONFIRM_THRESHOLD: usize = 5` にします。
+  - `explorer` の既存実装(`run_explore`)とは確認の出し方が違います。`explorer` は未管理エントリを MultiSelect で選ばせた後、1 件ごとに必ず Confirm("Open in Finder?"、既定 No)を挟みます。本機能は 5 件以内なら確認しません。理由: 開くだけで削除などの副作用が無く、MultiSelect で選んだこと自体が「開きたい」という意思表示だからです。ただし件数が多いと Finder のウィンドウが一度に大量に開くので、6 件以上のときだけ 1 回確認します。
+  - `open` は `explorer::open_in_finder` ではなく `self.runner.run("open", &[path])` で呼びます(cleaner から `std::process::Command` を直接呼ばない規約のため。共通規約 3.1)。`explorer::open_in_finder` と二重実装になるのは意図したものです。理由は 2 つです。(1) runner 経由にすると fake runner で `open` の呼び出し回数と引数をテストできる。`open_in_finder` は private で `std::process::Command` を直接呼ぶのでテストできない。(2) 今回 `src/explorer.rs` を変更しない(ロードマップ 4 章)。共通化は別 PBI(ロードマップ 8 章)で行います。
+  - `Confirm` の対話自体は TTY が必要なので単体テストしません(E2E でも出しません。共通規約 9 章の 10)。テストするのは `open_needs_confirmation` と、`open` の呼び出し回数(`reveal_paths`)です。
 
 ## 5. タスク分割
 
@@ -1932,7 +1967,8 @@ is not included in the total.
 
 **Leftovers (display only):** Folders directly under `Application Support`
 that match no installed `.app` by name or bundle ID tail are listed. Nothing
-is deleted; selecting an entry opens it in Finder.
+is deleted; selected entries are opened in Finder. Selecting more than 5
+entries asks for confirmation before any window is opened.
 
 **Safety:**
 - Allowlist only; `..`, absolute paths and symbolic links are rejected.
@@ -1968,7 +2004,8 @@ Local Storage、ワークスペースには一切触れません。
 
 **残骸の表示(表示のみ):** `Application Support` 直下のフォルダのうち、インストール済み
 `.app` の名前にも bundle ID の末尾要素にも一致しないものを一覧にします。削除は
-しません。選択すると Finder で開きます。
+しません。選択したものを Finder で開きます。6 件以上を選んだ場合は、ウィンドウを
+開く前に確認します。
 
 **安全性:**
 - 許可リストのみ。`..`、絶対パス、シンボリックリンクは拒否します。
@@ -2019,32 +2056,45 @@ git commit -m "docs(app-support): SUPPORTED.md と HOWTO-USE.md に app-support 
 
 ### Task 8: 第2段の前提確認(orphan-containers の関数)
 
-第2段は 02 が実装した `src/cleaners/orphan_containers.rs` の `collect_installed_ids` を再利用します。実装順(04 -> 02 -> 03 -> 05)により存在しているはずですが、実装前に確認します。
+第2段は 02 が実装した `src/cleaners/orphan_containers.rs` の `AppIdentity` と `collect_app_identities` を再利用します。実装順(04 -> 02 -> 03 -> 05)により存在しているはずですが、実装前に確認します。
 
 **8-1. 確認コマンド。**
 
 ```bash
-grep -n "pub fn collect_installed_ids" src/cleaners/orphan_containers.rs
+grep -n "pub struct AppIdentity" src/cleaners/orphan_containers.rs
+grep -n "pub fn collect_app_identities" src/cleaners/orphan_containers.rs
 grep -n "pub mod orphan_containers" src/cleaners/mod.rs
 ```
 
-期待: それぞれ1行ずつ出力され、1 行目が `pub fn collect_installed_ids(app_dirs: &[PathBuf], runner: &dyn CommandRunner) -> HashSet<String> {` であること。出ない場合や引数・戻り値の型が違う場合は、推測で合わせずに作業を止めて報告します。
+期待: それぞれ1行ずつ出力され、2 行目が `pub fn collect_app_identities(app_dirs: &[PathBuf], runner: &dyn CommandRunner) -> Vec<AppIdentity> {` であること。`AppIdentity` のフィールドが `bundle_id: String`、`name: Option<String>`、`display_name: Option<String>` の 3 つであることも `src/cleaners/orphan_containers.rs` を開いて確認します。出ない場合や引数・戻り値の型・フィールドが違う場合は、推測で合わせずに作業を止めて報告します。
 
-**8-2. テストを書く。** 存在とシグネチャをテストとして固定します。`mod tests` の末尾に追加します。
+**8-2. テストを書く。** 存在とシグネチャと 3 フィールドをテストとして固定します。`mod tests` の末尾に追加します。
 
 ```rust
     #[test]
-    fn orphan_containers_bundle_id_collector_is_available() {
-        let ids: HashSet<String> =
-            crate::cleaners::orphan_containers::collect_installed_ids(&[], &Fake::default());
-        assert!(ids.is_empty());
+    fn orphan_containers_identity_collector_is_available() {
+        use crate::cleaners::orphan_containers::{collect_app_identities, AppIdentity};
+        let apps: Vec<AppIdentity> = collect_app_identities(&[], &Fake::default());
+        assert!(apps.is_empty());
+        // No `..`: this stage relies on Info.plist giving exactly these three values.
+        let AppIdentity {
+            bundle_id,
+            name,
+            display_name,
+        } = AppIdentity {
+            bundle_id: "com.example.app".to_string(),
+            name: None,
+            display_name: None,
+        };
+        assert_eq!(bundle_id, "com.example.app");
+        assert!(name.is_none() && display_name.is_none());
     }
 ```
 
 **8-3. 実行。**
 
 ```bash
-cargo test --bin sasurahime orphan_containers_bundle_id_collector 2>&1 | tail -10
+cargo test --bin sasurahime orphan_containers_identity_collector 2>&1 | tail -10
 ```
 
 期待: passed(02 が完了済みなので最初から通ります。このタスクは赤の確認をしません)。コンパイルエラーになった場合は 02 の実装と食い違っているので、止めて報告します。
@@ -2053,7 +2103,7 @@ cargo test --bin sasurahime orphan_containers_bundle_id_collector 2>&1 | tail -1
 
 ```bash
 git add src/cleaners/app_support.rs
-git commit -m "test(app-support): orphan-containers の bundle ID 収集関数の存在を固定"
+git commit -m "test(app-support): orphan-containers のアプリ識別情報の収集関数の存在を固定"
 ```
 
 ### Task 9: 名前の正規化・除外・照合(第2段、純関数)
@@ -2335,43 +2385,23 @@ git commit -m "feat(app-support): アンインストール済みアプリ判定�
 
 ### Task 10: インストール済みアプリの収集(第2段)
 
-**10-1. 失敗するテストを書く。**
+`Info.plist` の値は 02 の `collect_app_identities` からだけ受け取ります。本書では `Info.plist` を `fs::read` せず、`plutil` も呼びません(共通規約 11.2)。02 が返す `AppIdentity` は bundle ID、`CFBundleName`、`CFBundleDisplayName` の 3 項目だけなので、README の「`Info.plist` からは bundle ID とアプリ名だけを取り出す」という約束は本書でも守られます(共通規約 1.6)。
+
+名前の集合は次の 3 つから作ります。
+
+- `.app` のファイル名の stem(`Info.plist` を読めない .app でも使えます)。
+- `AppIdentity::name`(`CFBundleName`)。
+- `AppIdentity::display_name`(`CFBundleDisplayName`)。
+
+bundle ID の集合は `AppIdentity::bundle_id` から作ります(`InstalledApps::from_parts` が小文字化します)。
+
+**10-1. 失敗するテストを書く。** `mod tests` の末尾に追加します。
 
 ```rust
-    struct PlistRunner(std::collections::HashMap<String, String>);
-
-    impl CommandRunner for PlistRunner {
-        fn run(&self, program: &str, args: &[&str]) -> anyhow::Result<Output> {
-            if program != "plutil" {
-                anyhow::bail!("unexpected {program}");
-            }
-            let path = args.last().copied().unwrap_or("");
-            match self.0.iter().find(|(k, _)| path.contains(k.as_str())) {
-                Some((_, json)) => Ok(Output {
-                    status: std::process::ExitStatus::from_raw(0),
-                    stdout: json.clone().into_bytes(),
-                    stderr: vec![],
-                }),
-                None => Ok(out(256)),
-            }
-        }
-        fn exists(&self, _: &str) -> bool {
-            true
-        }
-    }
-
-    #[test]
-    fn parse_plist_names_reads_both_keys() {
-        let j = r#"{"CFBundleName":"Code","CFBundleDisplayName":"Visual Studio Code","CFBundleIdentifier":"com.microsoft.VSCode"}"#;
-        assert_eq!(parse_plist_names(j), vec!["Code", "Visual Studio Code"]);
-    }
-
-    #[test]
-    fn parse_plist_names_tolerates_missing_keys_and_garbage() {
-        assert_eq!(parse_plist_names(r#"{"CFBundleName":"A"}"#), vec!["A"]);
-        assert!(parse_plist_names("{}").is_empty());
-        assert!(parse_plist_names("not json").is_empty());
-        assert!(parse_plist_names(r#"{"CFBundleName":5}"#).is_empty());
+    fn write_plist(app: &Path, xml: &str) {
+        let contents = app.join("Contents");
+        fs::create_dir_all(&contents).unwrap();
+        fs::write(contents.join("Info.plist"), xml).unwrap();
     }
 
     #[test]
@@ -2391,24 +2421,82 @@ git commit -m "feat(app-support): アンインストール済みアプリ判定�
     }
 
     #[test]
-    fn collect_installed_names_uses_file_stem_and_plist_names() {
+    fn collect_installed_apps_uses_file_stem_and_app_identity() {
         let tmp = TempDir::new().unwrap();
         let apps = tmp.path().join("Applications");
-        fs::create_dir_all(apps.join("Visual Studio Code.app/Contents")).unwrap();
-        fs::create_dir_all(apps.join("Plain.app/Contents")).unwrap();
-        let runner = PlistRunner(
-            [(
-                "Visual Studio Code.app".to_string(),
-                r#"{"CFBundleName":"Code"}"#.to_string(),
-            )]
-            .into_iter()
-            .collect(),
+        write_plist(
+            &apps.join("Visual Studio Code.app"),
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<plist version=\"1.0\">\n<dict>\n\t<key>CFBundleIdentifier</key>\n\t<string>com.microsoft.VSCode</string>\n\t<key>CFBundleName</key>\n\t<string>Code</string>\n</dict>\n</plist>\n",
         );
-        let mut names = collect_installed_names(&[apps], &runner);
+        fs::create_dir_all(apps.join("Plain.app/Contents")).unwrap();
+        let fake = Fake::default();
+        let installed = collect_installed_apps(&[apps], &fake);
+        let mut names: Vec<String> = installed.names.iter().cloned().collect();
         names.sort();
-        assert_eq!(names, vec!["Code", "Plain", "Visual Studio Code"]);
+        assert_eq!(names, vec!["code", "plain", "visualstudiocode"]);
+        assert!(installed.bundle_ids.contains("com.microsoft.vscode"));
+        assert!(matches_installed("Code", &installed));
+        assert!(matches_installed("vscode", &installed));
+        assert!(fake.calls().is_empty(), "XML plists need no command");
+    }
+
+    #[test]
+    fn collect_installed_apps_never_takes_other_plist_values() {
+        let tmp = TempDir::new().unwrap();
+        let apps = tmp.path().join("Applications");
+        write_plist(
+            &apps.join("Keeper.app"),
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0">
+<dict>
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>SasurahimeSecretScheme7f3a</string>
+            </array>
+        </dict>
+    </array>
+    <key>CFBundleExecutable</key>
+    <string>SasurahimeSecretExec7f3a</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.example.keeper</string>
+</dict>
+</plist>
+"#,
+        );
+        let installed = collect_installed_apps(&[apps], &Fake::default());
+        let names: Vec<String> = installed.names.iter().cloned().collect();
+        assert_eq!(names, vec!["keeper"]);
+        let ids: Vec<String> = installed.bundle_ids.iter().cloned().collect();
+        assert_eq!(ids, vec!["com.example.keeper"]);
+        assert!(!matches_installed("SasurahimeSecretScheme7f3a", &installed));
+        assert!(!matches_installed("SasurahimeSecretExec7f3a", &installed));
+    }
+
+    #[test]
+    fn collect_installed_apps_falls_back_to_stem_when_plutil_fails() {
+        let tmp = TempDir::new().unwrap();
+        let apps = tmp.path().join("Applications");
+        let app = apps.join("Binary Tool.app");
+        fs::create_dir_all(app.join("Contents")).unwrap();
+        let plist = app.join("Contents/Info.plist");
+        fs::write(&plist, b"bplist00\x00\x01\x02").unwrap();
+        let fake = Fake::default();
+        let installed = collect_installed_apps(&[apps], &fake);
+        let names: Vec<String> = installed.names.iter().cloned().collect();
+        assert_eq!(names, vec!["binarytool"]);
+        assert!(installed.bundle_ids.is_empty());
+        assert_eq!(
+            fake.calls(),
+            vec![format!("plutil -convert xml1 -o - {}", plist.display())]
+        );
     }
 ```
+
+- `Fake`(Task 5)は `plutil` を記録してから `unexpected command` で Err を返します。最後のテストでは、02 の `read_app_identity` がバイナリ plist に対して `plutil -convert xml1 -o - <path>` を 1 回だけ呼び、失敗を `None` として扱うことを確かめます。`Fake` に `"plutil"` の分岐を足しません。
+- `installed.names` と `installed.bundle_ids` は private フィールドですが、テストは同じモジュールの `mod tests` なので読めます。
 
 **10-2. 実行して失敗を確認。**
 
@@ -2416,22 +2504,11 @@ git commit -m "feat(app-support): アンインストール済みアプリ判定�
 cargo test --bin sasurahime app_support 2>&1 | tail -20
 ```
 
-期待: `cannot find function parse_plist_names` などのコンパイルエラー。
+期待: `cannot find function list_app_bundles`、`cannot find function collect_installed_apps` などのコンパイルエラー。
 
 **10-3. 実装する。** Task 9 のコードの後ろに追記します。`use` に `use std::time::SystemTime;` は Task 11 で足します。
 
 ```rust
-pub fn parse_plist_names(json: &str) -> Vec<String> {
-    let Ok(v) = serde_json::from_str::<serde_json::Value>(json) else {
-        return vec![];
-    };
-    ["CFBundleName", "CFBundleDisplayName"]
-        .iter()
-        .filter_map(|k| v.get(*k).and_then(|x| x.as_str()))
-        .map(|s| s.to_string())
-        .collect()
-}
-
 fn is_app_bundle(p: &Path) -> bool {
     p.extension().is_some_and(|e| e == "app")
 }
@@ -2466,33 +2543,30 @@ fn list_app_bundles(roots: &[PathBuf]) -> Vec<PathBuf> {
     found
 }
 
-fn collect_installed_names(roots: &[PathBuf], runner: &dyn CommandRunner) -> Vec<String> {
-    let mut names = Vec::new();
-    for app in list_app_bundles(roots) {
-        if let Some(stem) = app.file_stem().and_then(|s| s.to_str()) {
-            names.push(stem.to_string());
-        }
-        let plist = app.join("Contents/Info.plist");
-        if let Ok(o) = runner.run(
-            "plutil",
-            &["-convert", "json", "-o", "-", &plist.to_string_lossy()],
-        ) {
-            if o.status.success() {
-                names.extend(parse_plist_names(&String::from_utf8_lossy(&o.stdout)));
-            }
-        }
-    }
-    names
+/// Bundle file names still identify an app whose `Info.plist` cannot be read.
+fn app_bundle_stems(roots: &[PathBuf]) -> Vec<String> {
+    list_app_bundles(roots)
+        .iter()
+        .filter_map(|app| app.file_stem().and_then(|s| s.to_str()).map(str::to_string))
+        .collect()
 }
 
-/// Names come from this module; bundle IDs come from the orphan-containers
-/// collector so both features agree on what is installed.
+/// `Info.plist` values come only from the orphan-containers collector, which
+/// hands out nothing but the bundle ID and the two app names (README promise).
 pub fn collect_installed_apps(roots: &[PathBuf], runner: &dyn CommandRunner) -> InstalledApps {
-    let names = collect_installed_names(roots, runner);
-    let ids = crate::cleaners::orphan_containers::collect_installed_ids(roots, runner);
-    InstalledApps::from_parts(names, ids)
+    let mut names = app_bundle_stems(roots);
+    let mut bundle_ids = Vec::new();
+    for app in crate::cleaners::orphan_containers::collect_app_identities(roots, runner) {
+        names.extend(app.name);
+        names.extend(app.display_name);
+        bundle_ids.push(app.bundle_id);
+    }
+    InstalledApps::from_parts(names, bundle_ids)
 }
 ```
+
+- `names.extend(app.name)` は `Option<String>` を足します(`None` なら何も足しません)。
+- `AppIdentity` の値を `println!`、`eprintln!`、`log::*!` に渡しません。
 
 **10-4. 実行して成功を確認。**
 
@@ -2500,7 +2574,7 @@ pub fn collect_installed_apps(roots: &[PathBuf], runner: &dyn CommandRunner) -> 
 cargo test --bin sasurahime app_support 2>&1 | tail -20
 ```
 
-期待: 全件 passed。
+期待: 全件 passed(Task 10 で 4 件増える)。
 
 **10-5. コミット。**
 
@@ -2763,9 +2837,46 @@ git commit -m "feat(app-support): アンインストール済みアプリの残�
             .iter()
             .all(|c| c.starts_with("plutil") || c.starts_with("pgrep")));
     }
+
+    #[test]
+    fn open_confirmation_is_needed_only_above_five() {
+        assert_eq!(OPEN_CONFIRM_THRESHOLD, 5);
+        assert!(!open_needs_confirmation(0));
+        assert!(!open_needs_confirmation(1));
+        assert!(!open_needs_confirmation(5));
+        assert!(open_needs_confirmation(6));
+        assert!(open_needs_confirmation(40));
+    }
+
+    #[test]
+    fn reveal_paths_runs_open_once_per_path_through_runner() {
+        let tmp = TempDir::new().unwrap();
+        for n in [5usize, 6] {
+            let fake = Fake::default();
+            let c = cleaner_for(&tmp, &fake);
+            let paths: Vec<PathBuf> = (0..n).map(|i| tmp.path().join(format!("Gone{i}"))).collect();
+            c.reveal_paths(&paths);
+            let expected: Vec<String> = paths
+                .iter()
+                .map(|p| format!("open {}", p.display()))
+                .collect();
+            assert_eq!(fake.calls(), expected, "n={n}");
+        }
+    }
+
+    #[test]
+    fn reveal_paths_with_nothing_selected_runs_no_command() {
+        let tmp = TempDir::new().unwrap();
+        let fake = Fake::default();
+        let c = cleaner_for(&tmp, &fake);
+        c.reveal_paths(&[]);
+        assert!(fake.calls().is_empty(), "calls: {:?}", fake.calls());
+    }
 ```
 
-(最後のテストでは Fake が `plutil` を `unexpected command` で Err にしますが、`collect_installed_names` はエラーを無視するので問題ありません。`Fake` に `"plutil"` の分岐を足す必要はありません。)
+- `dry_run_with_leftovers_runs_no_destructive_commands` の `Apps` は空なので、`plutil` も呼ばれません。`Info.plist` を読むのは 02 の `collect_app_identities` で、バイナリ plist のときだけ `plutil` を呼びます。`Fake` に `"plutil"` の分岐を足す必要はありません。
+- `reveal_paths_runs_open_once_per_path_through_runner` は、5 件(確認なしで開く上限)と 6 件(確認ありの最小)のどちらでも、`reveal_paths` が `open <path>` を 1 件につき 1 回、選んだ順に runner 経由で呼ぶことを確かめます。確認を出すかどうかは `show_leftovers` が `open_needs_confirmation` で決め、`reveal_paths` は確認を出しません。
+- `Confirm` の対話は TTY が必要なので、単体テストも E2E も書きません(4.3 節)。`show_leftovers` の `dry_run = false` の経路は、非 TTY では MultiSelect の前に戻ります。
 
 **12-2. 実行して失敗を確認。**
 
@@ -2773,7 +2884,7 @@ git commit -m "feat(app-support): アンインストール済みアプリの残�
 cargo test --bin sasurahime app_support 2>&1 | tail -20
 ```
 
-期待: `no method named with_app_roots` / `leftovers` / `cannot find function format_leftover_line` のコンパイルエラー。
+期待: `no method named with_app_roots` / `leftovers` / `reveal_paths`、`cannot find function format_leftover_line` / `open_needs_confirmation`、`cannot find value OPEN_CONFIRM_THRESHOLD` のコンパイルエラー。
 
 **12-3. 実装する。**
 
@@ -2837,9 +2948,9 @@ pub struct AppSupportCleaner {
         )
     }
 
-    /// Display only. Selecting an entry opens it in Finder; nothing is deleted.
+    /// Display only. Selected entries are opened in Finder; nothing is deleted.
     fn show_leftovers(&self, dry_run: bool) -> Result<()> {
-        use dialoguer::MultiSelect;
+        use dialoguer::{Confirm, MultiSelect};
         if !self.base().exists() {
             return Ok(());
         }
@@ -2864,8 +2975,32 @@ pub struct AppSupportCleaner {
             .items(&items)
             .defaults(&defaults)
             .interact()?;
-        for i in picked {
-            let path = left[i].path.to_string_lossy().to_string();
+        if picked.is_empty() {
+            return Ok(());
+        }
+        if open_needs_confirmation(picked.len()) {
+            let ok = Confirm::new()
+                .with_prompt(format!(
+                    "This opens {} Finder windows. Continue?",
+                    picked.len()
+                ))
+                .default(false)
+                .interact()?;
+            if !ok {
+                println!("[{NAME}] nothing opened");
+                return Ok(());
+            }
+        }
+        let paths: Vec<PathBuf> = picked.into_iter().map(|i| left[i].path.clone()).collect();
+        self.reveal_paths(&paths);
+        Ok(())
+    }
+
+    /// Goes through the injected runner (not `explorer::open_in_finder`) so
+    /// that tests can count the `open` calls without launching Finder.
+    fn reveal_paths(&self, paths: &[PathBuf]) {
+        for p in paths {
+            let path = p.to_string_lossy().to_string();
             match self.runner.run("open", &[path.as_str()]) {
                 Ok(o) if o.status.success() => {}
                 Ok(o) => eprintln!(
@@ -2875,17 +3010,29 @@ pub struct AppSupportCleaner {
                 Err(e) => eprintln!("[{NAME}] error opening Finder: {e}"),
             }
         }
-        Ok(())
     }
 ```
 
-`format_leftover_line` を `format_candidate_label` の近くに追加します。
+`format_leftover_line`、`OPEN_CONFIRM_THRESHOLD`、`open_needs_confirmation` を `format_candidate_label` の近く(`impl AppSupportCleaner` の外)に追加します。
 
 ```rust
 pub fn format_leftover_line(l: &Leftover) -> String {
     format!("  {}  {}", l.path.display(), format_bytes(l.size))
 }
+
+/// Up to this many leftovers are opened in Finder without asking. Selecting
+/// is already the user's decision, but a long selection would flood the
+/// screen with Finder windows, so more than this asks once first.
+pub const OPEN_CONFIRM_THRESHOLD: usize = 5;
+
+pub fn open_needs_confirmation(selected: usize) -> bool {
+    selected > OPEN_CONFIRM_THRESHOLD
+}
 ```
+
+- 選択 0 件は `picked.is_empty()` で戻るので、確認も `open` も出しません。`open_needs_confirmation(0)` も `false` です。
+- 6 件以上で確認を拒否した場合は 1 件も開きません。「最初の 5 件だけ開く」はしません(どれを開くかを利用者が選び直せないため)。
+- `reveal_paths` と `open_needs_confirmation` は、`explorer.rs` の `open_in_finder` / `run_explore` と同じ役割の二重実装です。意図したもので、理由は 4.3 節にあります。共通化は別 PBI(ロードマップ 8 章)です。
 
 `impl Cleaner for AppSupportCleaner` の `clean` を次の2つに分けます。既存の `fn clean(...)` の本体を、名前だけ `clean_cache_dirs` に変えて `impl AppSupportCleaner` に移し(中身は変更しません)、`impl Cleaner` 側は次にします。
 
@@ -3000,7 +3147,18 @@ Apple-provided folders and vendor parent folders (`Google`, `Microsoft`,
 ベンダー親フォルダ(`Google`、`Microsoft`、`Adobe`、`JetBrains` など)は一覧に出しません。
 ```
 
-**13-2. 最終ゲート。**
+**13-2. README の確認(変更しない)。** 共通規約 1.6 の規則に照らし、本書の変更が README の Privacy / Data access の約束の中に収まっていることを確認します。README は編集しません。
+
+```bash
+grep -n "Library/Application Support/\`" README.md        # 英日 2 行(ディレクトリの一覧に既にある)
+grep -n "only the bundle ID and the app name" README.md   # 1 行(02 の Task 6)
+grep -n "取り出すのは bundle ID とアプリ名だけ" README.md     # 1 行(02 の Task 6)
+grep -n 'run("plutil"\|serde_json\|fs::read(' src/cleaners/app_support.rs   # 出力なし
+```
+
+期待: 上の 3 つが記載どおりの行数を出し、4 つ目が何も出さないこと(本書のコードが `plutil` を呼ばず、`serde_json` で plist を解析せず、ファイルの中身を `fs::read` していない)。テストの `format!("plutil -convert xml1 -o - {}", ...)` は `run("plutil"` を含まないので 4 つ目の検索語に当たりません。どれかが違えば、README を推測で直さずに止めて報告します。
+
+**13-3. 最終ゲート。**
 
 ```bash
 cargo fmt --check && cargo clippy -- -D warnings && cargo test 2>&1 | tail -5
@@ -3008,7 +3166,7 @@ cargo fmt --check && cargo clippy -- -D warnings && cargo test 2>&1 | tail -5
 
 期待: fmt と clippy が無出力、`test result: ok.`。
 
-**13-3. コミット。**
+**13-4. コミット。**
 
 ```bash
 git add docs/SUPPORTED.md
@@ -3091,7 +3249,11 @@ cargo test --test app_support
 | 残骸: Apple 製・ベンダー親・既知アプリ | 出さない | `excluded_names`、`leftovers_skips_excluded_names` |
 | 残骸: リンクとファイル | 出さない | `leftovers_skips_files_and_symlinks` |
 | 残骸表示で削除 | しない。`open <path>` のみ | `leftovers_never_modify_anything` |
-| plutil 失敗 | .app のファイル名だけで照合を続ける | `collect_installed_names_uses_file_stem_and_plist_names` |
+| plutil 失敗(バイナリ plist) | 02 の `read_app_identity` が `None` を返し、.app のファイル名だけで照合を続ける | `collect_installed_apps_falls_back_to_stem_when_plutil_fails` |
+| `Info.plist` に bundle ID とアプリ名以外の値がある | 照合にも表示にも使わない(02 の `AppIdentity` が 3 項目しか返さない) | `collect_installed_apps_never_takes_other_plist_values` |
+| 残骸を 0 件選択 | 確認も `open` も出さない | `open_confirmation_is_needed_only_above_five`、`reveal_paths_with_nothing_selected_runs_no_command` |
+| 残骸を 1 件から 5 件選択 | 確認なしで選んだ全件を `open` | `open_confirmation_is_needed_only_above_five`、`reveal_paths_runs_open_once_per_path_through_runner` |
+| 残骸を 6 件以上選択 | `Confirm`(既定 No)で 1 回確認。承認で全件を `open`、拒否で 1 件も開かない | `open_confirmation_is_needed_only_above_five`(`Confirm` 自体は TTY が必要なのでテストしない) |
 
 ## 8. やりがちな間違い、禁止事項、完了条件
 
@@ -3107,7 +3269,12 @@ cargo test --test app_support
 - マクロの標準エントリに加えて特殊変種(`command_name()` など)にも登録する: 同じサブコマンドが重複して clap がパニックします。`targets` の件数テストで検出します。
 - `--yes` から外すために除外リストや除外関数を作る、または `AUTO_CLEAN_TARGETS` に足す: 除外は `auto_clean_allowed()` の `false` だけで行います(共通規約 2.2)。
 - `src/hint/mod.rs` の `mod cleaner;` / `mod detector;` を `pub(crate) mod` にする、`is_running` の可視性を変える、`pub use` で再エクスポートする: 共通規約 7.3、7.4 の形(`pub(crate) fn` と `pub(crate) use`)だけです。
-- `crate::explorer::open_in_finder` を呼ぶ、または `src/explorer.rs` を変更する: Finder は runner 経由の `open` で開きます。
+- `crate::explorer::open_in_finder` を呼ぶ、または `src/explorer.rs` を変更する: Finder は runner 経由の `open` で開きます。explorer との二重実装は意図したもので、共通化は別 PBI です(4.3 節、ロードマップ 8 章)。
+- 6 件以上の選択で確認を省く、5 件以内でも確認を出す、閾値 5 を定数を使わずに書く: 閾値は `OPEN_CONFIRM_THRESHOLD`、判定は `open_needs_confirmation` だけで行います。
+- 6 件以上で確認を拒否されたときに最初の 5 件だけ開く: 拒否なら 1 件も開きません。
+- `Confirm` を単体テストや E2E で動かそうとする: TTY が必要なので止まります。判定関数と `reveal_paths` だけをテストします。
+- 本書で `Info.plist` を読む(`plutil -convert json`、`serde_json`、`fs::read`): `Info.plist` の値は 02 の `collect_app_identities` からだけ受け取ります。README の約束(bundle ID とアプリ名だけ)を崩すためです。
+- `AppIdentity` の値(bundle ID、アプリ名)を `println!`、`eprintln!`、`log::*!` に出す: README で「ログに書き出さない」と約束しています。
 - 単体テストで `with_app_roots` を付けずに第2段を動かす: 実機の `/Applications` を読み、`plutil` 呼び出しが記録されてテストが失敗します。
 - ゴミ箱を使うテスト: 先頭で `crate::trash::set_trash_mode(false);` を呼びます。
 
@@ -3132,6 +3299,9 @@ cargo test --test app_support
 - [ ] `main.rs` の変更はマクロ表の標準エントリ 1 つ(6.2 節)と単体テスト 1 件だけ。
 - [ ] `docs/SUPPORTED.md` の件数が 51、新節が `## 51.`、stats が `## 52.`。`cargo run -q -- targets | wc -l` が 51。
 - [ ] `src/explorer.rs` と `src/hint/detector.rs` に差分が無い。
+- [ ] 第2段の Finder 起動が `OPEN_CONFIRM_THRESHOLD`(5)と `open_needs_confirmation` に従い、`open` は `reveal_paths` から runner 経由でだけ呼ばれる。
+- [ ] `src/cleaners/app_support.rs` が `Info.plist` を自分で読まず、02 の `collect_app_identities` だけを使う(Task 13 の 13-2)。
+- [ ] `README.md` に差分が無い(13-2 の grep で、README の記述が本書の挙動を包含していることを確認済み)。
 - [ ] `docs/SUPPORTED.md` の英語節と日本語節、一覧表の両方と、`docs/HOWTO-USE.md` の 2 行を更新した。
 - [ ] 実機の `~/Library` を触るテストが無い。
 

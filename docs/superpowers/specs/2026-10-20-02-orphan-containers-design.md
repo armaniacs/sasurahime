@@ -16,14 +16,21 @@
   grep -n "const AUTO_CLEAN_TARGETS" src/main.rs         # 1 行出る
   cargo run -q -- targets | wc -l                        # 48
   grep -n "48 clean targets" docs/SUPPORTED.md           # 1 行出る
+  grep -n "^- mise configuration files" README.md        # 1 行出る (ロードマップ 7 章の P0)
+  grep -n "^- mise の設定ファイル" README.md              # 1 行出る (P0)
+  grep -n "com.docker.docker/Data/" README.md            # 2 行出る (04 の T5)
   ```
 
-- 本書が定義する `collect_installed_ids` は 05 (app-support) の第 2 段が使います。名前とシグネチャを変えないでください。
+- 本書が定義する `AppIdentity`、`read_app_identity`、`collect_app_identities` は 05 (app-support) の第 2 段が使います。名前、シグネチャ、`AppIdentity` の 3 フィールドを変えないでください。`collect_installed_ids` は本書の中だけで使います (シグネチャは `(app_dirs: &[PathBuf], runner: &dyn CommandRunner) -> HashSet<String>` のまま)。
+- 本書は `Info.plist` の内容 (bundle ID とアプリ名) を新しく読むので、共通規約 1.6 の規則に従い、同じ設計書の Task 6 で README の Data access 節 (英語・日本語) を更新します。
 - 既知の既存問題 (今回は触らない): `ios-backup` は `--yes` で TTY 上だと確認プロンプトを出します。
 
 ## 未検証の仮定
 
-- Task 1 から 4 のコード (`src/cleaners/orphan_containers.rs`) は、本書の原著者が基準コミットの複製に適用して `cargo fmt --check`、`cargo clippy -- -D warnings`、`cargo test` が通ることを確認したと報告しています (設計書の整理時には再検証していません)。そのまま写してください。ただし Task 4 に追加した `auto_clean_allowed()` のオーバーライドとそのテストは、04 の S2 が前提なので基準コミットではコンパイルできず、未検証です。
+- Task 1、3、4 のコード (`src/cleaners/orphan_containers.rs`) は、本書の原著者が基準コミットの複製に適用して `cargo fmt --check`、`cargo clippy -- -D warnings`、`cargo test` が通ることを確認したと報告しています (設計書の整理時には再検証していません)。そのまま写してください。ただし Task 4 に追加した `auto_clean_allowed()` のオーバーライドとそのテストは、04 の S2 が前提なので基準コミットではコンパイルできず、未検証です。
+- Task 2 のコード (`AppIdentity`、`xml_string_value`、`parse_app_identity_from_xml`、`read_app_identity`、`collect_app_identities`、`collect_installed_ids` とそのテスト) は、`Info.plist` から取り出す値を 3 つに限る設計に書き直したもので、コンパイル未確認です。`is_app_bundle`、`list_app_bundles`、`default_app_dirs` と、`collect_installed_ids_*` / `default_app_dirs_*` のテストは書き直し前と同じです。
+- `plutil -convert xml1 -o - <Info.plist>` がバイナリの `Info.plist` (例 `/Applications/Amazon Kindle.app/Contents/Info.plist`) を XML にして標準出力に出し、元のファイルを変えないことは、設計書の整理時に実機で読み取りだけ行って確認しました。
+- Task 5 の E2E `info_plist_values_other_than_identity_never_reach_output_or_logs` は、`RUST_LOG=trace` で `env_logger` の出力が標準エラーに出ることを前提にしています (`src/main.rs` の `env_logger::Builder::from_env(...)`)。
 - Task 5 の `src/main.rs` の変更 (マクロ表への 1 エントリと単体テスト 1 件) は、04 の実装後の `main.rs` を前提に書き直したため未コンパイルです。
 - 04 の `all_cleaners()` が `OrphanContainersCleaner::new` を呼ぶだけで実機の `/Applications` を読まないこと (読むのは `detect()` / `clean()` のとき) は、本書のコードで確認済みです。
 
@@ -57,8 +64,8 @@
 | `BQR82RBBHL.com.tinyspeck.slackmacgap` | チーム ID + bundle ID (同じチームの別フォルダ) |
 | `com.apple.Home.group` | 接頭辞なし。com.apple で始まる |
 
-- `/Applications` は 31 件。`plutil -extract CFBundleIdentifier raw -o - <Info.plist>` が動作します (バイナリ plist も読めます)。
-- 実機を確認し直す場合も `ls` と `plutil -extract` だけを使ってください。`rm` や `mv` は実行しません。
+- `/Applications` は 31 件。`Info.plist` には XML のものとバイナリ (`bplist00` で始まる) のものがあります。`plutil -convert xml1 -o - <Info.plist>` はバイナリの plist も XML にして標準出力に出します (`-o -` があれば元のファイルは変わりません)。
+- 実機を確認し直す場合も `ls`、`head -c 8`、`plutil -convert xml1 -o -` だけを使ってください。`-o -` を付けない `plutil -convert`、`rm`、`mv` は実行しません。
 
 ---
 
@@ -72,7 +79,7 @@
 | 新規 | `tests/orphan_containers.rs` | E2E (`--dry-run` のみ。tempdir を HOME にする) |
 | 変更 | `docs/SUPPORTED.md` | 一覧表の行、ターゲット数 48 -> 49、第 49 節の追加と stats 節の 49 -> 50 (英語節と日本語節) |
 | 変更 | `docs/HOWTO-USE.md` | 対象表 (英語と日本語) に 1 行ずつ |
-| 変更 | `README.md` | Data access 節 (英語と日本語) に 1 行ずつ |
+| 変更 | `README.md` | Data access 節 (英語と日本語) のディレクトリの一覧に 1 行ずつ、内容を読むファイルの一覧に 1 項目ずつ (共通規約 1.6) |
 
 `src/interactive.rs` と `src/cleaner.rs` は変更しません。
 
@@ -82,7 +89,9 @@
 
 | 判断 | 理由 |
 |---|---|
-| plist は `plist` クレートを使わず、XML は文字列検索、バイナリ (`bplist00`) だけ macOS 標準の `plutil` に委譲する (共通規約 11.2) | `Cargo.toml` に plist 系クレートは無く、追加すると推移依存が増えます。release は `opt-level = "z"` でサイズ重視です。`plutil` は `CommandRunner` 経由なのでテストで差し替えられ、macOS 専用というプロジェクト方針にも合います |
+| plist は `plist` クレートを使わず、XML は文字列検索、バイナリ (`bplist00`) は macOS 標準の `plutil -convert xml1 -o -` で XML にしてから同じ文字列検索で読む (共通規約 11.2) | `Cargo.toml` に plist 系クレートは無く、追加すると推移依存が増えます。release は `opt-level = "z"` でサイズ重視です。`plutil` は `CommandRunner` 経由なのでテストで差し替えられ、macOS 専用というプロジェクト方針にも合います。1 ファイルにつき `plutil` の呼び出しは 1 回で、キーごとに `plutil -extract` を 3 回呼ぶより scan が速く、解析経路も XML の 1 つに揃います |
+| `Info.plist` から取り出すのは `CFBundleIdentifier`、`CFBundleName`、`CFBundleDisplayName` の 3 つだけで、型 `AppIdentity { bundle_id, name, display_name }` で返す | README の Data access 節で「bundle ID とアプリ名だけを取り出す」と約束するためです (共通規約 1.6)。他のキーの値を返す経路を型の上で作らないので、05 が使うときも約束が守られます。02 自身は bundle ID だけを使いますが、名前を 05 のために同じ関数で読むと、`Info.plist` を読む場所が 1 か所に保てます |
+| 外部に出す bundle ID の集合 `collect_installed_ids` のシグネチャは変えず、内部で `collect_app_identities` を使う | 02 の `scan()` の呼び出しをそのままにする最小の変更です。`read_app_identity` と `collect_app_identities` は `collect_installed_ids` から呼ばれるので、05 の実装前でも `dead_code` 警告になりません |
 | `sub_targets()` は実装しない (共通規約 11.1) | TUI が `--sub` 付きの子プロセスを起動するため |
 | 登録は `define_cleaners!` の標準エントリ (特殊変種にしない) | CLI 引数が `--dry-run` だけなので、04 の実装後はマクロ表の 1 エントリで変種、`targets`、ディスパッチ、`all_cleaners()` (scan、TUI) まで揃います。特殊変種にすると `command_name` / `dry_run` / `extra_targets` / `matches!` / `match target` / `special_cleaners` の 6 か所を手で触ることになり、03 と 05 の変更と同じ行で衝突しやすくなります |
 | インストール先ディレクトリを `with_app_dirs` で注入する (`#[cfg(test)]`) | 実機の `/Applications` に依存するテストを避けるためです。本番コードでは未使用なので `cfg(test)` にしないと `clippy -D warnings` が dead_code で落ちます |
@@ -110,8 +119,12 @@ pub fn is_protected_id(id: &str) -> bool;
 pub fn is_owned_by_installed(id: &str, installed: &HashSet<String>) -> bool;
 pub fn find_orphan_names(kind: ContainerKind, names: &[String], installed: &HashSet<String>) -> Vec<String>;
 
-pub fn parse_bundle_id_from_xml(xml: &str) -> Option<String>;
-pub fn read_bundle_id(plist: &Path, runner: &dyn CommandRunner) -> Option<String>;
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AppIdentity { pub bundle_id: String, pub name: Option<String>, pub display_name: Option<String> }
+fn xml_string_value(xml: &str, key: &str) -> Option<String>;            // private
+pub fn parse_app_identity_from_xml(xml: &str) -> Option<AppIdentity>;
+pub fn read_app_identity(plist: &Path, runner: &dyn CommandRunner) -> Option<AppIdentity>;
+pub fn collect_app_identities(app_dirs: &[PathBuf], runner: &dyn CommandRunner) -> Vec<AppIdentity>;
 pub fn collect_installed_ids(app_dirs: &[PathBuf], runner: &dyn CommandRunner) -> HashSet<String>;
 pub fn default_app_dirs(home: &Path) -> Vec<PathBuf>;
 
@@ -133,7 +146,9 @@ impl Cleaner for OrphanContainersCleaner { /* name / detect / clean / auto_clean
 
 `main.rs` には関数や定数を追加しません (マクロ表の 1 エントリとテスト 1 件だけです)。
 
-05 (app-support) は `collect_installed_ids` をこのシグネチャのまま呼びます。戻り値の bundle ID は小文字化済みです。
+05 (app-support) は `AppIdentity` と `collect_app_identities` をこのシグネチャのまま使います。`collect_app_identities` が返す `bundle_id` は plist に書かれた綴りのまま (小文字化しない) で、`collect_installed_ids` が返す集合は小文字化済みです。
+
+`Info.plist` の値を返す公開関数は `parse_app_identity_from_xml`、`read_app_identity`、`collect_app_identities` (いずれも `AppIdentity` を返す) と `collect_installed_ids` (bundle ID だけ) です。任意のキーを引数に取る公開関数は作りません (`xml_string_value` は private)。
 
 ### 3.1 入出力例
 
@@ -184,14 +199,15 @@ impl Cleaner for OrphanContainersCleaner { /* name / detect / clean / auto_clean
 | Group | `BQR82RBBHL.com.tinyspeck.slackmacgap` | `com.tinyspeck.slackmacgap` | 空 (チーム付きでも同じ ID なら除外) |
 | 任意 | 空配列 | 任意 | 空 |
 
-`parse_bundle_id_from_xml`:
+`parse_app_identity_from_xml`:
 
 | 入力 | 結果 |
 |---|---|
-| `CFBundleIdentifier` の直後に `<string>com.foo.App</string>` | `Some("com.foo.App")` |
-| キーが無い | `None` |
-| キーの直後が `<true/>` で、その先に別の `<key>` と `<string>` | `None` (別キーの値を誤って拾わない) |
-| 値が空白だけ | `None` |
+| `CFBundleIdentifier` の直後に `<string>com.foo.App</string>`、`CFBundleName` に `X`、`CFBundleDisplayName` 無し | `Some(AppIdentity { bundle_id: "com.foo.App", name: Some("X"), display_name: None })` |
+| `CFBundleIdentifier` が無い | `None` (名前があっても) |
+| `CFBundleIdentifier` の直後が `<true/>` で、その先に別の `<key>` と `<string>` | `None` (別キーの値を誤って拾わない) |
+| `CFBundleIdentifier` の値が空白だけ | `None` |
+| 3 キーの前に `CFBundleURLTypes` (配列) と任意のキー `SasurahimeDummyKey` がある | 3 キーの値だけを持つ `AppIdentity`。他のキーの値はどこにも現れない |
 
 ---
 
@@ -519,7 +535,14 @@ git add src/cleaners/orphan_containers.rs src/cleaners/mod.rs
 git commit -m "feat(orphan-containers): bundle ID の正規化と残骸判定の純関数を追加"
 ```
 
-### Task 2: インストール済み bundle ID の収集
+### Task 2: インストール済みアプリの識別情報 (AppIdentity) の収集
+
+`Info.plist` から取り出す値を `CFBundleIdentifier`、`CFBundleName`、`CFBundleDisplayName` の 3 つに限り、型 `AppIdentity` で返します (共通規約 11.2)。README の Data access 節は「`Info.plist` からは bundle ID とアプリ名だけを取り出す」と約束します (Task 6 で追記)。この約束を型で守るため、他のキーの値を返す関数や、plist の値をログ・標準出力に出す経路は作りません。
+
+- `AppIdentity` のフィールドは 3 つだけです。フィールドを足すと Task 2 のテスト `app_identity_has_exactly_three_fields` がコンパイルエラーになります (構造体のパターンに `..` を書かないため)。
+- XML の plist は、ファイルを読んで 3 つのキーだけを文字列検索で取り出します。
+- バイナリの plist (`bplist00` で始まる) は、runner 経由の `plutil -convert xml1 -o - <path>` で XML を標準出力に出させ、同じ文字列検索で 3 つのキーだけを取り出します。`plutil` の呼び出しは 1 ファイルにつき 1 回です。`-o -` を省くと `plutil` が元のファイルを XML に書き換えるので、必ず付けます (テスト `read_app_identity_binary_plist_converts_with_plutil` が引数列を固定します)。
+- 外部 (05) に出すのは `AppIdentity`、`read_app_identity`、`collect_app_identities` です。02 自身は `collect_installed_ids` (小文字の bundle ID の集合。シグネチャは従来どおり) を使います。
 
 #### 2-1. インポート行を置き換える
 
@@ -540,18 +563,38 @@ use std::path::{Path, PathBuf};
 
     use crate::test_helpers::MockRunner;
     use std::os::unix::process::ExitStatusExt;
+    use std::sync::Mutex;
     use tempfile::TempDir;
 
+    const SECRET_URL_SCHEME: &str = "sasurahime-secret-url-scheme-7f3a";
+    const SECRET_VALUE: &str = "SasurahimeSecretValue7f3a";
+
+    /// Answers every `plutil` call with the same stdout and records the arguments.
     struct PlutilStub {
-        stdout: &'static str,
+        stdout: String,
         exit_code: i32,
+        calls: Mutex<Vec<Vec<String>>>,
+    }
+
+    impl PlutilStub {
+        fn new(stdout: &str, exit_code: i32) -> Self {
+            Self {
+                stdout: stdout.to_string(),
+                exit_code,
+                calls: Mutex::new(vec![]),
+            }
+        }
     }
 
     impl CommandRunner for PlutilStub {
-        fn run(&self, program: &str, _args: &[&str]) -> anyhow::Result<std::process::Output> {
+        fn run(&self, program: &str, args: &[&str]) -> anyhow::Result<std::process::Output> {
             if program != "plutil" {
                 anyhow::bail!("unexpected program {program}");
             }
+            self.calls
+                .lock()
+                .unwrap()
+                .push(args.iter().map(|s| s.to_string()).collect());
             Ok(std::process::Output {
                 status: std::process::ExitStatus::from_raw(self.exit_code << 8),
                 stdout: self.stdout.as_bytes().to_vec(),
@@ -570,6 +613,36 @@ use std::path::{Path, PathBuf};
         )
     }
 
+    /// A plist whose other keys hold values that must never come out of the
+    /// reader. They are placed before the three keys on purpose.
+    fn plist_xml_with_other_keys(bundle_id: &str) -> String {
+        format!(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0">
+<dict>
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>{SECRET_URL_SCHEME}</string>
+            </array>
+        </dict>
+    </array>
+    <key>SasurahimeDummyKey</key>
+    <string>{SECRET_VALUE}</string>
+    <key>CFBundleIdentifier</key>
+    <string>{bundle_id}</string>
+    <key>CFBundleName</key>
+    <string>Keeper</string>
+    <key>CFBundleDisplayName</key>
+    <string>Keeper Display</string>
+</dict>
+</plist>
+"#
+        )
+    }
+
     fn write_app(apps_dir: &Path, rel: &str, bundle_id: &str) {
         let contents = apps_dir.join(rel).join("Contents");
         fs::create_dir_all(&contents).unwrap();
@@ -577,87 +650,135 @@ use std::path::{Path, PathBuf};
     }
 
     #[test]
-    fn parse_bundle_id_from_xml_reads_value() {
+    fn parse_app_identity_from_xml_reads_three_keys() {
         assert_eq!(
-            parse_bundle_id_from_xml(&plist_xml("com.foo.App")),
+            parse_app_identity_from_xml(&plist_xml("com.foo.App")),
+            Some(AppIdentity {
+                bundle_id: "com.foo.App".to_string(),
+                name: Some("X".to_string()),
+                display_name: None,
+            })
+        );
+    }
+
+    #[test]
+    fn parse_app_identity_from_xml_missing_bundle_id_is_none() {
+        let xml = "<dict><key>CFBundleName</key><string>X</string></dict>";
+        assert_eq!(parse_app_identity_from_xml(xml), None);
+    }
+
+    #[test]
+    fn parse_app_identity_from_xml_key_without_string_is_none() {
+        let xml =
+            "<dict><key>CFBundleIdentifier</key><true/><key>Other</key><string>y</string></dict>";
+        assert_eq!(parse_app_identity_from_xml(xml), None);
+    }
+
+    #[test]
+    fn parse_app_identity_from_xml_empty_bundle_id_is_none() {
+        let xml = "<dict><key>CFBundleIdentifier</key><string>  </string></dict>";
+        assert_eq!(parse_app_identity_from_xml(xml), None);
+    }
+
+    #[test]
+    fn parse_app_identity_from_xml_ignores_other_keys() {
+        let identity =
+            parse_app_identity_from_xml(&plist_xml_with_other_keys("com.foo.Keeper")).unwrap();
+        assert_eq!(
+            identity,
+            AppIdentity {
+                bundle_id: "com.foo.Keeper".to_string(),
+                name: Some("Keeper".to_string()),
+                display_name: Some("Keeper Display".to_string()),
+            }
+        );
+        let shown = format!("{identity:?}");
+        assert!(!shown.contains(SECRET_URL_SCHEME), "{shown}");
+        assert!(!shown.contains(SECRET_VALUE), "{shown}");
+    }
+
+    #[test]
+    fn app_identity_has_exactly_three_fields() {
+        // No `..` in the pattern: adding a field to AppIdentity breaks this
+        // test on purpose, because README promises only these three values.
+        let AppIdentity {
+            bundle_id,
+            name,
+            display_name,
+        } = AppIdentity {
+            bundle_id: "com.foo.App".to_string(),
+            name: None,
+            display_name: None,
+        };
+        assert_eq!(bundle_id, "com.foo.App");
+        assert!(name.is_none() && display_name.is_none());
+    }
+
+    #[test]
+    fn read_app_identity_reads_xml_file() {
+        let tmp = TempDir::new().unwrap();
+        let p = tmp.path().join("Info.plist");
+        fs::write(&p, plist_xml("com.foo.App")).unwrap();
+        let runner = MockRunner::new().with_not_found();
+        assert_eq!(
+            read_app_identity(&p, &runner).map(|a| a.bundle_id),
             Some("com.foo.App".to_string())
         );
     }
 
     #[test]
-    fn parse_bundle_id_from_xml_missing_key_is_none() {
-        let xml = "<dict><key>CFBundleName</key><string>X</string></dict>";
-        assert_eq!(parse_bundle_id_from_xml(xml), None);
-    }
-
-    #[test]
-    fn parse_bundle_id_from_xml_key_without_string_is_none() {
-        let xml =
-            "<dict><key>CFBundleIdentifier</key><true/><key>Other</key><string>y</string></dict>";
-        assert_eq!(parse_bundle_id_from_xml(xml), None);
-    }
-
-    #[test]
-    fn parse_bundle_id_from_xml_empty_value_is_none() {
-        let xml = "<dict><key>CFBundleIdentifier</key><string>  </string></dict>";
-        assert_eq!(parse_bundle_id_from_xml(xml), None);
-    }
-
-    #[test]
-    fn read_bundle_id_reads_xml_file() {
-        let tmp = TempDir::new().unwrap();
-        let p = tmp.path().join("Info.plist");
-        fs::write(&p, plist_xml("com.foo.App")).unwrap();
-        let runner = MockRunner::new().with_not_found();
-        assert_eq!(read_bundle_id(&p, &runner), Some("com.foo.App".to_string()));
-    }
-
-    #[test]
-    fn read_bundle_id_garbage_is_none() {
+    fn read_app_identity_garbage_is_none() {
         let tmp = TempDir::new().unwrap();
         let p = tmp.path().join("Info.plist");
         fs::write(&p, [0xffu8, 0xfe, 0x00, 0x01]).unwrap();
         let runner = MockRunner::new().with_not_found();
-        assert_eq!(read_bundle_id(&p, &runner), None);
+        assert_eq!(read_app_identity(&p, &runner), None);
     }
 
     #[test]
-    fn read_bundle_id_missing_file_is_none() {
+    fn read_app_identity_missing_file_is_none() {
         let tmp = TempDir::new().unwrap();
         let runner = MockRunner::new().with_not_found();
         assert_eq!(
-            read_bundle_id(&tmp.path().join("nope.plist"), &runner),
+            read_app_identity(&tmp.path().join("nope.plist"), &runner),
             None
         );
     }
 
     #[test]
-    fn read_bundle_id_binary_plist_uses_plutil() {
+    fn read_app_identity_binary_plist_converts_with_plutil() {
         let tmp = TempDir::new().unwrap();
         let p = tmp.path().join("Info.plist");
         fs::write(&p, b"bplist00\x00\x01\x02").unwrap();
-        let runner = PlutilStub {
-            stdout: "com.example.bin\n",
-            exit_code: 0,
-        };
+        let runner = PlutilStub::new(&plist_xml_with_other_keys("com.example.bin"), 0);
+        let identity = read_app_identity(&p, &runner).unwrap();
+        assert_eq!(identity.bundle_id, "com.example.bin");
+        assert_eq!(identity.name.as_deref(), Some("Keeper"));
+        let shown = format!("{identity:?}");
+        assert!(!shown.contains(SECRET_URL_SCHEME), "{shown}");
+        assert!(!shown.contains(SECRET_VALUE), "{shown}");
+        let path = p.to_str().unwrap().to_string();
         assert_eq!(
-            read_bundle_id(&p, &runner),
-            Some("com.example.bin".to_string())
+            *runner.calls.lock().unwrap(),
+            vec![vec![
+                "-convert".to_string(),
+                "xml1".to_string(),
+                "-o".to_string(),
+                "-".to_string(),
+                path,
+            ]]
         );
     }
 
     #[test]
-    fn read_bundle_id_binary_plist_plutil_failure_is_none() {
+    fn read_app_identity_binary_plist_plutil_failure_is_none() {
         let tmp = TempDir::new().unwrap();
         let p = tmp.path().join("Info.plist");
         fs::write(&p, b"bplist00\x00\x01\x02").unwrap();
-        let failing = PlutilStub {
-            stdout: "",
-            exit_code: 1,
-        };
-        assert_eq!(read_bundle_id(&p, &failing), None);
+        let failing = PlutilStub::new("", 1);
+        assert_eq!(read_app_identity(&p, &failing), None);
         let not_found = MockRunner::new().with_not_found();
-        assert_eq!(read_bundle_id(&p, &not_found), None);
+        assert_eq!(read_app_identity(&p, &not_found), None);
     }
 
     #[test]
@@ -704,6 +825,32 @@ use std::path::{Path, PathBuf};
     }
 
     #[test]
+    fn collect_app_identities_returns_only_the_three_values() {
+        let tmp = TempDir::new().unwrap();
+        let apps = tmp.path().join("Applications");
+        let contents = apps.join("Keeper.app/Contents");
+        fs::create_dir_all(&contents).unwrap();
+        fs::write(
+            contents.join("Info.plist"),
+            plist_xml_with_other_keys("com.foo.Keeper"),
+        )
+        .unwrap();
+        let runner = MockRunner::new().with_not_found();
+        let found = collect_app_identities(&[apps], &runner);
+        assert_eq!(
+            found,
+            vec![AppIdentity {
+                bundle_id: "com.foo.Keeper".to_string(),
+                name: Some("Keeper".to_string()),
+                display_name: Some("Keeper Display".to_string()),
+            }]
+        );
+        let shown = format!("{found:?}");
+        assert!(!shown.contains(SECRET_URL_SCHEME), "{shown}");
+        assert!(!shown.contains(SECRET_VALUE), "{shown}");
+    }
+
+    #[test]
     fn default_app_dirs_lists_three_roots() {
         let dirs = default_app_dirs(Path::new("/Users/x"));
         assert_eq!(
@@ -717,26 +864,41 @@ use std::path::{Path, PathBuf};
     }
 ```
 
+`set` は Task 1 のテストで定義済みのヘルパーです。`CommandRunner` は `Send + Sync` を要求しますが、`Mutex<Vec<Vec<String>>>` は `Sync` なので `PlutilStub` はそのまま実装できます。
+
 #### 2-3. 失敗を確認する
 
 ```bash
 cargo test --bin sasurahime orphan_containers
 ```
 
-期待: コンパイルエラー。`cannot find function `parse_bundle_id_from_xml``、`read_bundle_id`、`collect_installed_ids`、`default_app_dirs` が見つからない旨が出ます。
+期待: コンパイルエラー。`cannot find type `AppIdentity``、`cannot find function `parse_app_identity_from_xml``、`read_app_identity`、`collect_installed_ids`、`collect_app_identities`、`default_app_dirs` が見つからない旨が出ます。
 
 #### 2-4. 実装を追加する
 
 `#[cfg(test)]` の行の直前 (Task 1 の実装の後ろ) に、次のコードを挿入します。
 
 ```rust
-/// Extracts `CFBundleIdentifier` from an XML plist. Returns `None` when the
-/// key is missing or is not directly followed by a `<string>` value.
-pub fn parse_bundle_id_from_xml(xml: &str) -> Option<String> {
-    const KEY: &str = "<key>CFBundleIdentifier</key>";
+/// The only values taken from an app's `Info.plist`. README promises that
+/// nothing else is read out of it, so do not add fields here.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AppIdentity {
+    pub bundle_id: String,
+    pub name: Option<String>,
+    pub display_name: Option<String>,
+}
+
+const PLIST_KEY_BUNDLE_ID: &str = "CFBundleIdentifier";
+const PLIST_KEY_NAME: &str = "CFBundleName";
+const PLIST_KEY_DISPLAY_NAME: &str = "CFBundleDisplayName";
+
+/// Value of `<key>{key}</key>` when it is directly followed by a non-blank
+/// `<string>`. A different `<key>` in between means the value is not a string.
+fn xml_string_value(xml: &str, key: &str) -> Option<String> {
     const OPEN: &str = "<string>";
     const CLOSE: &str = "</string>";
-    let after = &xml[xml.find(KEY)? + KEY.len()..];
+    let key_tag = format!("<key>{key}</key>");
+    let after = &xml[xml.find(&key_tag)? + key_tag.len()..];
     let open_at = after.find(OPEN)?;
     if after.find("<key>").is_some_and(|k| k < open_at) {
         return None;
@@ -750,31 +912,31 @@ pub fn parse_bundle_id_from_xml(xml: &str) -> Option<String> {
     }
 }
 
-/// Reads `CFBundleIdentifier` from an `Info.plist`. Binary plists (magic
-/// `bplist00`) are decoded by `plutil`, which ships with macOS; XML plists are
-/// parsed directly so that no extra crate is needed.
-pub fn read_bundle_id(plist: &Path, runner: &dyn CommandRunner) -> Option<String> {
+/// `None` when `CFBundleIdentifier` is missing; the two names are optional.
+pub fn parse_app_identity_from_xml(xml: &str) -> Option<AppIdentity> {
+    Some(AppIdentity {
+        bundle_id: xml_string_value(xml, PLIST_KEY_BUNDLE_ID)?,
+        name: xml_string_value(xml, PLIST_KEY_NAME),
+        display_name: xml_string_value(xml, PLIST_KEY_DISPLAY_NAME),
+    })
+}
+
+/// Reads an `Info.plist`. Binary plists (magic `bplist00`) are turned into XML
+/// on stdout by `plutil`, which ships with macOS, so no plist crate is needed.
+/// `-o -` matters: without it `plutil -convert` rewrites the file in place.
+pub fn read_app_identity(plist: &Path, runner: &dyn CommandRunner) -> Option<AppIdentity> {
     let bytes = fs::read(plist).ok()?;
     if bytes.starts_with(b"bplist00") {
         let path = plist.to_str()?;
         let out = runner
-            .run(
-                "plutil",
-                &["-extract", "CFBundleIdentifier", "raw", "-o", "-", path],
-            )
+            .run("plutil", &["-convert", "xml1", "-o", "-", path])
             .ok()?;
         if !out.status.success() {
             return None;
         }
-        let id = String::from_utf8(out.stdout).ok()?;
-        let id = id.trim();
-        return if id.is_empty() {
-            None
-        } else {
-            Some(id.to_string())
-        };
+        return parse_app_identity_from_xml(std::str::from_utf8(&out.stdout).ok()?);
     }
-    parse_bundle_id_from_xml(std::str::from_utf8(&bytes).ok()?)
+    parse_app_identity_from_xml(std::str::from_utf8(&bytes).ok()?)
 }
 
 fn is_app_bundle(path: &Path) -> bool {
@@ -804,18 +966,22 @@ fn list_app_bundles(dir: &Path) -> Vec<PathBuf> {
     apps
 }
 
-/// Collects lowercase bundle IDs of the apps found under `app_dirs`.
-/// Bundles whose `Info.plist` cannot be read are ignored.
+/// Identities of the apps found under `app_dirs`, in directory order.
+/// Bundles whose `Info.plist` cannot be read are skipped.
+pub fn collect_app_identities(app_dirs: &[PathBuf], runner: &dyn CommandRunner) -> Vec<AppIdentity> {
+    app_dirs
+        .iter()
+        .flat_map(|dir| list_app_bundles(dir.as_path()))
+        .filter_map(|app| read_app_identity(&app.join("Contents/Info.plist"), runner))
+        .collect()
+}
+
+/// Lowercase bundle IDs of the apps found under `app_dirs`.
 pub fn collect_installed_ids(app_dirs: &[PathBuf], runner: &dyn CommandRunner) -> HashSet<String> {
-    let mut ids = HashSet::new();
-    for dir in app_dirs {
-        for app in list_app_bundles(dir) {
-            if let Some(id) = read_bundle_id(&app.join("Contents/Info.plist"), runner) {
-                ids.insert(id.to_ascii_lowercase());
-            }
-        }
-    }
-    ids
+    collect_app_identities(app_dirs, runner)
+        .into_iter()
+        .map(|app| app.bundle_id.to_ascii_lowercase())
+        .collect()
 }
 
 pub fn default_app_dirs(home: &Path) -> Vec<PathBuf> {
@@ -827,19 +993,22 @@ pub fn default_app_dirs(home: &Path) -> Vec<PathBuf> {
 }
 ```
 
+- `AppIdentity` の値をログ (`log::*!`)、`println!`、`eprintln!` に渡すコードを書きません。02 で `AppIdentity` を使うのは `collect_installed_ids` だけで、そこでも bundle ID を小文字化して集合にするだけです。
+- `read_app_identity` と `collect_app_identities` は、05 が使うまでは本番コードから `collect_installed_ids` 経由でだけ呼ばれます。どちらも呼び出し元があるので `dead_code` 警告は出ません。
+
 #### 2-5. 成功を確認する
 
 ```bash
 cargo test --bin sasurahime orphan_containers
 ```
 
-期待: `test result: ok. 21 passed; 0 failed`。
+期待: `test result: ok. 24 passed; 0 failed` (Task 1 の 8 件と本タスクの 16 件)。
 
 #### 2-6. コミット
 
 ```bash
 git add src/cleaners/orphan_containers.rs
-git commit -m "feat(orphan-containers): インストール済みアプリの bundle ID 収集を追加"
+git commit -m "feat(orphan-containers): インストール済みアプリの bundle ID とアプリ名の収集を追加"
 ```
 
 ### Task 3: Containers と Group Containers の走査
@@ -1169,7 +1338,7 @@ impl OrphanContainersCleaner {
 cargo test --bin sasurahime orphan_containers
 ```
 
-期待: `test result: ok. 29 passed; 0 failed`。`chmod 000` を使うテストは root で実行すると失敗します。通常のユーザーで実行してください。
+期待: `test result: ok. 32 passed; 0 failed` (Task 2 までの 24 件と本タスクの 8 件)。`chmod 000` を使うテストは root で実行すると失敗します。通常のユーザーで実行してください。
 
 #### 3-6. コミット
 
@@ -1503,7 +1672,7 @@ impl Cleaner for OrphanContainersCleaner {
 cargo test --bin sasurahime orphan_containers
 ```
 
-期待: `test result: ok. 39 passed; 0 failed`。
+期待: `test result: ok. 42 passed; 0 failed` (Task 3 までの 32 件と本タスクの 10 件)。
 
 テストが走るとき、`delete_selected_records_failures_as_skipped` は存在しないパスを `trash::delete` に渡し、Finder 経由のエラーを得ます (数秒かかる場合があります)。実在するファイルはゴミ箱へ送られません。
 
@@ -1600,7 +1769,80 @@ fn clean_orphan_containers_rejects_all_flag() {
         .unwrap();
     assert!(!output.status.success());
 }
+
+const SECRET_URL_SCHEME: &str = "sasurahime-secret-url-scheme-7f3a";
+const SECRET_VALUE: &str = "SasurahimeSecretValue7f3a";
+
+#[test]
+fn info_plist_values_other_than_identity_never_reach_output_or_logs() {
+    let tmp = TempDir::new().unwrap();
+    let contents = tmp.path().join("Applications/Keeper.app/Contents");
+    fs::create_dir_all(&contents).unwrap();
+    let plist = format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0">
+<dict>
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>{SECRET_URL_SCHEME}</string>
+            </array>
+        </dict>
+    </array>
+    <key>SasurahimeDummyKey</key>
+    <string>{SECRET_VALUE}</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.example.sasurahimetest.keeper</string>
+    <key>CFBundleName</key>
+    <string>Keeper</string>
+</dict>
+</plist>
+"#
+    );
+    fs::write(contents.join("Info.plist"), plist).unwrap();
+    let keeper = make_container(tmp.path(), "Containers", "com.example.sasurahimetest.keeper");
+    let gone = make_container(tmp.path(), "Containers", "com.example.sasurahimetest.gone");
+
+    let output = sasurahime(tmp.path())
+        .env("RUST_LOG", "trace")
+        .args(["clean", "orphan-containers", "--dry-run"])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stdout.contains("com.example.sasurahimetest.gone"),
+        "stdout:\n{stdout}"
+    );
+    // Proves that ~/Applications/Keeper.app/Contents/Info.plist was actually read.
+    assert!(
+        !stdout.contains("com.example.sasurahimetest.keeper"),
+        "installed app's container must not be listed:\n{stdout}"
+    );
+    for secret in [SECRET_URL_SCHEME, SECRET_VALUE] {
+        assert!(!stdout.contains(secret), "stdout leaked {secret}:\n{stdout}");
+        assert!(!stderr.contains(secret), "stderr or log leaked {secret}:\n{stderr}");
+    }
+    assert!(keeper.exists() && gone.exists(), "dry-run must not delete");
+}
 ```
+
+`info_plist_values_other_than_identity_never_reach_output_or_logs` の意図:
+
+- tempdir の HOME の `~/Applications/Keeper.app/Contents/Info.plist` に、3 キーの前に `CFBundleURLTypes` (URL スキーム `sasurahime-secret-url-scheme-7f3a`) と任意のキー `SasurahimeDummyKey` (値 `SasurahimeSecretValue7f3a`) を置きます。`default_app_dirs(home)` は `home.join("Applications")` を含むので、このファイルが読まれます。
+- `com.example.sasurahimetest.keeper` のコンテナが一覧に出ないことで、plist が実際に読まれたことを確かめます。そのうえで、2 つの値が標準出力にも標準エラーにも出ないことを確かめます。
+- `RUST_LOG=trace` で、`log` クレートの全レベルの出力 (`env_logger` は標準エラーに書く) も検査の対象にします。
+- 実機の `/Applications` と `/System/Applications` も読み取りだけ行います (共通規約 11.5)。`com.example.sasurahimetest.*` に一致する実在のアプリは無い前提です。
+
+削除履歴 (`history.json`) に plist の値が書き出されないことを確かめるテストは追加しません。理由:
+
+- 履歴の 1 件は `HistoryEntry { timestamp: String, cleaner: String, freed_bytes: u64, skipped_count: usize }` で、`cleaner` には `write_history_entry` の `label` が入ります。`label` は `src/main.rs` の `run_and_exit` では CLI 名、`src/interactive.rs` (TUI と `--yes`) では cleaner の `name()` で、本書の cleaner ではどちらもコード中の固定文字列 `orphan-containers` です。plist の値を入れる欄が型の上にありません。
+- 履歴が書かれるのは解放量が 0 より大きい `clean` (`--dry-run` なし) のときだけで、テストでそれを起こすには対話の削除を通す必要があり、禁止事項 (7 章) に当たります。
+- 型が変わる (履歴に文字列の欄が足される) 場合は、共通規約 1.6 の「保存」に当たるので、その変更の PBI で README とテストを扱います。
 
 `src/main.rs` の `mod tests` の末尾 (最後のテスト関数の後ろ、`mod tests` を閉じる `}` の直前) に追加します。04 の S1 で追加された `names_of` を使います。
 
@@ -1624,7 +1866,7 @@ fn clean_orphan_containers_rejects_all_flag() {
 cargo test --test orphan_containers
 ```
 
-期待: 4 件中 3 件が失敗します (`dry_run_lists_orphans_and_keeps_files`、`without_library_exits_zero`、`targets_lists_orphan_containers`)。`error: unrecognized subcommand 'orphan-containers'` が stderr に出ます。`rejects_all_flag` は未登録でもサブコマンド不明で失敗終了するため、この時点でも通ります。
+期待: 5 件中 4 件が失敗します (`dry_run_lists_orphans_and_keeps_files`、`without_library_exits_zero`、`targets_lists_orphan_containers`、`info_plist_values_other_than_identity_never_reach_output_or_logs`)。`error: unrecognized subcommand 'orphan-containers'` が stderr に出ます。`rejects_all_flag` は未登録でもサブコマンド不明で失敗終了するため、この時点でも通ります。
 
 ```bash
 cargo test --bin sasurahime orphan_containers_is_registered
@@ -1672,7 +1914,7 @@ cargo test --test coverage
 cargo test --test interactive
 ```
 
-期待: `orphan_containers` E2E は `4 passed`、`orphan_containers_is_registered_but_not_auto_cleaned ... ok`、`cargo test --bin sasurahime` の全件 (04 が追加した `only_legacy_targets_are_auto_clean_allowed`、`standard_and_special_cleaners_do_not_overlap`、`standard_cleaners_follow_the_macro_table_order` など) が全件 ok、`coverage` は 2 件 ok (`targets` に載った名前が `clean <name> --help` で成功し、重複も無いことの確認)、`interactive` も全件 ok。
+期待: `orphan_containers` E2E は `5 passed`、`orphan_containers_is_registered_but_not_auto_cleaned ... ok`、`cargo test --bin sasurahime` の全件 (04 が追加した `only_legacy_targets_are_auto_clean_allowed`、`standard_and_special_cleaners_do_not_overlap`、`standard_cleaners_follow_the_macro_table_order` など) が全件 ok、`coverage` は 2 件 ok (`targets` に載った名前が `clean <name> --help` で成功し、重複も無いことの確認)、`interactive` も全件 ok。
 
 #### 5-5. コミット
 
@@ -1683,7 +1925,7 @@ git commit -m "feat(orphan-containers): clean サブコマンドと一覧への�
 
 ### Task 6: ドキュメントと最終確認
 
-#### 6-1. ドキュメントを更新する (SUPPORTED.md 6 か所、HOWTO-USE.md 2 か所、README.md 2 か所)
+#### 6-1. ドキュメントを更新する (SUPPORTED.md 6 か所、HOWTO-USE.md 2 か所、README.md 4 か所)
 
 番号と件数は共通規約 5.2 の表のとおりです (02 完了後: 件数 49、新節 `## 49.`、stats は `## 50.`)。
 
@@ -1810,17 +2052,36 @@ selecting.
 | `orphan-containers` | アンインストール済みアプリの `~/Library/Containers` / `~/Library/Group Containers` の残骸（対話的のみ） |
 ```
 
-(9) `README.md` の英語の「Data access」節。04 が追加した `- \`~/Library/Containers/com.docker.docker/Data/\`` で始まる行の次に追加します (共通規約 11.5)。
+(9) から (12) は README の Data access 節です。本書は `Info.plist` の内容を新しく読むので、共通規約 1.6 の規則によりこのタスクで README (英語・日本語) を更新します。ロードマップ 7 章の P0 が段落を書き直し、04 の T5 がディレクトリの一覧に Docker の行を足した状態が前提です。P0 の文のうち、mise の項目、「Values read from these files ...」「これらのファイルから読み取った値は ...」の文、sasurahime 自身のファイルの文は変えません。
+
+(9) `README.md` の英語の「Data access」節のディレクトリの一覧。04 が追加した `- \`~/Library/Containers/com.docker.docker/Data/\`` で始まる行の次に追加します (共通規約 11.5)。
 
 ```markdown
-- `~/Library/Containers/`, `~/Library/Group Containers/`, and the `Info.plist` of `.app` bundles in `/Applications`, `~/Applications`, `/System/Applications` (bundle IDs and app names only; `sasurahime clean orphan-containers` and `app-support`)
+- `~/Library/Containers/` and `~/Library/Group Containers/` (folder names and sizes only; `sasurahime clean orphan-containers`)
 ```
 
-(10) `README.md` の日本語の「アクセスするデータ」節。04 が追加した `- \`~/Library/Containers/com.docker.docker/Data/\`` で始まる行の次に追加します。
+(10) `README.md` の日本語の「アクセスするデータ」節のディレクトリの一覧。04 が追加した `- \`~/Library/Containers/com.docker.docker/Data/\`` で始まる行の次に追加します。
 
 ```markdown
-- `~/Library/Containers/`、`~/Library/Group Containers/`、`/Applications`・`~/Applications`・`/System/Applications` にある `.app` の `Info.plist`（bundle ID とアプリ名のみ。`sasurahime clean orphan-containers` と `app-support` で使用）
+- `~/Library/Containers/` と `~/Library/Group Containers/`（フォルダ名とサイズのみ。`sasurahime clean orphan-containers` で使用）
 ```
+
+(11) `README.md` の英語の内容を読むファイルの一覧。P0 が書いた `- mise configuration files` で始まる行の次に追加します。
+
+```markdown
+- the `Info.plist` of installed apps (`.app` bundles in `/Applications`, `~/Applications` and `/System/Applications`, and one folder level below them); only the bundle ID and the app name are taken from it, to tell leftovers of uninstalled apps from the data of installed apps
+```
+
+(12) `README.md` の日本語の内容を読むファイルの一覧。P0 が書いた `- mise の設定ファイル` で始まる行の次に追加します。
+
+```markdown
+- インストール済みアプリの `Info.plist`（`/Applications`、`~/Applications`、`/System/Applications` の直下と 1 階層下にある `.app`）。取り出すのは bundle ID とアプリ名だけで、アンインストール済みアプリの残骸とインストール済みアプリのデータを見分けるため
+```
+
+(11) と (12) を足した後の「内容を読むファイル」の部分は、ロードマップ 7.4 節の「02 の完了後」の形と一字一句同じになります。
+
+- (11)、(12) の「bundle ID とアプリ名だけ」は、Task 2 の `AppIdentity` (3 フィールド) とテスト `app_identity_has_exactly_three_fields`、`parse_app_identity_from_xml_ignores_other_keys`、`collect_app_identities_returns_only_the_three_values`、E2E `info_plist_values_other_than_identity_never_reach_output_or_logs` が裏付けます。
+- (11)、(12) にはコマンド名を書きません。05 (app-support) の第 2 段も同じ `AppIdentity` を使うので、05 の実装時に README を変えずに済みます (共通規約 11.5)。
 
 確認:
 
@@ -1828,6 +2089,9 @@ selecting.
 cargo run -q -- targets | wc -l                      # 49
 grep -n "49 clean targets\|49 のクリーンターゲット" docs/SUPPORTED.md   # 2 行
 grep -n "^## 49\. \|^## 50\. " docs/SUPPORTED.md     # orphan-containers 2 行、stats 2 行
+grep -n "Group Containers/" README.md                # 2 行 ((9) と (10))
+grep -n "Info.plist" README.md                       # 2 行 ((11) と (12))
+grep -n "^- mise configuration files" -A1 README.md  # 2 行目が "- the \`Info.plist\` of installed apps" で始まる
 ```
 
 #### 6-2. 最終確認コマンド
@@ -1842,7 +2106,7 @@ git status --short
 期待:
 - `cargo fmt --check` は出力なし。
 - `cargo clippy -- -D warnings` は警告 0 (`cargo clippy --all-targets` では HEAD から存在する `src/cleaner.rs` の `#[expect(dead_code)]` 未達成の警告が出る場合があります。これは今回の変更とは無関係なので、プロジェクト規定の `cargo clippy -- -D warnings` を基準にします)。
-- `cargo test` は全件成功 (02 の着手前から 44 件増えます。単体 39 件、`main.rs` の単体 1 件、E2E 4 件)。
+- `cargo test` は全件成功 (02 の着手前から 48 件増えます。単体 42 件、`main.rs` の単体 1 件、E2E 5 件)。
 - `git status --short` は `?? docs/superpowers/` 以外に未コミットの変更がないこと。
 
 #### 6-3. コミット
@@ -1876,8 +2140,11 @@ cargo run -- clean orphan-containers --dry-run
 | root ディレクトリが存在しない | 数えずにスキップ。両方無ければ `detect` は `NotFound` | 要 (`detect_without_roots_is_not_found`) |
 | 空の Containers | 候補ゼロ、`detect` は `Clean` | 要 (`scan_of_missing_or_empty_roots_is_empty`) |
 | サイズ 0 のフォルダ | 候補にしない | 要 (同上のシンボリックリンク用テスト内の `com.example.empty`) |
-| `.app` が壊れている (Info.plist 無し、キー無し、バイナリ読取失敗) | その .app は無視する。ID が集まらないので、その ID のコンテナは候補に出る | 要 (`collect_installed_ids_ignores_broken_and_non_app_entries`、`read_bundle_id_*`) |
-| バイナリ plist | `plutil` に委譲。失敗や未インストールなら `None` | 要 (`read_bundle_id_binary_plist_*`) |
+| `.app` が壊れている (Info.plist 無し、キー無し、バイナリ読取失敗) | その .app は無視する。ID が集まらないので、その ID のコンテナは候補に出る | 要 (`collect_installed_ids_ignores_broken_and_non_app_entries`、`read_app_identity_*`) |
+| バイナリ plist | `plutil -convert xml1 -o - <path>` で XML にしてから 3 キーを取り出す。失敗や未インストールなら `None` | 要 (`read_app_identity_binary_plist_*`) |
+| plist に 3 キー以外の値 (`CFBundleURLTypes`、任意のキー) がある | 返り値 (`AppIdentity`) にも標準出力にも標準エラー (ログ) にも出ない | 要 (`parse_app_identity_from_xml_ignores_other_keys`、`collect_app_identities_returns_only_the_three_values`、`read_app_identity_binary_plist_converts_with_plutil`、E2E `info_plist_values_other_than_identity_never_reach_output_or_logs`) |
+| `CFBundleName` / `CFBundleDisplayName` が無い | その項目は `None`。bundle ID があれば `AppIdentity` を返す | 要 (`parse_app_identity_from_xml_reads_three_keys` の `display_name: None`) |
+| 削除履歴に plist の値が入るか | 入らない (`HistoryEntry` に値を入れる欄が無い) | 不要 (Task 5-1 の後の説明) |
 | 大文字小文字の違い | 両側を小文字化して照合する | 要 (正規化表、`collect_installed_ids_scans_top_level_and_one_subfolder`) |
 | チーム ID 付き Group Containers で、インストール済みアプリが同じ ID を持つ | 正規化後に完全一致するので除外 | 要 (`find_orphan_names_group_exact_id_with_team_prefix_is_kept`) |
 | 同じチーム ID の別名フォルダ (`TEAM.slack`) | チーム内に一致があれば全て除外 | 要 (`scan_keeps_group_containers_of_a_team_with_an_installed_app`) |
@@ -1904,6 +2171,9 @@ cargo run -- clean orphan-containers --dry-run
 5. 新しい依存クレートを `Cargo.toml` に追加しない (`plist` を含む)。
 6. `git add -A` / `git add .` を使わない。`docs/superpowers/` を巻き込まない。
 7. `.env` や認証情報ファイルを読まない。
+8. `AppIdentity` にフィールドを足さない。任意のキーを引数に取る公開関数 (`xml_string_value` の `pub` 化など) を作らない。README の約束 (bundle ID とアプリ名だけ) が崩れます。
+9. `AppIdentity` や plist の値を `log::*!`、`println!`、`eprintln!` に渡さない。
+10. `-o -` を付けずに `plutil -convert` を呼ばない (元の `Info.plist` が書き換わります)。実機でも同じです。
 
 やりがちな間違い:
 1. `with_app_dirs` から `#[cfg(test)]` を外す。`clippy -D warnings` が `method is never used` で失敗します。
@@ -1917,6 +2187,8 @@ cargo run -- clean orphan-containers --dry-run
 9. `--yes` から外すために除外リストや除外関数を `main.rs` / `interactive.rs` に作る、または `orphan-containers` を `AUTO_CLEAN_TARGETS` に足す。除外は `auto_clean_allowed()` の `false` だけで行います (共通規約 2.2)。TUI (`run_interactive`) では選択して実行できます。
 10. SUPPORTED.md に issue 番号や経緯を書く。最新仕様のスナップショットだけを書きます。
 11. 特殊変種として `command_name()` などに手で登録する。マクロ表の標準エントリ 1 つだけです (5-3)。
+12. `collect_installed_ids` のシグネチャを変える、または `read_bundle_id` / `parse_bundle_id_from_xml` を別に残す。bundle ID だけを読む関数を別に残すと、本番から呼ばれず `dead_code` 警告になります。bundle ID は `collect_app_identities` から取ります。
+13. README の (11)、(12) を Task 6 より後のタスクや別の PBI に回す。`Info.plist` を読む変更と同じ設計書の中で README を直します (共通規約 1.6)。
 
 ---
 
@@ -1925,12 +2197,14 @@ cargo run -- clean orphan-containers --dry-run
 - [ ] `src/cleaners/orphan_containers.rs` が新規作成され、Task 1 から 4 のコードがすべて入っている
 - [ ] `src/cleaners/mod.rs` に `pub mod orphan_containers;` がある
 - [ ] `src/main.rs` の変更がマクロ表の標準エントリ 1 つ (5-3) と単体テスト 1 件だけである
-- [ ] `tests/orphan_containers.rs` の E2E 4 件が成功する (すべて tempdir の HOME、`--dry-run` のみ)
+- [ ] `tests/orphan_containers.rs` の E2E 5 件が成功する (すべて tempdir の HOME、`--dry-run` のみ)
 - [ ] `sasurahime targets` に `orphan-containers` が出る
 - [ ] `sasurahime scan` の一覧に `orphan-containers` が出る
 - [ ] `sasurahime --yes` が `orphan-containers` を実行しない (`orphan_containers_is_never_auto_cleaned`、`orphan_containers_is_registered_but_not_auto_cleaned`)
-- [ ] `docs/SUPPORTED.md` の 6 か所 (件数 48 -> 49 が 2、表 2、第 49 節 2 と stats の 50 への繰り下げ) と、`docs/HOWTO-USE.md` の 2 行、`README.md` の 2 行が更新されている
+- [ ] `docs/SUPPORTED.md` の 6 か所 (件数 48 -> 49 が 2、表 2、第 49 節 2 と stats の 50 への繰り下げ) と、`docs/HOWTO-USE.md` の 2 行、`README.md` の 4 か所 (ディレクトリの一覧に英日 1 行ずつ、内容を読むファイルの一覧に英日 1 項目ずつ) が更新されている
 - [ ] `cargo run -q -- targets | wc -l` が 49
+- [ ] `AppIdentity` のフィールドが `bundle_id`、`name`、`display_name` の 3 つだけで、`Info.plist` の値を返す公開関数が `parse_app_identity_from_xml`、`read_app_identity`、`collect_app_identities`、`collect_installed_ids` だけである
+- [ ] README の内容を読むファイルの一覧に `Info.plist` の項目 (英日) があり、ロードマップ 7.4 節の「02 の完了後」の形と一致する
 - [ ] 新規依存が `Cargo.toml` に無い
 - [ ] 実機の `~/Library` に変更を加えていない
 - [ ] コミットは 6 つ (Task 1 から 6)、すべて日本語 Conventional Commits、個別 `git add`

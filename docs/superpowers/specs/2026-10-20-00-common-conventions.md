@@ -2,7 +2,7 @@
 
 対象ブランチ: feat/apfs-snapshot-enhancement (基準コミット 2c71587)。
 対象機能: 2 orphan-containers / 3 library-caches / 4 Docker.raw と scan 網羅 / 5 app-support。
-実装順は 04 -> 02 -> 03 -> 05 で固定です。順序、前提タスク、ファイルごとの衝突確認は `2026-10-20-01-roadmap-and-order.md` (以下、ロードマップ) にあります。
+実装順は 04 -> 02 -> 03 -> 05 で固定です。04 の前に、ドキュメントだけの前提タスク P0 (README の Data access の事実化) を行います。順序、前提タスク、ファイルごとの衝突確認、別 PBI に回す事項は `2026-10-20-01-roadmap-and-order.md` (以下、ロードマップ) にあります。
 各設計書はこの規約書を参照します。ここに書いてあることは各設計書では繰り返しません。設計書の間で共通する判断は 11 章にまとめてあります。
 行番号は基準コミット時点の目安です。04 の実装後は `src/main.rs` の行番号が大きくずれます。ずれていたら関数名や引用したコードで探してください。
 
@@ -42,6 +42,16 @@
 
 - `.env` や認証情報ファイルを読まず、値を出力しません。
 - シークレットをリポジトリに置きません。
+
+### 1.6 README の Privacy / Data access と同時に更新する
+
+- README の「Privacy」節と「Data access」節 (英語 80-93 行付近、日本語 190-203 行付近) は、sasurahime が何を読み、何を送り、何を保存するかを利用者に約束する記述です。
+- 規則: README の Privacy / Data access の主張を変える可能性がある変更 (新しいファイル内容の読み取り、ネットワーク、保存) では、README (英語・日本語) を同じ PBI/タスクで更新します。後続のタスクや別の PBI に回しません。
+  - 「新しいファイル内容の読み取り」には、メタデータ (名前、サイズ、更新日時) 以外を読む変更がすべて入ります。例: 設定ファイルや plist を開いて値を取り出す、外部コマンドにファイルの中身を出力させる (`plutil -convert` など)。
+  - 「ネットワーク」は、外部への通信を行う変更すべてです (外部コマンド経由を含む)。
+  - 「保存」は、新しいファイルへの書き込み、既存の履歴や設定に新しい項目を足す変更です。
+- 既に README に書かれている範囲の中だけで読む変更 (例: 列挙済みの `Info.plist` の bundle ID とアプリ名を別の cleaner も使う) は、README の更新は不要です。その場合も、設計書に「README の該当文がこの変更を包含している」ことを確認する手順を書きます。
+- 判断に迷う場合は、実装を止めて報告します。
 
 ## 2. Cleaner trait と関連型 (src/cleaner.rs)
 
@@ -352,7 +362,7 @@ if let Err(e) = crate::trash::delete_path(&entry.path) {
 7. [ ] `tests/<module>.rs` に E2E テストを追加する (5.3)。
 8. [ ] `docs/SUPPORTED.md` を更新する (5.2)。
 9. [ ] `docs/HOWTO-USE.md` の対象表 (英語と日本語) に 1 行ずつ追加する (位置と文言は各設計書)。
-10. [ ] `README.md` の「Data access」節は、各設計書に指示がある場合だけ追記する (11.5 節)。
+10. [ ] `README.md` の「Data access」節は、各設計書に指示がある場合だけ追記する (11.5 節)。ただし 1.6 節の規則に当たる変更 (新しいファイル内容の読み取り、ネットワーク、保存) を設計書の指示なしに見つけた場合は、実装を止めて報告する。
 11. [ ] `cargo build`、`cargo clippy -- -D warnings`、`cargo fmt --check`、`cargo test` を全て通す。
 
 ### 5.1 変更箇所のチェックリスト (特殊変種、今回は使わない)
@@ -433,7 +443,7 @@ if let Err(e) = crate::trash::delete_path(&entry.path) {
 10. [ ] `tests/<module>.rs` に E2E テストを追加する (5.3)。
 11. [ ] `docs/SUPPORTED.md` を更新する (5.2)。
 12. [ ] 必要なら `docs/HOWTO-USE.md` の対象表に追加する。英語の表 (102 行付近) と日本語の表 (674 行付近) の両方 (11.6 節)。
-13. [ ] `README.md` は、対象表を持ちません。「Data access」節 (90 行付近の英語、200 行付近の日本語) に、cleaner が新しく読むディレクトリが含まれていなければ追記します (11.5 節)。既に列挙されているパス (`~/Library/Caches/`、`~/Library/Application Support/` など) の配下だけを読むなら変更不要です。
+13. [ ] `README.md` は、対象表を持ちません。「Data access」節 (90 行付近の英語、200 行付近の日本語) に、cleaner が新しく読むディレクトリが含まれていなければ追記します (11.5 節)。既に列挙されているパス (`~/Library/Caches/`、`~/Library/Application Support/` など) の配下のメタデータだけを読むなら変更不要です。ファイルの内容を新しく読む場合は 1.6 節の規則に従い、同じタスクで「内容を読むファイル」の一覧を更新します。
 14. [ ] `cargo build`、`cargo clippy -- -D warnings`、`cargo fmt --check`、`cargo test` を全て通す。
 
 ### 5.2 docs/SUPPORTED.md の更新
@@ -685,6 +695,8 @@ fn is_managed(path: &Path, home: &Path) -> Option<&'static str>;         // priv
 - 現在の `MANAGED_PATTERNS` の `clean_target` は uv / browsers / brew / mise / cargo / colima / xcode / simulator / ios-backup / huggingface / act / gradle / maven / sbt / pre-commit です。
 - 新しい cleaner が既存パスを管理するようになったら、対応する `ManagedPattern` を追加します (explore で「managed by sasurahime clean X」と表示されるため)。追加は設計書が指示したときだけ行います。
 - `ManagedPattern` は private なので、クレート外には出ません。`path_pattern` の `~/` は `home.join(...)` で展開されます。
+- `explorer.rs` の private 関数 `open_in_finder(path)` は `std::process::Command::new("open")` を直接呼びます。`run_explore` は未管理エントリを MultiSelect で選ばせた後、1 件ごとに `Confirm` ("Open in Finder?"、既定 No) を挟んでから `open_in_finder` を呼びます。
+- 05 (app-support) の第 2 段は Finder 起動を `open_in_finder` ではなく runner 経由の `open <path>` で行い、確認は 6 件以上のときだけ 1 回出します (05 の 4.3 節)。explorer と二重実装になるのは意図したものです (runner 経由でテストできること、今回 `explorer.rs` を変更しないこと)。共通化は別 PBI です (ロードマップ 8 章)。今回の 4 本では `explorer.rs` を変更しません。
 
 ### 7.6 共通ユーティリティ (src/format.rs)
 
@@ -764,8 +776,11 @@ pub fn format_bytes(bytes: u64) -> String;        // "1.5 GB" / "12.3 MB" / "4.0
 ### 11.2 plist は依存クレートを追加せずに読む
 
 - `plist` クレートなどを `Cargo.toml` に追加しません。
-- 02 (bundle ID の取得): XML の `Info.plist` は文字列検索で `CFBundleIdentifier` を取り出し、バイナリ (`bplist00` で始まる) だけ runner 経由の `plutil -extract CFBundleIdentifier raw -o - <path>` に任せます。関数は `orphan_containers::read_bundle_id` と `collect_installed_ids` です。
-- 05 (アプリ名の取得): runner 経由の `plutil -convert json -o - <path>` の出力を、既存の依存 `serde_json` で読みます。bundle ID は自前で読まず、02 の `collect_installed_ids` を呼びます。
+- `Info.plist` を読むのは 02 の `src/cleaners/orphan_containers.rs` だけです。05 は自前で plist を読まず、02 の関数を呼びます。
+- 02 は `Info.plist` から `CFBundleIdentifier`、`CFBundleName`、`CFBundleDisplayName` の 3 つの値だけを取り出し、型 `AppIdentity { bundle_id, name, display_name }` (3 項目のみ) で返します。他のキーの値を返す関数、ログに出す経路、保存する経路を作りません (README の約束。1.6 節)。
+  - XML の `Info.plist` は文字列検索で 3 キーを取り出します。バイナリ (`bplist00` で始まる) は runner 経由の `plutil -convert xml1 -o - <path>` で XML を標準出力に出させ、同じ文字列検索で 3 キーを取り出します。`-o -` を省くと `plutil` が元のファイルを書き換えるので、必ず付けます。
+  - 関数は `orphan_containers::read_app_identity` (1 ファイル)、`collect_app_identities` (インストール先の全 `.app`) と、それを小文字の bundle ID 集合にする `collect_installed_ids` です。
+- 05 (アプリ名の取得): 02 の `collect_app_identities` が返す `AppIdentity` の `name` と `display_name`、`.app` のファイル名の stem だけを使います。`plutil -convert json` と `serde_json` による plist の解析はしません。
 - `plutil` は macOS 標準で、runner 経由なのでテストで差し替えられます。
 
 ### 11.3 サイズは dir_size (物理ブロック) で測る
@@ -782,7 +797,11 @@ pub fn format_bytes(bytes: u64) -> String;        // "1.5 GB" / "12.3 MB" / "4.0
 ### 11.5 実機の /Applications と README の Data access
 
 - 単体テストは実機の `/Applications` に依存させません。インストール先は注入します (02 の `with_app_dirs`、05 の `with_app_roots`、どちらも `#[cfg(test)]`)。E2E が実機の `/Applications` を読み取りだけ行うのは許容します。
-- `README.md` の「Data access」節には、列挙外のパスを新しく読む設計書だけが追記します。追記するのは 04 (Docker Desktop の仮想ディスクと `~/.colima/`) と 02 (`~/Library/Containers/`、`~/Library/Group Containers/`、`.app` の `Info.plist`) です。03 と 05 は既に列挙された `~/Library/Caches/`、`~/Library/Application Support/` と、02 が追記する `Info.plist` の範囲だけを読むので追記しません。
+- `README.md` の「Data access」節は、ロードマップ 7 章の前提タスク P0 で「ディレクトリの一覧」「メタデータを読む旨」「内容を読むファイルの一覧」「読んだ値をログと削除履歴に書き出さない旨」の形に書き直します。P0 の時点で「内容を読むファイルの一覧」に入るのは mise の設定ファイルだけで、sasurahime 自身の設定と削除履歴は一覧の後の文で述べます。
+- 以降の設計書は、1.6 節の規則に従って次だけを追記します。
+  - 04: ディレクトリの一覧に 1 行 (Docker Desktop の仮想ディスクと `~/.colima/`。ファイルのサイズだけを読むので、内容を読むファイルの一覧は変えません)。
+  - 02: ディレクトリの一覧に 1 行 (`~/Library/Containers/`、`~/Library/Group Containers/`) と、内容を読むファイルの一覧に 1 項目 (インストール済みアプリの `Info.plist`。bundle ID とアプリ名のみ)。
+  - 03 と 05 は追記しません。03 は列挙済みの `~/Library/Caches/` のメタデータだけを読みます。05 は列挙済みの `~/Library/Application Support/` のメタデータと、02 が一覧に加えた `Info.plist` の bundle ID とアプリ名 (02 の `AppIdentity`) だけを使います。05 は最終タスクで、README の記述が 05 の挙動を包含していることを grep で確認します。
 - `README.md` と `Cargo.toml` の「40+」「40 以上」は 51 件でも正しいので変更しません。
 
 ### 11.6 docs/HOWTO-USE.md の対象表
@@ -792,3 +811,4 @@ pub fn format_bytes(bytes: u64) -> String;        // "1.5 GB" / "12.3 MB" / "4.0
 ### 11.7 既知の既存問題 (今回は触らない)
 
 - `ios-backup` は `--yes` の対象に残っており、TTY 上で `--yes` を付けると確認プロンプトを出します。今回の 4 本では修正しません。
+- このほか今回は扱わず別 PBI に回す事項 (explorer の Finder 起動の共通化、`per_cleaner` 設定の無効警告の扱い) は、ロードマップ 8 章に一覧があります。

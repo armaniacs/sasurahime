@@ -4,9 +4,10 @@
 
 ## 実装順序と位置づけ
 
-- 実装順は 04 (本書) -> 02 -> 03 -> 05 で固定です (`2026-10-20-01-roadmap-and-order.md`)。本書が最初です。前提は基準コミット (2c71587) で `cargo test`、`cargo clippy -- -D warnings`、`cargo fmt --check` が通ることだけです。
+- 実装順は 04 (本書) -> 02 -> 03 -> 05 で固定です (`2026-10-20-01-roadmap-and-order.md`)。設計書の中では本書が最初です。前提は、基準コミット (2c71587) で `cargo test`、`cargo clippy -- -D warnings`、`cargo fmt --check` が通ることと、ロードマップ 7 章の前提タスク P0 (README Data access の事実化) が完了していることです。P0 の完了は `grep -n "It reads the contents of only the following files" README.md` が 1 行出ることで確認します。出なければ着手せず、先に P0 を行います。
 - 02/03/05 は本書の全タスク (S1 から T5) の完了を前提にします。特に S2 の `Cleaner::auto_clean_allowed()` と S3 の `standard_cleaners()` / `special_cleaners()` / `AUTO_CLEAN_TARGETS` / `ManualOnly` による `all_cleaners()` の再構成は、02/03/05 の登録方法 (マクロ表に 1 エントリ足す) と `--yes` 除外の土台です。名前やシグネチャを変えないでください。
 - 既知の既存問題: `ios-backup` は `--yes` で TTY 上だと確認プロンプトを出します。今回は触りません。
+- 別 PBI に回す事項 (ロードマップ 8 章): マクロ表で `per_cleaner` 設定を無視している 29 件の factory の不整合と、無効な `per_cleaner` 設定の警告を起動時にまとめて出すこと。本書では colima の 1 行だけを直します (S3)。
 
 ## 未検証の仮定
 
@@ -73,7 +74,7 @@ scan に出ない標準ターゲット 31 件: bun, go, pip, node-gyp, npm, yarn
 
 ### 2.3 factory の引数
 
-マクロ表の各 factory は `|home, config|` 形式のクロージャです。`home` を使うもの、`config` で `.with_config(config)` を呼ぶもの (act, node-gyp, spm, downloads, vscode-extensions, terraform, volta, sbt, tree-sitter)、どちらも使わないもの (`|_home, _config|`) があります。`dispatch_clean` は `($factory)(home, config)` と即時呼び出しするので、同じ形で all_cleaners 用の関数を生成できます。runner は factory 内で `Box::new(SystemCommandRunner)` を作るため、呼び出し側で渡す必要はありません。
+マクロ表の各 factory は `|home, config|` 形式のクロージャです。`home` を使うもの、`config` で `.with_config(config)` を呼ぶもの (act, node-gyp, spm, downloads, vscode-extensions, terraform, volta, sbt, tree-sitter)、どちらも使わないもの (`|_home, _config|`) があります。colima の factory は `|home, _config|` で設定を無視していますが、手書きの `all_cleaners()` は colima に `.with_config(config)` を付けています。S3 でマクロ表の colima の行に `.with_config(config)` を付け、両者を揃えます (2.7 節)。`dispatch_clean` は `($factory)(home, config)` と即時呼び出しするので、同じ形で all_cleaners 用の関数を生成できます。runner は factory 内で `Box::new(SystemCommandRunner)` を作るため、呼び出し側で渡す必要はありません。
 
 特殊 7 件 (logs, xcode, library-logs, ollama, device-support, ios-backup, apfs-snapshot) は引数が個別 (keep_days、extra targets、保持数 2、runner なし) なのでマクロ化しません。
 
@@ -127,6 +128,15 @@ Colima は `~/.colima/_lima/*/disk`、`~/.colima/_lima/*/diffdisk`、`~/.colima/
 
 OrbStack は仮想ディスクを自動で縮める設計で、`orb prune` も別の目的のコマンドです。この機で実在確認ができないため、推測に基づく案内は出さず、扱いは現状維持とします (非目標)。
 
+### 2.7 colima と per_cleaner 設定の警告
+
+- `GenericCleaner::with_config` (`src/cleaners/generic.rs` の 355 行) は、`config.per_cleaner` に自分の `name()` のエントリがあり、`older_than_days` か `larger_than_mb` が設定されていて、`method` が `CleanMethod::Command` か `CleanMethod::CommandWithDetectDir` のとき、`log::warn!("per-cleaner filters not supported for '{}': command-based cleaner", name)` を出します。その後 `older_than_days` / `larger_than_mb` をフィールドに入れます。
+- colima は `CommandWithDetectDir` です。`detect()` と `clean()` がこの 2 つのフィールドを見るのは `CleanMethod::DeleteDirs` の分岐だけなので、colima に対する `with_config` の実際の効果は警告ログ 1 行だけです。
+- HEAD では、マクロ表の colima の行は `(|home, _config| cleaners::generic::GenericCleaner::colima_prune(home, Box::new(SystemCommandRunner))),` で設定を無視しています。このため `sasurahime clean colima` (マクロの `dispatch_clean` 経由) では警告が出ず、警告が出るのは手書きの `all_cleaners()` (scan、TUI、`--yes`) の経路だけです。
+- S3 で `all_cleaners()` をマクロ表から生成すると、そのままでは scan の経路の警告も消えます。
+- 決定: S3 で、マクロ表の colima の行を `(|home, config| cleaners::generic::GenericCleaner::colima_prune(home, Box::new(SystemCommandRunner)).with_config(config)),` に変えます。これで scan と clean の両方で警告が出ます。他の 29 件 (マクロ表で `_config` を受け取る行) は変えません。その不整合と、警告を起動時にまとめて出す仕組みは別 PBI です (ロードマップ 8 章)。
+- 警告の出力 (`log::warn!`) をテストで捕まえる仕組みは、このプロジェクトのテストにはありません (`log::set_logger` やテスト用ロガーを使うテストが無い)。グローバルなロガーを 1 つのテストバイナリ内の並列テストで共有すると、他のテストの警告と混ざり、設定は 1 回しかできません。そこで警告を出すかどうかの判定と文面を private メソッド `unsupported_filter_warning` に切り出し、それを単体テストします。あわせて、`with_config` の適用前後で colima の `detect()` の結果が変わらないことをテストします。マクロ表の colima の行が `with_config` を呼んでいることは、S3 の 9.4 の `grep` で確認します。
+
 ## 3. ファイル一覧と責務
 
 | ファイル | 変更 | 責務 |
@@ -137,7 +147,7 @@ OrbStack は仮想ディスクを自動で縮める設計で、`orb prune` も�
 | `src/interactive.rs` | 変更 | `auto_clean_indices()` を追加し run_auto で使う |
 | `src/main.rs` | 変更 | マクロに `standard_cleaners()` を生成、`special_cleaners()`、`AUTO_CLEAN_TARGETS`、`all_cleaners()` 再構成、`mod disk_image;`、テスト |
 | `src/disk_image.rs` | 新規 | 疎ディスクイメージの探索、サイズ整形、案内文生成 (純関数) |
-| `src/cleaners/generic.rs` | 変更 | `notice` フィールド、`docker(home, runner)`、colima への案内、Command 型 clean の終了コード警告と縮小判定 |
+| `src/cleaners/generic.rs` | 変更 | `with_config` から警告の判定 `unsupported_filter_warning` を切り出す (S3)。`notice` フィールド、`docker(home, runner)`、colima への案内、Command 型 clean の終了コード警告と縮小判定 (D2) |
 | `src/scanner.rs` | 変更 | 表の後に `advisory()` を出力 |
 | `src/cleaners/cargo.rs` | 変更 | detect の `println!` を `log::info!` に変更 |
 | `tests/scan_coverage.rs` | 新規 | scan 網羅、docker 案内、ハング無しの E2E |
@@ -180,6 +190,7 @@ pub fn colima_candidates(home: &Path) -> Vec<PathBuf>;
 // src/cleaners/generic.rs
 pub fn docker(home: &Path, runner: Box<dyn CommandRunner>) -> Self;   // 引数に home を追加
 pub fn with_notice(self, notice: DiskImageNotice) -> Self;
+fn unsupported_filter_warning(&self, config: &Config) -> Option<String>; // private。S3 で with_config から切り出す
 
 // src/main.rs (define_cleaners! が生成)
 fn standard_cleaners(home: &std::path::Path, config: &config::Config) -> Vec<Box<dyn cleaner::Cleaner>>;
@@ -201,6 +212,9 @@ fn special_cleaners(home: &std::path::Path, config: &config::Config) -> Vec<Box<
 | scan に出さないもの | `caches` (集約) と `trash` (scan 専用説明で削除は特殊) | 集約は個別と重複する。trash は --yes で消さないため登録しない |
 | docker の clean | 終了コードが非 0 なら警告を出し、縮小判定は成功時のみ | デーモン停止時に「縮まなかった」と誤案内しない |
 | colima の clean 後判定 | 実装しない (scan の案内のみ) | colima は CommandWithDetectDir で別経路。範囲を絞る |
+| colima の `per_cleaner` 警告 | マクロ表の colima の行に `.with_config(config)` を付け、scan と clean の両方で警告を出す (S3) | HEAD の scan の経路で出ていた警告を S3 の生成切替で失わないため。`clean colima` でも同じ警告が出るようになる (2.7 節) |
+| 他の 29 件の factory の `_config` | 変えない | 別 PBI (ロードマップ 8 章)。29 件を変えると dispatch と scan の挙動に広く触れるため |
+| 警告のテスト方法 | 判定を `unsupported_filter_warning` に切り出して単体テストし、`detect()` が変わらないことを確かめる。ログは捕まえない | ログを捕まえる既存の仕組みが無く、グローバルなロガーは並列テストで混ざるため (2.7 節) |
 
 ## 6. タスクの依存順序
 
@@ -550,6 +564,8 @@ git commit -m "feat(auto): --yes の対象外にできる ManualOnly と auto_cl
 
 前提: S2 が完了していること。
 
+範囲: `all_cleaners()` のマクロ生成への切替に加えて、マクロ表の colima の行に `.with_config(config)` を付け、`with_config` の警告判定を `unsupported_filter_warning` に切り出します (2.7 節)。colima の行を変えないと、切替によって scan の経路で出ていた colima の `per_cleaner` 警告が消えるためです。
+
 ### 9.1 失敗するテストを書く
 
 `src/main.rs` の `mod tests` に追加します (S1 の `names_of` と `LEGACY_SCAN_TARGETS` を使います)。
@@ -647,13 +663,88 @@ git commit -m "feat(auto): --yes の対象外にできる ManualOnly と auto_cl
     }
 ```
 
+`src/cleaners/generic.rs` 末尾の `mod tests` の最後 (`with_config_no_match_for_name_leaves_cleaner_unchanged` の後ろ、`mod tests` を閉じる `}` の直前) に追加します (2.7 節)。`MissingToolRunner` と `fs`、`ScanStatus` は既存の `mod tests` で使えます。
+
+```rust
+    fn colima_filter_config() -> crate::config::Config {
+        let mut per_cleaner = std::collections::HashMap::new();
+        per_cleaner.insert(
+            "colima".to_string(),
+            crate::config::PerCleanerConfig {
+                older_than_days: Some(30),
+                larger_than_mb: None,
+            },
+        );
+        crate::config::Config {
+            per_cleaner,
+            ..crate::config::Config::default()
+        }
+    }
+
+    #[test]
+    fn colima_with_filter_config_takes_the_warning_branch() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cleaner = GenericCleaner::colima_prune(tmp.path(), Box::new(MissingToolRunner));
+        let msg = cleaner
+            .unsupported_filter_warning(&colima_filter_config())
+            .expect("colima ignores per-cleaner filters, so a warning is expected");
+        assert_eq!(
+            msg,
+            "per-cleaner filters not supported for 'colima': command-based cleaner"
+        );
+    }
+
+    #[test]
+    fn unsupported_filter_warning_is_none_without_entry_or_for_delete_dirs() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let colima = GenericCleaner::colima_prune(tmp.path(), Box::new(MissingToolRunner));
+        assert!(colima
+            .unsupported_filter_warning(&crate::config::Config::default())
+            .is_none());
+
+        let mut per_cleaner = std::collections::HashMap::new();
+        per_cleaner.insert(
+            "dirs-only".to_string(),
+            crate::config::PerCleanerConfig {
+                older_than_days: Some(30),
+                larger_than_mb: None,
+            },
+        );
+        let config = crate::config::Config {
+            per_cleaner,
+            ..crate::config::Config::default()
+        };
+        let dirs = GenericCleaner::delete_dirs("dirs-only", tmp.path().join("data"));
+        assert!(dirs.unsupported_filter_warning(&config).is_none());
+    }
+
+    #[test]
+    fn colima_with_config_keeps_detect_result() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        // Freshly written, so a 30-day age filter would hide it if it were applied.
+        fs::create_dir_all(tmp.path().join(".colima/_lima/colima")).unwrap();
+        fs::write(tmp.path().join(".colima/_lima/colima/dummy.img"), b"x").unwrap();
+
+        let plain = GenericCleaner::colima_prune(tmp.path(), Box::new(MissingToolRunner)).detect();
+        let configured = GenericCleaner::colima_prune(tmp.path(), Box::new(MissingToolRunner))
+            .with_config(&colima_filter_config())
+            .detect();
+
+        assert!(matches!(plain.status, ScanStatus::Pruneable(_)));
+        assert!(matches!(configured.status, ScanStatus::Pruneable(_)));
+        assert_eq!(plain.bytes_for_test(), configured.bytes_for_test());
+    }
+```
+
+`ScanStatus` は `PartialEq` を実装していないので、`assert_eq!(plain.status, configured.status)` とは書けません。`matches!` と `bytes_for_test()` で比べます。
+
 ### 9.2 実行と期待される失敗
 
 ```
 cargo test --bin sasurahime 2>&1 | tail -20
 ```
 
-期待: コンパイルエラー (`standard_cleaners`, `special_cleaners`, `AUTO_CLEAN_TARGETS` が未定義)。
+期待: コンパイルエラー (`standard_cleaners`, `special_cleaners`, `AUTO_CLEAN_TARGETS` が未定義、`no method named unsupported_filter_warning found`)。
 
 ### 9.3 実装 (src/main.rs)
 
@@ -776,23 +867,131 @@ fn all_cleaners(home: &std::path::Path, config: &config::Config) -> Vec<Box<dyn 
 
 custom cleaner は ManualOnly で包みません。利用者が config に定義したものなので従来どおり `--yes` 対象です。
 
+(4) マクロ表の colima の行を置換します (2.7 節)。`Colima : "colima" => ...;` の次の行です。
+
+HEAD:
+
+```rust
+    (|home, _config| cleaners::generic::GenericCleaner::colima_prune(home, Box::new(SystemCommandRunner))),
+```
+
+置換後:
+
+```rust
+    (|home, config| cleaners::generic::GenericCleaner::colima_prune(home, Box::new(SystemCommandRunner)).with_config(config)),
+```
+
+マクロ表の他の行 (`_config` を受け取る残り 29 件) は変えません (ロードマップ 8 章)。
+
+### 9.3b 実装 (src/cleaners/generic.rs)
+
+`impl GenericCleaner` の `with_config` (HEAD の 352-380 行、doc コメント 3 行を含む) を、次の 2 つのメソッドで置換します。警告の文面と、`older_than_days` / `larger_than_mb` を入れる処理は変えません。
+
+HEAD:
+
+```rust
+    /// Apply per-cleaner config filters from the parsed config file.
+    /// Looks up `self.name()` in `config.per_cleaner` and applies
+    /// `older_than_days` and `larger_than_mb` if present.
+    pub fn with_config(self, config: &Config) -> Self {
+        let name = self.name();
+        if let Some(pcc) = config.per_cleaner.get(name) {
+            if (pcc.older_than_days.is_some() || pcc.larger_than_mb.is_some())
+                && matches!(
+                    self.method,
+                    CleanMethod::Command { .. } | CleanMethod::CommandWithDetectDir { .. }
+                )
+            {
+                log::warn!(
+                    "per-cleaner filters not supported for '{}': command-based cleaner",
+                    name
+                );
+            }
+            let mut c = self;
+            if let Some(days) = pcc.older_than_days {
+                c = c.with_older_than(days);
+            }
+            if let Some(mb) = pcc.larger_than_mb {
+                c = c.with_larger_than(mb);
+            }
+            c
+        } else {
+            self
+        }
+    }
+```
+
+置換後:
+
+```rust
+    /// Apply per-cleaner config filters from the parsed config file.
+    /// Looks up `self.name()` in `config.per_cleaner` and applies
+    /// `older_than_days` and `larger_than_mb` if present.
+    pub fn with_config(self, config: &Config) -> Self {
+        if let Some(msg) = self.unsupported_filter_warning(config) {
+            log::warn!("{msg}");
+        }
+        let name = self.name();
+        if let Some(pcc) = config.per_cleaner.get(name) {
+            let mut c = self;
+            if let Some(days) = pcc.older_than_days {
+                c = c.with_older_than(days);
+            }
+            if let Some(mb) = pcc.larger_than_mb {
+                c = c.with_larger_than(mb);
+            }
+            c
+        } else {
+            self
+        }
+    }
+
+    /// Command-based cleaners never look at `older_than_days` /
+    /// `larger_than_mb`, so a configured filter is reported instead of being
+    /// silently ignored.
+    fn unsupported_filter_warning(&self, config: &Config) -> Option<String> {
+        let pcc = config.per_cleaner.get(self.name())?;
+        let has_filter = pcc.older_than_days.is_some() || pcc.larger_than_mb.is_some();
+        let command_based = matches!(
+            self.method,
+            CleanMethod::Command { .. } | CleanMethod::CommandWithDetectDir { .. }
+        );
+        if has_filter && command_based {
+            Some(format!(
+                "per-cleaner filters not supported for '{}': command-based cleaner",
+                self.name()
+            ))
+        } else {
+            None
+        }
+    }
+```
+
+`self.name()` は `&'static str` を返すので、`let name = self.name();` の後に `let mut c = self;` で `self` を移動できます (HEAD と同じ)。`unsupported_filter_warning` は private のまま (`pub` を付けない) にします。呼び出し元は `with_config` と同じファイルの `mod tests` だけです。
+
 ### 9.4 実行と期待出力
 
 ```
 cargo test --bin sasurahime 2>&1 | tail -20
+cargo test --bin sasurahime colima_with 2>&1 | tail -8
+cargo test --bin sasurahime unsupported_filter_warning 2>&1 | tail -8
 cargo test --test interactive 2>&1 | tail -8
+grep -n "colima_prune(home, Box::new(SystemCommandRunner)).with_config(config)" src/main.rs
+grep -c "|home, _config| cleaners::generic::GenericCleaner::colima_prune" src/main.rs
 cargo fmt --check
 cargo clippy -- -D warnings
 ```
 
-期待: S1 の 2 件と本タスクの 6 件が ok、interactive の E2E が全件 ok (`yes_flag_never_runs_manual_only_targets` を含む)。fmt は出力なし。clippy は `method advisory is never used` の警告だけが残ります (D3 で消えます。0 章の例外)。
+期待: S1 の 2 件、本タスクの `src/main.rs` の 6 件と `src/cleaners/generic.rs` の 3 件が ok (`colima_with` で 2 件、`unsupported_filter_warning` で 1 件)。interactive の E2E が全件 ok (`yes_flag_never_runs_manual_only_targets` を含む)。1 つ目の `grep -n` はマクロ表の colima の行 1 行だけを出し、`grep -c` は `0` を出します。fmt は出力なし。clippy は `method advisory is never used` の警告だけが残ります (D3 で消えます。0 章の例外)。
 
 ### 9.5 コミット
 
 ```
-git add src/main.rs
+git add src/main.rs src/cleaners/generic.rs
 git commit -m "refactor(scan): all_cleaners をマクロ表から生成し、新規ターゲットは --yes 対象外にする"
 ```
+
+コミットメッセージの本文 (2 行目以降) に「colima は scan と clean の両方で per_cleaner の警告を出す」と 1 行添えます。`git commit -m "<1 行目>" -m "colima は scan と clean の両方で per_cleaner 設定の警告を出す"` の形で書きます。
 
 ## 10. Task D1: disk_image モジュール (純関数)
 
@@ -1653,7 +1852,7 @@ image size を小さくするか、Troubleshoot > Clean / Purge data (全イメ�
 
 57 行の `sasurahime --yes` 行のコメントを `# non-interactive clean of the unattended target set (CI / scripting)` に、168 行の日本語行を `# 確認なしで無人実行対象のみ削除（CI・スクリプト向け）` に変更します。「40+」は実数 48 (後続の 02/03/05 の後は 51) に対して正しいので変更しません。
 
-「Data access」節に 1 行ずつ追加します (共通規約 11.5)。
+「Data access」節のディレクトリの一覧に 1 行ずつ追加します (共通規約 11.5)。本書は仮想ディスクイメージのメタデータ (`st_blocks` による物理サイズと `metadata().len()` による論理サイズ) だけを読み、ファイルの内容は読みません。そのため、P0 (ロードマップ 7 章) で作った「内容を読むファイル」の一覧と、その前後の文は変更しません (共通規約 1.6)。
 
 - 英語 (90 行付近、`- \`~/Library/Application Support/MobileSync/Backup/\`` で始まる行の次):
 
@@ -1708,9 +1907,9 @@ git commit -m "docs: docker 仮想ディスクの案内、--yes の対象範囲�
 | Colima のプロファイルが複数 | `_lima/*/disk` と `_lima/_disks/*/datadisk` をすべて列挙 |
 | `config.exclude` に `docker` | all_cleaners から除外され、scan にも出ない |
 | `config.exclude` に `cocoa-pods` と書いた | 効かない。`cocoapods` と書く (name() で照合) |
-| `per_cleaner` の `older_than_days` を command 型に設定 | 従来どおり警告ログのみ。挙動は変えない |
+| `per_cleaner` の `older_than_days` を command 型に設定 | 検出と削除の挙動は変えない。警告ログ (`log::warn!`) が出るのは factory が `with_config` を呼ぶ cleaner だけです。Command 系では colima だけが該当し、他の Command 系 (docker、npm など) は factory の `_config` で設定を無視するため警告も出ません (別 PBI、ロードマップ 8 章) |
 | custom cleaner | 従来どおり `--yes` 対象 (ManualOnly で包まない) |
-| colima の `per_cleaner` 設定 | HEAD の手書き `all_cleaners()` は colima に `.with_config(config)` を付けていましたが、マクロ表の colima factory は付けていません。S3 後は scan 時に colima の `per_cleaner` 警告ログ (command 型は filter 非対応という `log::warn!`) が出なくなるだけで、検出と削除の挙動は同じです。マクロ表は変更しません |
+| colima の `per_cleaner` 設定 | 警告ログを維持します。HEAD の手書き `all_cleaners()` は colima に `.with_config(config)` を付けていましたが、マクロ表の colima factory は付けていません。S3 でマクロ表の colima の行に `.with_config(config)` を付けるので、S3 後は scan (`all_cleaners()` 経由) と `clean colima` (`dispatch_clean` 経由) の両方で `per-cleaner filters not supported for 'colima': command-based cleaner` の警告が出ます。検出と削除の挙動は変わりません (`colima_with_config_keeps_detect_result` で確認) |
 | TUI で `npm (0 B)` を選ぶ | 利用者の明示選択なので `npm cache clean --force` を実行 |
 | rustup の detect が 30 秒でタイムアウト | `Err` を `NotFound` として扱う (既存実装) |
 | 環境変数 `ACT_CACHE_DIR`、`PUB_CACHE`、`TF_PLUGIN_CACHE_DIR` が設定されている | HOME ではなく環境変数のパスを走査する (既存仕様)。E2E は `env_remove` が必要な場合がある |
@@ -1728,6 +1927,9 @@ git commit -m "docs: docker 仮想ディスクの案内、--yes の対象範囲�
 8. `ManualOnly` で `clean_with_opts` や `sub_targets` の転送を忘れる。xcode のサブターゲットや apfs-snapshot のオプションが壊れます (ただし新規 31 件は現状これらを使わないため、将来のための必須実装)。
 9. E2E で実際の `~/` を対象に `clean` を実行する。禁止です (17 節)。
 10. `tests/` の E2E で `HOME` だけを差し替えて PATH を差し替えない。実機の docker や npm が見え、結果が環境依存になります。
+11. S3 でマクロ表の colima 以外の行にも `.with_config(config)` を付ける。`_config` を受け取る残り 29 件は変えません (別 PBI、ロードマップ 8 章)。
+12. `unsupported_filter_warning` を `pub` にする、または警告の文面を変える。private のままにし、文面は HEAD の `log::warn!` と同じにします。
+13. 警告をテストで捕まえるために `log::set_logger` やテスト用のロガーを追加する。本書では判定関数の単体テストで代えます (2.7 節)。
 
 ## 17. 禁止事項
 
@@ -1746,7 +1948,8 @@ git commit -m "docs: docker 仮想ディスクの案内、--yes の対象範囲�
 4. Docker Desktop または Colima の仮想ディスクが存在する環境で、scan の表の下に `Notes:` と「on disk」「maximum size」「対処案」が出る。
 5. docker デーモンが応答しなくても scan が 25 秒以内に終わる (D3 の E2E)。
 6. `docs/SUPPORTED.md` の件数が `sasurahime targets | wc -l` の出力 (48) と一致する。
-7. 各 Task が個別にコミットされている (S1, S2, S3, D1, D2, D3, T4, T5 の 8 コミット)。
+7. 各 Task が個別にコミットされている (S1, S2, S3, D1, D2, D3, T4, T5 の 8 コミット)。P0 のコミットは本書の 8 コミットに数えません。
+8. マクロ表の colima の行が `.with_config(config)` を呼び、`colima_with_filter_config_takes_the_warning_branch`、`unsupported_filter_warning_is_none_without_entry_or_for_delete_dirs`、`colima_with_config_keeps_detect_result` が ok である。マクロ表の他の行の factory は HEAD と同じ (docker の D2 の変更を除く)。
 
 ## 19. 最終確認コマンド
 
