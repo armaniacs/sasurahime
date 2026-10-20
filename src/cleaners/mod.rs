@@ -13,6 +13,7 @@ pub mod log;
 pub mod manual_only;
 pub mod mise;
 pub mod ollama;
+pub mod orphan_containers;
 pub mod pre_commit;
 pub mod rustup;
 pub mod uv;
