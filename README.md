@@ -3,7 +3,7 @@
 <details open>
 <summary><strong>🇺🇸 English</strong></summary>
 
-Scan, select, and remove stale caches from 40+ developer tools — uv, Homebrew, mise, Docker, Cargo, Go, pip, and more — all from a single command on macOS.
+Scan, select, and remove stale caches from 50+ developer tools including uv, Homebrew, mise, Docker, Cargo, Go, and pip, all from a single command on macOS.
 
 sasurahime only removes caches and unused old versions. It never touches runtimes or packages that are currently in use. Every deletion goes to macOS Trash by default, so you can restore anything with a single click.
 
@@ -49,6 +49,8 @@ sasurahime clean browsers
 sasurahime clean xcode
 sasurahime clean caches          # bun / go / pip / node-gyp / npm / yarn / pnpm
 sasurahime clean logs
+sasurahime clean orphan-containers   # leftover app containers (interactive)
+sasurahime clean library-caches      # per-app Library/Caches (interactive)
 
 # --- Options ---
 sasurahime stats                   # show deletion history and statistics
@@ -66,6 +68,9 @@ sasurahime --version
   restore them from Finder. Use `--permanent` to permanently delete.
 - mise runtime removal checks both global and per-project `.mise.toml` before deleting.
 - macOS immutable flags (`uchg`) are handled automatically.
+- `--yes` cleans only the unattended set. `ios-backup` and `apfs-snapshot`
+  require an explicit choice (the picker or `--all`) and are listed as
+  skipped.
 
 ## Name
 
@@ -121,7 +126,7 @@ For feature proposals, please open an issue first so we can discuss the scope be
 <details>
 <summary><strong>🇯🇵 日本語</strong></summary>
 
-uv・Homebrew・mise・Docker・Cargo・Go・pip など 40 以上のツールの古いキャッシュを、スキャン・選択・削除。macOS 開発者向けキャッシュクリーナー（Rust 製）。
+uv・Homebrew・mise・Docker・Cargo・Go・pip など 50 以上のツールの古いキャッシュを、スキャン・選択・削除。macOS 開発者向けキャッシュクリーナー（Rust 製）。
 
 削除するのはキャッシュや古いバージョンのみです。現在使用中のランタイムやパッケージには一切触れません。また、削除したファイルはデフォルトで macOS のゴミ箱に移動されるため、いつでも Finder から復元できます。
 
@@ -167,6 +172,8 @@ sasurahime clean browsers
 sasurahime clean xcode
 sasurahime clean caches          # bun / go / pip / node-gyp / npm / yarn / pnpm
 sasurahime clean logs
+sasurahime clean orphan-containers   # アンインストール済みアプリの残骸（対話的）
+sasurahime clean library-caches      # アプリ別 Library/Caches（対話的）
 
 # --- オプション ---
 sasurahime stats                   # 削除履歴と統計を表示
@@ -183,6 +190,8 @@ sasurahime --version
 - **Trash モードがデフォルトで有効**です。削除したファイルは macOS のゴミ箱に移動されるため、Finder から復元できます。完全に消去したい場合は `--permanent` フラグを使用してください。
 - mise のランタイム削除は、グローバル設定とプロジェクト固有の `.mise.toml` を両方チェックしてから実行します。
 - macOS の immutable フラグ（`uchg`）は自動的に解除してから削除します。
+- `--yes` が削除するのは無人実行対象のみです。`ios-backup` と `apfs-snapshot`
+  は明示的な選択（ピッカーまたは `--all`）が必要で、スキップとして表示されます。
 
 ## 名前の由来
 

@@ -4,6 +4,53 @@ All notable changes to sasurahime will be documented in this file. The format is
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- **`scan` now covers all 51 targets** (previously 15). Interactive-only and
+  previously invisible targets now appear in the table.
+- **`orphan-containers`** finds leftover `~/Library/Containers` and
+  `~/Library/Group Containers` directories of uninstalled apps and moves them
+  to the Trash (interactive only).
+- **`library-caches`** lists per-app directories under `~/Library/Caches/` so
+  known app caches can be removed (interactive only).
+- **`app-support`** removes cache directories of known apps under
+  `~/Library/Application Support/` by allow-list, and lists leftovers with a
+  "reveal in Finder" prompt (interactive only).
+- **Docker / Colima virtual disk size.** `scan` reports the image file size
+  and prints a shrink hint instead of an unknown size.
+- **Startup warning for ineffective `[cleaner.<name>]` filters.** Settings a
+  cleaner will not apply are reported once on stderr, including unknown
+  cleaner names.
+- **`--yes` lists skipped targets.** Targets that need an explicit selection
+  are named in one line instead of being dropped silently.
+
+### Changed
+
+- **`--yes` never runs `ios-backup` or `apfs-snapshot`.** The unattended set
+  is now 13 targets; both require an explicit choice (the picker or `--all`)
+  and are reported as skipped.
+- **"moved to Trash" reflects the cleaner.** The message now depends on
+  `CleanResult.uses_trash`, so permanent deleters such as `uv` and `rustup`
+  no longer claim Trash.
+- **`apfs-snapshot` validates dates** (month, day, hour, minute, second
+  ranges) and reports the `tmutil` error output as the skip reason.
+
+### Fixed
+
+- `--yes` no longer opens a selection prompt for `ios-backup` or
+  `apfs-snapshot` on a TTY.
+
+### Internal
+
+- Finder `open` calls are unified in `command::open_path` and tested through
+  `CommandRunner`; no direct `std::process::Command::new("open")` remains.
+- `cargo clippy --all-targets` passes, and tests that set environment
+  variables take `TEST_LOCK`.
+
+---
+
 ## [0.2.1] — 2026-06-24
 
 ### Added
