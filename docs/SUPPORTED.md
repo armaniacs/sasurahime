@@ -1482,7 +1482,9 @@ sasurahime scan --config /path/to/config.toml
 ## Scan (`sasurahime scan`)
 
 Runs `detect()` on every cleaner and prints a formatted table via
-`comfy_table`. No side effects — never creates, modifies, or deletes files.
+`comfy_table`. Rows are ordered by size, largest first; targets without a
+size (clean or not found) come last. No side effects — never creates,
+modifies, or deletes files.
 
 ---
 
@@ -2822,7 +2824,7 @@ sasurahime scan --config /path/to/config.toml
 
 ## スキャン (`sasurahime scan`)
 
-すべてのクリーナーで `detect()` を実行し、`comfy_table` を使ってフォーマットされたテーブルを表示します。副作用はありません — ファイルの作成、変更、削除は一切行いません。
+すべてのクリーナーで `detect()` を実行し、`comfy_table` を使ってフォーマットされたテーブルを表示します。行はサイズの大きい順に並び、サイズのない対象（clean または not found）は末尾に表示します。副作用はありません — ファイルの作成、変更、削除は一切行いません。
 
 ---
 

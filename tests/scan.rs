@@ -177,3 +177,33 @@ fn scan_shows_not_found_for_missing_dirs() {
         "expected 'not found' in output:\n{stdout}"
     );
 }
+
+#[test]
+fn scan_lists_largest_targets_first() {
+    let tmp = TempDir::new().unwrap();
+    // act is small, tree-sitter is larger; both are directory-based cleaners so
+    // they are available without external binaries.
+    fs::create_dir_all(tmp.path().join(".cache/act")).unwrap();
+    fs::write(tmp.path().join(".cache/act/dummy"), b"x".repeat(100)).unwrap();
+    fs::create_dir_all(tmp.path().join(".cache/tree-sitter")).unwrap();
+    fs::write(
+        tmp.path().join(".cache/tree-sitter/big"),
+        b"x".repeat(50_000),
+    )
+    .unwrap();
+
+    let output = sasurahime(tmp.path()).arg("scan").output().unwrap();
+    assert!(output.status.success());
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let pos = |needle: &str| {
+        stdout
+            .lines()
+            .position(|l| l.trim_start().starts_with(&format!("│ {needle} ")))
+            .unwrap_or_else(|| panic!("row for {needle} not found:\n{stdout}"))
+    };
+    assert!(
+        pos("tree-sitter") < pos("act"),
+        "largest target must come first:\n{stdout}"
+    );
+}
