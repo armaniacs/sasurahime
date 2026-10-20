@@ -3,6 +3,7 @@ mod cleaners;
 mod command;
 mod config;
 mod context;
+mod disk_image;
 mod explorer;
 mod format;
 mod hint;
