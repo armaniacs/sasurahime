@@ -225,6 +225,9 @@ define_cleaners! {
     TreeSitter : "tree-sitter" => "tree-sitter parser compilation cache";
     (|home, config| cleaners::generic::GenericCleaner::tree_sitter(home, Box::new(SystemCommandRunner)).with_config(config)),
 
+    OrphanContainers : "orphan-containers" => "Leftover Containers / Group Containers of uninstalled apps (interactive)";
+    (|home, _config| cleaners::orphan_containers::OrphanContainersCleaner::new(home, Box::new(SystemCommandRunner))),
+
     ;
     /// Clean all generic caches (bun, go, pip, node-gyp, npm, yarn, pnpm)
     Caches {
@@ -1135,5 +1138,17 @@ mod tests {
         assert!(!names.contains(&"docker"));
         assert!(!names.contains(&"cocoapods"));
         assert!(names.contains(&"npm"));
+    }
+
+    #[test]
+    fn orphan_containers_is_registered_but_not_auto_cleaned() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cleaners = all_cleaners(tmp.path(), &config::Config::default());
+        assert!(names_of(&cleaners).contains(&"orphan-containers"));
+        let c = cleaners
+            .iter()
+            .find(|c| c.name() == "orphan-containers")
+            .unwrap();
+        assert!(!c.auto_clean_allowed());
     }
 }
