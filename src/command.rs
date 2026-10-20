@@ -16,6 +16,21 @@ pub trait CommandRunner: Send + Sync {
     fn exists(&self, program: &str) -> bool;
 }
 
+/// Opens `path` in Finder through `runner`. Non-zero exit is an error; a
+/// non-UTF-8 path is rejected because `open` takes a UTF-8 argument.
+pub fn open_path(runner: &dyn CommandRunner, path: &std::path::Path) -> Result<()> {
+    let path = path
+        .to_str()
+        .ok_or_else(|| anyhow::anyhow!("path is not valid UTF-8: {}", path.display()))?;
+    let output = runner.run("open", &[path])?;
+    anyhow::ensure!(
+        output.status.success(),
+        "open returned non-zero exit: {:?}",
+        output.status.code()
+    );
+    Ok(())
+}
+
 pub struct SystemCommandRunner;
 
 impl SystemCommandRunner {
@@ -155,5 +170,95 @@ mod tests {
             err.contains("did not complete within"),
             "expected timeout message, got: {err}"
         );
+    }
+
+    use std::os::unix::process::ExitStatusExt;
+
+    struct OpenRunner {
+        status: i32,
+        calls: std::sync::Mutex<Vec<(String, Vec<String>)>>,
+    }
+
+    impl OpenRunner {
+        fn new(status: i32) -> Self {
+            Self {
+                status,
+                calls: std::sync::Mutex::new(vec![]),
+            }
+        }
+    }
+
+    impl CommandRunner for OpenRunner {
+        fn run(&self, program: &str, args: &[&str]) -> Result<std::process::Output> {
+            self.calls.lock().unwrap().push((
+                program.to_string(),
+                args.iter().map(|s| s.to_string()).collect(),
+            ));
+            Ok(std::process::Output {
+                status: std::process::ExitStatus::from_raw(self.status << 8),
+                stdout: vec![],
+                stderr: vec![],
+            })
+        }
+        fn exists(&self, _: &str) -> bool {
+            true
+        }
+    }
+
+    struct BrokenRunner;
+
+    impl CommandRunner for BrokenRunner {
+        fn run(&self, program: &str, _: &[&str]) -> Result<std::process::Output> {
+            anyhow::bail!("failed to spawn `{program}`: No such file or directory")
+        }
+        fn exists(&self, _: &str) -> bool {
+            false
+        }
+    }
+
+    #[test]
+    fn open_path_calls_open_with_the_path() {
+        let runner = OpenRunner::new(0);
+        let path = std::path::PathBuf::from("/tmp/Gone App");
+        open_path(&runner, &path).unwrap();
+        assert_eq!(
+            *runner.calls.lock().unwrap(),
+            vec![("open".to_string(), vec!["/tmp/Gone App".to_string()])]
+        );
+    }
+
+    #[test]
+    fn open_path_errors_on_non_zero_exit_and_mentions_the_code() {
+        let runner = OpenRunner::new(1);
+        let err = open_path(&runner, std::path::Path::new("/tmp/x")).unwrap_err();
+        assert!(err.to_string().contains("non-zero"), "{err}");
+        assert!(err.to_string().contains("1"), "{err}");
+    }
+
+    #[test]
+    fn open_path_propagates_a_runner_error() {
+        let err = open_path(&BrokenRunner, std::path::Path::new("/tmp/x")).unwrap_err();
+        assert!(err.to_string().contains("failed to spawn"), "{err}");
+    }
+
+    #[test]
+    fn open_path_passes_spaces_and_non_ascii_as_one_argument() {
+        let runner = OpenRunner::new(0);
+        let path = std::path::PathBuf::from("/tmp/a b/\u{65e5}\u{672c}\u{8a9e}.app");
+        open_path(&runner, &path).unwrap();
+        let calls = runner.calls.lock().unwrap();
+        assert_eq!(calls[0].1.len(), 1, "must be a single argument");
+        assert_eq!(calls[0].1[0], path.to_string_lossy());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn open_path_rejects_a_non_utf8_path() {
+        use std::ffi::OsString;
+        use std::os::unix::ffi::OsStringExt;
+        let runner = OpenRunner::new(0);
+        let path = std::path::PathBuf::from(OsString::from_vec(vec![b'/', 0xff, b'x']));
+        assert!(open_path(&runner, &path).is_err());
+        assert!(runner.calls.lock().unwrap().is_empty());
     }
 }

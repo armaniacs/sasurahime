@@ -231,13 +231,7 @@ fn print_unmanaged_table(entries: &[ExploreEntry], home: &Path) {
 
 /// Runs `open "<path>"` via `std::process::Command`. macOS-only; not unit-tested.
 fn open_in_finder(path: &Path) -> Result<()> {
-    let status = std::process::Command::new("open").arg(path).status()?;
-    anyhow::ensure!(
-        status.success(),
-        "open returned non-zero exit: {:?}",
-        status.code()
-    );
-    Ok(())
+    crate::command::open_path(&crate::command::SystemCommandRunner, path)
 }
 
 /// Full interactive flow: calls `explore_results`, prints tables, runs dialoguer.

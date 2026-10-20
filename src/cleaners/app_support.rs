@@ -338,11 +338,8 @@ impl AppSupportCleaner {
     /// that tests can count the `open` calls without launching Finder.
     fn reveal_paths(&self, paths: &[PathBuf]) {
         for p in paths {
-            let path = p.to_string_lossy().to_string();
-            match self.runner.run("open", &[path.as_str()]) {
-                Ok(o) if o.status.success() => {}
-                Ok(o) => eprintln!("[{NAME}] open returned {:?} for {path}", o.status.code()),
-                Err(e) => eprintln!("[{NAME}] error opening Finder: {e}"),
+            if let Err(e) = crate::command::open_path(self.runner.as_ref(), p) {
+                eprintln!("[{NAME}] error opening Finder: {e}");
             }
         }
     }
