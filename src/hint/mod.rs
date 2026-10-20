@@ -4,6 +4,7 @@ mod detector;
 
 pub use cleaner::{offer_auto_clean, print_hints};
 pub use detector::collect_hints;
+pub(crate) use detector::is_running;
 
 use std::path::{Path, PathBuf};
 

@@ -31,7 +31,7 @@ fn dir_size_bytes(path: &Path, runner: &dyn CommandRunner) -> u64 {
     }
 }
 
-fn is_running(process_name: &str, runner: &dyn CommandRunner) -> bool {
+pub(crate) fn is_running(process_name: &str, runner: &dyn CommandRunner) -> bool {
     runner
         .run("pgrep", &["-x", process_name])
         .map(|o| o.status.success())

@@ -8,6 +8,7 @@ pub mod generic;
 pub mod gradle;
 pub mod huggingface;
 pub mod ios_backup;
+pub mod library_caches;
 pub mod library_logs;
 pub mod log;
 pub mod manual_only;
