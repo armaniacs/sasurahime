@@ -3,6 +3,7 @@ mod cleaner;
 mod detector;
 
 pub use cleaner::{offer_auto_clean, print_hints};
+pub(crate) use cleaner::{quit_app_and_wait, relaunch_app};
 pub use detector::collect_hints;
 pub(crate) use detector::is_running;
 
@@ -523,5 +524,45 @@ mod tests {
         let calls = runner.recorded_calls();
         assert!(!calls.iter().any(|(p, _)| p == "osascript"));
         assert!(!calls.iter().any(|(p, _)| p == "open"));
+    }
+
+    static NO_QUIT_ENTRY: HintEntry = HintEntry {
+        base_dir: BaseDir::Caches,
+        path_suffixes: &["x"],
+        display_name: "NoQuit",
+        process_name: None,
+        commands: &[],
+        threshold_bytes: 0,
+        skip: false,
+        quit_app: None,
+        relaunch_app: None,
+    };
+
+    #[test]
+    fn quit_app_and_wait_errors_when_entry_has_no_quit_app() {
+        let runner = RecordingRunner::new(&[], 0);
+        let err = cleaner::quit_app_and_wait(&NO_QUIT_ENTRY, &runner).unwrap_err();
+        assert!(err.to_string().contains("cannot be auto-quit"));
+        assert!(runner.recorded_calls().is_empty());
+    }
+
+    #[test]
+    fn relaunch_app_opens_configured_app() {
+        let runner = RecordingRunner::new(&[], 0);
+        cleaner::relaunch_app(&VSCODE_ENTRY, &runner).unwrap();
+        let calls = runner.recorded_calls();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].0, "open");
+        assert_eq!(
+            calls[0].1,
+            vec!["-a".to_string(), "Visual Studio Code".to_string()]
+        );
+    }
+
+    #[test]
+    fn relaunch_app_does_nothing_without_relaunch_app() {
+        let runner = RecordingRunner::new(&[], 0);
+        cleaner::relaunch_app(&SLACK_ENTRY, &runner).unwrap();
+        assert!(runner.recorded_calls().is_empty());
     }
 }

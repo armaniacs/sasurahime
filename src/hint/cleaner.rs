@@ -2,28 +2,24 @@ use crate::command::CommandRunner;
 use crate::format::format_bytes;
 use std::path::Path;
 
-use super::{base_path, ProcessHint, PromptReader};
+use super::{base_path, HintEntry, ProcessHint, PromptReader};
 
 const QUIT_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
 const QUIT_TIMEOUT_SECS: usize = 10;
 
-/// Quit the app, delete caches, optionally relaunch. Returns Err if quit timed out.
-pub fn auto_clean_hint(
-    hint: &ProcessHint,
-    home: &Path,
+/// Quit the app via osascript and wait until its process is gone.
+pub(crate) fn quit_app_and_wait(
+    entry: &HintEntry,
     runner: &dyn CommandRunner,
 ) -> anyhow::Result<()> {
-    let entry = hint.entry;
     let quit_app = match entry.quit_app {
         Some(a) => a,
         None => anyhow::bail!("{} cannot be auto-quit", entry.display_name),
     };
 
-    // Ask the app to quit via osascript.
     eprintln!("  Quitting {}...", entry.display_name);
     runner.run("osascript", &["-e", &format!("quit app \"{quit_app}\"")])?;
 
-    // Poll until the process is gone.
     let process_name = entry.process_name.unwrap_or(quit_app);
     for _ in 0..QUIT_TIMEOUT_SECS {
         std::thread::sleep(QUIT_POLL_INTERVAL);
@@ -35,7 +31,6 @@ pub fn auto_clean_hint(
             break;
         }
     }
-    // Final check.
     let still_running = runner
         .run("pgrep", &["-x", process_name])
         .map(|o| o.status.success())
@@ -47,8 +42,33 @@ pub fn auto_clean_hint(
             QUIT_TIMEOUT_SECS
         );
     }
+    Ok(())
+}
 
-    // Delete all path_suffixes.
+/// Relaunch the app if the entry configures `relaunch_app`.
+pub(crate) fn relaunch_app(entry: &HintEntry, runner: &dyn CommandRunner) -> anyhow::Result<()> {
+    if let Some(app) = entry.relaunch_app {
+        eprintln!("  Restarting {}...", entry.display_name);
+        runner.run("open", &["-a", app])?;
+        eprintln!("  [OK]");
+    } else {
+        eprintln!(
+            "  ({} will not be restarted — relaunch manually if needed)",
+            entry.display_name
+        );
+    }
+    Ok(())
+}
+
+/// Quit the app, delete caches, optionally relaunch. Returns Err if quit timed out.
+pub fn auto_clean_hint(
+    hint: &ProcessHint,
+    home: &Path,
+    runner: &dyn CommandRunner,
+) -> anyhow::Result<()> {
+    let entry = hint.entry;
+    quit_app_and_wait(entry, runner)?;
+
     let base = base_path(home, entry.base_dir);
     eprintln!("  Clearing cache...");
     for suffix in entry.path_suffixes {
@@ -60,19 +80,7 @@ pub fn auto_clean_hint(
     }
     eprintln!("  [OK]");
 
-    // Optionally relaunch.
-    if let Some(app) = entry.relaunch_app {
-        eprintln!("  Restarting {}...", entry.display_name);
-        runner.run("open", &["-a", app])?;
-        eprintln!("  [OK]");
-    } else {
-        eprintln!(
-            "  ({} will not be restarted — relaunch manually if needed)",
-            entry.display_name
-        );
-    }
-
-    Ok(())
+    relaunch_app(entry, runner)
 }
 
 /// Delete cache directories for a hint without quitting or relaunching the app.
