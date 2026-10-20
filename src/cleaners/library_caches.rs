@@ -5,6 +5,7 @@ use crate::hint::{apps::KNOWN_ENTRIES, BaseDir, HintEntry};
 use crate::progress::ProgressReporter;
 use anyhow::Result;
 use std::fs;
+use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 
 pub const EXCLUDED_NAMES: &[(&str, &str)] = &[
@@ -223,6 +224,55 @@ impl LibraryCachesCleaner {
     pub(crate) fn scan(&self, include_unknown: bool) -> Vec<CacheEntry> {
         scan_caches(&self.caches_dir(), include_unknown, self.threshold_override)
     }
+
+    fn delete_entries(
+        &self,
+        entries: &[CacheEntry],
+        reporter: &dyn ProgressReporter,
+    ) -> CleanResult {
+        let mut result = empty_result(self.name());
+        result.uses_trash = true;
+        reporter.progress_init(self.name(), entries.len());
+        for (i, e) in entries.iter().enumerate() {
+            reporter.progress_tick(&e.path, i + 1, e.size);
+            let path_str = e.path.to_string_lossy();
+            let _ = self.runner.run("chflags", &["-R", "nouchg", &path_str]);
+            match crate::trash::delete_path(&e.path) {
+                Ok(()) => {
+                    result.bytes_freed += e.size;
+                    println!(
+                        "[library-caches] removed: {} (freed {})",
+                        e.path.display(),
+                        format_bytes(e.size)
+                    );
+                }
+                Err(err) => {
+                    eprintln!(
+                        "[library-caches] error removing {}: {err}",
+                        e.path.display()
+                    );
+                    result.skipped.push(SkippedEntry {
+                        path: e.path.clone(),
+                        reason: err.to_string(),
+                    });
+                }
+            }
+        }
+        reporter.progress_finish();
+        result
+    }
+
+    fn interactive_select(&self, entries: &[CacheEntry]) -> Result<Vec<CacheEntry>> {
+        use dialoguer::MultiSelect;
+        let items: Vec<String> = entries.iter().map(render_item).collect();
+        let defaults = vec![false; entries.len()];
+        println!("\nSelect known app caches to move to Trash:\n");
+        let picked = MultiSelect::new()
+            .items(&items)
+            .defaults(&defaults)
+            .interact()?;
+        Ok(picked.into_iter().map(|i| entries[i].clone()).collect())
+    }
 }
 
 impl Cleaner for LibraryCachesCleaner {
@@ -255,8 +305,62 @@ impl Cleaner for LibraryCachesCleaner {
         r
     }
 
-    fn clean(&self, _dry_run: bool, _reporter: &dyn ProgressReporter) -> Result<CleanResult> {
-        Ok(empty_result(self.name()))
+    fn clean(&self, dry_run: bool, reporter: &dyn ProgressReporter) -> Result<CleanResult> {
+        if !self.caches_dir().exists() {
+            return Ok(empty_result(self.name()));
+        }
+        let mut entries = self.scan(true);
+        if entries.is_empty() {
+            println!("[library-caches] nothing to clean");
+            return Ok(empty_result(self.name()));
+        }
+        mark_running(&mut entries, self.runner.as_ref());
+
+        println!("\n~/Library/Caches/ by size:\n");
+        for line in render_listing(&entries) {
+            println!("{line}");
+        }
+
+        let deletable: Vec<CacheEntry> = entries
+            .into_iter()
+            .filter(|e| e.disposition == Disposition::Deletable)
+            .collect();
+
+        if dry_run {
+            println!(
+                "\n[library-caches] dry-run: {} deletable known cache(s)",
+                deletable.len()
+            );
+            for e in &deletable {
+                println!("  would remove: {}", e.path.display());
+            }
+            return Ok(empty_result(self.name()));
+        }
+        if deletable.is_empty() {
+            println!("\n[library-caches] no deletable known caches");
+            return Ok(empty_result(self.name()));
+        }
+        if !std::io::stdin().is_terminal() {
+            eprintln!(
+                "[library-caches] not a terminal - skipping. \
+                 Run `sasurahime clean library-caches` interactively."
+            );
+            return Ok(empty_result(self.name()));
+        }
+
+        let selected = self.interactive_select(&deletable)?;
+        if selected.is_empty() {
+            println!("[library-caches] nothing selected");
+            return Ok(empty_result(self.name()));
+        }
+        let (to_delete, mut skipped) = split_running(selected);
+        let mut result = self.delete_entries(&to_delete, reporter);
+        result.skipped.append(&mut skipped);
+        println!(
+            "[library-caches] total freed: {}",
+            format_bytes(result.bytes_freed)
+        );
+        Ok(result)
     }
 
     // Removing an app cache is an explicit per-app choice; `--yes` must never pick it.
@@ -536,5 +640,67 @@ mod tests {
     fn library_caches_is_never_auto_cleaned() {
         let tmp = TempDir::new().unwrap();
         assert!(!cleaner(&tmp).auto_clean_allowed());
+    }
+
+    #[test]
+    fn delete_entries_removes_and_sums_bytes() {
+        crate::trash::set_trash_mode(false);
+        let tmp = TempDir::new().unwrap();
+        let c = caches(&tmp);
+        put(&c, "typescript", 20_000);
+        let mut cl = LibraryCachesCleaner::new(
+            tmp.path(),
+            Box::new(MockRunner::new().with_success("chflags")),
+        );
+        cl.threshold_override = Some(1);
+        let entries = cl.scan(false);
+        let size = entries[0].size;
+        let r = cl.delete_entries(&entries, &crate::progress::DeepSuppressReporter);
+        assert!(!c.join("typescript").exists());
+        assert_eq!(r.bytes_freed, size);
+        assert!(r.skipped.is_empty());
+        assert!(r.uses_trash);
+        crate::trash::set_trash_mode(true);
+    }
+
+    #[test]
+    fn delete_entries_records_failures_as_skipped() {
+        crate::trash::set_trash_mode(false);
+        let tmp = TempDir::new().unwrap();
+        let ghost = entry("ghost", 100, Disposition::Deletable, None);
+        let mut ghost = ghost;
+        ghost.path = tmp.path().join("does-not-exist");
+        let cl = cleaner(&tmp);
+        let r = cl.delete_entries(&[ghost], &crate::progress::DeepSuppressReporter);
+        assert_eq!(r.bytes_freed, 0);
+        assert_eq!(r.skipped.len(), 1);
+        assert_eq!(r.exit_code(), 1);
+        crate::trash::set_trash_mode(true);
+    }
+
+    #[test]
+    fn clean_dry_run_deletes_nothing() {
+        let tmp = TempDir::new().unwrap();
+        let c = caches(&tmp);
+        put(&c, "typescript", 20_000);
+        put(&c, "SomeUnknownApp", 20_000);
+        let mut cl = cleaner(&tmp);
+        cl.threshold_override = Some(1);
+        let r = cl
+            .clean(true, &crate::progress::DeepSuppressReporter)
+            .unwrap();
+        assert_eq!(r.bytes_freed, 0);
+        assert!(c.join("typescript/data.bin").exists());
+        assert!(c.join("SomeUnknownApp/data.bin").exists());
+    }
+
+    #[test]
+    fn clean_without_dir_is_ok_and_empty() {
+        let tmp = TempDir::new().unwrap();
+        let r = cleaner(&tmp)
+            .clean(false, &crate::progress::DeepSuppressReporter)
+            .unwrap();
+        assert_eq!(r.bytes_freed, 0);
+        assert_eq!(r.exit_code(), 0);
     }
 }
