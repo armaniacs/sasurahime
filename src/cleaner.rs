@@ -137,6 +137,18 @@ pub trait Cleaner: Send + Sync {
         true
     }
 
+    /// Whether `--yes` (run_auto) may clean this target. Targets that run
+    /// destructive external commands or delete user data return false and are
+    /// cleaned only when explicitly selected.
+    fn auto_clean_allowed(&self) -> bool {
+        true
+    }
+
+    /// Read-only note shown under the scan table. Must not run external commands.
+    fn advisory(&self) -> Option<String> {
+        None
+    }
+
     /// Returns sub-targets with display names and sizes (for TUI/CLI).
     fn sub_targets(&self) -> Vec<(&'static str, u64)> {
         vec![]

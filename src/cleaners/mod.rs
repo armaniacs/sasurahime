@@ -10,6 +10,7 @@ pub mod huggingface;
 pub mod ios_backup;
 pub mod library_logs;
 pub mod log;
+pub mod manual_only;
 pub mod mise;
 pub mod ollama;
 pub mod pre_commit;

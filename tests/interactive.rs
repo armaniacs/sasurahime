@@ -373,3 +373,41 @@ fn clean_uv_subcommand_shows_spinner() {
     assert!(combined.contains("Cleaning"), "combined: {combined}");
     assert!(combined.contains("uv"), "combined: {combined}");
 }
+
+#[test]
+fn yes_flag_never_runs_manual_only_targets() {
+    let tmp = TempDir::new().unwrap();
+    let bin_dir = tmp.path().join("bin");
+    fs::create_dir_all(&bin_dir).unwrap();
+    let calls = tmp.path().join("calls_docker.txt");
+    let script = format!(
+        "#!/bin/sh\necho \"$@\" >> \"{}\"\nexit 0\n",
+        calls.display()
+    );
+    fs::write(bin_dir.join("docker"), script).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(bin_dir.join("docker"), fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    let act_cache = tmp.path().join(".cache/act");
+    fs::create_dir_all(&act_cache).unwrap();
+    fs::write(act_cache.join("dummy"), b"x".repeat(1024)).unwrap();
+
+    let original_path = std::env::var("PATH").unwrap_or_default();
+    let output = sasurahime(tmp.path())
+        .env("PATH", format!("{}:{original_path}", bin_dir.display()))
+        .env_remove("ACT_CACHE_DIR")
+        .args(["--permanent", "--yes"])
+        .write_stdin("y\n")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    assert!(
+        !act_cache.exists(),
+        "act is auto-eligible and must be cleaned"
+    );
+    assert!(!calls.exists(), "docker prune must never run under --yes");
+}

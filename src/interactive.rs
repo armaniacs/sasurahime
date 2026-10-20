@@ -69,6 +69,21 @@ pub(crate) fn compute_selected_total(
         .sum()
 }
 
+/// Indices that `--yes` may clean: Pruneable and allowed for unattended runs.
+pub(crate) fn auto_clean_indices(
+    results: &[ScanResult],
+    cleaners: &[Box<dyn Cleaner>],
+) -> Vec<usize> {
+    results
+        .iter()
+        .enumerate()
+        .filter(|(i, r)| {
+            matches!(r.status, ScanStatus::Pruneable(_)) && cleaners[*i].auto_clean_allowed()
+        })
+        .map(|(i, _)| i)
+        .collect()
+}
+
 /// Non-interactive: clean every pruneable cleaner without prompting.
 /// Used by `--yes` flag.
 pub fn run_auto(cleaners: &[Box<dyn Cleaner>]) -> Result<()> {
@@ -96,12 +111,7 @@ pub fn run_auto(cleaners: &[Box<dyn Cleaner>]) -> Result<()> {
         }
     }
 
-    let pruneable_indices: Vec<usize> = results
-        .iter()
-        .enumerate()
-        .filter(|(_, r)| matches!(r.status, ScanStatus::Pruneable(_)))
-        .map(|(i, _)| i)
-        .collect();
+    let pruneable_indices = auto_clean_indices(&results, cleaners);
 
     if pruneable_indices.is_empty() {
         println!("Nothing to clean.");
@@ -423,5 +433,18 @@ mod tests {
         // Select xcode > DerivedData (idx 0) and brew (idx 1)
         let total = compute_selected_total(&[0, 1], &mapping, &results, &cleaners);
         assert_eq!(total, 500 + 2000);
+    }
+
+    #[test]
+    fn auto_clean_indices_skips_manual_only() {
+        let cleaners: Vec<Box<dyn Cleaner>> = vec![
+            Box::new(TestCleaner::new("brew", 2000, vec![])),
+            Box::new(crate::cleaners::manual_only::ManualOnly::new(Box::new(
+                TestCleaner::new("docker", 3000, vec![]),
+            ))),
+            Box::new(TestCleaner::new("empty", 0, vec![])),
+        ];
+        let results: Vec<ScanResult> = cleaners.iter().map(|c| c.detect()).collect();
+        assert_eq!(auto_clean_indices(&results, &cleaners), vec![0]);
     }
 }
