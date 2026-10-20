@@ -420,7 +420,7 @@ of the directory are removed (the root directory is preserved).
 [cleaner.act]
 older_than_days = 30
 
-[cleaner.colima]
+[cleaner.downloads]
 larger_than_mb = 500
 
 [cleaner.logs]
@@ -430,8 +430,15 @@ older_than_days = 14
 Filters apply to directory-scanning cleaners (`DeleteDirs` method).
 `older_than_days` skips entries modified within that many days.
 `larger_than_mb` skips entries smaller than the threshold.
-Command-based cleaners (uv, brew, bun, etc.) show a warning that the
-filter does not apply — they delegate deletion to external tools.
+`logs` accepts `older_than_days` only.
+
+A filter that a cleaner will not use is reported once at startup on stderr:
+command-based cleaners (uv, brew, bun, ...), the interactive cleaners
+(orphan-containers, library-caches, app-support), `larger_than_mb` on `logs`,
+and unknown cleaner names. For example:
+
+    [config] some [cleaner.*] settings have no effect:
+      - [docker] older_than_days: this cleaner has no per-cleaner filters
 
 ### Complete config example
 
@@ -453,7 +460,7 @@ path = "~/work/.cache"
 [cleaner.act]
 older_than_days = 30
 
-[cleaner.colima]
+[cleaner.downloads]
 larger_than_mb = 500
 
 # Log settings
@@ -978,7 +985,7 @@ path = "~/work/.cache"
 [cleaner.act]
 older_than_days = 30
 
-[cleaner.colima]
+[cleaner.downloads]
 larger_than_mb = 500
 
 [cleaner.logs]
@@ -988,8 +995,15 @@ older_than_days = 14
 フィルタはディレクトリスキャン方式（`DeleteDirs`）のクリーナーに適用されます。
 `older_than_days` は指定日数以内に変更されたエントリをスキップし、
 `larger_than_mb` は閾値未満のエントリをスキップします。
-コマンドベースのクリーナー（uv, brew, bun 等）にフィルタを設定すると、
-実行時に「フィルタは適用できません」というワーニングが表示されます。
+`logs` が受け付けるのは `older_than_days` だけです。
+
+効かないフィルタは起動時に stderr へ 1 回だけまとめて表示されます。対象は、
+コマンドベースのクリーナー（uv, brew, bun 等）、対話型のクリーナー
+（orphan-containers, library-caches, app-support）、`logs` の
+`larger_than_mb`、存在しないクリーナー名です。例:
+
+    [config] some [cleaner.*] settings have no effect:
+      - [docker] older_than_days: this cleaner has no per-cleaner filters
 
 ### 完全な設定例
 
@@ -1011,7 +1025,7 @@ path = "~/work/.cache"
 [cleaner.act]
 older_than_days = 30
 
-[cleaner.colima]
+[cleaner.downloads]
 larger_than_mb = 500
 
 # ログ設定
