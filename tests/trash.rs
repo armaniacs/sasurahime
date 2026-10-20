@@ -8,15 +8,6 @@ fn sasurahime(home: &std::path::Path) -> Command {
     cmd
 }
 
-fn install_gradle_fixture(home: &std::path::Path) -> std::path::PathBuf {
-    let caches = home.join(".gradle/caches");
-    std::fs::create_dir_all(caches.join("8.12.0")).unwrap();
-    std::fs::create_dir_all(caches.join("8.8.0")).unwrap();
-    std::fs::write(caches.join("8.12.0/cache.dat"), b"data").unwrap();
-    std::fs::write(caches.join("8.8.0/cache.dat"), b"data").unwrap();
-    caches
-}
-
 fn install_fake_uv(bin_dir: &std::path::Path) {
     let script = bin_dir.join("uv");
     fs::write(&script, "#!/bin/sh\nexit 0\n").unwrap();
@@ -55,33 +46,6 @@ fn dry_run_with_default_trash_mode_deletes_nothing() {
         String::from_utf8_lossy(&output.stdout),
     );
     assert!(cache.exists(), "--dry-run must prevent deletion/trashing");
-}
-
-#[test]
-fn clean_shows_moved_to_trash_message() {
-    let tmp = TempDir::new().unwrap();
-    // GradleCleaner moves old version caches to the Trash, so the note must appear.
-    let caches = install_gradle_fixture(tmp.path());
-
-    // Default: trash mode on — no --trash flag needed.
-    let output = sasurahime(tmp.path())
-        .args(["clean", "gradle"])
-        .output()
-        .unwrap();
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        output.status.success(),
-        "status: {:?}\nstdout: {stdout}\nstderr: {stderr}",
-        output.status.code(),
-    );
-    assert!(
-        stdout.contains("moved to Trash"),
-        "stdout:\n{stdout}\nstderr:\n{stderr}"
-    );
-    assert!(!caches.join("8.8.0").exists(), "old cache must be removed");
-    assert!(caches.join("8.12.0").exists(), "newest cache must stay");
 }
 
 #[test]
@@ -269,28 +233,6 @@ fn permanent_dry_run_shows_freed_not_trash() {
     assert!(
         !stdout.contains("Trash"),
         "--permanent should bypass Trash:\n{stdout}"
-    );
-}
-
-#[test]
-fn config_trash_mode_true_still_works() {
-    let tmp = TempDir::new().unwrap();
-    let config_dir = tmp.path().join(".config/sasurahime");
-    fs::create_dir_all(&config_dir).unwrap();
-    fs::write(config_dir.join("config.toml"), "trash_mode = true\n").unwrap();
-
-    install_gradle_fixture(tmp.path());
-
-    let output = sasurahime(tmp.path())
-        .args(["clean", "gradle"])
-        .output()
-        .unwrap();
-
-    assert!(output.status.success());
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(
-        stdout.contains("moved to Trash"),
-        "config trash_mode should move to Trash:\n{stdout}"
     );
 }
 

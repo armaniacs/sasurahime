@@ -62,7 +62,8 @@ fn yes_flag_exits_zero_and_skips_tui() {
     let original_path = std::env::var("PATH").unwrap_or_default();
     let output = sasurahime(tmp.path())
         .env("PATH", format!("{}:{original_path}", bin_dir.display()))
-        .arg("--yes")
+        .args(["--permanent", "--yes"])
+        .write_stdin("y\n")
         .output()
         .unwrap();
 
@@ -88,7 +89,8 @@ fn yes_flag_nothing_pruneable_exits_zero() {
     // the non-interactive guard skips deletion and "Total freed: 0 B" is printed.
     let output = sasurahime(tmp.path())
         .env("PATH", "/usr/bin:/bin")
-        .arg("--yes")
+        .args(["--permanent", "--yes"])
+        .write_stdin("y\n")
         .output()
         .unwrap();
 
@@ -123,7 +125,11 @@ fn no_args_without_tty_exits_with_hint() {
 #[test]
 fn startup_version_display_yes() {
     let tmp = TempDir::new().unwrap();
-    let output = sasurahime(tmp.path()).arg("--yes").output().unwrap();
+    let output = sasurahime(tmp.path())
+        .args(["--permanent", "--yes"])
+        .write_stdin("y\n")
+        .output()
+        .unwrap();
 
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
@@ -184,7 +190,11 @@ fn sub_targets_integration_via_yes_cleans_default_subcategory() {
     fs::create_dir_all(archives.join("A1")).unwrap();
     fs::write(archives.join("A1/f"), b"x").unwrap();
 
-    let output = sasurahime(tmp.path()).arg("--yes").output().unwrap();
+    let output = sasurahime(tmp.path())
+        .args(["--permanent", "--yes"])
+        .write_stdin("y\n")
+        .output()
+        .unwrap();
 
     assert!(
         output.status.success(),
@@ -212,7 +222,11 @@ fn yes_flag_cleans_xcode_without_interactive_prompt() {
     fs::create_dir_all(derived.join("ProjectA-abcdef")).unwrap();
     fs::write(derived.join("ProjectA-abcdef/dummy"), b"x").unwrap();
 
-    let output = sasurahime(tmp.path()).arg("--yes").output().unwrap();
+    let output = sasurahime(tmp.path())
+        .args(["--permanent", "--yes"])
+        .write_stdin("y\n")
+        .output()
+        .unwrap();
 
     assert!(
         output.status.success(),
@@ -265,7 +279,8 @@ fn yes_flag_shows_progress_spinner() {
     let original_path = std::env::var("PATH").unwrap_or_default();
     let output = sasurahime(tmp.path())
         .env("PATH", format!("{}:{original_path}", bin_dir.display()))
-        .arg("--yes")
+        .args(["--permanent", "--yes"])
+        .write_stdin("y\n")
         .output()
         .unwrap();
 
@@ -303,7 +318,8 @@ fn yes_flag_shows_detect_progress() {
     let original_path = std::env::var("PATH").unwrap_or_default();
     let output = sasurahime(tmp.path())
         .env("PATH", format!("{}:{original_path}", bin_dir.display()))
-        .arg("--yes")
+        .args(["--permanent", "--yes"])
+        .write_stdin("y\n")
         .output()
         .unwrap();
 
@@ -401,6 +417,7 @@ fn yes_flag_never_runs_manual_only_targets() {
         .env_remove("ACT_CACHE_DIR")
         .args(["--permanent", "--yes"])
         .write_stdin("y\n")
+        .write_stdin("y\n")
         .output()
         .unwrap();
 
@@ -424,6 +441,7 @@ fn yes_flag_never_runs_ios_backup() {
     let output = sasurahime(tmp.path())
         .env("PATH", "/usr/bin:/bin")
         .args(["--permanent", "--yes"])
+        .write_stdin("y\n")
         .write_stdin("y\n")
         .output()
         .unwrap();
