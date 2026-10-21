@@ -37,3 +37,6 @@ docs/_site/
 
 # Git worktrees
 .worktrees/
+
+# Release article drafts (local only, not published)
+promo/
