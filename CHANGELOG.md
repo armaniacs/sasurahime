@@ -4,7 +4,7 @@ All notable changes to sasurahime will be documented in this file. The format is
 
 ---
 
-## [Unreleased]
+## [0.3.0] - 2026-10-21
 
 ### Added
 
