@@ -7,6 +7,7 @@ use std::io::IsTerminal;
 pub struct ApfsSnapshotCleaner {
     pub runner: Box<dyn CommandRunner>,
     all: bool,
+    thin: Option<(u64, u32)>,
     free_space: Box<dyn Fn() -> Option<u64> + Send + Sync>,
 }
 
@@ -15,12 +16,20 @@ impl ApfsSnapshotCleaner {
         Self {
             runner,
             all: false,
+            thin: None,
             free_space: Box::new(root_free_space),
         }
     }
 
     pub fn with_all(mut self, all: bool) -> Self {
         self.all = all;
+        self
+    }
+
+    /// Thins local snapshots toward a target free-space amount.
+    /// `target_bytes` uses tmutil's decimal convention (GB = 10^9).
+    pub fn with_thin(mut self, target_bytes: u64, urgency: u32) -> Self {
+        self.thin = Some((target_bytes, urgency));
         self
     }
 
@@ -37,6 +46,34 @@ fn freed_bytes(before: u64, after: u64) -> u64 {
 
 fn root_free_space() -> Option<u64> {
     fs2::available_space("/").ok()
+}
+
+/// Parses a decimal size string for tmutil: `10GB` -> 10_000_000_000.
+/// tmutil thinlocalsnapshots takes the target free space in decimal bytes,
+/// unlike the binary units sasurahime prints elsewhere.
+pub fn parse_size_decimal(s: &str) -> Option<u64> {
+    let upper = s.trim().to_ascii_uppercase();
+    let mult = if upper.ends_with("GB") {
+        1_000_000_000.0_f64
+    } else if upper.ends_with("MB") {
+        1_000_000.0
+    } else if upper.ends_with("KB") {
+        1_000.0
+    } else {
+        return None;
+    };
+    let num = upper
+        .strip_suffix("GB")
+        .or_else(|| upper.strip_suffix("MB"))
+        .or_else(|| upper.strip_suffix("KB"))?;
+    let v: f64 = num.trim().parse().ok()?;
+    Some((v * mult) as u64)
+}
+
+/// Urgency must be 1..=4; anything else is rejected. 4 interrupts running
+/// backups and needs an extra confirmation.
+pub fn validate_urgency(urgency: u32) -> bool {
+    (1..=4).contains(&urgency)
 }
 
 const TM_PREFIX: &str = "com.apple.TimeMachine.";
@@ -130,6 +167,9 @@ impl Cleaner for ApfsSnapshotCleaner {
     }
 
     fn clean(&self, dry_run: bool, _reporter: &dyn ProgressReporter) -> Result<CleanResult> {
+        if self.thin.is_some() {
+            return self.clean_thin(dry_run);
+        }
         if !self.runner.exists("tmutil") {
             return Ok(CleanResult {
                 name: self.name(),
@@ -305,6 +345,82 @@ impl ApfsSnapshotCleaner {
             .defaults(&defaults)
             .interact()?;
         Ok(selections.into_iter().map(|i| names[i].clone()).collect())
+    }
+
+    /// Thins local snapshots toward a target free-space amount, letting macOS
+    /// decide which snapshots to delete. Safer than deleting individual
+    /// snapshots: the OS keeps the most useful ones.
+    fn clean_thin(&self, dry_run: bool) -> Result<CleanResult> {
+        let zero = CleanResult {
+            name: self.name(),
+            bytes_freed: 0,
+            uses_trash: false,
+            skipped: vec![],
+            deleted_paths: vec![],
+        };
+        let Some((target_bytes, urgency)) = self.thin else {
+            return Ok(zero);
+        };
+        if !self.runner.exists("tmutil") {
+            println!("[apfs-snapshot] tmutil not found — skipping thinning.");
+            return Ok(zero);
+        }
+        if !validate_urgency(urgency) {
+            anyhow::bail!(
+                "urgency must be 1..=4, got {urgency}. Lower urgency deletes fewer snapshots."
+            );
+        }
+        eprintln!(
+            "⚠  Thinning snapshots disables local Time Machine protection until the next backup."
+        );
+        if urgency == 4 {
+            eprintln!(
+                "⚠  Urgency 4 interrupts running backups: data written while thinning runs may be lost."
+            );
+            // Extra confirmation, TTY only; a pipeline cannot confirm, so
+            // urgency 4 never runs unattended.
+            if !std::io::stdin().is_terminal()
+                || !dialoguer::Confirm::new()
+                    .with_prompt("Interrupt running backups and thin with urgency 4?")
+                    .default(false)
+                    .interact()?
+            {
+                println!("[apfs-snapshot] cancelled");
+                return Ok(zero);
+            }
+        }
+        if dry_run {
+            println!(
+                "[apfs-snapshot] dry-run: would run `tmutil thinlocalsnapshots / {} {}`",
+                target_bytes, urgency
+            );
+            return Ok(zero);
+        }
+        // Thinning is an explicit opt-in like --all, so it skips the plain
+        // non-TTY guard; urgency 4 keeps its own confirmation above.
+        let before = (self.free_space)();
+        self.runner.run(
+            "tmutil",
+            &[
+                "thinlocalsnapshots",
+                "/",
+                &target_bytes.to_string(),
+                &urgency.to_string(),
+            ],
+        )?;
+        let after = (self.free_space)();
+        let freed = freed_bytes(before.unwrap_or(0), after.unwrap_or(0));
+        println!(
+            "Freed: {} (purgeable space is updated lazily by macOS; the change may not be visible immediately.)",
+            crate::format::format_bytes(freed)
+        );
+        Ok(CleanResult {
+            name: self.name(),
+            bytes_freed: freed,
+            uses_trash: false,
+            skipped: vec![],
+            deleted_paths: vec![],
+        })
     }
 }
 
@@ -869,5 +985,72 @@ mod tests {
             result.skipped[0].reason
         );
         assert_eq!(result.exit_code(), 1);
+    }
+
+    #[test]
+    fn parse_size_decimal_uses_tmutil_convention() {
+        assert_eq!(parse_size_decimal("10GB"), Some(10_000_000_000));
+        assert_eq!(parse_size_decimal("500MB"), Some(500_000_000));
+        assert_eq!(parse_size_decimal("1KB"), Some(1_000));
+        assert_eq!(parse_size_decimal("10gb"), Some(10_000_000_000));
+        assert_eq!(parse_size_decimal("10GiB"), None, "binary units rejected");
+        assert_eq!(parse_size_decimal("abc"), None);
+    }
+
+    #[test]
+    fn urgency_validation_rejects_out_of_range() {
+        assert!(validate_urgency(1));
+        assert!(validate_urgency(2));
+        assert!(validate_urgency(4));
+        assert!(!validate_urgency(0));
+        assert!(!validate_urgency(5));
+    }
+
+    #[test]
+    fn thin_dry_run_never_calls_tmutil() {
+        // A runner without any tmutil behavior errors on unexpected programs:
+        // Ok(0-freed) proves dry-run made no tmutil call.
+        let cleaner = ApfsSnapshotCleaner::new(Box::new(crate::test_helpers::MockRunner::new()))
+            .with_thin(10_000_000_000, 2);
+        let reporter = crate::progress::DeepSuppressReporter;
+        let result = cleaner.clean(true, &reporter).unwrap();
+        assert_eq!(result.bytes_freed, 0);
+        assert!(!result.uses_trash);
+    }
+
+    #[test]
+    fn thin_without_tmutil_skips_without_erroring() {
+        let cleaner = ApfsSnapshotCleaner::new(Box::new(
+            crate::test_helpers::MockRunner::new().with_not_found(),
+        ))
+        .with_thin(10_000_000_000, 2);
+        let reporter = crate::progress::DeepSuppressReporter;
+        let result = cleaner.clean(false, &reporter).unwrap();
+        assert_eq!(result.bytes_freed, 0);
+    }
+
+    #[test]
+    fn thin_reports_free_space_delta_without_going_negative() {
+        // tmutil succeeds via the mock; free space "shrinks" (after < before):
+        // the freed amount must saturate at 0, not wrap.
+        let cleaner = ApfsSnapshotCleaner::new(Box::new(
+            crate::test_helpers::MockRunner::new().with_success("tmutil"),
+        ))
+        .with_thin(10_000_000_000, 2)
+        .with_free_space(|| None);
+        let reporter = crate::progress::DeepSuppressReporter;
+        let result = cleaner.clean(false, &reporter).unwrap();
+        assert_eq!(result.bytes_freed, 0, "missing readings stay at 0");
+        assert!(!result.uses_trash);
+    }
+
+    #[test]
+    fn thin_rejects_urgency_outside_range() {
+        let cleaner = ApfsSnapshotCleaner::new(Box::new(
+            crate::test_helpers::MockRunner::new().with_success("tmutil"),
+        ))
+        .with_thin(10_000_000_000, 5);
+        let reporter = crate::progress::DeepSuppressReporter;
+        assert!(cleaner.clean(false, &reporter).is_err());
     }
 }

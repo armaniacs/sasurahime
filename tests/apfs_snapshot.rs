@@ -75,3 +75,114 @@ fn clean_apfs_snapshot_all_dry_run_succeeds() {
         String::from_utf8_lossy(&output.stderr)
     );
 }
+
+#[test]
+fn thin_dry_run_prints_the_plan_without_calling_tmutil() {
+    let tmp = TempDir::new().unwrap();
+    // Restrict PATH: if tmutil were called, the spawn would still succeed
+    // only where it exists; the dry-run plan must print either way.
+    let output = Command::cargo_bin("sasurahime")
+        .unwrap()
+        .env("HOME", tmp.path())
+        .args([
+            "--permanent",
+            "clean",
+            "apfs-snapshot",
+            "--thin",
+            "10GB",
+            "--dry-run",
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        combined.contains("tmutil thinlocalsnapshots / 10000000000 2"),
+        "the exact tmutil argument list must be in the plan, got:\n{combined}"
+    );
+}
+
+#[test]
+fn thin_without_a_tty_skips_without_erroring() {
+    let tmp = TempDir::new().unwrap();
+    // E2E runs without a terminal: thinning must skip safely, exit 0.
+    let output = Command::cargo_bin("sasurahime")
+        .unwrap()
+        .env("HOME", tmp.path())
+        .args(["--permanent", "clean", "apfs-snapshot", "--thin", "10GB"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn thin_urgency_4_never_runs_without_confirmation() {
+    let tmp = TempDir::new().unwrap();
+    let output = Command::cargo_bin("sasurahime")
+        .unwrap()
+        .env("HOME", tmp.path())
+        .args([
+            "--permanent",
+            "clean",
+            "apfs-snapshot",
+            "--thin",
+            "10GB",
+            "--urgency",
+            "4",
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        combined.contains("Urgency 4 interrupts running backups"),
+        "the backup-interruption warning must be shown, got:\n{combined}"
+    );
+    assert!(
+        combined.contains("cancelled") || !combined.contains("Freed:"),
+        "urgency 4 must not run unattended, got:\n{combined}"
+    );
+}
+
+#[test]
+fn thin_rejects_unparseable_sizes() {
+    let tmp = TempDir::new().unwrap();
+    let output = Command::cargo_bin("sasurahime")
+        .unwrap()
+        .env("HOME", tmp.path())
+        .args([
+            "--permanent",
+            "clean",
+            "apfs-snapshot",
+            "--thin",
+            "nonsense",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        !output.status.success(),
+        "an unparseable size must fail with an error"
+    );
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        combined.contains("cannot parse size"),
+        "the error must explain the expected format, got:\n{combined}"
+    );
+}

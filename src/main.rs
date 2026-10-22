@@ -300,6 +300,14 @@ define_cleaners! {
         /// Delete every local snapshot without prompting
         #[arg(long)]
         all: bool,
+        /// Thin local snapshots toward this free-space target (e.g. 10GB,
+        /// decimal bytes as tmutil expects)
+        #[arg(long)]
+        thin: Option<String>,
+        /// Thinning urgency 1..=4 (default 2; 4 interrupts running backups
+        /// and needs an extra confirmation)
+        #[arg(long)]
+        urgency: Option<u32>,
     },
     /// Report /private/var/vm swap files (no-op; re-initialized on reboot)
     #[command(name = "vm-swap")]
@@ -1103,11 +1111,24 @@ fn main() -> anyhow::Result<()> {
                             reporter.as_ref(),
                         )?;
                     }
-                    CleanTarget::ApfsSnapshot { dry_run, all } => {
-                        let cleaner = cleaners::apfs_snapshot::ApfsSnapshotCleaner::new(Box::new(
-                            SystemCommandRunner,
-                        ))
+                    CleanTarget::ApfsSnapshot {
+                        dry_run,
+                        all,
+                        thin,
+                        urgency,
+                    } => {
+                        let mut cleaner = cleaners::apfs_snapshot::ApfsSnapshotCleaner::new(
+                            Box::new(SystemCommandRunner),
+                        )
                         .with_all(all);
+                        if let Some(spec) = thin {
+                            let Some(bytes) = cleaners::apfs_snapshot::parse_size_decimal(&spec)
+                            else {
+                                eprintln!("Error: cannot parse size: {spec} (expected e.g. 10GB)");
+                                std::process::exit(1);
+                            };
+                            cleaner = cleaner.with_thin(bytes, urgency.unwrap_or(2));
+                        }
                         run_and_exit(
                             "apfs-snapshot",
                             move |dry, rep| cleaner.clean(dry, rep),

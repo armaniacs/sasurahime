@@ -58,6 +58,7 @@ sasurahime clean orphan-containers   # leftover app containers (interactive)
 sasurahime clean library-caches      # per-app Library/Caches (interactive)
 sasurahime clean vm-swap             # /private/var/vm swap size + uptime (report only)
 sasurahime clean project-artifacts   # stale node_modules / target / .build with manifests
+sasurahime clean apfs-snapshot --thin 10GB   # thin local snapshots toward 10GB free (tmutil)
 
 # --- Options ---
 sasurahime stats                   # show deletion history and statistics
@@ -79,6 +80,13 @@ sasurahime --version
   `--verbose`, and `history.json`/`stats` record the trash vs delete method.
 - `clean trash` is report-only: it shows the Trash size and how to empty it in
   Finder; sasurahime never empties the Trash itself.
+- `clean apfs-snapshot --thin 10GB` thins local Time Machine snapshots toward
+  a free-space target by running `tmutil thinlocalsnapshots / 10000000000 2`
+  (decimal bytes, as tmutil expects). Urgency defaults to 2; `--urgency 4`
+  interrupts running backups and needs an extra confirmation. Thinning never
+  calls sudo: if it needs elevation, macOS reports the error and sasurahime
+  prints how to re-run. Freed space is reported as the before/after free-space
+  delta; purgeable space is updated lazily by macOS.
 - `clean project-artifacts` detects stale `node_modules` + `package.json`,
   `target` + `Cargo.toml` and `.build` + `Package.swift` pairs under the
   configured roots (default `~/Playground`, depth 5, `[project-artifacts]` in
@@ -232,6 +240,7 @@ sasurahime clean orphan-containers   # アンインストール済みアプリ�
 sasurahime clean library-caches      # アプリ別 Library/Caches（対話的）
 sasurahime clean vm-swap             # /private/var/vm のスワップサイズと稼働日数（表示のみ）
 sasurahime clean project-artifacts   # マニフェスト付きの古い node_modules / target / .build
+sasurahime clean apfs-snapshot --thin 10GB   # ローカルスナップショットを10GB目標で間引き (tmutil)
 
 # --- オプション ---
 sasurahime stats                   # 削除履歴と統計を表示
@@ -254,6 +263,12 @@ sasurahime --version
   を残し、`history.json` と `stats` に trash と delete の区別が記録されます。
 - `clean trash` は表示のみです: ゴミ箱のサイズと Finder での空にする手順を示します。
   sasurahime 自身がゴミ箱を空にすることはありません。
+- `clean apfs-snapshot --thin 10GB` は `tmutil thinlocalsnapshots / 10000000000 2`
+  （tmutil が期待する10進バイト）を実行して、ローカルスナップショットを空き容量
+  目標に間引きます。緊急度の既定は2で、`--urgency 4` は実行中のバックアップを
+  中断するため追加確認が必要です。間引きは sudo を呼びません: 昇格が必要な場合は
+  macOS がエラーを返し、sasurahime が再実行手順を案内します。解放量は前後の空き
+  容量差で報告され、パージ可能領域は macOS が遅延更新します。
 - `clean project-artifacts` は設定したルート（既定 `~/Playground`、深さ5、
   config.toml の `[project-artifacts]`）配下で、マニフェストと組になった古い
   `node_modules` + `package.json`、`target` + `Cargo.toml`、`.build` +
