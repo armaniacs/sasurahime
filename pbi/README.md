@@ -61,6 +61,16 @@ Sprint 1〜5 の全 7 PBI（22 SP）と PBI 01〜12（25 SP）は `v0.2.0` と�
 | 2026-10-20-11-backlog-clean-result-trash-message | clean 結果の「moved to Trash」表示を CleanResult.uses_trash に基づかせる | 1 | なし | 完了 |
 | 2026-10-20-12-backlog-apfs-snapshot-followups | apfs-snapshot の軽微な積み残しを整理する | 2 | なし | 完了 |
 
+## 未着手のバックログ
+
+各一覧に RICE 採点表と着手順があります。
+
+| 一覧 | 内容 |
+|------|------|
+| `2026-10-22-00-backlog.md` | 全体レビューで挙がった修正・改善 7 件 |
+| `2026-10-23-00-backlog.md` | scan キャッシュ、グローバルフィルタ、ポリシーエンジン、プラグイン 4 件 |
+| `2026-10-23-10-backlog-research-adoption.md` | FDA 診断、プロジェクト生成物、vm 表示、スナップショット間引き 4 件(リスク分類は 2026-10-22-04 に統合) |
+
 ## 設計方針（不変）
 
 - **安全性優先**: `--dry-run` を全クリーナーに実装
