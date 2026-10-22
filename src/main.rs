@@ -316,6 +316,12 @@ define_cleaners! {
         #[arg(long)]
         include_manual: bool,
     },
+    /// Purge stale project artifacts (node_modules / target / .build)
+    #[command(name = "project-artifacts")]
+    ProjectArtifacts {
+        #[arg(long)]
+        dry_run: bool,
+    },
 }
 
 #[derive(Parser)]
@@ -427,6 +433,7 @@ impl CleanTarget {
             CleanTarget::ApfsSnapshot { .. } => "apfs-snapshot",
             CleanTarget::VmSwap { .. } => "vm-swap",
             CleanTarget::All { .. } => "all",
+            CleanTarget::ProjectArtifacts { .. } => "project-artifacts",
             _ => self.dispatch_command_name(),
         }
     }
@@ -444,6 +451,7 @@ impl CleanTarget {
             CleanTarget::ApfsSnapshot { dry_run, .. } => *dry_run,
             CleanTarget::VmSwap { dry_run } => *dry_run,
             CleanTarget::All { dry_run, .. } => *dry_run,
+            CleanTarget::ProjectArtifacts { dry_run } => *dry_run,
             _ => self.dispatch_dry_run(),
         }
     }
@@ -481,6 +489,10 @@ fn extra_targets() -> &'static [(&'static str, &'static str)] {
             "all",
             "Explicit full clean (Safe targets; --include-manual for the rest)",
         ),
+        (
+            "project-artifacts",
+            "Stale project artifacts (node_modules / target / .build with manifests)",
+        ),
     ]
 }
 
@@ -493,6 +505,21 @@ fn home() -> PathBuf {
 /// Every cleaner whose `risk()` is not `Safe` is wrapped in `ManualOnly` so it
 /// runs only when selected in the TUI or via `clean <target>`. There is no
 /// central list: the classification on each cleaner decides.
+/// Expands `[project-artifacts]` roots (tilde-aware). Defaults apply when the
+/// config leaves roots empty.
+fn project_artifact_roots(home: &std::path::Path, config: &config::Config) -> Vec<PathBuf> {
+    if config.project_artifacts.roots.is_empty() {
+        config::ProjectArtifactsConfig::default().roots
+    } else {
+        config
+            .project_artifacts
+            .roots
+            .iter()
+            .map(|r| config::Config::expand_tilde(&r.to_string_lossy(), home))
+            .collect()
+    }
+}
+
 fn special_cleaners(
     home: &std::path::Path,
     config: &config::Config,
@@ -541,6 +568,13 @@ fn special_cleaners(
             std::path::PathBuf::from("/private/var/vm"),
             Box::new(SystemCommandRunner),
         )),
+        Box::new(
+            cleaners::project_artifacts::ProjectArtifactsCleaner::new(project_artifact_roots(
+                home, config,
+            ))
+            .with_max_depth(config.project_artifacts.max_depth)
+            .with_recency_days(config.project_artifacts.recency_days),
+        ),
     ]
 }
 
@@ -903,6 +937,7 @@ fn main() -> anyhow::Result<()> {
                     | CleanTarget::ApfsSnapshot { .. }
                     | CleanTarget::VmSwap { .. }
                     | CleanTarget::All { .. }
+                    | CleanTarget::ProjectArtifacts { .. }
             ) {
                 // --- Special targets (custom dispatch logic) ---
                 match target {
@@ -1155,6 +1190,19 @@ fn main() -> anyhow::Result<()> {
                         }
                         println!("Total freed: {}", format::format_bytes(total));
                     }
+                    CleanTarget::ProjectArtifacts { dry_run } => {
+                        let roots = project_artifact_roots(&home, &config);
+                        let cleaner =
+                            cleaners::project_artifacts::ProjectArtifactsCleaner::new(roots)
+                                .with_max_depth(config.project_artifacts.max_depth)
+                                .with_recency_days(config.project_artifacts.recency_days);
+                        run_and_exit(
+                            "project-artifacts",
+                            move |dry, rep| cleaner.clean(dry, rep),
+                            dry_run,
+                            reporter.as_ref(),
+                        )?;
+                    }
                     _ => unreachable!(),
                 }
             } else {
@@ -1305,6 +1353,7 @@ mod tests {
         ("app-support", cleaner::Risk::Manual),
         ("library-caches", cleaner::Risk::Manual),
         ("orphan-containers", cleaner::Risk::Manual),
+        ("project-artifacts", cleaner::Risk::Manual),
         // Risky: destructive or irreversible.
         ("ios-backup", cleaner::Risk::Risky),
         ("apfs-snapshot", cleaner::Risk::Risky),

@@ -17,6 +17,7 @@ pub mod mise;
 pub mod ollama;
 pub mod orphan_containers;
 pub mod pre_commit;
+pub mod project_artifacts;
 pub mod rustup;
 pub mod uv;
 pub mod vm_swap;

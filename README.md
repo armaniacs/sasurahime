@@ -57,6 +57,7 @@ sasurahime clean logs
 sasurahime clean orphan-containers   # leftover app containers (interactive)
 sasurahime clean library-caches      # per-app Library/Caches (interactive)
 sasurahime clean vm-swap             # /private/var/vm swap size + uptime (report only)
+sasurahime clean project-artifacts   # stale node_modules / target / .build with manifests
 
 # --- Options ---
 sasurahime stats                   # show deletion history and statistics
@@ -78,6 +79,12 @@ sasurahime --version
   `--verbose`, and `history.json`/`stats` record the trash vs delete method.
 - `clean trash` is report-only: it shows the Trash size and how to empty it in
   Finder; sasurahime never empties the Trash itself.
+- `clean project-artifacts` detects stale `node_modules` + `package.json`,
+  `target` + `Cargo.toml` and `.build` + `Package.swift` pairs under the
+  configured roots (default `~/Playground`, depth 5, `[project-artifacts]` in
+  config.toml). Projects updated within 7 days are excluded. **Protection is
+  mtime only: uncommitted changes are NOT checked.** Review `git status`
+  before cleaning.
 - `clean all` is an explicit full clean: `Safe` targets run without extra
   flags; `Moderate` / `Risky` / `Manual` targets need `--include-manual` and
   are listed as skipped with their classification until then. Global
@@ -110,7 +117,7 @@ selection and the scan display (`scan`, `scan --json`). New targets default to
 | `Safe` | Regenerable developer caches | cleaned | `uv`, `brew`, `mise`, `browsers`, `xcode`, `logs`, `act`, `huggingface`, `pre-commit`, `library-logs`, `colima`, `ollama`, `device-support` |
 | `Moderate` | Large or partially user-visible data | skipped (explicit choice) | `docker`, `cargo`, `npm`, `bun`, `go`, `pip`, `rustup`, `simulator`, ... |
 | `Risky` | Destructive or irreversible | never | `ios-backup`, `apfs-snapshot` |
-| `Manual` | User data | never | `downloads`, `app-support`, `library-caches`, `orphan-containers` |
+| `Manual` | User data | never | `downloads`, `app-support`, `library-caches`, `orphan-containers`, `project-artifacts` |
 
 ## Name
 
@@ -224,6 +231,7 @@ sasurahime clean logs
 sasurahime clean orphan-containers   # アンインストール済みアプリの残骸（対話的）
 sasurahime clean library-caches      # アプリ別 Library/Caches（対話的）
 sasurahime clean vm-swap             # /private/var/vm のスワップサイズと稼働日数（表示のみ）
+sasurahime clean project-artifacts   # マニフェスト付きの古い node_modules / target / .build
 
 # --- オプション ---
 sasurahime stats                   # 削除履歴と統計を表示
@@ -246,6 +254,12 @@ sasurahime --version
   を残し、`history.json` と `stats` に trash と delete の区別が記録されます。
 - `clean trash` は表示のみです: ゴミ箱のサイズと Finder での空にする手順を示します。
   sasurahime 自身がゴミ箱を空にすることはありません。
+- `clean project-artifacts` は設定したルート（既定 `~/Playground`、深さ5、
+  config.toml の `[project-artifacts]`）配下で、マニフェストと組になった古い
+  `node_modules` + `package.json`、`target` + `Cargo.toml`、`.build` +
+  `Package.swift` を検出します。7日以内に更新されたプロジェクトは除外されます。
+  **保護は mtime のみで、未コミット変更の有無は見ません。** クリーニング前に
+  `git status` を確認してください。
 - `clean all` は明示的な全消去です: `Safe` ターゲットは追加フラグなしで実行され、
   `Moderate` / `Risky` / `Manual` は `--include-manual` が必要で、それまでは
   分類付きでスキップとして表示されます。グローバルな `--older-than <日数>` /
@@ -275,7 +289,7 @@ sasurahime --version
 | `Safe` | 再生成される開発キャッシュ | 削除する | `uv`, `brew`, `mise`, `browsers`, `xcode`, `logs`, `act`, `huggingface`, `pre-commit`, `library-logs`, `colima`, `ollama`, `device-support` |
 | `Moderate` | 大きい、または一部ユーザーデータを含む | スキップ（明示的な選択） | `docker`, `cargo`, `npm`, `bun`, `go`, `pip`, `rustup`, `simulator` など |
 | `Risky` | 破壊的・不可逆 | 動かない | `ios-backup`, `apfs-snapshot` |
-| `Manual` | ユーザーデータ | 動かない | `downloads`, `app-support`, `library-caches`, `orphan-containers` |
+| `Manual` | ユーザーデータ | 動かない | `downloads`, `app-support`, `library-caches`, `orphan-containers`, `project-artifacts` |
 
 ## 名前の由来
 

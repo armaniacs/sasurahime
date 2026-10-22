@@ -35,8 +35,20 @@ struct LogsSection {
     targets: Vec<ExtraLogTarget>,
 }
 
+/// `[project-artifacts]` section: roots, depth and recency for stale
+/// project artifact detection.
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct ProjectArtifactsSection {
+    #[serde(default)]
+    roots: Vec<String>,
+    max_depth: Option<usize>,
+    recency_days: Option<u32>,
+}
+
 #[derive(Debug, Clone, Deserialize, Default)]
 struct RawConfig {
+    #[serde(default, rename = "project-artifacts", alias = "project_artifacts")]
+    project_artifacts: ProjectArtifactsSection,
     #[serde(default)]
     logs: LogsSection,
     trash_mode: Option<bool>,
@@ -60,6 +72,25 @@ pub struct Config {
     pub exclude: Vec<String>,
     pub custom: Vec<CustomTarget>,
     pub per_cleaner: HashMap<String, PerCleanerConfig>,
+    pub project_artifacts: ProjectArtifactsConfig,
+}
+
+/// Resolved `[project-artifacts]` settings with defaults applied.
+#[derive(Debug, Clone)]
+pub struct ProjectArtifactsConfig {
+    pub roots: Vec<PathBuf>,
+    pub max_depth: usize,
+    pub recency_days: u32,
+}
+
+impl Default for ProjectArtifactsConfig {
+    fn default() -> Self {
+        Self {
+            roots: vec![PathBuf::from("~/Playground")],
+            max_depth: 5,
+            recency_days: 7,
+        }
+    }
 }
 
 impl Default for Config {
@@ -73,6 +104,7 @@ impl Default for Config {
             exclude: vec![],
             custom: vec![],
             per_cleaner: HashMap::new(),
+            project_artifacts: ProjectArtifactsConfig::default(),
         }
     }
 }
@@ -96,6 +128,26 @@ fn parse_config_file(path: &Path) -> Result<Config> {
         exclude: raw.exclude,
         custom: raw.custom,
         per_cleaner: raw.per_cleaner,
+        project_artifacts: ProjectArtifactsConfig {
+            roots: if raw.project_artifacts.roots.is_empty() {
+                ProjectArtifactsConfig::default().roots
+            } else {
+                let home = dirs::home_dir().unwrap_or_default();
+                raw.project_artifacts
+                    .roots
+                    .iter()
+                    .map(|r| Config::expand_tilde(r, &home))
+                    .collect()
+            },
+            max_depth: raw
+                .project_artifacts
+                .max_depth
+                .unwrap_or_else(|| ProjectArtifactsConfig::default().max_depth),
+            recency_days: raw
+                .project_artifacts
+                .recency_days
+                .unwrap_or_else(|| ProjectArtifactsConfig::default().recency_days),
+        },
     })
 }
 
