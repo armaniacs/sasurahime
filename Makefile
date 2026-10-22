@@ -1,8 +1,11 @@
 INSTALL_DIR ?= $(HOME)/.local/bin
 BINARY      := sasurahime
 
-.PHONY: build test lint fmt install uninstall clean publish release \
-        check-deps outdated audit msrv
+VERSION := $(shell grep '^version' Cargo.toml | cut -d'"' -f2)
+TAG     := v$(VERSION)
+
+.PHONY: build test lint fmt install uninstall clean publish release release-tag \
+        release-github tap-update check-deps outdated audit msrv
 
 build:
 	cargo build --release
@@ -32,7 +35,20 @@ clean:
 publish:
 	cargo publish
 
-release: lint test build publish
+# Full release: gates, tag, GitHub release, crates.io, Homebrew tap.
+release: lint test build release-tag release-github publish tap-update
+
+release-tag:
+	git tag $(TAG)
+	git push origin $(TAG)
+
+release-github:
+	awk '/^## \[$(VERSION)\]/{f=1;next} /^## \[/{f=0} f' CHANGELOG.md | \
+		gh release create $(TAG) --repo armaniacs/sasurahime \
+		--title "sasurahime $(TAG)" --notes-file -
+
+tap-update:
+	scripts/update-tap.sh $(TAG)
 
 # ── Dependency checks ────────────────────────────────────────────────────
 
