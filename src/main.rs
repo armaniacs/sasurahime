@@ -300,6 +300,12 @@ define_cleaners! {
         #[arg(long)]
         all: bool,
     },
+    /// Report /private/var/vm swap files (no-op; re-initialized on reboot)
+    #[command(name = "vm-swap")]
+    VmSwap {
+        #[arg(long)]
+        dry_run: bool,
+    },
 }
 
 #[derive(Parser)]
@@ -397,6 +403,7 @@ impl CleanTarget {
             CleanTarget::DeviceSupport { .. } => "device-support",
             CleanTarget::IosBackup { .. } => "ios-backup",
             CleanTarget::ApfsSnapshot { .. } => "apfs-snapshot",
+            CleanTarget::VmSwap { .. } => "vm-swap",
             _ => self.dispatch_command_name(),
         }
     }
@@ -412,6 +419,7 @@ impl CleanTarget {
             CleanTarget::DeviceSupport { dry_run, .. } => *dry_run,
             CleanTarget::IosBackup { dry_run } => *dry_run,
             CleanTarget::ApfsSnapshot { dry_run, .. } => *dry_run,
+            CleanTarget::VmSwap { dry_run } => *dry_run,
             _ => self.dispatch_dry_run(),
         }
     }
@@ -440,6 +448,10 @@ fn extra_targets() -> &'static [(&'static str, &'static str)] {
         (
             "apfs-snapshot",
             "APFS local Time Machine snapshots (tmutil deletelocalsnapshot)",
+        ),
+        (
+            "vm-swap",
+            "/private/var/vm swap files (report only; re-initialized on reboot)",
         ),
     ]
 }
@@ -497,6 +509,10 @@ fn special_cleaners(
         Box::new(cleaners::apfs_snapshot::ApfsSnapshotCleaner::new(Box::new(
             SystemCommandRunner,
         ))),
+        Box::new(cleaners::vm_swap::VmSwapCleaner::new(
+            std::path::PathBuf::from("/private/var/vm"),
+            Box::new(SystemCommandRunner),
+        )),
     ]
 }
 
@@ -819,6 +835,7 @@ fn main() -> anyhow::Result<()> {
                     | CleanTarget::DeviceSupport { .. }
                     | CleanTarget::IosBackup { .. }
                     | CleanTarget::ApfsSnapshot { .. }
+                    | CleanTarget::VmSwap { .. }
             ) {
                 // --- Special targets (custom dispatch logic) ---
                 match target {
@@ -991,6 +1008,23 @@ fn main() -> anyhow::Result<()> {
                             reporter.as_ref(),
                         )?;
                     }
+                    CleanTarget::VmSwap { dry_run } => {
+                        // No-op by design: swap files are re-initialized on
+                        // reboot, nothing can be deleted from a running system.
+                        println!(
+                            "vm-swap is a no-op: swap files in /private/var/vm are re-initialized on reboot. Nothing was deleted."
+                        );
+                        let cleaner = cleaners::vm_swap::VmSwapCleaner::new(
+                            std::path::PathBuf::from("/private/var/vm"),
+                            Box::new(SystemCommandRunner),
+                        );
+                        run_and_exit(
+                            "vm-swap",
+                            move |dry, rep| cleaner.clean(dry, rep),
+                            dry_run,
+                            reporter.as_ref(),
+                        )?;
+                    }
                     _ => unreachable!(),
                 }
             } else {
@@ -1140,6 +1174,8 @@ mod tests {
         // Risky: destructive or irreversible.
         ("ios-backup", cleaner::Risk::Risky),
         ("apfs-snapshot", cleaner::Risk::Risky),
+        // Manual: user data, only cleaned when explicitly selected.
+        ("vm-swap", cleaner::Risk::Manual),
         // Moderate: large or partially user-visible data.
         ("bun", cleaner::Risk::Moderate),
         ("go", cleaner::Risk::Moderate),

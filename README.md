@@ -56,6 +56,7 @@ sasurahime clean caches          # bun / go / pip / node-gyp / npm / yarn / pnpm
 sasurahime clean logs
 sasurahime clean orphan-containers   # leftover app containers (interactive)
 sasurahime clean library-caches      # per-app Library/Caches (interactive)
+sasurahime clean vm-swap             # /private/var/vm swap size + uptime (report only)
 
 # --- Options ---
 sasurahime stats                   # show deletion history and statistics
@@ -201,6 +202,7 @@ sasurahime clean caches          # bun / go / pip / node-gyp / npm / yarn / pnpm
 sasurahime clean logs
 sasurahime clean orphan-containers   # アンインストール済みアプリの残骸（対話的）
 sasurahime clean library-caches      # アプリ別 Library/Caches（対話的）
+sasurahime clean vm-swap             # /private/var/vm のスワップサイズと稼働日数（表示のみ）
 
 # --- オプション ---
 sasurahime stats                   # 削除履歴と統計を表示
