@@ -102,8 +102,10 @@ impl Cleaner for ApfsSnapshotCleaner {
             return ScanResult::new(self.name(), ScanStatus::NotFound);
         }
         let output = match self.runner.run("tmutil", &["listlocalsnapshots", "/"]) {
-            Ok(o) => o,
-            Err(_) => return ScanResult::new(self.name(), ScanStatus::NotFound),
+            Ok(o) if o.status.success() => o,
+            // tmutil exists but the command failed/timed out: snapshots cannot
+            // be measured, so report unavailable instead of `not found`.
+            _ => return ScanResult::new(self.name(), ScanStatus::Unavailable),
         };
         let names = parse_snapshot_names(&String::from_utf8_lossy(&output.stdout));
         if names.is_empty() {
@@ -506,6 +508,19 @@ mod tests {
         fn exists(&self, _: &str) -> bool {
             true
         }
+    }
+
+    #[test]
+    fn detect_returns_unavailable_when_tmutil_fails() {
+        // tmutil exists but the command fails: snapshots cannot be measured,
+        // so scan must say `unavailable`, not `not found`.
+        let cleaner = ApfsSnapshotCleaner::new(Box::new(ErrRunner));
+        let result = cleaner.detect();
+        assert!(
+            matches!(result.status, ScanStatus::Unavailable),
+            "expected Unavailable, got {:?}",
+            result.status
+        );
     }
 
     #[test]

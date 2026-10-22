@@ -57,9 +57,11 @@ impl Cleaner for RustupCleaner {
             return ScanResult::new(self.name(), ScanStatus::NotFound);
         }
         let output = match self.runner.run("rustup", &["toolchain", "list"]) {
-            Ok(o) => o,
-            Err(_) => {
-                return ScanResult::new(self.name(), ScanStatus::NotFound);
+            Ok(o) if o.status.success() => o,
+            // rustup is installed but the command failed/timed out: the target
+            // is present, so report it as unavailable instead of `not found`.
+            _ => {
+                return ScanResult::new(self.name(), ScanStatus::Unavailable);
             }
         };
         let stdout = String::from_utf8_lossy(&output.stdout);
@@ -172,6 +174,34 @@ mod tests {
         fn exists(&self, _program: &str) -> bool {
             true
         }
+    }
+
+    /// rustup is installed but its command fails (spawn error / timeout).
+    struct FailingRunner;
+    impl CommandRunner for FailingRunner {
+        fn run(&self, program: &str, _: &[&str]) -> anyhow::Result<Output> {
+            anyhow::bail!("failed to spawn `{program}`: command timed out")
+        }
+        fn exists(&self, _: &str) -> bool {
+            true
+        }
+    }
+
+    #[test]
+    fn detect_returns_unavailable_when_toolchain_list_fails() {
+        let tmp = TempDir::new().unwrap();
+        fs::create_dir_all(
+            tmp.path()
+                .join(".rustup/toolchains/stable-aarch64-apple-darwin"),
+        )
+        .unwrap();
+        let cleaner = RustupCleaner::new(tmp.path(), Box::new(FailingRunner));
+        let result = cleaner.detect();
+        assert!(
+            matches!(result.status, ScanStatus::Unavailable),
+            "expected Unavailable, got {:?}",
+            result.status
+        );
     }
 
     #[test]

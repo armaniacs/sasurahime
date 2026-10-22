@@ -207,3 +207,52 @@ fn scan_lists_largest_targets_first() {
         "largest target must come first:\n{stdout}"
     );
 }
+
+#[test]
+fn scan_shows_unavailable_when_tool_command_fails() {
+    let tmp = TempDir::new().unwrap();
+
+    // rustup stub exists on PATH (so the cleaner is available) but its command
+    // fails, which the cleaner cannot measure — the row must say `unavailable`
+    // instead of lying `clean` or `not found`. act cache is readable so the
+    // rest of the scan must not be interrupted.
+    let bin = tmp.path().join("bin");
+    fs::create_dir_all(&bin).unwrap();
+    let stub = bin.join("rustup");
+    fs::write(&stub, "#!/bin/sh\nexit 1\n").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&stub, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let path = format!(
+        "{}:{}",
+        bin.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+
+    let act_cache = tmp.path().join(".cache/act");
+    fs::create_dir_all(&act_cache).unwrap();
+    fs::write(act_cache.join("dummy"), b"x".repeat(100)).unwrap();
+
+    let output = sasurahime(tmp.path())
+        .env("PATH", path)
+        .arg("scan")
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "scan must not fail: exit code must be 0"
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("unavailable"),
+        "expected 'unavailable' row in output:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("act"),
+        "other rows must still be scanned and shown:\n{stdout}"
+    );
+}

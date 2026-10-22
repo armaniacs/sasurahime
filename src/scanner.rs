@@ -21,6 +21,17 @@ fn sort_by_size(results: &mut [ScanResult]) {
     });
 }
 
+/// (size column, status column, bytes counted toward the total).
+/// `Unavailable` rows display their own status and are excluded from the total.
+fn status_columns(status: &ScanStatus) -> (String, &'static str, Option<u64>) {
+    match status {
+        ScanStatus::Pruneable(b) => (format_bytes(*b), "pruneable", Some(*b)),
+        ScanStatus::Clean => ("-".to_string(), "clean", None),
+        ScanStatus::NotFound => ("-".to_string(), "not found", None),
+        ScanStatus::Unavailable => ("-".to_string(), "unavailable", None),
+    }
+}
+
 pub fn run_scan(cleaners: &[Box<dyn Cleaner>]) {
     // Pre-filter: skip cleaners whose binary is not installed
     let available: Vec<&Box<dyn Cleaner>> = cleaners.iter().filter(|c| c.is_available()).collect();
@@ -47,16 +58,16 @@ pub fn run_scan(cleaners: &[Box<dyn Cleaner>]) {
     table.set_header(vec!["Category", "Size", "Status", "Target"]);
 
     let mut total: u64 = 0;
+    let mut unavailable: usize = 0;
 
     for r in &results {
-        let (size, status) = match &r.status {
-            ScanStatus::Pruneable(b) => {
-                total += b;
-                (format_bytes(*b), "pruneable")
-            }
-            ScanStatus::Clean => ("-".to_string(), "clean"),
-            ScanStatus::NotFound => ("-".to_string(), "not found"),
-        };
+        let (size, status, counted) = status_columns(&r.status);
+        if let Some(b) = counted {
+            total += b;
+        }
+        if matches!(r.status, ScanStatus::Unavailable) {
+            unavailable += 1;
+        }
         let target = r.primary_target.as_deref().unwrap_or("-");
         table.add_row(vec![r.name, &size, status, target]);
     }
@@ -65,6 +76,12 @@ pub fn run_scan(cleaners: &[Box<dyn Cleaner>]) {
 
     if total > 0 {
         println!("\nTotal reclaimable: {}", format_bytes(total));
+    }
+
+    if unavailable > 0 {
+        println!(
+            "\n{unavailable} target(s) unavailable (could not be measured); excluded from the total."
+        );
     }
 
     let notes: Vec<String> = available.iter().filter_map(|c| c.advisory()).collect();
@@ -110,5 +127,32 @@ mod tests {
         ];
         sort_by_size(&mut v);
         assert_eq!(names(&v), vec!["first", "second", "third"]);
+    }
+
+    #[test]
+    fn sort_by_size_treats_unavailable_as_sizeless() {
+        let mut v = vec![
+            r("failed", ScanStatus::Unavailable),
+            r("small", ScanStatus::Pruneable(10)),
+            r("clean", ScanStatus::Clean),
+        ];
+        sort_by_size(&mut v);
+        assert_eq!(names(&v), vec!["small", "failed", "clean"]);
+    }
+
+    #[test]
+    fn status_columns_unavailable_is_excluded_from_total() {
+        let (size, status, counted) = status_columns(&ScanStatus::Unavailable);
+        assert_eq!(status, "unavailable");
+        assert_eq!(size, "-");
+        assert_eq!(counted, None, "unavailable must not count toward the total");
+    }
+
+    #[test]
+    fn status_columns_pruneable_counts_toward_total() {
+        let (size, status, counted) = status_columns(&ScanStatus::Pruneable(1234));
+        assert_eq!(status, "pruneable");
+        assert_eq!(counted, Some(1234));
+        assert!(!size.is_empty());
     }
 }

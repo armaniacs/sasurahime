@@ -11,6 +11,9 @@ enum MockBehavior {
         program: String,
         output: std::process::Output,
     },
+    Failure {
+        program: String,
+    },
 }
 
 /// A configurable mock for [`CommandRunner`].
@@ -53,6 +56,15 @@ impl MockRunner {
         });
         self
     }
+
+    /// A specific tool exists (`exists()` returns true) but its command fails
+    /// (spawn error). Models a tool whose detect command times out or crashes.
+    pub fn with_failure(mut self, program: &str) -> Self {
+        self.behaviors.push(MockBehavior::Failure {
+            program: program.to_string(),
+        });
+        self
+    }
 }
 
 impl CommandRunner for MockRunner {
@@ -61,6 +73,9 @@ impl CommandRunner for MockRunner {
             match b {
                 MockBehavior::Output { program: p, output } if p == program => {
                     return Ok(output.clone());
+                }
+                MockBehavior::Failure { program: p } if p == program => {
+                    anyhow::bail!("failed to spawn `{program}`: command failed")
                 }
                 _ => {}
             }
@@ -75,6 +90,7 @@ impl CommandRunner for MockRunner {
         for b in &self.behaviors {
             match b {
                 MockBehavior::Output { program: p, .. } if p == program => return true,
+                MockBehavior::Failure { program: p } if p == program => return true,
                 _ => {}
             }
         }

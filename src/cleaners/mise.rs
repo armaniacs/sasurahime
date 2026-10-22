@@ -29,12 +29,14 @@ impl MiseCleaner {
     }
 
     /// Returns cached stdout from `mise ls --current`, computing it on first call.
+    /// `None` when the command fails, times out, or exits non-zero.
     fn get_mise_output(&self) -> Option<String> {
         self.mise_output_cache
             .get_or_init(|| {
                 self.runner
                     .run("mise", &["ls", "--current"])
                     .ok()
+                    .filter(|o| o.status.success())
                     .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
             })
             .clone()
@@ -196,7 +198,9 @@ impl Cleaner for MiseCleaner {
         }
         let stdout = match self.get_mise_output() {
             Some(ref s) => s.clone(),
-            None => return ScanResult::new(self.name(), ScanStatus::NotFound),
+            // mise is installed but the command failed/timed out: the target is
+            // present, so report it as unavailable instead of `not found`.
+            None => return ScanResult::new(self.name(), ScanStatus::Unavailable),
         };
         let active = Self::parse_active_versions(&stdout);
         let pinned = self.get_pinned().clone();
@@ -541,5 +545,21 @@ mod tests {
             .clean(false, &crate::progress::DeepSuppressReporter)
             .unwrap();
         assert_eq!(clean_result.bytes_freed, 0);
+    }
+
+    #[test]
+    fn detect_returns_unavailable_when_mise_command_fails() {
+        // mise is installed but its command fails (e.g. timed out after 30s):
+        // the target is present, so scan must say `unavailable`, not `not found`.
+        let tmp = TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join(".local/share/mise/installs/node/20.11.0")).unwrap();
+        let runner = MockRunner::new().with_failure("mise");
+        let cleaner = MiseCleaner::new(tmp.path(), Box::new(runner));
+        let detect_result = cleaner.detect();
+        assert!(
+            matches!(detect_result.status, ScanStatus::Unavailable),
+            "expected Unavailable, got {:?}",
+            detect_result.status
+        );
     }
 }

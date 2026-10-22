@@ -19,12 +19,17 @@ Homebrew downloads   16.6 GB    stale
 bun cache             5.5 GB    clearable
 mise / node (old)     3.4 GB    unused
 Playwright (old)      0.5 GB    stale
+docker images        12.0 GB    unavailable
 ──────────────────────────────────────────
 Total reclaimable    44.2 GB
 ```
 
 > **Note on sizes**: The numbers above are from one developer's machine.
-> Your environment will differ — these are examples, not guarantees.
+> Your environment will differ ― these are examples, not guarantees.
+>
+> `unavailable` means the target exists but could not be measured
+> (permission denied or the tool's command failed). Those rows are
+> excluded from the total instead of being counted as 0 B.
 
 ## Install
 
@@ -41,7 +46,7 @@ sasurahime scan
 sasurahime targets               # list all supported clean targets
 
 # --- Step 2: clean what you want ---
-sasurahime                       # interactive — pick targets from a menu
+sasurahime                       # interactive ― pick targets from a menu
 sasurahime clean uv              # clean a specific target
 sasurahime clean brew
 sasurahime clean mise
@@ -63,8 +68,8 @@ sasurahime --version
 
 ## Safety first
 
-- Every cleaner supports `--dry-run` — nothing is deleted until you confirm.
-- **Trash mode is on by default** — removed files go to macOS Trash, so you can
+- Every cleaner supports `--dry-run` ― nothing is deleted until you confirm.
+- **Trash mode is on by default** ― removed files go to macOS Trash, so you can
   restore them from Finder. Use `--permanent` to permanently delete.
 - mise runtime removal checks both global and per-project `.mise.toml` before deleting.
 - macOS immutable flags (`uchg`) are handled automatically.
@@ -76,11 +81,11 @@ sasurahime --version
 
 *sasurahime* is named after **速佐須良比売（Hayasasurahi-me）**, a goddess who appears in the *Oharae-no-Kotoba* (Great Purification Words) of Shinto tradition.
 
-In Japanese mythology, impurities swept from the world are carried downstream — from river to sea, and finally to the depths of the underworld (*Ne-no-Kuni*). It is Hayasasurahi-me who receives them at the very end and makes them vanish without a trace.
+In Japanese mythology, impurities swept from the world are carried downstream ― from river to sea, and finally to the depths of the underworld (*Ne-no-Kuni*). It is Hayasasurahi-me who receives them at the very end and makes them vanish without a trace.
 
 She is, in other words, the ultimate destructor.
 
-The name was chosen from the world of the *Kojiki* and *Nihon Shoki* for its role — purging accumulated impurities (stale caches, orphaned files) completely and finally — and for how cleanly it reads as a command name in a terminal.
+The name was chosen from the world of the *Kojiki* and *Nihon Shoki* for its role ― purging accumulated impurities (stale caches, orphaned files) completely and finally ― and for how cleanly it reads as a command name in a terminal.
 
 ## Privacy
 
@@ -93,7 +98,7 @@ sasurahime operates entirely locally on your machine. It does **not**:
 
 sasurahime reads the following directories to identify cleanable cache data:
 - `~/.cache/`, `~/Library/Caches/`, `~/.local/share/`, `~/Library/Application Support/`
-- `~/Library/Application Support/MobileSync/Backup/` (iOS backups — only with `sasurahime clean ios-backup`)
+- `~/Library/Application Support/MobileSync/Backup/` (iOS backups ― only with `sasurahime clean ios-backup`)
 - `~/Library/Containers/com.docker.docker/Data/` and `~/.colima/` (size of the virtual disk image files only, shown by `sasurahime scan`)
 - `~/Library/Containers/` and `~/Library/Group Containers/` (folder names and sizes only; `sasurahime clean orphan-containers`)
 
@@ -142,12 +147,17 @@ Homebrew downloads   16.6 GB    stale
 bun cache             5.5 GB    clearable
 mise / node (old)     3.4 GB    unused
 Playwright (old)      0.5 GB    stale
+docker images        12.0 GB    unavailable
 ──────────────────────────────────────────
 Total reclaimable    44.2 GB
 ```
 
 > **サイズについて**: 上記の数値は開発者一人の環境での実測値です。
 > 環境によって大きく異なります。目安としてご覧ください。
+>
+> `unavailable` は対象が存在するものの計測できなかった行です
+> （権限不足、ツールのコマンド失敗など）。0 B として合計に加算されず、
+> 合計から除外されます。
 
 ## インストール
 
@@ -164,7 +174,7 @@ sasurahime scan
 sasurahime targets               # 対応している削除対象を一覧表示
 
 # --- Step 2: 削除したいものを片付ける ---
-sasurahime                       # インタラクティブモード — メニューから選択
+sasurahime                       # インタラクティブモード ― メニューから選択
 sasurahime clean uv              # 対象を指定して削除
 sasurahime clean brew
 sasurahime clean mise
@@ -201,7 +211,7 @@ sasurahime --version
 
 究極のデストラクタ。
 
-コマンド名としての音の響き、そして「溜まった不要なものを完全に消し去る」という役割 — 『古事記』『日本書紀』の神々の中から、このツールにぴったりの名を選びました。
+コマンド名としての音の響き、そして「溜まった不要なものを完全に消し去る」という役割 ― 『古事記』『日本書紀』の神々の中から、このツールにぴったりの名を選びました。
 
 ## プライバシー
 
@@ -214,7 +224,7 @@ sasurahime はあなたのマシン上で完全にローカルに動作します
 
 sasurahime は以下のディレクトリを読み取り、クリーニング可能なキャッシュデータを特定します:
 - `~/.cache/`、`~/Library/Caches/`、`~/.local/share/`、`~/Library/Application Support/`
-- `~/Library/Application Support/MobileSync/Backup/`（iOS バックアップ — `sasurahime clean ios-backup` でのみアクセス）
+- `~/Library/Application Support/MobileSync/Backup/`（iOS バックアップ ― `sasurahime clean ios-backup` でのみアクセス）
 - `~/Library/Containers/com.docker.docker/Data/` と `~/.colima/`（仮想ディスクイメージのファイルサイズのみ。`sasurahime scan` で表示）
 - `~/Library/Containers/` と `~/Library/Group Containers/`（フォルダ名とサイズのみ。`sasurahime clean orphan-containers` で使用）
 

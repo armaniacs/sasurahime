@@ -468,6 +468,36 @@ mod tests {
     }
 
     #[test]
+    fn auto_clean_indices_excludes_unavailable() {
+        struct UnavailableCleaner(&'static str);
+        impl Cleaner for UnavailableCleaner {
+            fn name(&self) -> &'static str {
+                self.0
+            }
+            fn detect(&self) -> ScanResult {
+                ScanResult::new(self.0, ScanStatus::Unavailable)
+            }
+            fn clean(
+                &self,
+                _dry_run: bool,
+                _reporter: &dyn ProgressReporter,
+            ) -> Result<CleanResult> {
+                panic!("unavailable cleaner must never be cleaned by --yes")
+            }
+        }
+        let cleaners: Vec<Box<dyn Cleaner>> = vec![
+            Box::new(TestCleaner::new("brew", 2000, vec![])),
+            Box::new(UnavailableCleaner("mise")),
+        ];
+        let results: Vec<ScanResult> = cleaners.iter().map(|c| c.detect()).collect();
+        assert_eq!(
+            auto_clean_indices(&results, &cleaners),
+            vec![0],
+            "unavailable targets must never be picked by --yes"
+        );
+    }
+
+    #[test]
     fn run_auto_does_not_clean_manual_only_targets() {
         use crate::cleaners::manual_only::ManualOnly;
         use std::sync::atomic::{AtomicUsize, Ordering};

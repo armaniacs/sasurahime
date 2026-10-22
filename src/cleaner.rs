@@ -8,7 +8,9 @@ pub enum ScanStatus {
     Pruneable(u64),
     Clean,
     NotFound,
-    // PermissionDenied is intentionally omitted — no cleaner currently constructs it.
+    /// The target is present but could not be measured (permission denied,
+    /// external command failed or timed out). Never counts toward totals.
+    Unavailable,
 }
 
 #[derive(Debug, Clone)]
