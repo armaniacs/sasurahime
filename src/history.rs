@@ -126,7 +126,18 @@ pub fn append_history(entry: &HistoryEntry, history_dir: &Path) -> anyhow::Resul
 
     let json = serde_json::to_string_pretty(&entries)?;
     let tmp_path = history_dir.join("history.json.tmp");
-    fs::write(&tmp_path, &json)?;
+    // Write via an owned file handle so the temp file is fsynced before the
+    // rename: an interruption (or crash) can then never leave a torn file.
+    {
+        use std::io::Write;
+        let mut tmp = fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(&tmp_path)?;
+        tmp.write_all(json.as_bytes())?;
+        tmp.sync_all()?;
+    }
     fs::rename(&tmp_path, &history_path)?;
 
     // Lock is released on drop.

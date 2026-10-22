@@ -44,8 +44,13 @@ fn exclude_removes_cleaner_from_scan() {
     let output = sasurahime(tmp.path()).arg("scan").output().unwrap();
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
+    // No standalone "act" row in the table (the substring "act" also appears
+    // inside "project-artifacts", so match the category cell exactly).
+    let has_act_row = stdout
+        .lines()
+        .any(|l| l.trim_start().starts_with("│ act ") || l.trim_start().starts_with("| act "));
     assert!(
-        !stdout.contains("act"),
+        !has_act_row,
         "excluded cleaner 'act' should not appear in scan output, got:\n{stdout}"
     );
 }
