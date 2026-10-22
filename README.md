@@ -33,6 +33,20 @@ Total reclaimable    44.2 GB
 
 ## Install
 
+With cargo (from this checkout):
+
+```bash
+cargo install --path .
+# Update after pulling new code:
+cargo install --path . --force
+```
+
+`--force` is required to replace an existing binary. The binary lands in
+`~/.cargo/bin/sasurahime`; if a Homebrew copy is also installed, the first
+one on `PATH` wins (`which sasurahime`), so remove one or adjust your `PATH`.
+
+With Homebrew:
+
 ```bash
 brew tap armaniacs/sasurahime
 brew install sasurahime
@@ -109,7 +123,8 @@ To run it periodically with launchd, save this as
 ```
 
 Then `launchctl load ~/Library/LaunchAgents/app.sasurahime.auto.plist`.
-Adjust the binary path (`which sasurahime`); no resident daemon is required.
+Adjust the binary path (`which sasurahime`; `~/.cargo/bin/sasurahime` when
+installed with cargo); no resident daemon is required.
 
 ## Safety first
 
@@ -257,6 +272,20 @@ Total reclaimable    44.2 GB
 
 ## インストール
 
+このリポジトリから cargo で入れる場合:
+
+```bash
+cargo install --path .
+# 新しいコードを取り込んだあとの更新:
+cargo install --path . --force
+```
+
+既存のバイナリを置き換えるには `--force` が必要です。バイナリは
+`~/.cargo/bin/sasurahime` に入ります。Homebrew 版も入れている場合は
+`PATH` の先頭にある方が優先されます（`which sasurahime` で確認）。
+
+Homebrew で入れる場合:
+
 ```bash
 brew tap armaniacs/sasurahime
 brew install sasurahime
@@ -334,7 +363,8 @@ launchd で定期実行するには、以下を
 ```
 
 その後 `launchctl load ~/Library/LaunchAgents/app.sasurahime.auto.plist`。
-バイナリのパスは `which sasurahime` で確認してください。常駐デーモンは不要です。
+バイナリのパスは `which sasurahime` で確認してください（cargo で入れた場合は
+`~/.cargo/bin/sasurahime`）。常駐デーモンは不要です。
 
 ## 安全性について
 
