@@ -72,6 +72,12 @@ sasurahime --version
 - Every cleaner supports `--dry-run` ― nothing is deleted until you confirm.
 - **Trash mode is on by default** ― removed files go to macOS Trash, so you can
   restore them from Finder. Use `--permanent` to permanently delete.
+- Trash runs show two axes: `Logical freed: X / Physical freed: 0 B (in Trash)`,
+  plus a restore pointer (`open ~/.Trash`). `--permanent` runs keep a minimal
+  audit trail (`Permanently deleted: no Trash copy was kept.`) without
+  `--verbose`, and `history.json`/`stats` record the trash vs delete method.
+- `clean trash` is report-only: it shows the Trash size and how to empty it in
+  Finder; sasurahime never empties the Trash itself.
 - mise runtime removal checks both global and per-project `.mise.toml` before deleting.
 - macOS immutable flags (`uchg`) are handled automatically.
 - `--yes` cleans only `Safe` targets. Targets classified `Moderate` / `Risky` /
@@ -219,6 +225,12 @@ sasurahime --version
 - **Trash モードがデフォルトで有効**です。削除したファイルは macOS のゴミ箱に移動されるため、Finder から復元できます。完全に消去したい場合は `--permanent` フラグを使用してください。
 - mise のランタイム削除は、グローバル設定とプロジェクト固有の `.mise.toml` を両方チェックしてから実行します。
 - macOS の immutable フラグ（`uchg`）は自動的に解除してから削除します。
+- Trash モードの実行は2軸で表示されます: `Logical freed: X / Physical freed: 0 B (in Trash)`
+  に加えて復元導線（`open ~/.Trash`）を表示します。`--permanent` 実行は
+  `--verbose` なしでも最低限の監査証跡（`Permanently deleted: no Trash copy was kept.`）
+  を残し、`history.json` と `stats` に trash と delete の区別が記録されます。
+- `clean trash` は表示のみです: ゴミ箱のサイズと Finder での空にする手順を示します。
+  sasurahime 自身がゴミ箱を空にすることはありません。
 - `--yes` が削除するのは `Safe` 分類のターゲットのみです。`Moderate` /
   `Risky` / `Manual` のターゲットは分類付きでスキップとして表示され、
   明示的な選択（ピッカーまたは `clean <target>`）が必要です。

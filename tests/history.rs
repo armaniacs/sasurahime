@@ -183,3 +183,101 @@ fn clean_creates_history_json() {
     let freed = entries[0]["freed_bytes"].as_u64().unwrap();
     assert!(freed > 0, "freed_bytes should be > 0");
 }
+
+#[test]
+fn permanent_clean_keeps_an_audit_trail_without_verbose() {
+    let tmp = TempDir::new().unwrap();
+    let bin_dir = tmp.path().join("bin");
+    fs::create_dir_all(&bin_dir).unwrap();
+    let script = bin_dir.join("uv");
+    fs::write(&script, "#!/bin/sh\nexit 0\n").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    // simple-v16 with data + simple-v17 empty: the uv cleaner removes the
+    // stale simple-v16 directory for real (no Trash involved).
+    let uv_cache = tmp.path().join(".cache/uv");
+    fs::create_dir_all(uv_cache.join("simple-v16")).unwrap();
+    fs::write(uv_cache.join("simple-v16/pkg.tar.gz"), [0u8; 4096]).unwrap();
+    fs::create_dir_all(uv_cache.join("simple-v17")).unwrap();
+
+    let original_path = std::env::var("PATH").unwrap_or_default();
+    let new_path = format!("{}:{}", bin_dir.display(), original_path);
+
+    let output = sasurahime(tmp.path())
+        .env("PATH", &new_path)
+        .args(["--permanent", "clean", "uv"])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        combined.contains("Permanently deleted: no Trash copy was kept."),
+        "--permanent must keep a minimal audit trail without --verbose, got:\n{combined}"
+    );
+
+    // The record also lands in history.json as a delete (not trash).
+    let history_path = tmp.path().join(".local/share/sasurahime/history.json");
+    assert!(history_path.exists(), "audit trail must reach history.json");
+    let raw = fs::read_to_string(&history_path).unwrap();
+    assert!(
+        raw.contains("\"moved_to_trash\": false"),
+        "history must record the physical delete, got:\n{raw}"
+    );
+}
+
+#[test]
+fn clean_trash_shows_size_and_finder_guidance() {
+    let tmp = TempDir::new().unwrap();
+    let output = sasurahime(tmp.path())
+        .args(["clean", "trash"])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "clean trash must exit 0");
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        combined.contains("Trash holds:"),
+        "the Trash size must be shown, got:\n{combined}"
+    );
+    assert!(
+        combined.contains("Finder") && combined.contains("empty"),
+        "Finder emptying steps must be shown, got:\n{combined}"
+    );
+    assert!(
+        combined.contains("open ~/.Trash") || combined.contains("~/.Trash"),
+        "an open ~/.Trash pointer must be shown, got:\n{combined}"
+    );
+}
+
+#[test]
+fn stats_shows_trash_method_after_a_trash_clean() {
+    let tmp = TempDir::new().unwrap();
+    // A trash-mode clean of a PathCleaner target really moves files to the
+    // Trash, which is an Apple-Event operation (TCC); run the trash-mode
+    // detection through history.json instead by writing an entry with the
+    // new field and checking stats renders it.
+    write_history(
+        tmp.path(),
+        r#"[{"timestamp":"2026-05-25T10:30:00+09:00","cleaner":"uv","freed_bytes":4096,"skipped_count":0,"moved_to_trash":true}]"#,
+    );
+    let output = sasurahime(tmp.path()).args(["stats"]).output().unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("trash"),
+        "stats must surface the trash/physical distinction, got:\n{stdout}"
+    );
+    assert!(stdout.contains("Method"), "stats: {stdout}");
+}

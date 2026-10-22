@@ -19,6 +19,11 @@ pub struct HistoryEntry {
     pub cleaner: String,
     pub freed_bytes: u64,
     pub skipped_count: usize,
+    /// Whether the freed bytes were moved to the macOS Trash (true) instead of
+    /// permanently deleted (false). Older history files lack this field and
+    /// default to false.
+    #[serde(default)]
+    pub moved_to_trash: bool,
 }
 
 #[derive(Debug, Default)]
@@ -79,13 +84,16 @@ fn build_box(lines: &[String]) -> String {
 
 fn table_header() -> String {
     format!(
-        "  {:>3}  {:<18}  {:<15}  {:>10}",
-        "#", "Date", "Cleaner", "Size"
+        "  {:>3}  {:<18}  {:<15}  {:>10}  {:>7}",
+        "#", "Date", "Cleaner", "Size", "Method"
     )
 }
 
-fn table_row(i: usize, ts: &str, cleaner: &str, size: &str) -> String {
-    format!("  {:>3}  {:<18}  {:<15}  {:>10}", i, ts, cleaner, size)
+fn table_row(i: usize, ts: &str, cleaner: &str, size: &str, method: &str) -> String {
+    format!(
+        "  {:>3}  {:<18}  {:<15}  {:>10}  {:>7}",
+        i, ts, cleaner, size, method
+    )
 }
 
 pub fn append_history(entry: &HistoryEntry, history_dir: &Path) -> anyhow::Result<()> {
@@ -199,7 +207,13 @@ fn format_entries_table(summary: &StatsSummary, count: usize, output: &mut Strin
             &entry.timestamp
         };
         let size = crate::format::format_bytes(entry.freed_bytes);
-        output.push_str(&table_row(i + 1, ts, &entry.cleaner, &size));
+        // trash/physical distinction stays visible in stats.
+        let method = if entry.moved_to_trash {
+            "trash"
+        } else {
+            "delete"
+        };
+        output.push_str(&table_row(i + 1, ts, &entry.cleaner, &size, method));
         output.push('\n');
     }
 }
@@ -208,7 +222,12 @@ pub fn default_history_dir(home: &Path) -> PathBuf {
     home.join(".local/share/sasurahime")
 }
 
-pub fn write_history_entry(label: &str, freed_bytes: u64, skipped_count: usize) {
+pub fn write_history_entry(
+    label: &str,
+    freed_bytes: u64,
+    skipped_count: usize,
+    moved_to_trash: bool,
+) {
     if freed_bytes == 0 {
         return;
     }
@@ -221,6 +240,7 @@ pub fn write_history_entry(label: &str, freed_bytes: u64, skipped_count: usize) 
         cleaner: label.to_string(),
         freed_bytes,
         skipped_count,
+        moved_to_trash,
     };
     let _ = append_history(&entry, &history_dir);
 }
@@ -239,6 +259,7 @@ mod tests {
             cleaner: "uv".to_string(),
             freed_bytes: 500_000_000,
             skipped_count: 0,
+            moved_to_trash: false,
         };
         append_history(&entry, &history_dir).unwrap();
         let history_path = history_dir.join("history.json");
@@ -247,6 +268,62 @@ mod tests {
         assert_eq!(loaded.len(), 1);
         assert_eq!(loaded[0].cleaner, "uv");
         assert_eq!(loaded[0].freed_bytes, 500_000_000);
+        assert!(!loaded[0].moved_to_trash);
+    }
+
+    #[test]
+    fn moved_to_trash_roundtrips() {
+        let tmp = TempDir::new().unwrap();
+        let history_dir = tmp.path().join(".local/share/sasurahime");
+        let entry = HistoryEntry {
+            timestamp: "2026-05-25T10:30:00+09:00".to_string(),
+            cleaner: "uv".to_string(),
+            freed_bytes: 100,
+            skipped_count: 0,
+            moved_to_trash: true,
+        };
+        append_history(&entry, &history_dir).unwrap();
+        let loaded = load_history(&history_dir.join("history.json"));
+        assert!(loaded[0].moved_to_trash, "trash distinction must survive");
+    }
+
+    #[test]
+    fn older_history_without_moved_to_trash_defaults_to_false() {
+        // Pre-22-05 history files have no moved_to_trash field; they must
+        // still load.
+        let tmp = TempDir::new().unwrap();
+        let history_dir = tmp.path().join(".local/share/sasurahime");
+        std::fs::create_dir_all(&history_dir).unwrap();
+        let legacy = r#"[{"timestamp":"2026-05-25T10:30:00+09:00","cleaner":"uv","freed_bytes":500,"skipped_count":0}]"#;
+        std::fs::write(history_dir.join("history.json"), legacy).unwrap();
+        let loaded = load_history(&history_dir.join("history.json"));
+        assert_eq!(loaded.len(), 1);
+        assert!(!loaded[0].moved_to_trash, "legacy entries default to false");
+    }
+
+    #[test]
+    fn stats_table_shows_trash_and_delete_methods() {
+        let entries = vec![
+            HistoryEntry {
+                timestamp: "2026-05-25T10:30:00+09:00".to_string(),
+                cleaner: "uv".to_string(),
+                freed_bytes: 100,
+                skipped_count: 0,
+                moved_to_trash: true,
+            },
+            HistoryEntry {
+                timestamp: "2026-05-24T10:30:00+09:00".to_string(),
+                cleaner: "brew".to_string(),
+                freed_bytes: 200,
+                skipped_count: 0,
+                moved_to_trash: false,
+            },
+        ];
+        let summary = compute_stats(&entries);
+        let stats = format_stats(&summary);
+        assert!(stats.contains("Method"), "stats: {stats}");
+        assert!(stats.contains("trash"), "stats: {stats}");
+        assert!(stats.contains("delete"), "stats: {stats}");
     }
 
     #[test]
@@ -265,12 +342,14 @@ mod tests {
                 cleaner: "uv".to_string(),
                 freed_bytes: 500_000_000,
                 skipped_count: 0,
+                moved_to_trash: false,
             },
             HistoryEntry {
                 timestamp: "2026-05-24T22:15:00+09:00".to_string(),
                 cleaner: "brew".to_string(),
                 freed_bytes: 1_200_000_000,
                 skipped_count: 1,
+                moved_to_trash: false,
             },
         ];
         let summary = compute_stats(&entries);
@@ -287,6 +366,7 @@ mod tests {
             cleaner: "uv".to_string(),
             freed_bytes: 500_000_000,
             skipped_count: 0,
+            moved_to_trash: false,
         }];
         let summary = compute_stats(&entries);
         let output = format_stats(&summary);
@@ -323,12 +403,14 @@ mod tests {
             cleaner: "uv".to_string(),
             freed_bytes: 500_000_000,
             skipped_count: 0,
+            moved_to_trash: false,
         };
         let e2 = HistoryEntry {
             timestamp: "2026-05-24T22:15:00+09:00".to_string(),
             cleaner: "brew".to_string(),
             freed_bytes: 1_200_000_000,
             skipped_count: 1,
+            moved_to_trash: false,
         };
         append_history(&e1, &history_dir).unwrap();
         append_history(&e2, &history_dir).unwrap();
@@ -348,12 +430,14 @@ mod tests {
                 cleaner: "uv".to_string(),
                 freed_bytes: 500_000_000,
                 skipped_count: 0,
+                moved_to_trash: false,
             },
             HistoryEntry {
                 timestamp: "2026-05-24T22:15:00+09:00".to_string(),
                 cleaner: "brew".to_string(),
                 freed_bytes: 1_200_000_000,
                 skipped_count: 1,
+                moved_to_trash: false,
             },
         ];
         let summary = compute_stats(&entries);
@@ -372,18 +456,21 @@ mod tests {
                 cleaner: "old".to_string(),
                 freed_bytes: 100,
                 skipped_count: 0,
+                moved_to_trash: false,
             },
             HistoryEntry {
                 timestamp: "2026-05-26T10:00:00+09:00".to_string(),
                 cleaner: "newest".to_string(),
                 freed_bytes: 200,
                 skipped_count: 0,
+                moved_to_trash: false,
             },
             HistoryEntry {
                 timestamp: "2026-05-25T10:30:00+09:00".to_string(),
                 cleaner: "middle".to_string(),
                 freed_bytes: 300,
                 skipped_count: 0,
+                moved_to_trash: false,
             },
         ];
         let summary = compute_stats(&entries);
@@ -400,6 +487,7 @@ mod tests {
             cleaner: "uv".to_string(),
             freed_bytes: 500_000_000,
             skipped_count: 0,
+            moved_to_trash: false,
         }];
         let summary = compute_stats(&entries);
         let output = format_stats(&summary);
@@ -421,6 +509,7 @@ mod tests {
             cleaner: "uv".to_string(),
             freed_bytes: 500_000_000,
             skipped_count: 0,
+            moved_to_trash: false,
         }];
         let summary = compute_stats(&entries);
         let output = format_stats(&summary);
@@ -448,6 +537,7 @@ mod tests {
                     cleaner: "uv".to_string(),
                     freed_bytes: 100,
                     skipped_count: 0,
+                    moved_to_trash: false,
                 },
                 &history_dir,
             )

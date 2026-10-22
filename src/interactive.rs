@@ -180,7 +180,12 @@ pub fn run_auto(cleaners: &[Box<dyn Cleaner>]) -> Result<()> {
             Ok(r) => {
                 total_freed += r.bytes_freed;
                 if r.bytes_freed > 0 {
-                    crate::history::write_history_entry(name, r.bytes_freed, r.skipped.len());
+                    crate::history::write_history_entry(
+                        name,
+                        r.bytes_freed,
+                        r.skipped.len(),
+                        r.uses_trash,
+                    );
                 }
             }
             Err(e) => eprintln!("Error cleaning {name}: {e}"),
@@ -308,7 +313,12 @@ pub fn run_interactive(cleaners: &[Box<dyn Cleaner>]) -> Result<()> {
                 Ok(r) => {
                     freed += r.bytes_freed;
                     if r.bytes_freed > 0 {
-                        crate::history::write_history_entry(name, r.bytes_freed, r.skipped.len());
+                        crate::history::write_history_entry(
+                            name,
+                            r.bytes_freed,
+                            r.skipped.len(),
+                            r.uses_trash,
+                        );
                     }
                 }
                 Err(e) => eprintln!("Error: {e}"),

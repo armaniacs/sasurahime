@@ -546,12 +546,31 @@ fn all_cleaners(home: &std::path::Path, config: &config::Config) -> Vec<Box<dyn 
 /// its bytes can be restored.
 fn freed_message(bytes_freed: u64, uses_trash: bool, trash_mode: bool) -> String {
     if trash_mode && uses_trash && bytes_freed > 0 {
+        // Two axes: the logical size is gone from the caches, but the bytes
+        // still sit in the Trash until it is emptied.
         format!(
-            "Freed: 0 B ({} moved to Trash)",
+            "Logical freed: {} / Physical freed: 0 B (in Trash)",
             crate::format::format_bytes(bytes_freed)
         )
     } else {
         format!("Freed: {}", crate::format::format_bytes(bytes_freed))
+    }
+}
+
+/// Minimal audit trail / restore guidance printed after a clean, so the
+/// record exists even without `--verbose`. `None` when nothing was freed.
+fn post_clean_note(bytes_freed: u64, uses_trash: bool, trash_mode: bool) -> Option<String> {
+    if bytes_freed == 0 {
+        return None;
+    }
+    if trash_mode {
+        if uses_trash {
+            Some("Restore from Finder (Trash) or run `open ~/.Trash`.".to_string())
+        } else {
+            None
+        }
+    } else {
+        Some("Permanently deleted: no Trash copy was kept.".to_string())
     }
 }
 
@@ -680,6 +699,13 @@ where
                 crate::trash::is_trash_mode()
             )
         );
+        if let Some(note) = post_clean_note(
+            result.bytes_freed,
+            result.uses_trash,
+            crate::trash::is_trash_mode(),
+        ) {
+            println!("{note}");
+        }
     }
 
     if !result.skipped.is_empty() {
@@ -693,7 +719,12 @@ where
     }
 
     if !dry_run && result.bytes_freed > 0 {
-        history::write_history_entry(label, result.bytes_freed, result.skipped.len());
+        history::write_history_entry(
+            label,
+            result.bytes_freed,
+            result.skipped.len(),
+            result.uses_trash,
+        );
     }
 
     Ok(result)
@@ -880,6 +911,7 @@ fn main() -> anyhow::Result<()> {
                                             c.name(),
                                             r.bytes_freed,
                                             r.skipped.len(),
+                                            r.uses_trash,
                                         );
                                     }
                                 }
@@ -938,13 +970,14 @@ fn main() -> anyhow::Result<()> {
                             &home,
                             Box::new(SystemCommandRunner),
                         );
-                        if dry_run {
-                            let result = cleaner.clean(true, reporter.as_ref())?;
-                            println!("Freed: {}", format::format_bytes(result.bytes_freed));
-                        } else {
-                            eprintln!("Warning: Use Finder to empty Trash. sasurahime cannot safely empty ~/.Trash.");
-                            println!("Freed: 0 B");
-                        }
+                        // Report-only in both modes: sasurahime never empties
+                        // the Trash itself.
+                        let _ = dry_run;
+                        let result = cleaner.clean(true, reporter.as_ref())?;
+                        println!("Trash holds: {}", format::format_bytes(result.bytes_freed));
+                        eprintln!(
+                            "Warning: sasurahime cannot safely empty ~/.Trash. Open it in Finder (or run `open ~/.Trash`) and empty it there."
+                        );
                     }
                     CleanTarget::Ollama { dry_run } => {
                         let cleaner = cleaners::ollama::OllamaCleaner::new(
@@ -1417,7 +1450,7 @@ mod tests {
         assert_eq!(freed_message(0, true, true), "Freed: 0 B");
         assert_eq!(
             freed_message(bytes, true, true),
-            format!("Freed: 0 B ({shown} moved to Trash)")
+            format!("Logical freed: {shown} / Physical freed: 0 B (in Trash)")
         );
         assert_eq!(freed_message(bytes, false, true), format!("Freed: {shown}"));
         assert_eq!(freed_message(bytes, true, false), format!("Freed: {shown}"));
@@ -1425,6 +1458,36 @@ mod tests {
             freed_message(bytes, false, false),
             format!("Freed: {shown}")
         );
+    }
+
+    #[test]
+    fn post_clean_note_shows_restore_guidance_for_trash_runs() {
+        let note = post_clean_note(2048, true, true).expect("restore note");
+        assert!(
+            note.contains("Finder") && note.contains("~/.Trash"),
+            "restore guidance must mention Finder and ~/.Trash, got: {note}"
+        );
+        // A cleaner that never moves to Trash prints nothing in trash mode.
+        assert_eq!(post_clean_note(2048, false, true), None);
+    }
+
+    #[test]
+    fn post_clean_note_keeps_a_permanent_audit_trail() {
+        let note = post_clean_note(2048, true, false).expect("audit note");
+        assert!(
+            note.contains("Permanently deleted"),
+            "permanent runs must keep a minimal audit trail, got: {note}"
+        );
+        assert_eq!(
+            post_clean_note(2048, false, false).expect("audit note"),
+            "Permanently deleted: no Trash copy was kept."
+        );
+    }
+
+    #[test]
+    fn post_clean_note_is_silent_when_nothing_was_freed() {
+        assert_eq!(post_clean_note(0, true, true), None);
+        assert_eq!(post_clean_note(0, false, false), None);
     }
 
     fn pcc(older: Option<u32>, larger: Option<u64>) -> config::PerCleanerConfig {
