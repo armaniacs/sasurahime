@@ -630,6 +630,22 @@ mod tests {
     }
 
     #[test]
+    fn detect_bytes_match_explore_metric() {
+        // 数値突合: scan と explore は同じ format::dir_size metric で測る。
+        // 20_480 bytes = 5 APFS pages, measured exactly.
+        let tmp = TempDir::new().unwrap();
+        let c = caches(&tmp);
+        put(&c, "typescript", 20_480);
+        let mut cl = cleaner(&tmp);
+        cl.threshold_override = Some(10_000);
+        assert_eq!(
+            cl.detect().bytes_for_test(),
+            crate::format::dir_size(&c.join("typescript")),
+            "scan bytes must equal the explore metric on the same path"
+        );
+    }
+
+    #[test]
     fn sub_targets_is_empty() {
         let tmp = TempDir::new().unwrap();
         put(&caches(&tmp), "typescript", 20_000);

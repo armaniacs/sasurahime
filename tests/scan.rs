@@ -256,3 +256,71 @@ fn scan_shows_unavailable_when_tool_command_fails() {
         "other rows must still be scanned and shown:\n{stdout}"
     );
 }
+
+#[test]
+fn scan_shows_unknown_for_cli_delegating_cleaners() {
+    // docker is installed (stub) but detect cannot measure a byte count
+    // without running it: the row must say `unknown`, not lie `pruneable`.
+    let tmp = TempDir::new().unwrap();
+    let bin = tmp.path().join("bin");
+    fs::create_dir_all(&bin).unwrap();
+    let stub = bin.join("docker");
+    fs::write(&stub, "#!/bin/sh\nexit 0\n").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&stub, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let path = format!(
+        "{}:{}",
+        bin.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+
+    let output = sasurahime(tmp.path())
+        .env("PATH", path)
+        .arg("scan")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("unknown"),
+        "expected 'unknown' row for a CLI-delegating cleaner:\n{stdout}"
+    );
+}
+
+#[test]
+fn scan_json_outputs_valid_schema() {
+    let tmp = TempDir::new().unwrap();
+    let act_cache = tmp.path().join(".cache/act");
+    fs::create_dir_all(&act_cache).unwrap();
+    fs::write(act_cache.join("dummy"), b"x".repeat(100)).unwrap();
+
+    let output = sasurahime(tmp.path())
+        .arg("scan")
+        .arg("--json")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    let json_path = tmp.path().join("scan.json");
+    fs::write(&json_path, stdout.as_bytes()).unwrap();
+    let check = std::process::Command::new("jq")
+        .arg("-e")
+        .arg(
+            r#"(.total_reclaimable_bytes >= 0) and
+               ([.targets[] | select(.name == "act" and .status == "pruneable" and .estimable == true and .size_bytes > 0)] | length) == 1 and
+               (all(.targets[]; has("name") and has("status") and has("estimable")))"#,
+        )
+        .arg(&json_path)
+        .status()
+        .expect("jq must be available for the JSON schema test");
+    assert!(
+        check.success(),
+        "scan --json schema check failed:\n{stdout}"
+    );
+}

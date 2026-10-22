@@ -348,7 +348,11 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     /// Scan cache locations and report sizes
-    Scan,
+    Scan {
+        /// Output machine-readable JSON instead of the table (no hints, no prompts)
+        #[arg(long)]
+        json: bool,
+    },
     /// Clean a specific cache target
     Clean {
         #[command(subcommand)]
@@ -771,8 +775,13 @@ fn main() -> anyhow::Result<()> {
     }
 
     match cli.command {
-        Some(Commands::Scan) => {
+        Some(Commands::Scan { json }) => {
             let cleaners = all_cleaners(&home, &config);
+            if json {
+                // Machine-readable output: no hints, no interactive prompt.
+                scanner::run_scan_json(&cleaners);
+                return Ok(());
+            }
             scanner::run_scan(&cleaners);
             let runner = SystemCommandRunner;
             let hints = hint::collect_hints(&home, &runner);

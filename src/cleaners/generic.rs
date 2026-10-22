@@ -443,7 +443,9 @@ impl Cleaner for GenericCleaner {
                 if !self.runner.exists(program) {
                     return make_result(ScanStatus::NotFound);
                 }
-                make_result(ScanStatus::Pruneable(0))
+                // The tool is installed but detect cannot measure a byte count
+                // without running it: report unknown instead of a lying 0 B.
+                make_result(ScanStatus::Unknown)
             }
             CleanMethod::CommandWithDetectDir {
                 program,
@@ -1454,7 +1456,7 @@ mod tests {
     }
 
     #[test]
-    fn docker_detect_does_not_run_commands_and_stays_pruneable_zero() {
+    fn docker_detect_does_not_run_commands_and_stays_unknown() {
         let tmp = tempfile::TempDir::new().unwrap();
         struct ExistsOnlyRunner;
         impl CommandRunner for ExistsOnlyRunner {
@@ -1466,7 +1468,7 @@ mod tests {
             }
         }
         let cleaner = GenericCleaner::docker(tmp.path(), Box::new(ExistsOnlyRunner));
-        assert!(matches!(cleaner.detect().status, ScanStatus::Pruneable(0)));
+        assert!(matches!(cleaner.detect().status, ScanStatus::Unknown));
     }
 
     #[test]

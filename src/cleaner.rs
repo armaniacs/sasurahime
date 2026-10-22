@@ -11,6 +11,10 @@ pub enum ScanStatus {
     /// The target is present but could not be measured (permission denied,
     /// external command failed or timed out). Never counts toward totals.
     Unavailable,
+    /// The tool is installed but detect cannot measure a byte count without
+    /// running it (CLI-delegating cleaners). Displayed as `unknown` and
+    /// never counted toward totals.
+    Unknown,
 }
 
 #[derive(Debug, Clone)]
