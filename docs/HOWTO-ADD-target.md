@@ -29,8 +29,31 @@ Body:  - Tool name / version
 ## 2. Implementation
 
 There are three paths depending on the cleaner's complexity.
+**Plugins are preferred for new targets**: they keep the binary lean and do
+not need a code review of the core. Write an external `sasurahime-*`
+executable and ship it yourself:
 
-### Path G: Generic cleaner (fastest, recommended for cache targets)
+### Path P: External plugin (preferred for new targets)
+
+Build an executable named `sasurahime-<name>` on PATH that answers:
+
+```sh
+sasurahime-<name> scan --json
+# stdout: {"status": "pruneable|clean|notfound|unavailable", "bytes": <n>}
+# exit 0
+sasurahime-<name> clean [--dry-run]
+# performs (or plans) the clean; exit 0 on success
+```
+
+Then `sasurahime scan` shows a `<name>` row, `sasurahime targets` lists it
+with a `(plugin)` marker, and `sasurahime clean <name>` runs the plugin.
+Failures, invalid output and hangs (over a 10 s timeout, override with
+`SASURAHIME_PLUGIN_TIMEOUT_SECS`) are isolated: the row becomes
+`unavailable` and the rest of the scan is unaffected. See
+`examples/sample-plugin.sh` for a working sample. Security note: plugins are
+arbitrary binaries found on PATH; only install plugins you trust.
+
+### Path G: Generic cleaner (built-in, for cache targets already maintained here)
 
 If the new target either delegates to an external CLI tool or just deletes
 known directories, pick `CliCleaner` or `PathCleaner` in

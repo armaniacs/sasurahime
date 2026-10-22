@@ -330,6 +330,9 @@ define_cleaners! {
         #[arg(long)]
         dry_run: bool,
     },
+    /// Catch-all for external plugin targets (sasurahime-* on PATH)
+    #[command(external_subcommand)]
+    External(Vec<String>),
 }
 
 #[derive(Parser)]
@@ -449,6 +452,10 @@ impl CleanTarget {
             CleanTarget::VmSwap { .. } => "vm-swap",
             CleanTarget::All { .. } => "all",
             CleanTarget::ProjectArtifacts { .. } => "project-artifacts",
+            CleanTarget::External(args) => {
+                let name = args.first().cloned().unwrap_or_default();
+                Box::leak(name.into_boxed_str())
+            }
             _ => self.dispatch_command_name(),
         }
     }
@@ -467,6 +474,7 @@ impl CleanTarget {
             CleanTarget::VmSwap { dry_run } => *dry_run,
             CleanTarget::All { dry_run, .. } => *dry_run,
             CleanTarget::ProjectArtifacts { dry_run } => *dry_run,
+            CleanTarget::External(args) => args.iter().any(|a| a == "--dry-run"),
             _ => self.dispatch_dry_run(),
         }
     }
@@ -597,6 +605,11 @@ fn all_cleaners(home: &std::path::Path, config: &config::Config) -> Vec<Box<dyn 
     let mut cleaners: Vec<Box<dyn cleaner::Cleaner>> = standard_cleaners(home, config)
         .into_iter()
         .chain(special_cleaners(home, config))
+        .chain(
+            cleaners::plugin::PluginCleaner::discover()
+                .into_iter()
+                .map(|p| Box::new(p) as Box<dyn cleaner::Cleaner>),
+        )
         .map(|c| -> Box<dyn cleaner::Cleaner> {
             if c.auto_clean_allowed() {
                 c
@@ -975,6 +988,11 @@ fn main() -> anyhow::Result<()> {
             for (name, desc) in targets {
                 println!("{:<12} {}", name, desc);
             }
+            // Plugin-derived targets are marked so they can be told apart
+            // from built-ins.
+            for p in cleaners::plugin::PluginCleaner::discover() {
+                println!("{:<12} (plugin)", p.name());
+            }
         }
         None => {
             let cleaners = all_cleaners(&home, &config);
@@ -1019,6 +1037,7 @@ fn main() -> anyhow::Result<()> {
                     | CleanTarget::VmSwap { .. }
                     | CleanTarget::All { .. }
                     | CleanTarget::ProjectArtifacts { .. }
+                    | CleanTarget::External(_)
             ) {
                 // --- Special targets (custom dispatch logic) ---
                 match target {
@@ -1293,6 +1312,27 @@ fn main() -> anyhow::Result<()> {
                         run_and_exit(
                             "project-artifacts",
                             move |dry, rep| cleaner.clean(dry, rep),
+                            dry_run,
+                            reporter.as_ref(),
+                        )?;
+                    }
+                    CleanTarget::External(args) => {
+                        let Some(name) = args.first().cloned() else {
+                            eprintln!("Error: missing target name.");
+                            std::process::exit(1);
+                        };
+                        let Some(plugin) = cleaners::plugin::PluginCleaner::discover()
+                            .into_iter()
+                            .find(|p| p.name() == name)
+                        else {
+                            eprintln!("Error: no plugin named '{name}' on PATH.");
+                            std::process::exit(1);
+                        };
+                        let label: &'static str = Box::leak(name.clone().into_boxed_str());
+                        let dry_run = args.iter().any(|a| a == "--dry-run");
+                        run_and_exit(
+                            label,
+                            move |dry, rep| plugin.clean(dry, rep),
                             dry_run,
                             reporter.as_ref(),
                         )?;
