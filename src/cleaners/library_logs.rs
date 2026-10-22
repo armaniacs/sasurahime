@@ -518,7 +518,10 @@ mod tests {
 
         let runner = crate::test_helpers::MockRunner::new().with_success("chflags");
         let cleaner = LibraryLogsCleaner::new(tmp.path(), Box::new(runner));
-        let opts = crate::cleaner::CleanOptions { all: true };
+        let opts = crate::cleaner::CleanOptions {
+            all: true,
+            ..Default::default()
+        };
         let result = cleaner
             .clean_with_opts(false, &crate::progress::DeepSuppressReporter, &opts)
             .unwrap();

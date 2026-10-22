@@ -1,5 +1,6 @@
 use crate::cleaner::{
-    CleanCancelled, CleanResult, Cleaner, PerCleanerFilters, Risk, ScanResult, ScanStatus,
+    CleanCancelled, CleanOptions, CleanResult, Cleaner, PerCleanerFilters, Risk, ScanResult,
+    ScanStatus,
 };
 use crate::command::CommandRunner;
 #[cfg(test)]
@@ -715,52 +716,75 @@ impl Cleaner for PathCleaner {
     }
 
     fn clean(&self, dry_run: bool, reporter: &dyn ProgressReporter) -> Result<CleanResult> {
-        let cleanable: Vec<&PathBuf> = self
-            .dirs
-            .iter()
-            .filter(|d| d.exists())
-            .filter(|d| {
-                fs::metadata(d)
-                    .map(|m| meets_age_filter(&m, self.older_than_days))
-                    .unwrap_or(false)
-            })
-            .filter(|d| meets_size_filter(dir_size(d), self.larger_than_mb))
-            .collect();
-        if !dry_run && !cleanable.is_empty() {
-            reporter.progress_init(self.name(), cleanable.len());
-        }
+        let any_filter = self.older_than_days.is_some() || self.larger_than_mb.is_some();
+        self.clean_filtered(
+            dry_run,
+            reporter,
+            self.older_than_days,
+            self.larger_than_mb,
+            any_filter,
+        )
+    }
+
+    /// Applies the combined per-cleaner + global filters. Global filters are
+    /// the user's explicit intent and combine with the cleaner's own config
+    /// (the stricter value wins). Out-of-condition entries are reported with
+    /// a skip reason when global filters are active.
+    fn clean_with_opts(
+        &self,
+        dry_run: bool,
+        reporter: &dyn ProgressReporter,
+        opts: &CleanOptions,
+    ) -> Result<CleanResult> {
+        let older = match (self.older_than_days, opts.older_than_days) {
+            (Some(a), Some(b)) => Some(a.max(b)),
+            (a, b) => a.or(b),
+        };
+        let larger = match (self.larger_than_mb, opts.larger_than_mb) {
+            (Some(a), Some(b)) => Some(a.max(b)),
+            (a, b) => a.or(b),
+        };
+        let any_filter = older.is_some() || larger.is_some();
+        self.clean_filtered(dry_run, reporter, older, larger, any_filter)
+    }
+}
+
+impl PathCleaner {
+    fn clean_filtered(
+        &self,
+        dry_run: bool,
+        reporter: &dyn ProgressReporter,
+        older_than_days: Option<u32>,
+        larger_than_mb: Option<u64>,
+        explain_skips: bool,
+    ) -> Result<CleanResult> {
         let mut freed: u64 = 0;
-        for (i, dir) in cleanable.iter().enumerate() {
-            let size = dir_size(dir);
-            if dry_run {
-                println!("[dry-run] would remove: {}", dir.display());
-            } else {
-                // Verify path safety at clean-time (TOCTOU mitigation for
-                // env-var-derived paths: terraform, flutter, act).
-                if !is_safe_delete_target(dir) {
-                    eprintln!(
-                        "[{}] warning: unsafe path, skipping: {}",
-                        self.display_name,
-                        dir.display()
-                    );
-                    continue;
-                }
-                reporter.progress_tick(dir, i + 1, size);
-                let path_str = dir.to_string_lossy();
-                if let Err(e) = self.runner.run("chflags", &["-R", "nouchg", &path_str]) {
-                    log::warn!(
-                        "[{}] chflags failed for {}: {e}",
-                        self.display_name,
-                        dir.display()
-                    );
-                }
-                crate::trash::delete_path(dir)?;
-                freed += size;
-                println!("Removed: {}", dir.display());
+        for d in &self.dirs {
+            if !d.exists() {
+                continue;
             }
-        }
-        if !dry_run && !cleanable.is_empty() {
-            reporter.progress_finish();
+            let age_ok = fs::metadata(d)
+                .map(|m| meets_age_filter(&m, older_than_days))
+                .unwrap_or(false);
+            let size = dir_size(d);
+            let size_ok = meets_size_filter(size, larger_than_mb);
+            if !age_ok {
+                if explain_skips {
+                    if let Some(days) = older_than_days {
+                        println!("Skipped {}: younger than {days} day(s)", d.display());
+                    }
+                }
+                continue;
+            }
+            if !size_ok {
+                if explain_skips {
+                    if let Some(mb) = larger_than_mb {
+                        println!("Skipped {}: smaller than {mb} MB", d.display());
+                    }
+                }
+                continue;
+            }
+            freed += self.clean_one(d, size, dry_run, reporter)?;
         }
         Ok(CleanResult {
             name: self.name(),
@@ -769,6 +793,41 @@ impl Cleaner for PathCleaner {
             skipped: vec![],
             deleted_paths: vec![],
         })
+    }
+
+    fn clean_one(
+        &self,
+        dir: &Path,
+        size: u64,
+        dry_run: bool,
+        reporter: &dyn ProgressReporter,
+    ) -> Result<u64> {
+        if dry_run {
+            println!("[dry-run] would remove: {}", dir.display());
+            return Ok(0);
+        }
+        // Verify path safety at clean-time (TOCTOU mitigation for
+        // env-var-derived paths: terraform, flutter, act).
+        if !is_safe_delete_target(dir) {
+            eprintln!(
+                "[{}] warning: unsafe path, skipping: {}",
+                self.display_name,
+                dir.display()
+            );
+            return Ok(0);
+        }
+        reporter.progress_tick(dir, 1, size);
+        let path_str = dir.to_string_lossy();
+        if let Err(e) = self.runner.run("chflags", &["-R", "nouchg", &path_str]) {
+            log::warn!(
+                "[{}] chflags failed for {}: {e}",
+                self.display_name,
+                dir.display()
+            );
+        }
+        crate::trash::delete_path(dir)?;
+        println!("Removed: {}", dir.display());
+        Ok(size)
     }
 }
 

@@ -91,6 +91,14 @@ impl CleanResult {
 #[derive(Debug, Clone, Default)]
 pub struct CleanOptions {
     pub all: bool,
+    /// Include Moderate/Risky/Manual targets in a `clean --all` run. Without
+    /// this, only `Safe` (auto-clean-allowed) targets are cleaned.
+    pub include_manual: bool,
+    /// Global age filter (days): only entries older than this are cleaned.
+    /// Combines with a cleaner's own filter (the stricter wins).
+    pub older_than_days: Option<u32>,
+    /// Global size filter (MB): only dirs of at least this size are cleaned.
+    pub larger_than_mb: Option<u64>,
 }
 
 #[derive(Debug)]

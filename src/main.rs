@@ -307,6 +307,15 @@ define_cleaners! {
         #[arg(long)]
         dry_run: bool,
     },
+    /// Explicit full clean: Safe targets by default, everything with
+    /// --include-manual. Honors global --older-than / --larger-than filters.
+    All {
+        #[arg(long)]
+        dry_run: bool,
+        /// Also clean Moderate / Risky / Manual targets
+        #[arg(long)]
+        include_manual: bool,
+    },
 }
 
 #[derive(Parser)]
@@ -352,6 +361,14 @@ struct Cli {
     /// Disable the persistent scan cache (always full walks)
     #[arg(long, global = true)]
     no_cache: bool,
+
+    /// Global age filter in days (clean --all): only entries older than this
+    #[arg(long, global = true)]
+    older_than: Option<u32>,
+
+    /// Global size filter in MB (clean --all): only dirs of at least this size
+    #[arg(long, global = true)]
+    larger_than: Option<u64>,
 
     #[command(subcommand)]
     command: Option<Commands>,
@@ -409,6 +426,7 @@ impl CleanTarget {
             CleanTarget::IosBackup { .. } => "ios-backup",
             CleanTarget::ApfsSnapshot { .. } => "apfs-snapshot",
             CleanTarget::VmSwap { .. } => "vm-swap",
+            CleanTarget::All { .. } => "all",
             _ => self.dispatch_command_name(),
         }
     }
@@ -425,6 +443,7 @@ impl CleanTarget {
             CleanTarget::IosBackup { dry_run } => *dry_run,
             CleanTarget::ApfsSnapshot { dry_run, .. } => *dry_run,
             CleanTarget::VmSwap { dry_run } => *dry_run,
+            CleanTarget::All { dry_run, .. } => *dry_run,
             _ => self.dispatch_dry_run(),
         }
     }
@@ -457,6 +476,10 @@ fn extra_targets() -> &'static [(&'static str, &'static str)] {
         (
             "vm-swap",
             "/private/var/vm swap files (report only; re-initialized on reboot)",
+        ),
+        (
+            "all",
+            "Explicit full clean (Safe targets; --include-manual for the rest)",
         ),
     ]
 }
@@ -879,6 +902,7 @@ fn main() -> anyhow::Result<()> {
                     | CleanTarget::IosBackup { .. }
                     | CleanTarget::ApfsSnapshot { .. }
                     | CleanTarget::VmSwap { .. }
+                    | CleanTarget::All { .. }
             ) {
                 // --- Special targets (custom dispatch logic) ---
                 match target {
@@ -1008,7 +1032,10 @@ fn main() -> anyhow::Result<()> {
                             &home,
                             Box::new(SystemCommandRunner),
                         );
-                        let opts = crate::cleaner::CleanOptions { all };
+                        let opts = crate::cleaner::CleanOptions {
+                            all,
+                            ..Default::default()
+                        };
                         run_and_exit(
                             "library-logs",
                             move |dry, rep| cleaner.clean_with_opts(dry, rep, &opts),
@@ -1069,6 +1096,64 @@ fn main() -> anyhow::Result<()> {
                             dry_run,
                             reporter.as_ref(),
                         )?;
+                    }
+                    CleanTarget::All {
+                        dry_run,
+                        include_manual,
+                    } => {
+                        // Explicit full clean: the user picked every target on
+                        // purpose. Safe targets run without --include-manual;
+                        // Moderate/Risky/Manual need it.
+                        let opts = cleaner::CleanOptions {
+                            all: true,
+                            include_manual,
+                            older_than_days: cli.older_than,
+                            larger_than_mb: cli.larger_than,
+                        };
+                        let cleaners_list = all_cleaners(&home, &config);
+                        let mut total: u64 = 0;
+                        let mut skipped_targets: usize = 0;
+                        for c in &cleaners_list {
+                            if !opts.include_manual && !c.auto_clean_allowed() {
+                                skipped_targets += 1;
+                                println!(
+                                    "Skipped {} ({}): needs --include-manual",
+                                    c.name(),
+                                    c.risk().label()
+                                );
+                                continue;
+                            }
+                            match crate::progress::with_spinner_result(
+                                &format!("Cleaning {}...", c.name()),
+                                || c.clean_with_opts(dry_run, reporter.as_ref(), &opts),
+                            ) {
+                                Ok(r) => {
+                                    total += r.bytes_freed;
+                                    if let Some(note) = post_clean_note(
+                                        r.bytes_freed,
+                                        r.uses_trash,
+                                        crate::trash::is_trash_mode(),
+                                    ) {
+                                        println!("{note}");
+                                    }
+                                    if !dry_run && r.bytes_freed > 0 {
+                                        history::write_history_entry(
+                                            c.name(),
+                                            r.bytes_freed,
+                                            r.skipped.len(),
+                                            r.uses_trash,
+                                        );
+                                    }
+                                }
+                                Err(e) => eprintln!("Error cleaning {}: {e}", c.name()),
+                            }
+                        }
+                        if skipped_targets > 0 {
+                            eprintln!(
+                                "Skipped {skipped_targets} target(s) that need --include-manual."
+                            );
+                        }
+                        println!("Total freed: {}", format::format_bytes(total));
                     }
                     _ => unreachable!(),
                 }
@@ -1196,7 +1281,7 @@ mod tests {
         );
     }
 
-    const NOT_SCANNED: &[&str] = &["caches", "trash"];
+    const NOT_SCANNED: &[&str] = &["caches", "trash", "all"];
 
     // Risk classification table: every registered cleaner must match. Listing
     // every Moderate entry explicitly catches accidental defaults (未分類の検出).

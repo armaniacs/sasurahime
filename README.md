@@ -78,6 +78,16 @@ sasurahime --version
   `--verbose`, and `history.json`/`stats` record the trash vs delete method.
 - `clean trash` is report-only: it shows the Trash size and how to empty it in
   Finder; sasurahime never empties the Trash itself.
+- `clean all` is an explicit full clean: `Safe` targets run without extra
+  flags; `Moderate` / `Risky` / `Manual` targets need `--include-manual` and
+  are listed as skipped with their classification until then. Global
+  `--older-than <days>` / `--larger-than <MB>` filters apply to dir-based
+  cleaners during `clean all` (the stricter of the global and per-cleaner
+  value wins), and out-of-condition entries are shown with a skip reason.
+  Command-delegating cleaners (brew, docker, ...) use their own tool
+  semantics; global filters cannot restrict them, so `[cleaner.*]` settings
+  for those names keep the "no effect" warning. `--yes` is unaffected: it
+  still runs only `Safe` targets in the TUI-driven path.
 - `scan` keeps a persistent cache (`~/.local/share/sasurahime/scan-cache.json`)
   keyed by directory mtime, so unchanged directories skip the expensive walk.
   Invalidation is conservative: any mtime mismatch, hourly expiry, filesystem
@@ -236,6 +246,15 @@ sasurahime --version
   を残し、`history.json` と `stats` に trash と delete の区別が記録されます。
 - `clean trash` は表示のみです: ゴミ箱のサイズと Finder での空にする手順を示します。
   sasurahime 自身がゴミ箱を空にすることはありません。
+- `clean all` は明示的な全消去です: `Safe` ターゲットは追加フラグなしで実行され、
+  `Moderate` / `Risky` / `Manual` は `--include-manual` が必要で、それまでは
+  分類付きでスキップとして表示されます。グローバルな `--older-than <日数>` /
+  `--larger-than <MB>` フィルタは `clean all` 実行時にディレクトリベースの
+  クリーナーに適用され（グローバル値とクリーナー固有値の厳しい方が優先）、
+  条件外のエントリはスキップ理由と共に表示されます。外部コマンド委譲系の
+  クリーナー（brew、docker など）はツール自身の意味論に従うため、グローバル
+  フィルタでは絞り込めません。そのため、それらの名前への `[cleaner.*]` 設定は
+  引き続き「効果なし」警告が出ます。`--yes` は影響を受けません。
 - `scan` は永続キャッシュ（`~/.local/share/sasurahime/scan-cache.json`）を
   ディレクトリの mtime をキーに保持し、変更のないディレクトリは高コストな
   walk をスキップします。無効化は保守的です: mtime の不一致・1時間の期限切れ・
