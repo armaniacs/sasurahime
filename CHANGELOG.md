@@ -24,6 +24,38 @@ All notable changes to sasurahime will be documented in this file. The format is
 - `Cleaner::risk() -> Risk` with the classification table covering all
   registered targets; `auto_clean_allowed()` is derived from it
   (`risk() == Safe`).
+- `doctor` subcommand that diagnoses Full Disk Access problems before
+  scanning, so missing FDA no longer looks like silent scan gaps.
+- `scan --json` machine-readable output with resolved sizes, and
+  `ScanStatus::Unavailable` for entries that cannot be measured (permission
+  errors, command failures): `0 B` entries are excluded from the total
+  instead of reported as cleanable.
+- Persistent scan cache (`scan-cache.json`, 1-hour expiry) that makes a
+  second scan of unchanged directories fast; `--no-cache` disables it.
+- Global filters (`--older-than`, `--larger-than`) that apply to every
+  cleaner, plus `clean all` with risk-based skipping for unattended runs.
+- `clean project-artifacts` purges stale `node_modules` / `target` /
+  `.build` directories that sit next to their manifest; protected by file
+  mtimes only, so uncommitted changes are NOT checked.
+- `clean apfs-snapshot --thin` runs `tmutil thinlocalsnapshots` with a
+  decimal size and urgency (1..=4; 4 asks for an extra confirmation).
+- External plugin targets: `sasurahime-*` executables on PATH answer a
+  minimal scan/clean protocol, appear in `scan` / `targets` with a
+  `(plugin)` marker, and are isolated by a timeout (10 s default) so one
+  broken plugin cannot take a scan down.
+- `auto` command: unattended policy apply driven by a `[policy]` config
+  section; refuses to run without one, and irreversible targets never run
+  unattended. A launchd plist example is documented in the README.
+- Two-axis freed display: `clean` now reports logical and physical bytes
+  separately, with restore guidance when files went to the Trash.
+- `/private/var/vm` swap files are shown in `scan` with uptime guidance.
+- Deletion history records the method (`trash` / `delete`) and appends are
+  fsynced before rename, so an interruption cannot leave a torn file.
+
+### Changed
+
+- `delete_path` takes the trash mode as an argument (`DeleteCtx`) instead of
+  reading a global; the global-based call sites keep working unchanged.
 
 ---
 
