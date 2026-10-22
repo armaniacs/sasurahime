@@ -63,6 +63,7 @@ pub(crate) fn scan_json_document(
     results: &[ScanResult],
     total: u64,
     risks: &std::collections::HashMap<&str, Risk>,
+    denied: &[&'static str],
 ) -> String {
     let targets: Vec<ScanJsonEntry> = results
         .iter()
@@ -80,6 +81,7 @@ pub(crate) fn scan_json_document(
     let doc = serde_json::json!({
         "targets": targets,
         "total_reclaimable_bytes": total,
+        "unreadable_protected_paths": denied,
     });
     serde_json::to_string_pretty(&doc).unwrap_or_else(|_| "{}".to_string())
 }
@@ -103,12 +105,14 @@ fn scan_results(cleaners: &[Box<dyn Cleaner>]) -> Vec<ScanResult> {
     results
 }
 
-pub fn run_scan(cleaners: &[Box<dyn Cleaner>]) {
+pub fn run_scan(cleaners: &[Box<dyn Cleaner>], home: &std::path::Path) {
     let results = scan_results(cleaners);
     let available: Vec<&Box<dyn Cleaner>> = cleaners.iter().filter(|c| c.is_available()).collect();
     // Same classification as `--yes` and the TUI, shown per row.
     let risks: std::collections::HashMap<&str, Risk> =
         available.iter().map(|c| (c.name(), c.risk())).collect();
+    // Same probe as `doctor`: protected paths blocked by missing FDA.
+    let denied = crate::doctor::denied_paths(home);
 
     let mut table = Table::new();
     if crate::history::USE_UNICODE.load(std::sync::atomic::Ordering::Relaxed) {
@@ -146,6 +150,17 @@ pub fn run_scan(cleaners: &[Box<dyn Cleaner>]) {
         );
     }
 
+    if !denied.is_empty() {
+        println!(
+            "\n{} path(s) unreadable due to missing Full Disk Access; excluded from the total.",
+            denied.len()
+        );
+        for rel in &denied {
+            println!("  - ~/{rel}");
+        }
+        println!("Run `sasurahime doctor` for details.");
+    }
+
     let notes: Vec<String> = available.iter().filter_map(|c| c.advisory()).collect();
     if !notes.is_empty() {
         println!("\nNotes:");
@@ -157,11 +172,13 @@ pub fn run_scan(cleaners: &[Box<dyn Cleaner>]) {
 
 /// Machine-readable scan: prints one JSON document, no table, no hints and no
 /// prompt. Used by `scan --json` for scripts and CI.
-pub fn run_scan_json(cleaners: &[Box<dyn Cleaner>]) {
+pub fn run_scan_json(cleaners: &[Box<dyn Cleaner>], home: &std::path::Path) {
     let results = scan_results(cleaners);
     let available: Vec<&Box<dyn Cleaner>> = cleaners.iter().filter(|c| c.is_available()).collect();
     let risks: std::collections::HashMap<&str, Risk> =
         available.iter().map(|c| (c.name(), c.risk())).collect();
+    // Same probe as `doctor`: protected paths blocked by missing FDA.
+    let denied: Vec<&'static str> = crate::doctor::denied_paths(home);
     let total: u64 = results
         .iter()
         .filter_map(|r| match r.status {
@@ -169,7 +186,7 @@ pub fn run_scan_json(cleaners: &[Box<dyn Cleaner>]) {
             _ => None,
         })
         .sum();
-    println!("{}", scan_json_document(&results, total, &risks));
+    println!("{}", scan_json_document(&results, total, &risks, &denied));
 }
 
 #[cfg(test)]
@@ -246,7 +263,7 @@ mod tests {
         let mut risks = std::collections::HashMap::new();
         risks.insert("uv", Risk::Safe);
         risks.insert("docker", Risk::Moderate);
-        let doc = scan_json_document(&results, 1234, &risks);
+        let doc = scan_json_document(&results, 1234, &risks, &[]);
         let parsed: serde_json::Value = serde_json::from_str(&doc).expect("valid JSON");
         let entries = parsed["targets"].as_array().unwrap();
         assert_eq!(entries.len(), 4);
@@ -281,7 +298,7 @@ mod tests {
         let mut risks = std::collections::HashMap::new();
         risks.insert("uv", Risk::Safe);
         risks.insert("docker", Risk::Moderate);
-        let doc = scan_json_document(&results, total, &risks);
+        let doc = scan_json_document(&results, total, &risks, &[]);
         let parsed: serde_json::Value = serde_json::from_str(&doc).expect("valid JSON");
         assert_eq!(parsed["total_reclaimable_bytes"], 100);
         assert_eq!(parsed["targets"].as_array().unwrap().len(), 2);

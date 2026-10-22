@@ -122,6 +122,10 @@ The tool reads file and directory metadata (names, sizes, modification times) to
 
 Values read from these files are not written to logs or to the deletion history. sasurahime also reads its own configuration file (`~/.config/sasurahime/config.toml`, or the file given with `--config`) and its deletion history (`~/.local/share/sasurahime/history.json`). It does **not** read the contents of any other file.
 
+### Full Disk Access (FDA)
+
+Some protected paths (`~/Library/Mail`, `~/Library/Application Support/MobileSync/Backup/`, `~/.Trash`) need Full Disk Access to be listed. sasurahime `doctor` probes them with `read_dir` only (never their contents) and shows which ones could not be read, with granting instructions. `scan` notes unreadable protected paths so the reported total is not silently too small. Paths that do not exist are never reported. sasurahime never changes any configuration on its own.
+
 ### Deletion history
 
 Every successful clean operation appends a record to
@@ -261,6 +265,10 @@ sasurahime は以下のディレクトリを読み取り、クリーニング可
 - インストール済みアプリの `Info.plist`（`/Applications`、`~/Applications`、`/System/Applications` の直下と 1 階層下にある `.app`）。取り出すのは bundle ID とアプリ名だけで、アンインストール済みアプリの残骸とインストール済みアプリのデータを見分けるため
 
 これらのファイルから読み取った値は、ログにも削除履歴にも書き出しません。このほか、sasurahime 自身の設定ファイル（`~/.config/sasurahime/config.toml`、または `--config` で指定したファイル）と削除履歴（`~/.local/share/sasurahime/history.json`）を読み取ります。それ以外のファイルの内容は読み取りません。
+
+### フルディスクアクセス（FDA）
+
+一部の保護パス（`~/Library/Mail`、`~/Library/Application Support/MobileSync/Backup/`、`~/.Trash`）を一覧するにはフルディスクアクセスが必要です。`sasurahime doctor` は `read_dir` だけで調べ（中身は読まない）、読めなかったパスと付与手順を表示します。`scan` も読めなかった保護パスを注記するため、合計が黙って小さく見えることはありません。存在しないパスは問題として扱いません。sasurahime が設定を自動で変更することはありません。
 
 ### 削除履歴
 
