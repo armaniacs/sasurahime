@@ -11,6 +11,7 @@ mod hint;
 mod history;
 mod interactive;
 mod progress;
+mod scan_cache;
 mod scanner;
 mod trash;
 
@@ -347,6 +348,10 @@ struct Cli {
     /// Disable Unicode box-drawing characters in stats output
     #[arg(long, global = true)]
     no_unicode: bool,
+
+    /// Disable the persistent scan cache (always full walks)
+    #[arg(long, global = true)]
+    no_cache: bool,
 
     #[command(subcommand)]
     command: Option<Commands>,
@@ -801,6 +806,13 @@ fn main() -> anyhow::Result<()> {
         crate::history::USE_UNICODE.store(false, std::sync::atomic::Ordering::Relaxed);
     }
 
+    // Persistent scan cache: enabled unless --no-cache. Loaded once per
+    // process and saved back at the end; deletion paths never consult it.
+    let scan_cache_path = history::default_history_dir(&home).join(scan_cache::CACHE_FILE_NAME);
+    if !cli.no_cache {
+        scan_cache::init(&scan_cache_path);
+    }
+
     match cli.command {
         Some(Commands::Doctor) => {
             doctor::run(&home);
@@ -1084,6 +1096,10 @@ fn main() -> anyhow::Result<()> {
                 }
             }
         }
+    }
+
+    if !cli.no_cache {
+        scan_cache::flush(&scan_cache_path);
     }
 
     Ok(())

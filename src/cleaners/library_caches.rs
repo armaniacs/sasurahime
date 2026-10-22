@@ -1,6 +1,6 @@
 use crate::cleaner::{CleanResult, Cleaner, ScanResult, ScanStatus, SkippedEntry};
 use crate::command::CommandRunner;
-use crate::format::{dir_size, format_bytes};
+use crate::format::format_bytes;
 use crate::hint::{apps::KNOWN_ENTRIES, BaseDir, HintEntry};
 use crate::progress::ProgressReporter;
 use anyhow::Result;
@@ -115,7 +115,7 @@ pub fn scan_caches(
         if known.is_none() && !include_unknown {
             continue;
         }
-        let size = dir_size(&path);
+        let size = crate::scan_cache::cached_dir_size(&path);
         if size == 0 {
             continue;
         }

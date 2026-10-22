@@ -451,7 +451,7 @@ impl Cleaner for CliCleaner {
                 {
                     return make_result(ScanStatus::NotFound);
                 }
-                let bytes = dir_size(detect_dir);
+                let bytes = crate::scan_cache::cached_dir_size(detect_dir);
                 make_result(if bytes > 0 {
                     ScanStatus::Pruneable(bytes)
                 } else {
@@ -696,7 +696,7 @@ impl Cleaner for PathCleaner {
                 if !meets_age_filter(&meta, self.older_than_days) {
                     return None;
                 }
-                let size = dir_size(d);
+                let size = crate::scan_cache::cached_dir_size(d);
                 if !meets_size_filter(size, self.larger_than_mb) {
                     return None;
                 }

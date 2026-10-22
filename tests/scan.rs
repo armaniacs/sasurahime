@@ -491,3 +491,107 @@ fn config_exclude_removes_the_risk_from_scan() {
         "excluded target must not appear:\n{stdout}"
     );
 }
+
+#[test]
+fn second_scan_reuses_the_persistent_cache() {
+    let tmp = TempDir::new().unwrap();
+    let act_cache = tmp.path().join(".cache/act");
+    fs::create_dir_all(&act_cache).unwrap();
+    fs::write(act_cache.join("dummy"), b"x".repeat(100)).unwrap();
+
+    // First scan: creates the cache file.
+    let first = sasurahime(tmp.path()).arg("scan").output().unwrap();
+    assert!(first.status.success());
+    let cache_path = tmp.path().join(".local/share/sasurahime/scan-cache.json");
+    assert!(
+        cache_path.exists(),
+        "first scan must save the persistent cache"
+    );
+    let first_stdout = String::from_utf8_lossy(&first.stdout);
+    let first_total = first_stdout
+        .lines()
+        .find(|l| l.contains("Total reclaimable"))
+        .expect("total line")
+        .to_string();
+
+    // Second scan with no file changes: served from the cache.
+    let second = sasurahime(tmp.path()).arg("scan").output().unwrap();
+    assert!(second.status.success());
+    let second_stdout = String::from_utf8_lossy(&second.stdout);
+    assert!(
+        second_stdout.contains(&first_total),
+        "totals must match between scans:\nfirst: {first_total}\nsecond:\n{second_stdout}"
+    );
+    let second_cache = fs::read_to_string(&cache_path).unwrap();
+    assert!(
+        second_cache.contains(".cache/act"),
+        "cache must record the target dir:\n{second_cache}"
+    );
+}
+
+#[test]
+fn changed_target_is_remeasured_by_the_cache() {
+    let tmp = TempDir::new().unwrap();
+    let act_cache = tmp.path().join(".cache/act");
+    fs::create_dir_all(&act_cache).unwrap();
+    fs::write(act_cache.join("dummy"), b"x".repeat(100)).unwrap();
+    let _ = sasurahime(tmp.path()).arg("scan").output().unwrap();
+
+    // Change the target: a new direct child updates the directory mtime, so
+    // the cache must re-measure it. 100 B + 4 KiB of files occupy 8 KiB of
+    // physical blocks on APFS (dir_size reports blocks * 512).
+    fs::write(act_cache.join("extra"), b"x".repeat(4096)).unwrap();
+    let output = sasurahime(tmp.path()).arg("scan").output().unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let act_row = stdout
+        .lines()
+        .find(|l| l.contains("act"))
+        .expect("act row in the scan table");
+    assert!(
+        act_row.contains("8.0 KB"),
+        "the changed target must be re-measured (8.0 KB expected), got: {act_row}"
+    );
+}
+
+#[test]
+fn corrupt_cache_falls_back_to_a_full_scan() {
+    let tmp = TempDir::new().unwrap();
+    let act_cache = tmp.path().join(".cache/act");
+    fs::create_dir_all(&act_cache).unwrap();
+    fs::write(act_cache.join("dummy"), b"x".repeat(100)).unwrap();
+
+    let _ = sasurahime(tmp.path()).arg("scan").output().unwrap();
+    let cache_path = tmp.path().join(".local/share/sasurahime/scan-cache.json");
+    fs::write(&cache_path, "not valid json :::").unwrap();
+
+    let output = sasurahime(tmp.path()).arg("scan").output().unwrap();
+    assert!(
+        output.status.success(),
+        "a corrupt cache must not fail the scan"
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("act") && stdout.contains("Total reclaimable"),
+        "full scan results must still be correct:\n{stdout}"
+    );
+}
+
+#[test]
+fn no_cache_flag_skips_the_persistent_cache() {
+    let tmp = TempDir::new().unwrap();
+    let act_cache = tmp.path().join(".cache/act");
+    fs::create_dir_all(&act_cache).unwrap();
+    fs::write(act_cache.join("dummy"), b"x".repeat(100)).unwrap();
+
+    let output = sasurahime(tmp.path())
+        .args(["--no-cache", "scan"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let cache_path = tmp.path().join(".local/share/sasurahime/scan-cache.json");
+    assert!(
+        !cache_path.exists(),
+        "--no-cache must not write the cache file"
+    );
+}

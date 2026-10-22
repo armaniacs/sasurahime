@@ -78,6 +78,11 @@ sasurahime --version
   `--verbose`, and `history.json`/`stats` record the trash vs delete method.
 - `clean trash` is report-only: it shows the Trash size and how to empty it in
   Finder; sasurahime never empties the Trash itself.
+- `scan` keeps a persistent cache (`~/.local/share/sasurahime/scan-cache.json`)
+  keyed by directory mtime, so unchanged directories skip the expensive walk.
+  Invalidation is conservative: any mtime mismatch, hourly expiry, filesystem
+  error or corrupt cache file falls back to a full walk. Deletion paths never
+  consult the cache. Use `--no-cache` to always walk.
 - mise runtime removal checks both global and per-project `.mise.toml` before deleting.
 - macOS immutable flags (`uchg`) are handled automatically.
 - `--yes` cleans only `Safe` targets. Targets classified `Moderate` / `Risky` /
@@ -231,6 +236,11 @@ sasurahime --version
   を残し、`history.json` と `stats` に trash と delete の区別が記録されます。
 - `clean trash` は表示のみです: ゴミ箱のサイズと Finder での空にする手順を示します。
   sasurahime 自身がゴミ箱を空にすることはありません。
+- `scan` は永続キャッシュ（`~/.local/share/sasurahime/scan-cache.json`）を
+  ディレクトリの mtime をキーに保持し、変更のないディレクトリは高コストな
+  walk をスキップします。無効化は保守的です: mtime の不一致・1時間の期限切れ・
+  ファイルシステムエラー・キャッシュ破損のいずれかでフルスキャンにフォールバックします。
+  削除経路はキャッシュを参照しません。常にwalkしたい場合は `--no-cache` を使用してください。
 - `--yes` が削除するのは `Safe` 分類のターゲットのみです。`Moderate` /
   `Risky` / `Manual` のターゲットは分類付きでスキップとして表示され、
   明示的な選択（ピッカーまたは `clean <target>`）が必要です。
