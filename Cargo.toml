@@ -6,6 +6,21 @@ description = "macOS developer cache cleaner — scan and wipe stale caches from
 repository = "https://github.com/armaniacs/sasurahime"
 license = "Apache-2.0"
 authors = ["ARAKI Yasuhiro <iron@araki.net>"]
+readme = "README.md"
+keywords = ["macos", "cache", "cleanup", "disk", "cli"]
+categories = ["command-line-utilities", "development-tools"]
+# Keep the crate lean: plans, backlog and site docs stay out of the package.
+exclude = [
+    ".github",
+    ".hex-skills",
+    ".plan",
+    "blog",
+    "docs",
+    "pbi",
+    "plans",
+    "Makefile",
+    "CLAUDE.md",
+]
 
 [[bin]]
 name = "sasurahime"
