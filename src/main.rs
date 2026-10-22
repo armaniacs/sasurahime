@@ -1426,4 +1426,23 @@ mod tests {
         assert!(lines[0].starts_with("[docker]"), "{lines:?}");
         assert!(lines[1].starts_with("[logs]"), "{lines:?}");
     }
+
+    #[test]
+    fn managed_patterns_clean_targets_are_registered() {
+        // Correspondence table test: every path the explorer marks as managed
+        // must map to a target that actually exists in the registry.
+        let registered: std::collections::HashSet<&str> = SUPPORTED_TARGETS
+            .iter()
+            .chain(extra_targets())
+            .map(|(n, _)| *n)
+            .collect();
+        for pat in explorer::MANAGED_PATTERNS {
+            assert!(
+                registered.contains(pat.clean_target),
+                "explorer pattern {} maps to unregistered clean target {:?}",
+                pat.path_pattern,
+                pat.clean_target
+            );
+        }
+    }
 }

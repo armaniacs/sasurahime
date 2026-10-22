@@ -1,4 +1,5 @@
 use crate::command::CommandRunner;
+use crate::format::dir_size;
 use std::path::{Path, PathBuf};
 
 use super::{apps, BaseDir, ProcessHint};
@@ -8,26 +9,6 @@ fn base_path(home: &Path, base: BaseDir) -> PathBuf {
         BaseDir::Caches => home.join("Library/Caches"),
         BaseDir::AppSupport => home.join("Library/Application Support"),
         BaseDir::Logs => home.join("Library/Logs"),
-    }
-}
-
-fn dir_size_bytes(path: &Path, runner: &dyn CommandRunner) -> u64 {
-    if !path.exists() {
-        return 0;
-    }
-    let path_str = path.to_string_lossy();
-    match runner.run("du", &["-sk", &path_str]) {
-        Ok(out) => {
-            let stdout = String::from_utf8_lossy(&out.stdout);
-            stdout
-                .lines()
-                .next()
-                .and_then(|l| l.split_whitespace().next())
-                .and_then(|s| s.parse::<u64>().ok())
-                .map(|kb| kb * 1024)
-                .unwrap_or(0)
-        }
-        Err(_) => 0,
     }
 }
 
@@ -45,10 +26,12 @@ pub fn collect_hints(home: &Path, runner: &dyn CommandRunner) -> Vec<ProcessHint
         .filter(|e| !e.skip)
         .filter_map(|entry| {
             let base = base_path(home, entry.base_dir);
+            // Same metric as scan and explore (`format::dir_size`): one size
+            // standard everywhere, no `du` round-trip or dual accounting.
             let size_bytes: u64 = entry
                 .path_suffixes
                 .iter()
-                .map(|s| dir_size_bytes(&base.join(s), runner))
+                .map(|s| dir_size(&base.join(s)))
                 .sum();
             if size_bytes <= entry.threshold_bytes {
                 return None;

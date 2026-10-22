@@ -82,17 +82,19 @@ mod tests {
         }
     }
 
+    /// 1.25 MB, a multiple of the 4096-byte APFS page so that
+    /// `format::dir_size` (st_blocks × 512) measures it exactly. Above the
+    /// 1 MB log threshold.
+    const ABOVE_LOG_THRESHOLD: usize = 1_310_720;
+
     struct FakeRunner {
-        /// Maps path substrings to KB sizes returned by `du -sk`.
-        sizes: Vec<(String, u64)>,
         /// Process names that are "running" (pgrep returns exit 0).
         running: Vec<String>,
     }
 
     impl FakeRunner {
-        fn new(sizes: &[(&str, u64)], running: &[&str]) -> Self {
+        fn new(running: &[&str]) -> Self {
             Self {
-                sizes: sizes.iter().map(|(p, k)| (p.to_string(), *k)).collect(),
                 running: running.iter().map(|s| s.to_string()).collect(),
             }
         }
@@ -101,16 +103,6 @@ mod tests {
     impl CommandRunner for FakeRunner {
         fn run(&self, program: &str, args: &[&str]) -> Result<Output> {
             match program {
-                "du" => {
-                    let path = args.last().copied().unwrap_or("");
-                    let kb = self
-                        .sizes
-                        .iter()
-                        .find(|(pat, _)| path.contains(pat.as_str()))
-                        .map(|(_, kb)| *kb)
-                        .unwrap_or(0);
-                    Ok(make_output(0, &format!("{kb}\t{path}\n")))
-                }
                 "pgrep" => {
                     let name = args.last().copied().unwrap_or("");
                     let found = self.running.iter().any(|r| r == name);
@@ -133,6 +125,22 @@ mod tests {
         };
         for s in suffixes {
             std::fs::create_dir_all(base_path.join(s)).unwrap();
+        }
+    }
+
+    /// Creates dirs and writes a `file_bytes`-byte file in each so that
+    /// `format::dir_size` measures exactly `file_bytes`. Byte counts must be
+    /// multiples of 4096 (the APFS page size).
+    fn make_dirs_with_files(home: &Path, base: BaseDir, suffixes: &[&str], file_bytes: usize) {
+        let base_path = match base {
+            BaseDir::Caches => home.join("Library/Caches"),
+            BaseDir::AppSupport => home.join("Library/Application Support"),
+            BaseDir::Logs => home.join("Library/Logs"),
+        };
+        for s in suffixes {
+            let dir = base_path.join(s);
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join("data.bin"), vec![0u8; file_bytes]).unwrap();
         }
     }
 
@@ -164,49 +172,57 @@ mod tests {
     }
 
     #[test]
+    fn collect_hints_uses_format_dir_size_metric() {
+        // Unification test: hint sizes must be measured by the same
+        // `format::dir_size` metric as scan, not by `du -sk`.
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path();
+        make_dirs_with_files(home, BaseDir::Logs, &["Claude"], ABOVE_LOG_THRESHOLD);
+
+        let runner = FakeRunner::new(&[]);
+        let hints = collect_hints(home, &runner);
+
+        let claude = hints.iter().find(|h| h.entry.display_name == "Claude logs");
+        assert!(claude.is_some(), "hint above threshold must be found");
+        assert_eq!(
+            claude.unwrap().size_bytes,
+            crate::format::dir_size(&home.join("Library/Logs/Claude")),
+            "hint size must equal format::dir_size on the same path"
+        );
+    }
+
+    #[test]
     fn collect_hints_filters_below_threshold() {
         let tmp = tempfile::tempdir().unwrap();
         let home = tmp.path();
-        make_dirs(home, BaseDir::Caches, &["Homebrew", "typescript"]);
+        make_dirs_with_files(home, BaseDir::Logs, &["Claude"], ABOVE_LOG_THRESHOLD);
+        make_dirs_with_files(home, BaseDir::Logs, &["zoom.us"], 4_096);
 
-        let runner = FakeRunner::new(&[("Homebrew", 80 * 1024), ("typescript", 10 * 1024)], &[]);
+        let runner = FakeRunner::new(&[]);
         let hints = collect_hints(home, &runner);
 
-        assert!(hints.iter().any(|h| h.entry.display_name == "Homebrew"));
-        assert!(!hints
-            .iter()
-            .any(|h| h.entry.display_name == "TypeScript server cache"));
+        assert!(hints.iter().any(|h| h.entry.display_name == "Claude logs"));
+        assert!(!hints.iter().any(|h| h.entry.display_name == "Zoom logs"));
     }
 
     #[test]
     fn collect_hints_limits_to_top5() {
         let tmp = tempfile::tempdir().unwrap();
         let home = tmp.path();
-        make_dirs(
+        make_dirs_with_files(
             home,
-            BaseDir::Caches,
+            BaseDir::Logs,
             &[
-                "Microsoft Edge",
-                "com.microsoft.VSCode.ShipIt",
-                "ms-playwright",
-                "ms-playwright-go",
-                "electron",
-                "BraveSoftware",
-                "Homebrew",
+                "Claude",
+                "zoom.us",
+                "DiagnosticReports",
+                "LM Studio",
+                "CrashReporter",
+                "fsck_hfs.log",
             ],
+            ABOVE_LOG_THRESHOLD,
         );
-        let runner = FakeRunner::new(
-            &[
-                ("Microsoft Edge", 1_800 * 1024),
-                ("com.microsoft.VSCode.ShipIt", 900 * 1024),
-                ("ms-playwright", 280 * 1024),
-                ("ms-playwright-go", 130 * 1024),
-                ("electron", 110 * 1024),
-                ("BraveSoftware", 100 * 1024),
-                ("Homebrew", 80 * 1024),
-            ],
-            &[],
-        );
+        let runner = FakeRunner::new(&[]);
         let hints = collect_hints(home, &runner);
         assert_eq!(hints.len(), 5);
         assert!(hints[0].size_bytes >= hints[1].size_bytes);
@@ -217,7 +233,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let home = tmp.path();
         make_dirs(home, BaseDir::Caches, &["GeoServices"]);
-        let runner = FakeRunner::new(&[("GeoServices", 100 * 1024)], &[]);
+        let runner = FakeRunner::new(&[]);
         let hints = collect_hints(home, &runner);
         assert!(!hints.iter().any(|h| h.entry.display_name == "GeoServices"));
     }
@@ -226,45 +242,41 @@ mod tests {
     fn collect_hints_sets_running_flag() {
         let tmp = tempfile::tempdir().unwrap();
         let home = tmp.path();
-        make_dirs(home, BaseDir::AppSupport, &["Slack/Cache"]);
-        let runner = FakeRunner::new(&[("Slack", 230 * 1024)], &["Slack"]);
+        make_dirs_with_files(home, BaseDir::Logs, &["Claude"], ABOVE_LOG_THRESHOLD);
+        let runner = FakeRunner::new(&["Claude"]);
         let hints = collect_hints(home, &runner);
-        let slack = hints.iter().find(|h| h.entry.display_name == "Slack");
-        assert!(slack.is_some());
-        assert!(slack.unwrap().running);
+        let claude = hints.iter().find(|h| h.entry.display_name == "Claude logs");
+        assert!(claude.is_some());
+        assert!(claude.unwrap().running);
     }
 
     #[test]
     fn collect_hints_aggregates_vscode_dirs() {
+        // 22 MB per suffix (multiple of 4096); 3 × 22 MB > the 64 MB threshold.
+        const SUFFIX_BYTES: usize = 22 * 1_048_576;
         let tmp = tempfile::tempdir().unwrap();
         let home = tmp.path();
-        make_dirs(
+        make_dirs_with_files(
             home,
             BaseDir::AppSupport,
             &["Code/Cache", "Code/CachedExtensionVSIXs", "Code/CachedData"],
+            SUFFIX_BYTES,
         );
-        let runner = FakeRunner::new(
-            &[
-                ("Code/Cache", 200 * 1024),
-                ("Code/CachedExtensionVSIXs", 200 * 1024),
-                ("Code/CachedData", 200 * 1024),
-            ],
-            &[],
-        );
+        let runner = FakeRunner::new(&[]);
         let hints = collect_hints(home, &runner);
         let vscode = hints
             .iter()
             .find(|h| h.entry.display_name == "VSCode caches");
         assert!(vscode.is_some());
-        assert_eq!(vscode.unwrap().size_bytes, 600 * 1024 * 1024);
+        assert_eq!(vscode.unwrap().size_bytes, 3 * SUFFIX_BYTES as u64);
     }
 
     #[test]
     fn collect_hints_includes_logs() {
         let tmp = tempfile::tempdir().unwrap();
         let home = tmp.path();
-        make_dirs(home, BaseDir::Logs, &["Claude"]);
-        let runner = FakeRunner::new(&[("Claude", 62 * 1024)], &["Claude"]);
+        make_dirs_with_files(home, BaseDir::Logs, &["Claude"], ABOVE_LOG_THRESHOLD);
+        let runner = FakeRunner::new(&["Claude"]);
         let hints = collect_hints(home, &runner);
         let log = hints.iter().find(|h| h.entry.display_name == "Claude logs");
         assert!(log.is_some());
@@ -349,10 +361,6 @@ mod tests {
                         .count();
                     let still_running = is_running && pgrep_count <= self.gone_after_pgrep_calls;
                     Ok(make_output(if still_running { 0 } else { 1 }, ""))
-                }
-                "du" => {
-                    let path = args.last().copied().unwrap_or("");
-                    Ok(make_output(0, &format!("102400\t{path}\n")))
                 }
                 "osascript" | "open" | "rm" => Ok(make_output(0, "")),
                 _ => anyhow::bail!("RecordingRunner: unexpected {program} (call #{call_count})"),

@@ -186,3 +186,60 @@ fn clean_mise_pinned_version_not_deleted() {
         "24.15.0 is not active and not pinned — must be removed"
     );
 }
+
+#[test]
+fn clean_mise_ignores_pins_inside_vendored_dirs() {
+    // A deep monorepo: pins inside node_modules/.git/target are vendor junk
+    // and must not protect a version; the project-level pin does.
+    let tmp = TempDir::new().unwrap();
+    let bin_dir = tmp.path().join("bin");
+    fs::create_dir_all(&bin_dir).unwrap();
+    install_fake_mise(&bin_dir, "");
+
+    let installs = tmp.path().join(".local/share/mise/installs/node");
+    fs::create_dir_all(installs.join("20.11.0")).unwrap(); // pinned by project
+    fs::create_dir_all(installs.join("19.0.0")).unwrap(); // pinned ONLY inside node_modules
+    fs::create_dir_all(installs.join("18.0.0")).unwrap(); // not pinned anywhere
+
+    // Project-level pin (honored)
+    fs::create_dir_all(tmp.path().join("proj")).unwrap();
+    fs::write(
+        tmp.path().join("proj/.mise.toml"),
+        "[tools]\nnode = \"20.11.0\" # active in this project\n",
+    )
+    .unwrap();
+    // Vendored pins (must be ignored)
+    for dir in ["proj/node_modules", "proj/.git", "proj/target"] {
+        fs::create_dir_all(tmp.path().join(dir)).unwrap();
+        fs::write(
+            tmp.path().join(dir).join(".mise.toml"),
+            "[tools]\nnode = \"19.0.0\"\n",
+        )
+        .unwrap();
+    }
+
+    let original_path = std::env::var("PATH").unwrap_or_default();
+    let output = sasurahime(tmp.path())
+        .env("PATH", format!("{}:{original_path}", bin_dir.display()))
+        .args(["--permanent", "clean", "mise"])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        installs.join("20.11.0").exists(),
+        "pinned by the project .mise.toml — must be protected"
+    );
+    assert!(
+        !installs.join("19.0.0").exists(),
+        "pinned only inside node_modules — vendor pin must be ignored"
+    );
+    assert!(
+        !installs.join("18.0.0").exists(),
+        "not pinned anywhere — must be removed"
+    );
+}

@@ -17,6 +17,12 @@ pub struct MiseCleaner {
     pinned_cache: std::sync::OnceLock<HashSet<(String, String)>>,
 }
 
+/// Default max depth for the `.mise.toml` search under HOME (CLAUDE.md rule).
+const DEFAULT_PINNED_MAX_DEPTH: usize = 5;
+
+/// Directory names the pinned-version scan never descends into.
+const PINNED_SCAN_EXCLUDED_DIRS: &[&str] = &["node_modules", ".git", "target"];
+
 impl MiseCleaner {
     pub fn new(home: &Path, runner: Box<dyn CommandRunner>) -> Self {
         Self {
@@ -45,7 +51,7 @@ impl MiseCleaner {
     /// Returns cached pinned versions, computing them on first call.
     fn get_pinned(&self) -> &HashSet<(String, String)> {
         self.pinned_cache
-            .get_or_init(|| Self::scan_pinned_versions(&self.home))
+            .get_or_init(|| Self::scan_pinned_versions(&self.home, DEFAULT_PINNED_MAX_DEPTH))
     }
 
     /// Parses `mise ls --current` stdout into a set of (tool, version) pairs.
@@ -102,12 +108,16 @@ impl MiseCleaner {
     }
 
     /// Scans `~/.config/mise/config.toml` and all `.mise.toml` files under
-    /// `home` (max depth 5) and returns a set of pinned `(tool, version)` pairs.
+    /// `home` (up to `max_depth`) and returns a set of pinned `(tool, version)`
+    /// pairs.
     ///
     /// Respects CLAUDE.md safety rule:
     ///   "mise runtime deletion must cross-check global config.toml AND any
     ///    .mise.toml found within HOME (max depth 5)."
-    fn scan_pinned_versions(home: &Path) -> HashSet<(String, String)> {
+    ///
+    /// Vendored/build directories (`node_modules`, `.git`, `target`) are never
+    /// descended into: their `.mise.toml` files are vendor junk, not pins.
+    fn scan_pinned_versions(home: &Path, max_depth: usize) -> HashSet<(String, String)> {
         let mut pinned = HashSet::new();
 
         // ── global ──────────────────────────────────────────────────────────
@@ -116,11 +126,12 @@ impl MiseCleaner {
             Self::parse_tools_section(&content, &mut pinned);
         }
 
-        // ── per-project (depth ≤ 5) ─────────────────────────────────────────
+        // ── per-project (depth ≤ max_depth) ─────────────────────────────────
         for entry in walkdir::WalkDir::new(home)
-            .max_depth(5)
+            .max_depth(max_depth)
             .follow_links(false)
             .into_iter()
+            .filter_entry(|e| e.depth() == 0 || !Self::is_excluded_dir(e))
             .filter_map(|e| e.ok())
         {
             if entry.file_type().is_file() && entry.file_name().to_string_lossy() == ".mise.toml" {
@@ -133,41 +144,46 @@ impl MiseCleaner {
         pinned
     }
 
-    /// Reads TOML content and collects `tool = "version"` from `[tools]` section.
-    fn parse_tools_section(content: &str, out: &mut HashSet<(String, String)>) {
-        let mut in_tools = false;
-        for line in content.lines() {
-            let trimmed = line.trim();
-            if trimmed.starts_with('[') && trimmed.trim_end_matches(']') == "[tools" {
-                in_tools = true;
-                continue;
-            }
-            if trimmed.starts_with('[') {
-                in_tools = false;
-                continue;
-            }
-            if in_tools {
-                // matches:  tool_name = "0.1.0"
-                if let Some((key, val)) = Self::parse_toml_kv(trimmed) {
-                    out.insert((key, val));
-                }
-            }
+    /// True for directories the pinned-version scan never descends into.
+    fn is_excluded_dir(entry: &walkdir::DirEntry) -> bool {
+        entry.file_type().is_dir()
+            && PINNED_SCAN_EXCLUDED_DIRS.contains(&entry.file_name().to_string_lossy().as_ref())
+    }
+
+    /// Extracts the version strings a `[tools]` spec value may contain.
+    fn spec_versions(spec: &toml::Value) -> Vec<String> {
+        match spec {
+            toml::Value::String(v) => vec![v.clone()],
+            toml::Value::Array(arr) => arr
+                .iter()
+                .filter_map(|x| x.as_str().map(str::to_string))
+                .collect(),
+            toml::Value::Table(t) => t
+                .get("version")
+                .and_then(|v| v.as_str())
+                .map(|s| vec![s.to_string()])
+                .unwrap_or_default(),
+            toml::Value::Integer(i) => vec![i.to_string()],
+            toml::Value::Float(f) => vec![f.to_string()],
+            _ => vec![],
         }
     }
 
-    /// Parses a single `key = "value"` line from TOML.
-    fn parse_toml_kv(line: &str) -> Option<(String, String)> {
-        let line = line.trim();
-        if line.is_empty() || line.starts_with('#') {
-            return None;
+    /// Reads TOML content and collects `tool = "version"` pairs from the
+    /// `[tools]` section via the `toml` crate, so inline comments, arrays and
+    /// table-form specs parse correctly.
+    fn parse_tools_section(content: &str, out: &mut HashSet<(String, String)>) {
+        let Ok(value) = content.parse::<toml::Table>() else {
+            return;
+        };
+        let Some(tools) = value.get("tools").and_then(|t| t.as_table()) else {
+            return;
+        };
+        for (tool, spec) in tools {
+            for v in Self::spec_versions(spec) {
+                out.insert((tool.clone(), v));
+            }
         }
-        let (key, rest) = line.split_once('=')?;
-        let key = key.trim().to_string();
-        let val = rest.trim().trim_matches('"').to_string();
-        if key.is_empty() || val.is_empty() {
-            return None;
-        }
-        Some((key, val))
     }
 
     /// Clears macOS `uchg` immutable flags then deletes the directory.
@@ -406,30 +422,6 @@ mod tests {
         assert_eq!(unused[0].1, "3.12.0");
     }
 
-    // ── parse_toml_kv ──
-
-    #[test]
-    fn parse_toml_kv_valid_line_returns_key_value() {
-        let result = MiseCleaner::parse_toml_kv(r#"node = "20.11.0""#);
-        assert_eq!(result, Some(("node".to_string(), "20.11.0".to_string())));
-    }
-
-    #[test]
-    fn parse_toml_kv_comment_line_returns_none() {
-        let result = MiseCleaner::parse_toml_kv("# node = \"20.11.0\"");
-        assert_eq!(result, None);
-    }
-
-    #[test]
-    fn parse_toml_kv_empty_line_returns_none() {
-        assert_eq!(MiseCleaner::parse_toml_kv(""), None);
-    }
-
-    #[test]
-    fn parse_toml_kv_no_equals_returns_none() {
-        assert_eq!(MiseCleaner::parse_toml_kv("node 20.11.0"), None);
-    }
-
     // ── parse_tools_section ──
 
     #[test]
@@ -473,13 +465,36 @@ mod tests {
         assert_eq!(result.len(), 1, "[aliases] should end [tools] section");
     }
 
+    // ── complex TOML (toml crate parity) ──
+
+    #[test]
+    fn parse_tools_section_inline_comment_is_ignored() {
+        let mut result = std::collections::HashSet::new();
+        MiseCleaner::parse_tools_section("[tools]\nnode = \"20.11.0\" # active\n", &mut result);
+        assert!(
+            result.contains(&("node".to_string(), "20.11.0".to_string())),
+            "inline comment must not corrupt the version, got {result:?}"
+        );
+    }
+
+    #[test]
+    fn parse_tools_section_array_of_versions_is_parsed() {
+        let mut result = std::collections::HashSet::new();
+        MiseCleaner::parse_tools_section(
+            "[tools]\nnode = [\"20.11.0\", \"18.19.0\"]\n",
+            &mut result,
+        );
+        assert!(result.contains(&("node".to_string(), "20.11.0".to_string())));
+        assert!(result.contains(&("node".to_string(), "18.19.0".to_string())));
+    }
+
     // ── scan_pinned_versions ──
 
     #[test]
     fn scan_pinned_versions_no_config_files_returns_empty() {
         use tempfile::TempDir;
         let tmp = TempDir::new().unwrap();
-        let result = MiseCleaner::scan_pinned_versions(tmp.path());
+        let result = MiseCleaner::scan_pinned_versions(tmp.path(), 5);
         assert!(result.is_empty());
     }
 
@@ -494,7 +509,7 @@ mod tests {
             "[tools]\nnode = \"22.0.0\"\n",
         )
         .unwrap();
-        let result = MiseCleaner::scan_pinned_versions(tmp.path());
+        let result = MiseCleaner::scan_pinned_versions(tmp.path(), 5);
         assert!(result.contains(&("node".to_string(), "22.0.0".to_string())));
     }
 
@@ -507,7 +522,7 @@ mod tests {
             "[tools]\npython = \"3.13.0\"\n",
         )
         .unwrap();
-        let result = MiseCleaner::scan_pinned_versions(tmp.path());
+        let result = MiseCleaner::scan_pinned_versions(tmp.path(), 5);
         assert!(result.contains(&("python".to_string(), "3.13.0".to_string())));
     }
 
@@ -516,8 +531,57 @@ mod tests {
         use tempfile::TempDir;
         let tmp = TempDir::new().unwrap();
         fs::write(tmp.path().join(".mise.toml"), "[[[invalid toml").unwrap();
-        let result = MiseCleaner::scan_pinned_versions(tmp.path());
+        let result = MiseCleaner::scan_pinned_versions(tmp.path(), 5);
         assert!(result.is_empty());
+    }
+
+    #[test]
+    fn scan_pinned_versions_ignores_node_modules_git_target() {
+        use tempfile::TempDir;
+        let tmp = TempDir::new().unwrap();
+        // Pins inside vendored/build directories must not be honored.
+        for dir in ["node_modules", ".git", "target"] {
+            fs::create_dir_all(tmp.path().join(dir)).unwrap();
+            fs::write(
+                tmp.path().join(dir).join(".mise.toml"),
+                "[tools]\nnode = \"19.0.0\"\n",
+            )
+            .unwrap();
+        }
+        // A real project .mise.toml is honored.
+        fs::write(
+            tmp.path().join(".mise.toml"),
+            "[tools]\nnode = \"20.11.0\"\n",
+        )
+        .unwrap();
+        let result = MiseCleaner::scan_pinned_versions(tmp.path(), 5);
+        assert!(result.contains(&("node".to_string(), "20.11.0".to_string())));
+        assert!(
+            !result.contains(&("node".to_string(), "19.0.0".to_string())),
+            "pins inside node_modules/.git/target must be ignored, got {result:?}"
+        );
+    }
+
+    #[test]
+    fn scan_pinned_versions_respects_max_depth_boundary() {
+        use tempfile::TempDir;
+        // home(0)/a(1)/b(2)/c(3)/d(4)/.mise.toml(5) is exactly at depth 5.
+        let tmp = TempDir::new().unwrap();
+        let deep = tmp.path().join("a/b/c/d");
+        fs::create_dir_all(&deep).unwrap();
+        fs::write(deep.join(".mise.toml"), "[tools]\nnode = \"21.0.0\"\n").unwrap();
+
+        let at_limit = MiseCleaner::scan_pinned_versions(tmp.path(), 5);
+        assert!(
+            at_limit.contains(&("node".to_string(), "21.0.0".to_string())),
+            "a .mise.toml exactly at max_depth must be found"
+        );
+
+        let below = MiseCleaner::scan_pinned_versions(tmp.path(), 4);
+        assert!(
+            !below.contains(&("node".to_string(), "21.0.0".to_string())),
+            "a .mise.toml beyond max_depth must be skipped"
+        );
     }
 
     #[test]
