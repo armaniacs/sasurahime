@@ -28,7 +28,35 @@ Body:  - Tool name / version
 
 ## 2. Implementation
 
-There are two paths depending on the cleaner's complexity.
+There are three paths depending on the cleaner's complexity.
+
+### Path G: Generic cleaner (fastest, recommended for cache targets)
+
+If the new target either delegates to an external CLI tool or just deletes
+known directories, pick `CliCleaner` or `PathCleaner` in
+`src/cleaners/generic.rs`. That is **2 touches** total, no new file:
+
+```rust
+// In src/cleaners/generic.rs, inside impl CliCleaner (external tool does the cleaning):
+pub fn my_tool(runner: Box<dyn CommandRunner>) -> Self {
+    Self::new("my-tool", "my_tool", &["cache", "clean"], runner)
+}
+// or inside impl PathCleaner (fixed directory list, optional age/size filters):
+pub fn my_cache(home: &Path, runner: Box<dyn CommandRunner>) -> Self {
+    Self::new("my-cache", vec![home.join(".my-cache")], runner)
+}
+```
+
+```rust
+// In src/main.rs, inside the define_cleaners! block:
+MyTool : "my-tool" => "MyTool package cache";
+(|_home, _config| cleaners::generic::CliCleaner::my_tool(Box::new(SystemCommandRunner))),
+```
+
+The CLI-delegation and path-deletion branches are closed into the two types,
+so no shared dispatch enum needs to be understood. Use `CliCleaner::with_detect_dir`
+factories when the size should be measured from the filesystem, and
+`PathCleaner::with_older_than` / `with_larger_than` for age or size filters.
 
 ### Path A: Standard cleaner (recommended)
 
@@ -125,7 +153,30 @@ Body:  - ツール名 / バージョン
 
 ## 2. 実装
 
-クリーナーの複雑さに応じて 2 つのパスがあります。
+クリーナーの複雑さに応じて 3 つのパスがあります。
+
+### パス G：ジェネリッククリーナー（最短、キャッシュターゲットには推奨）
+
+新しいターゲットが外部 CLI ツールへの委譲か、既知ディレクトリの削除のいずれかなら、`src/cleaners/generic.rs` の `CliCleaner` または `PathCleaner` を選びます。合計 **2 箇所** の変更で、新規ファイルは不要です：
+
+```rust
+// src/cleaners/generic.rs の impl CliCleaner 内（外部ツールがクリーンする場合）：
+pub fn my_tool(runner: Box<dyn CommandRunner>) -> Self {
+    Self::new("my-tool", "my_tool", &["cache", "clean"], runner)
+}
+// または impl PathCleaner 内（固定ディレクトリリスト、年齢/サイズフィルタ可）：
+pub fn my_cache(home: &Path, runner: Box<dyn CommandRunner>) -> Self {
+    Self::new("my-cache", vec![home.join(".my-cache")], runner)
+}
+```
+
+```rust
+// src/main.rs の define_cleaners! ブロック内：
+MyTool : "my-tool" => "MyTool パッケージキャッシュ";
+(|_home, _config| cleaners::generic::CliCleaner::my_tool(Box::new(SystemCommandRunner))),
+```
+
+CLI 委譲とパス削除の分岐は 2 つの型に閉じているため、共有ディスパッチ列挙型を理解する必要はありません。サイズをファイルシステムから計測したい場合は `CliCleaner::with_detect_dir` ファクトリを、年齢やサイズのフィルタが必要なら `PathCleaner::with_older_than` / `with_larger_than` を使います。
 
 ### パス A：標準クリーナー（推奨）
 

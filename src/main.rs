@@ -109,7 +109,7 @@ macro_rules! define_cleaners {
 
 define_cleaners! {
     Act : "act" => "act GitHub Actions local runner cache";
-    (|home, config| cleaners::generic::GenericCleaner::act(home, Box::new(SystemCommandRunner)).with_config(config)),
+    (|home, config| cleaners::generic::PathCleaner::act(home, Box::new(SystemCommandRunner)).with_config(config)),
 
     Uv : "uv" => "Stale simple-vN index directories + uv cache prune";
     (|home, _config| cleaners::uv::UvCleaner::new(home, Box::new(SystemCommandRunner))),
@@ -124,70 +124,70 @@ define_cleaners! {
     (|home, _config| cleaners::browser::BrowserCleaner::new(home, Box::new(SystemCommandRunner))),
 
     Bun : "bun" => "Bun package cache";
-    (|_home, _config| cleaners::generic::GenericCleaner::bun(Box::new(SystemCommandRunner))),
+    (|_home, _config| cleaners::generic::CliCleaner::bun(Box::new(SystemCommandRunner))),
 
     Go : "go" => "Go build cache";
-    (|_home, _config| cleaners::generic::GenericCleaner::go(Box::new(SystemCommandRunner))),
+    (|_home, _config| cleaners::generic::CliCleaner::go(Box::new(SystemCommandRunner))),
 
     Pip : "pip" => "pip package cache";
-    (|_home, _config| cleaners::generic::GenericCleaner::pip(Box::new(SystemCommandRunner))),
+    (|_home, _config| cleaners::generic::CliCleaner::pip(Box::new(SystemCommandRunner))),
 
     NodeGyp : "node-gyp" => "node-gyp build cache directories";
-    (|home, config| cleaners::generic::GenericCleaner::node_gyp(home, Box::new(SystemCommandRunner)).with_config(config)),
+    (|home, config| cleaners::generic::PathCleaner::node_gyp(home, Box::new(SystemCommandRunner)).with_config(config)),
 
     Npm : "npm" => "npm package cache";
-    (|_home, _config| cleaners::generic::GenericCleaner::npm(Box::new(SystemCommandRunner))),
+    (|_home, _config| cleaners::generic::CliCleaner::npm(Box::new(SystemCommandRunner))),
 
     Yarn : "yarn" => "yarn cache";
-    (|_home, _config| cleaners::generic::GenericCleaner::yarn(Box::new(SystemCommandRunner))),
+    (|_home, _config| cleaners::generic::CliCleaner::yarn(Box::new(SystemCommandRunner))),
 
     Pnpm : "pnpm" => "pnpm store";
-    (|_home, _config| cleaners::generic::GenericCleaner::pnpm(Box::new(SystemCommandRunner))),
+    (|_home, _config| cleaners::generic::CliCleaner::pnpm(Box::new(SystemCommandRunner))),
 
     Cargo : "cargo" => "Cargo registry cache + target/ directories";
     (|home, _config| cleaners::cargo::CargoCleaner::new(home, Box::new(SystemCommandRunner))),
 
     Docker : "docker" => "Docker system prune (images, containers, build cache)";
-    (|home, _config| cleaners::generic::GenericCleaner::docker(home, Box::new(SystemCommandRunner))),
+    (|home, _config| cleaners::generic::CliCleaner::docker(home, Box::new(SystemCommandRunner))),
 
     Orbstack : "orbstack" => "Orbstack prune";
-    (|_home, _config| cleaners::generic::GenericCleaner::orbstack(Box::new(SystemCommandRunner))),
+    (|_home, _config| cleaners::generic::CliCleaner::orbstack(Box::new(SystemCommandRunner))),
 
-    CocoaPods : "cocoa-pods" => "CocoaPods cache clean --all";
-    (|_home, _config| cleaners::generic::GenericCleaner::cocoapods(Box::new(SystemCommandRunner))),
+    CocoaPods : "cocoapods" => "CocoaPods cache clean --all";
+    (|_home, _config| cleaners::generic::CliCleaner::cocoapods(Box::new(SystemCommandRunner))),
 
     Colima : "colima" => "Colima VM disk images (inactive) prune";
-    (|home, config| cleaners::generic::GenericCleaner::colima_prune(home, Box::new(SystemCommandRunner)).with_config(config)),
+    (|home, _config| cleaners::generic::CliCleaner::colima_prune(home, Box::new(SystemCommandRunner))),
 
     SwiftPM : "spm" => "SwiftPM cache directory";
-    (|home, config| cleaners::generic::GenericCleaner::spm_cache(home, Box::new(SystemCommandRunner)).with_config(config)),
+    (|home, config| cleaners::generic::PathCleaner::spm_cache(home, Box::new(SystemCommandRunner)).with_config(config)),
 
     Conda : "conda" => "Conda clean --all";
-    (|_home, _config| cleaners::generic::GenericCleaner::conda(Box::new(SystemCommandRunner))),
+    (|_home, _config| cleaners::generic::CliCleaner::conda(Box::new(SystemCommandRunner))),
 
     Poetry : "poetry" => "Poetry cache clear --all";
-    (|_home, _config| cleaners::generic::GenericCleaner::poetry(Box::new(SystemCommandRunner))),
+    (|_home, _config| cleaners::generic::CliCleaner::poetry(Box::new(SystemCommandRunner))),
 
     Pipx : "pipx" => "pipx cache and unused packages";
-    (|_home, _config| cleaners::generic::GenericCleaner::pipx(Box::new(SystemCommandRunner))),
+    (|_home, _config| cleaners::generic::CliCleaner::pipx(Box::new(SystemCommandRunner))),
 
     Deno : "deno" => "Deno cache reload";
-    (|_home, _config| cleaners::generic::GenericCleaner::deno(Box::new(SystemCommandRunner))),
+    (|_home, _config| cleaners::generic::CliCleaner::deno(Box::new(SystemCommandRunner))),
 
     Dotnet : "dotnet" => ".NET NuGet cache clear";
-    (|_home, _config| cleaners::generic::GenericCleaner::dotnet(Box::new(SystemCommandRunner))),
+    (|_home, _config| cleaners::generic::CliCleaner::dotnet(Box::new(SystemCommandRunner))),
 
     Gem : "gem" => "RubyGems old gem versions cleanup";
-    (|_home, _config| cleaners::generic::GenericCleaner::gem(Box::new(SystemCommandRunner))),
+    (|_home, _config| cleaners::generic::CliCleaner::gem(Box::new(SystemCommandRunner))),
 
     Bundle : "bundle" => "Bundler cache clean";
-    (|_home, _config| cleaners::generic::GenericCleaner::bundle(Box::new(SystemCommandRunner))),
+    (|_home, _config| cleaners::generic::CliCleaner::bundle(Box::new(SystemCommandRunner))),
 
     Rustup : "rustup" => "Unused Rust toolchains";
     (|home, _config| cleaners::rustup::RustupCleaner::new(home, Box::new(SystemCommandRunner))),
 
     Simulator : "simulator" => "iOS Simulator cache (xcrun simctl delete unavailable)";
-    (|home, _config| cleaners::generic::GenericCleaner::simulator(home, Box::new(SystemCommandRunner))),
+    (|home, _config| cleaners::generic::CliCleaner::simulator(home, Box::new(SystemCommandRunner))),
 
     Gradle : "gradle" => "Gradle old version caches";
     (|home, _config| cleaners::gradle::GradleCleaner::new(home, Box::new(SystemCommandRunner))),
@@ -202,28 +202,28 @@ define_cleaners! {
     (|home, _config| cleaners::gradle::JetBrainsCleaner::new(home, Box::new(SystemCommandRunner))),
 
     Downloads : "downloads" => "~/Downloads old files";
-    (|home, config| cleaners::generic::GenericCleaner::downloads(home, Box::new(SystemCommandRunner)).with_config(config)),
+    (|home, config| cleaners::generic::PathCleaner::downloads(home, Box::new(SystemCommandRunner)).with_config(config)),
 
     VscodeExtensions : "vscode-extensions" => "VS Code extensions cache";
-    (|home, config| cleaners::generic::GenericCleaner::vscode_extensions(home, Box::new(SystemCommandRunner)).with_config(config)),
+    (|home, config| cleaners::generic::PathCleaner::vscode_extensions(home, Box::new(SystemCommandRunner)).with_config(config)),
 
     Maven : "maven" => "Maven local repository (mvn dependency:purge-local-repository)";
-    (|home, _config| cleaners::generic::GenericCleaner::maven(home, Box::new(SystemCommandRunner))),
+    (|home, _config| cleaners::generic::CliCleaner::maven(home, Box::new(SystemCommandRunner))),
 
     Terraform : "terraform" => "Terraform provider plugin cache";
-    (|home, config| cleaners::generic::GenericCleaner::terraform(home, Box::new(SystemCommandRunner)).with_config(config)),
+    (|home, config| cleaners::generic::PathCleaner::terraform(home, Box::new(SystemCommandRunner)).with_config(config)),
 
     Flutter : "flutter" => "Flutter/Dart pub cache (dart pub cache clean)";
-    (|home, _config| cleaners::generic::GenericCleaner::flutter(home, Box::new(SystemCommandRunner))),
+    (|home, _config| cleaners::generic::CliCleaner::flutter(home, Box::new(SystemCommandRunner))),
 
     Volta : "volta" => "Volta Node.js manager cache";
-    (|home, config| cleaners::generic::GenericCleaner::volta(home, Box::new(SystemCommandRunner)).with_config(config)),
+    (|home, config| cleaners::generic::PathCleaner::volta(home, Box::new(SystemCommandRunner)).with_config(config)),
 
     Sbt : "sbt" => "Scala/sbt build cache and Ivy cache";
-    (|home, config| cleaners::generic::GenericCleaner::sbt(home, Box::new(SystemCommandRunner)).with_config(config)),
+    (|home, config| cleaners::generic::PathCleaner::sbt(home, Box::new(SystemCommandRunner)).with_config(config)),
 
     TreeSitter : "tree-sitter" => "tree-sitter parser compilation cache";
-    (|home, config| cleaners::generic::GenericCleaner::tree_sitter(home, Box::new(SystemCommandRunner)).with_config(config)),
+    (|home, config| cleaners::generic::PathCleaner::tree_sitter(home, Box::new(SystemCommandRunner)).with_config(config)),
 
     OrphanContainers : "orphan-containers" => "Leftover Containers / Group Containers of uninstalled apps (interactive)";
     (|home, _config| cleaners::orphan_containers::OrphanContainersCleaner::new(home, Box::new(SystemCommandRunner))),
@@ -567,13 +567,6 @@ fn filter_support(
     support
 }
 
-fn cleaner_name_for_setting(key: &str) -> &str {
-    match key {
-        "cocoa-pods" => "cocoapods",
-        other => other,
-    }
-}
-
 /// Lists `[cleaner.*]` settings that no cleaner will apply. Pure so the wording
 /// can be tested without capturing stderr.
 fn ineffective_per_cleaner_settings(
@@ -585,8 +578,7 @@ fn ineffective_per_cleaner_settings(
     let mut out = Vec::new();
     for key in keys {
         let pcc = &config.per_cleaner[key];
-        let wanted = cleaner_name_for_setting(key);
-        let Some((_, capability)) = support.iter().find(|(n, _)| n == wanted) else {
+        let Some((_, capability)) = support.iter().find(|(n, _)| n == key.as_str()) else {
             out.push(format!("[{key}] unknown cleaner name"));
             continue;
         };
@@ -841,29 +833,29 @@ fn main() -> anyhow::Result<()> {
                 match target {
                     CleanTarget::Caches { dry_run } => {
                         let caches: Vec<Box<dyn cleaner::Cleaner>> = vec![
-                            Box::new(cleaners::generic::GenericCleaner::bun(Box::new(
+                            Box::new(cleaners::generic::CliCleaner::bun(Box::new(
                                 SystemCommandRunner,
                             ))),
-                            Box::new(cleaners::generic::GenericCleaner::go(Box::new(
+                            Box::new(cleaners::generic::CliCleaner::go(Box::new(
                                 SystemCommandRunner,
                             ))),
-                            Box::new(cleaners::generic::GenericCleaner::pip(Box::new(
+                            Box::new(cleaners::generic::CliCleaner::pip(Box::new(
                                 SystemCommandRunner,
                             ))),
                             Box::new(
-                                cleaners::generic::GenericCleaner::node_gyp(
+                                cleaners::generic::PathCleaner::node_gyp(
                                     &home,
                                     Box::new(SystemCommandRunner),
                                 )
                                 .with_config(&config),
                             ),
-                            Box::new(cleaners::generic::GenericCleaner::npm(Box::new(
+                            Box::new(cleaners::generic::CliCleaner::npm(Box::new(
                                 SystemCommandRunner,
                             ))),
-                            Box::new(cleaners::generic::GenericCleaner::yarn(Box::new(
+                            Box::new(cleaners::generic::CliCleaner::yarn(Box::new(
                                 SystemCommandRunner,
                             ))),
-                            Box::new(cleaners::generic::GenericCleaner::pnpm(Box::new(
+                            Box::new(cleaners::generic::CliCleaner::pnpm(Box::new(
                                 SystemCommandRunner,
                             ))),
                         ];
@@ -934,7 +926,7 @@ fn main() -> anyhow::Result<()> {
                         )?;
                     }
                     CleanTarget::Trash { dry_run } => {
-                        let cleaner = cleaners::generic::GenericCleaner::trash(
+                        let cleaner = cleaners::generic::PathCleaner::trash(
                             &home,
                             Box::new(SystemCommandRunner),
                         );
@@ -1132,14 +1124,6 @@ mod tests {
 
     const NOT_SCANNED: &[&str] = &["caches", "trash"];
 
-    // The only target whose Cleaner::name() differs from its CLI name.
-    fn cleaner_name_for(cli_name: &str) -> &str {
-        match cli_name {
-            "cocoa-pods" => "cocoapods",
-            other => other,
-        }
-    }
-
     #[test]
     fn every_clean_target_is_registered_in_all_cleaners() {
         let tmp = tempfile::TempDir::new().unwrap();
@@ -1150,7 +1134,7 @@ mod tests {
             .chain(extra_targets())
             .map(|(cli, _)| *cli)
             .filter(|cli| !NOT_SCANNED.contains(cli))
-            .filter(|cli| !names.iter().any(|n| *n == cleaner_name_for(cli)))
+            .filter(|cli| !names.contains(cli))
             .collect();
         assert!(
             missing.is_empty(),
@@ -1159,12 +1143,30 @@ mod tests {
     }
 
     #[test]
+    fn clean_target_names_need_no_translation() {
+        // Every CleanTarget CLI name must equal its Cleaner::name() directly:
+        // no cleaner_name_for translation map may be needed anywhere.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cleaners = all_cleaners(tmp.path(), &config::Config::default());
+        let names = names_of(&cleaners);
+        for (cli, _) in SUPPORTED_TARGETS.iter().chain(extra_targets()) {
+            if NOT_SCANNED.contains(cli) {
+                continue;
+            }
+            assert!(
+                names.contains(cli),
+                "CLI name {cli} has no cleaner with the same name; a translation hack would be needed"
+            );
+        }
+    }
+
+    #[test]
     fn standard_cleaners_follow_the_macro_table_order() {
         let tmp = tempfile::TempDir::new().unwrap();
         let cleaners = standard_cleaners(tmp.path(), &config::Config::default());
         assert_eq!(cleaners.len(), SUPPORTED_TARGETS.len());
         for ((cli, _), c) in SUPPORTED_TARGETS.iter().zip(&cleaners) {
-            assert_eq!(c.name(), cleaner_name_for(cli));
+            assert_eq!(c.name(), *cli);
         }
     }
 
@@ -1406,12 +1408,24 @@ mod tests {
     }
 
     #[test]
-    fn ineffective_settings_maps_the_cocoa_pods_alias() {
+    fn ineffective_settings_reject_the_old_cocoa_pods_alias() {
+        // The cocoa-pods→cocoapods translation hack is gone: the old config
+        // key is now an unknown cleaner name, "cocoapods" is the real one.
         let cfg = cfg_with(&[("cocoa-pods", pcc(Some(30), None))]);
         let s = support(&[("cocoapods", cleaner::PerCleanerFilters::None)]);
         assert_eq!(
             ineffective_per_cleaner_settings(&cfg, &s),
-            vec!["[cocoa-pods] older_than_days: this cleaner has no per-cleaner filters"]
+            vec!["[cocoa-pods] unknown cleaner name"]
+        );
+    }
+
+    #[test]
+    fn ineffective_settings_use_real_names_without_translation() {
+        let cfg = cfg_with(&[("cocoapods", pcc(Some(30), None))]);
+        let s = support(&[("cocoapods", cleaner::PerCleanerFilters::None)]);
+        assert_eq!(
+            ineffective_per_cleaner_settings(&cfg, &s),
+            vec!["[cocoapods] older_than_days: this cleaner has no per-cleaner filters"]
         );
     }
 

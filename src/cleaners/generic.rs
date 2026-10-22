@@ -22,125 +22,148 @@ use std::time::{Duration, SystemTime};
 /// before the cleaning loop, avoiding a redundant second prompt.
 static SKIP_CONFIRM: AtomicBool = AtomicBool::new(false);
 
-/// Globally suppress the secondary confirmation prompt in `GenericCleaner::clean()`.
+/// Globally suppress the secondary confirmation prompt in `CliCleaner::clean()`.
 /// Call before the TUI cleaning loop and restore with `set_skip_confirm(false)` after.
 pub fn set_skip_confirm(skip: bool) {
     SKIP_CONFIRM.store(skip, Ordering::Relaxed);
 }
 
-pub enum CleanMethod {
-    Command {
-        program: &'static str,
-        args: &'static [&'static str],
-    },
-    CommandWithDetectDir {
-        program: &'static str,
-        args: &'static [&'static str],
-        detect_dir: PathBuf,
-    },
-    DeleteDirs(Vec<PathBuf>),
-}
-
-pub struct GenericCleaner {
+/// A cleaner that delegates the actual cleaning to an external CLI tool
+/// (`program args`). When constructed with a `detect_dir`, the size is
+/// measured from the filesystem and a missing tool falls back to deleting
+/// that directory (when `fallback_delete` is set).
+pub struct CliCleaner {
     display_name: &'static str,
-    method: CleanMethod,
+    program: &'static str,
+    args: &'static [&'static str],
+    detect_dir: Option<PathBuf>,
     runner: Box<dyn CommandRunner>,
     /// Optional confirmation prompt shown before cleaning on an interactive TTY.
     confirm_message: Option<&'static str>,
     /// If true and the CLI tool is not found, fall back to deleting detect_dir directly.
     fallback_delete: bool,
-    /// Skip entries with mtime newer than this many days (None = no filter).
-    older_than_days: Option<u32>,
-    /// Skip entries with total size below this many MiB (None = no filter).
-    larger_than_mb: Option<u64>,
     /// Sparse VM disk image that pruning inside the VM may not shrink.
     notice: Option<DiskImageNotice>,
 }
 
-impl GenericCleaner {
-    fn base_cleaner(
-        display_name: &'static str,
-        method: CleanMethod,
-        runner: Box<dyn CommandRunner>,
-    ) -> Self {
-        Self {
-            display_name,
-            method,
-            runner,
-            confirm_message: None,
-            fallback_delete: false,
-            older_than_days: None,
-            larger_than_mb: None,
-            notice: None,
-        }
-    }
+/// A cleaner that removes a fixed list of directories, with optional age and
+/// size filters. Never invokes the target tool; the runner is only used for
+/// `chflags`.
+pub struct PathCleaner {
+    display_name: &'static str,
+    dirs: Vec<PathBuf>,
+    runner: Box<dyn CommandRunner>,
+    /// Skip entries with mtime newer than this many days (None = no filter).
+    older_than_days: Option<u32>,
+    /// Skip entries with total size below this many MiB (None = no filter).
+    larger_than_mb: Option<u64>,
+}
 
-    fn command_cleaner(
+impl CliCleaner {
+    fn new(
         display_name: &'static str,
         program: &'static str,
         args: &'static [&'static str],
         runner: Box<dyn CommandRunner>,
     ) -> Self {
-        Self::base_cleaner(display_name, CleanMethod::Command { program, args }, runner)
+        Self {
+            display_name,
+            program,
+            args,
+            detect_dir: None,
+            runner,
+            confirm_message: None,
+            fallback_delete: false,
+            notice: None,
+        }
+    }
+
+    fn with_detect_dir(
+        display_name: &'static str,
+        program: &'static str,
+        args: &'static [&'static str],
+        detect_dir: PathBuf,
+        runner: Box<dyn CommandRunner>,
+    ) -> Self {
+        Self {
+            detect_dir: Some(detect_dir),
+            ..Self::new(display_name, program, args, runner)
+        }
     }
 
     pub fn with_notice(mut self, notice: DiskImageNotice) -> Self {
         self.notice = Some(notice);
         self
     }
+}
+
+impl PathCleaner {
+    fn new(display_name: &'static str, dirs: Vec<PathBuf>, runner: Box<dyn CommandRunner>) -> Self {
+        Self {
+            display_name,
+            dirs,
+            runner,
+            older_than_days: None,
+            larger_than_mb: None,
+        }
+    }
+}
+
+impl CliCleaner {
+    // ── CLI-delegating cleaners (external tool does the cleaning) ──
 
     pub fn bun(runner: Box<dyn CommandRunner>) -> Self {
-        Self::command_cleaner("bun", "bun", &["pm", "cache", "rm"], runner)
+        Self::new("bun", "bun", &["pm", "cache", "rm"], runner)
     }
 
     pub fn go(runner: Box<dyn CommandRunner>) -> Self {
-        Self::command_cleaner("go", "go", &["clean", "-cache"], runner)
+        Self::new("go", "go", &["clean", "-cache"], runner)
     }
 
     pub fn pip(runner: Box<dyn CommandRunner>) -> Self {
-        Self::command_cleaner("pip", "pip", &["cache", "purge"], runner)
+        Self::new("pip", "pip", &["cache", "purge"], runner)
     }
 
     pub fn npm(runner: Box<dyn CommandRunner>) -> Self {
-        Self::command_cleaner("npm", "npm", &["cache", "clean", "--force"], runner)
+        Self::new("npm", "npm", &["cache", "clean", "--force"], runner)
     }
 
     pub fn yarn(runner: Box<dyn CommandRunner>) -> Self {
-        Self::command_cleaner("yarn", "yarn", &["cache", "clean"], runner)
+        Self::new("yarn", "yarn", &["cache", "clean"], runner)
     }
 
     pub fn pnpm(runner: Box<dyn CommandRunner>) -> Self {
-        Self::command_cleaner("pnpm", "pnpm", &["store", "prune"], runner)
+        Self::new("pnpm", "pnpm", &["store", "prune"], runner)
     }
 
     pub fn deno(runner: Box<dyn CommandRunner>) -> Self {
-        Self::command_cleaner("deno", "deno", &["cache", "-r"], runner)
+        Self::new("deno", "deno", &["cache", "-r"], runner)
     }
 
     pub fn pipx(runner: Box<dyn CommandRunner>) -> Self {
-        Self::command_cleaner("pipx", "pipx", &["cache", "purge"], runner)
+        Self::new("pipx", "pipx", &["cache", "purge"], runner)
     }
 
     pub fn docker(home: &Path, runner: Box<dyn CommandRunner>) -> Self {
-        Self::command_cleaner("docker", "docker", &["system", "prune", "-f"], runner).with_notice(
+        Self::new("docker", "docker", &["system", "prune", "-f"], runner).with_notice(
             DiskImageNotice::new("docker", docker_desktop_candidates(home), DOCKER_REMEDY),
         )
     }
 
     pub fn orbstack(runner: Box<dyn CommandRunner>) -> Self {
-        Self::command_cleaner("orbstack", "orb", &["prune"], runner)
+        Self::new("orbstack", "orb", &["prune"], runner)
     }
 
     pub fn gem(runner: Box<dyn CommandRunner>) -> Self {
-        Self::command_cleaner("gem", "gem", &["cleanup"], runner)
+        Self::new("gem", "gem", &["cleanup"], runner)
     }
 
     pub fn bundle(runner: Box<dyn CommandRunner>) -> Self {
-        Self::command_cleaner("bundle", "bundle", &["clean"], runner)
+        Self::new("bundle", "bundle", &["clean"], runner)
     }
 
     pub fn dotnet(runner: Box<dyn CommandRunner>) -> Self {
-        Self::command_cleaner(
+        Self::new(
             "dotnet",
             "dotnet",
             &["nuget", "locals", "all", "--clear"],
@@ -149,13 +172,11 @@ impl GenericCleaner {
     }
 
     pub fn simulator(home: &Path, runner: Box<dyn CommandRunner>) -> Self {
-        Self::base_cleaner(
+        Self::with_detect_dir(
             "simulator",
-            CleanMethod::CommandWithDetectDir {
-                program: "xcrun",
-                args: &["simctl", "delete", "unavailable"],
-                detect_dir: home.join("Library/Developer/CoreSimulator"),
-            },
+            "xcrun",
+            &["simctl", "delete", "unavailable"],
+            home.join("Library/Developer/CoreSimulator"),
             runner,
         )
     }
@@ -164,13 +185,11 @@ impl GenericCleaner {
         Self {
             confirm_message: Some("This will delete ALL stopped Colima VM disk data (containers, images, volumes). Continue?"),
             fallback_delete: true,
-            ..Self::base_cleaner(
+            ..Self::with_detect_dir(
                 "colima",
-                CleanMethod::CommandWithDetectDir {
-                    program: "colima",
-                    args: &["prune", "--all", "--force"],
-                    detect_dir: home.join(".colima"),
-                },
+                "colima",
+                &["prune", "--all", "--force"],
+                home.join(".colima"),
                 runner,
             )
         }
@@ -182,75 +201,86 @@ impl GenericCleaner {
     }
 
     pub fn cocoapods(runner: Box<dyn CommandRunner>) -> Self {
-        Self::command_cleaner("cocoapods", "pod", &["cache", "clean", "--all"], runner)
+        Self::new("cocoapods", "pod", &["cache", "clean", "--all"], runner)
+    }
+
+    pub fn maven(home: &Path, runner: Box<dyn CommandRunner>) -> Self {
+        Self::with_detect_dir(
+            "maven",
+            "mvn",
+            &["dependency:purge-local-repository"],
+            home.join(".m2/repository"),
+            runner,
+        )
     }
 
     pub fn conda(runner: Box<dyn CommandRunner>) -> Self {
-        Self::command_cleaner("conda", "conda", &["clean", "--all", "-y"], runner)
+        Self::new("conda", "conda", &["clean", "--all", "-y"], runner)
+    }
+
+    pub fn flutter(home: &Path, runner: Box<dyn CommandRunner>) -> Self {
+        let cache = match std::env::var("PUB_CACHE") {
+            Ok(dir) => {
+                let p = PathBuf::from(&dir);
+                if !is_safe_delete_target(&p) {
+                    eprintln!(
+                        "[flutter] WARNING: PUB_CACHE={dir} points to an unsafe path, using default"
+                    );
+                    home.join(".pub-cache")
+                } else {
+                    p
+                }
+            }
+            Err(_) => home.join(".pub-cache"),
+        };
+        Self::with_detect_dir("flutter", "dart", &["pub", "cache", "clean"], cache, runner)
     }
 
     pub fn poetry(runner: Box<dyn CommandRunner>) -> Self {
-        Self::command_cleaner("poetry", "poetry", &["cache", "clear", "--all"], runner)
+        Self::new("poetry", "poetry", &["cache", "clear", "--all"], runner)
     }
+}
+
+impl PathCleaner {
+    // ── path-based cleaners (fixed directory list, optional filters) ──
 
     pub fn node_gyp(home: &Path, runner: Box<dyn CommandRunner>) -> Self {
-        Self::base_cleaner(
+        Self::new(
             "node-gyp",
-            CleanMethod::DeleteDirs(vec![
+            vec![
                 home.join(".cache/node-gyp"),
                 home.join("Library/Caches/node-gyp"),
-            ]),
+            ],
             runner,
         )
     }
 
     pub fn spm_cache(home: &Path, runner: Box<dyn CommandRunner>) -> Self {
         let cache = home.join("Library/Caches/org.swift.swiftpm");
-        Self::base_cleaner("spm", CleanMethod::DeleteDirs(vec![cache]), runner)
+        Self::new("spm", vec![cache], runner)
     }
 
     pub fn trash(home: &Path, runner: Box<dyn CommandRunner>) -> Self {
-        Self::base_cleaner(
-            "trash",
-            CleanMethod::DeleteDirs(vec![home.join(".Trash")]),
-            runner,
-        )
+        Self::new("trash", vec![home.join(".Trash")], runner)
     }
 
     pub fn downloads(home: &Path, runner: Box<dyn CommandRunner>) -> Self {
-        Self::base_cleaner(
-            "downloads",
-            CleanMethod::DeleteDirs(vec![home.join("Downloads")]),
-            runner,
-        )
-        .with_older_than(30)
+        Self::new("downloads", vec![home.join("Downloads")], runner).with_older_than(30)
     }
 
     #[expect(dead_code)]
     pub fn cargo_registry(home: &Path, runner: Box<dyn CommandRunner>) -> Self {
-        Self::base_cleaner(
+        Self::new(
             "cargo-registry",
-            CleanMethod::DeleteDirs(vec![home.join(".cargo/registry/cache")]),
+            vec![home.join(".cargo/registry/cache")],
             runner,
         )
     }
 
     pub fn vscode_extensions(home: &Path, runner: Box<dyn CommandRunner>) -> Self {
-        Self::base_cleaner(
+        Self::new(
             "vscode-extensions",
-            CleanMethod::DeleteDirs(vec![home.join(".vscode/extensions")]),
-            runner,
-        )
-    }
-
-    pub fn maven(home: &Path, runner: Box<dyn CommandRunner>) -> Self {
-        Self::base_cleaner(
-            "maven",
-            CleanMethod::CommandWithDetectDir {
-                program: "mvn",
-                args: &["dependency:purge-local-repository"],
-                detect_dir: home.join(".m2/repository"),
-            },
+            vec![home.join(".vscode/extensions")],
             runner,
         )
     }
@@ -270,57 +300,23 @@ impl GenericCleaner {
             }
             Err(_) => home.join(".terraform.d/plugin-cache"),
         };
-        Self::base_cleaner("terraform", CleanMethod::DeleteDirs(vec![cache]), runner)
-    }
-
-    pub fn flutter(home: &Path, runner: Box<dyn CommandRunner>) -> Self {
-        let cache = match std::env::var("PUB_CACHE") {
-            Ok(dir) => {
-                let p = PathBuf::from(&dir);
-                if !is_safe_delete_target(&p) {
-                    eprintln!(
-                        "[flutter] WARNING: PUB_CACHE={dir} points to an unsafe path, using default"
-                    );
-                    home.join(".pub-cache")
-                } else {
-                    p
-                }
-            }
-            Err(_) => home.join(".pub-cache"),
-        };
-        Self::base_cleaner(
-            "flutter",
-            CleanMethod::CommandWithDetectDir {
-                program: "dart",
-                args: &["pub", "cache", "clean"],
-                detect_dir: cache,
-            },
-            runner,
-        )
+        Self::new("terraform", vec![cache], runner)
     }
 
     pub fn volta(home: &Path, runner: Box<dyn CommandRunner>) -> Self {
-        Self::base_cleaner(
-            "volta",
-            CleanMethod::DeleteDirs(vec![home.join(".volta/cache")]),
-            runner,
-        )
+        Self::new("volta", vec![home.join(".volta/cache")], runner)
     }
 
     pub fn sbt(home: &Path, runner: Box<dyn CommandRunner>) -> Self {
-        Self::base_cleaner(
+        Self::new(
             "sbt",
-            CleanMethod::DeleteDirs(vec![home.join(".sbt"), home.join(".ivy2/cache")]),
+            vec![home.join(".sbt"), home.join(".ivy2/cache")],
             runner,
         )
     }
 
     pub fn tree_sitter(home: &Path, runner: Box<dyn CommandRunner>) -> Self {
-        Self::base_cleaner(
-            "tree-sitter",
-            CleanMethod::DeleteDirs(vec![home.join(".cache/tree-sitter")]),
-            runner,
-        )
+        Self::new("tree-sitter", vec![home.join(".cache/tree-sitter")], runner)
     }
 
     pub fn act(home: &Path, runner: Box<dyn CommandRunner>) -> Self {
@@ -339,20 +335,16 @@ impl GenericCleaner {
             }
             Err(_) => home.join(".cache/act"),
         };
-        Self::base_cleaner("act", CleanMethod::DeleteDirs(vec![cache_dir]), runner)
+        Self::new("act", vec![cache_dir], runner)
     }
 }
 
-impl GenericCleaner {
+impl PathCleaner {
     /// Create a `DeleteDirs` cleaner with a given display name and target path.
-    /// The runner is a no-op since `DeleteDirs` cleaners never invoke external commands.
+    /// The runner is a no-op since path cleaners never invoke target commands.
     #[cfg(test)]
     pub fn delete_dirs(name: &'static str, path: PathBuf) -> Self {
-        Self::base_cleaner(
-            name,
-            CleanMethod::DeleteDirs(vec![path]),
-            Box::new(SystemCommandRunner),
-        )
+        Self::new(name, vec![path], Box::new(SystemCommandRunner))
     }
 
     /// Apply an age filter: only entries with mtime older than `days` days
@@ -389,36 +381,25 @@ impl GenericCleaner {
     }
 
     fn primary_target_display(&self) -> Option<String> {
-        match &self.method {
-            CleanMethod::Command { .. } => None,
-            CleanMethod::CommandWithDetectDir { detect_dir, .. } => {
-                Some(detect_dir.to_string_lossy().to_string())
-            }
-            CleanMethod::DeleteDirs(dirs) => dirs.first().map(|d| d.to_string_lossy().to_string()),
-        }
+        self.dirs.first().map(|d| d.to_string_lossy().to_string())
     }
 }
 
-impl Cleaner for GenericCleaner {
+impl CliCleaner {
+    fn primary_target_display(&self) -> Option<String> {
+        self.detect_dir
+            .as_ref()
+            .map(|d| d.to_string_lossy().to_string())
+    }
+}
+
+impl Cleaner for CliCleaner {
     fn per_cleaner_filters(&self) -> PerCleanerFilters {
-        match &self.method {
-            CleanMethod::DeleteDirs(_) => PerCleanerFilters::Both,
-            _ => PerCleanerFilters::None,
-        }
+        PerCleanerFilters::None
     }
 
     fn is_available(&self) -> bool {
-        match &self.method {
-            CleanMethod::Command { program, .. } => self.runner.exists(program),
-            CleanMethod::CommandWithDetectDir { program, .. } => {
-                if self.fallback_delete {
-                    true
-                } else {
-                    self.runner.exists(program)
-                }
-            }
-            CleanMethod::DeleteDirs(_) => true,
-        }
+        self.detect_dir.is_some() && self.fallback_delete || self.runner.exists(self.program)
     }
 
     fn advisory(&self) -> Option<String> {
@@ -438,21 +419,11 @@ impl Cleaner for GenericCleaner {
             r
         };
 
-        match &self.method {
-            CleanMethod::Command { program, .. } => {
-                if !self.runner.exists(program) {
-                    return make_result(ScanStatus::NotFound);
-                }
-                // The tool is installed but detect cannot measure a byte count
-                // without running it: report unknown instead of a lying 0 B.
-                make_result(ScanStatus::Unknown)
-            }
-            CleanMethod::CommandWithDetectDir {
-                program,
-                detect_dir,
-                ..
-            } => {
-                if !detect_dir.exists() || (!self.runner.exists(program) && !self.fallback_delete) {
+        match &self.detect_dir {
+            Some(detect_dir) => {
+                if !detect_dir.exists()
+                    || (!self.runner.exists(self.program) && !self.fallback_delete)
+                {
                     return make_result(ScanStatus::NotFound);
                 }
                 let bytes = dir_size(detect_dir);
@@ -462,38 +433,22 @@ impl Cleaner for GenericCleaner {
                     ScanStatus::Clean
                 })
             }
-            CleanMethod::DeleteDirs(dirs) => {
-                let entries: Vec<(PathBuf, u64)> = dirs
-                    .iter()
-                    .filter(|d| d.exists())
-                    .filter_map(|d| {
-                        let meta = fs::metadata(d).ok()?;
-                        if !meets_age_filter(&meta, self.older_than_days) {
-                            return None;
-                        }
-                        let size = dir_size(d);
-                        if !meets_size_filter(size, self.larger_than_mb) {
-                            return None;
-                        }
-                        Some((d.clone(), size))
-                    })
-                    .collect();
-                if entries.is_empty() {
+            None => {
+                if !self.runner.exists(self.program) {
                     return make_result(ScanStatus::NotFound);
                 }
-                let bytes: u64 = entries.iter().map(|(_, s)| s).sum();
-                make_result(if bytes > 0 {
-                    ScanStatus::Pruneable(bytes)
-                } else {
-                    ScanStatus::Clean
-                })
+                // The tool is installed but detect cannot measure a byte count
+                // without running it: report unknown instead of a lying 0 B.
+                make_result(ScanStatus::Unknown)
             }
         }
     }
 
-    fn clean(&self, dry_run: bool, reporter: &dyn ProgressReporter) -> Result<CleanResult> {
-        match &self.method {
-            CleanMethod::Command { program, args } => {
+    fn clean(&self, dry_run: bool, _reporter: &dyn ProgressReporter) -> Result<CleanResult> {
+        let program = self.program;
+        let args = self.args;
+        match &self.detect_dir {
+            None => {
                 if !self.runner.exists(program) {
                     println!("{}: not found, skipping", self.display_name);
                     return Ok(CleanResult {
@@ -544,11 +499,7 @@ impl Cleaner for GenericCleaner {
                     deleted_paths: vec![],
                 })
             }
-            CleanMethod::CommandWithDetectDir {
-                program,
-                args,
-                detect_dir,
-            } => {
+            Some(detect_dir) => {
                 let size_before = if detect_dir.exists() {
                     dir_size(detect_dir)
                 } else {
@@ -682,62 +633,113 @@ impl Cleaner for GenericCleaner {
                     deleted_paths: vec![],
                 })
             }
-            CleanMethod::DeleteDirs(dirs) => {
-                let cleanable: Vec<&PathBuf> = dirs
-                    .iter()
-                    .filter(|d| d.exists())
-                    .filter(|d| {
-                        fs::metadata(d)
-                            .map(|m| meets_age_filter(&m, self.older_than_days))
-                            .unwrap_or(false)
-                    })
-                    .filter(|d| meets_size_filter(dir_size(d), self.larger_than_mb))
-                    .collect();
-                if !dry_run && !cleanable.is_empty() {
-                    reporter.progress_init(self.name(), cleanable.len());
+        }
+    }
+}
+
+impl Cleaner for PathCleaner {
+    fn per_cleaner_filters(&self) -> PerCleanerFilters {
+        PerCleanerFilters::Both
+    }
+
+    fn is_available(&self) -> bool {
+        true
+    }
+
+    fn name(&self) -> &'static str {
+        self.display_name
+    }
+
+    fn detect(&self) -> ScanResult {
+        let make_result = |status| {
+            let mut r = ScanResult::new(self.name(), status);
+            if crate::context::is_verbose() {
+                r.primary_target = self.primary_target_display();
+            }
+            r
+        };
+        let entries: Vec<(PathBuf, u64)> = self
+            .dirs
+            .iter()
+            .filter(|d| d.exists())
+            .filter_map(|d| {
+                let meta = fs::metadata(d).ok()?;
+                if !meets_age_filter(&meta, self.older_than_days) {
+                    return None;
                 }
-                let mut freed: u64 = 0;
-                for (i, dir) in cleanable.iter().enumerate() {
-                    let size = dir_size(dir);
-                    if dry_run {
-                        println!("[dry-run] would remove: {}", dir.display());
-                    } else {
-                        // Verify path safety at clean-time (TOCTOU mitigation for
-                        // env-var-derived paths: terraform, flutter, act).
-                        if !is_safe_delete_target(dir) {
-                            eprintln!(
-                                "[{}] warning: unsafe path, skipping: {}",
-                                self.display_name,
-                                dir.display()
-                            );
-                            continue;
-                        }
-                        reporter.progress_tick(dir, i + 1, size);
-                        let path_str = dir.to_string_lossy();
-                        if let Err(e) = self.runner.run("chflags", &["-R", "nouchg", &path_str]) {
-                            log::warn!(
-                                "[{}] chflags failed for {}: {e}",
-                                self.display_name,
-                                dir.display()
-                            );
-                        }
-                        crate::trash::delete_path(dir)?;
-                        freed += size;
-                        println!("Removed: {}", dir.display());
-                    }
+                let size = dir_size(d);
+                if !meets_size_filter(size, self.larger_than_mb) {
+                    return None;
                 }
-                if !dry_run && !cleanable.is_empty() {
-                    reporter.progress_finish();
+                Some((d.clone(), size))
+            })
+            .collect();
+        if entries.is_empty() {
+            return make_result(ScanStatus::NotFound);
+        }
+        let bytes: u64 = entries.iter().map(|(_, s)| s).sum();
+        make_result(if bytes > 0 {
+            ScanStatus::Pruneable(bytes)
+        } else {
+            ScanStatus::Clean
+        })
+    }
+
+    fn clean(&self, dry_run: bool, reporter: &dyn ProgressReporter) -> Result<CleanResult> {
+        let cleanable: Vec<&PathBuf> = self
+            .dirs
+            .iter()
+            .filter(|d| d.exists())
+            .filter(|d| {
+                fs::metadata(d)
+                    .map(|m| meets_age_filter(&m, self.older_than_days))
+                    .unwrap_or(false)
+            })
+            .filter(|d| meets_size_filter(dir_size(d), self.larger_than_mb))
+            .collect();
+        if !dry_run && !cleanable.is_empty() {
+            reporter.progress_init(self.name(), cleanable.len());
+        }
+        let mut freed: u64 = 0;
+        for (i, dir) in cleanable.iter().enumerate() {
+            let size = dir_size(dir);
+            if dry_run {
+                println!("[dry-run] would remove: {}", dir.display());
+            } else {
+                // Verify path safety at clean-time (TOCTOU mitigation for
+                // env-var-derived paths: terraform, flutter, act).
+                if !is_safe_delete_target(dir) {
+                    eprintln!(
+                        "[{}] warning: unsafe path, skipping: {}",
+                        self.display_name,
+                        dir.display()
+                    );
+                    continue;
                 }
-                Ok(CleanResult {
-                    name: self.name(),
-                    bytes_freed: freed,
-                    uses_trash: crate::trash::is_trash_mode(),
-                    skipped: vec![],
-                    deleted_paths: vec![],
-                })
+                reporter.progress_tick(dir, i + 1, size);
+                let path_str = dir.to_string_lossy();
+                if let Err(e) = self.runner.run("chflags", &["-R", "nouchg", &path_str]) {
+                    log::warn!(
+                        "[{}] chflags failed for {}: {e}",
+                        self.display_name,
+                        dir.display()
+                    );
+                }
+                crate::trash::delete_path(dir)?;
+                freed += size;
+                println!("Removed: {}", dir.display());
             }
         }
+        if !dry_run && !cleanable.is_empty() {
+            reporter.progress_finish();
+        }
+        Ok(CleanResult {
+            name: self.name(),
+            bytes_freed: freed,
+            uses_trash: crate::trash::is_trash_mode(),
+            skipped: vec![],
+            deleted_paths: vec![],
+        })
     }
 }
 
@@ -945,6 +947,56 @@ mod tests {
         }
     }
 
+    // ── type split: per_cleaner_filters / is_available live on each type ──
+
+    #[test]
+    fn cli_cleaner_per_cleaner_filters_are_none() {
+        let cleaner = CliCleaner::bun(Box::new(crate::test_helpers::MockRunner::new()));
+        assert!(matches!(
+            cleaner.per_cleaner_filters(),
+            PerCleanerFilters::None
+        ));
+    }
+
+    #[test]
+    fn path_cleaner_per_cleaner_filters_are_both() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cleaner = PathCleaner::node_gyp(
+            tmp.path(),
+            Box::new(crate::test_helpers::MockRunner::new().with_not_found()),
+        );
+        assert!(matches!(
+            cleaner.per_cleaner_filters(),
+            PerCleanerFilters::Both
+        ));
+    }
+
+    #[test]
+    fn path_cleaner_is_always_available() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cleaner = PathCleaner::tree_sitter(tmp.path(), Box::new(MissingToolRunner));
+        assert!(cleaner.is_available());
+    }
+
+    #[test]
+    fn cli_cleaner_availability_follows_program_presence() {
+        let present = CliCleaner::bun(Box::new(
+            crate::test_helpers::MockRunner::new().with_success("bun"),
+        ));
+        assert!(present.is_available());
+        let missing = CliCleaner::bun(Box::new(MissingToolRunner));
+        assert!(!missing.is_available());
+    }
+
+    #[test]
+    fn cli_cleaner_with_detect_dir_and_fallback_is_always_available() {
+        // fallback_delete cleaners (colima) are available even when the CLI
+        // tool is missing, because they fall back to deleting the dir.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cleaner = CliCleaner::colima_prune(tmp.path(), Box::new(MissingToolRunner));
+        assert!(cleaner.is_available());
+    }
+
     #[test]
     fn command_with_detect_dir_fallback_reports_pruneable_when_tool_missing() {
         let tmp = tempfile::TempDir::new().unwrap();
@@ -953,7 +1005,7 @@ mod tests {
         fs::create_dir_all(tmp.path().join(".colima/_lima/colima")).unwrap();
         fs::write(tmp.path().join(".colima/_lima/colima/dummy.img"), b"x").unwrap();
 
-        let cleaner = GenericCleaner::colima_prune(tmp.path(), Box::new(MissingToolRunner));
+        let cleaner = CliCleaner::colima_prune(tmp.path(), Box::new(MissingToolRunner));
         let result = cleaner.detect();
         assert!(
             matches!(result.status, ScanStatus::Pruneable(_)),
@@ -969,7 +1021,7 @@ mod tests {
         fs::write(tmp.path().join(".colima/_lima/colima/dummy.img"), b"x").unwrap();
 
         // Using a non-colima CommandWithDetectDir cleaner (no fallback).
-        let cleaner = GenericCleaner::simulator(tmp.path(), Box::new(MissingToolRunner));
+        let cleaner = CliCleaner::simulator(tmp.path(), Box::new(MissingToolRunner));
         let result = cleaner.detect();
         assert!(
             matches!(result.status, ScanStatus::NotFound),
@@ -1100,8 +1152,7 @@ mod tests {
         let _lock = crate::context::TEST_LOCK.lock().unwrap();
         let tmp = tempfile::TempDir::new().unwrap();
         let _guard = crate::test_helpers::EnvGuard::set("ACT_CACHE_DIR", "/");
-        let cleaner =
-            GenericCleaner::act(tmp.path(), Box::new(crate::command::SystemCommandRunner));
+        let cleaner = PathCleaner::act(tmp.path(), Box::new(crate::command::SystemCommandRunner));
         let result = cleaner.detect();
         assert!(matches!(result.status, ScanStatus::NotFound));
     }
@@ -1110,14 +1161,14 @@ mod tests {
 
     #[test]
     fn primary_target_display_for_command_returns_none() {
-        let cleaner = GenericCleaner::bun(Box::new(MissingToolRunner));
+        let cleaner = CliCleaner::bun(Box::new(MissingToolRunner));
         assert!(cleaner.primary_target_display().is_none());
     }
 
     #[test]
     fn primary_target_display_for_command_with_detect_dir_returns_path() {
         let tmp = tempfile::TempDir::new().unwrap();
-        let cleaner = GenericCleaner::colima_prune(tmp.path(), Box::new(MissingToolRunner));
+        let cleaner = CliCleaner::colima_prune(tmp.path(), Box::new(MissingToolRunner));
         let target = cleaner.primary_target_display();
         assert!(target.is_some());
         assert!(target.unwrap().contains(".colima"));
@@ -1126,7 +1177,7 @@ mod tests {
     #[test]
     fn primary_target_display_for_delete_dirs_returns_first_path() {
         let tmp = tempfile::TempDir::new().unwrap();
-        let cleaner = GenericCleaner::node_gyp(tmp.path(), Box::new(MissingToolRunner));
+        let cleaner = PathCleaner::node_gyp(tmp.path(), Box::new(MissingToolRunner));
         let target = cleaner.primary_target_display();
         assert!(target.is_some());
         let path = target.unwrap();
@@ -1141,7 +1192,7 @@ mod tests {
         fs::create_dir_all(&cache).unwrap();
         fs::write(cache.join("dummy"), b"x").unwrap();
 
-        let cleaner = GenericCleaner::act(tmp.path(), Box::new(MissingToolRunner));
+        let cleaner = PathCleaner::act(tmp.path(), Box::new(MissingToolRunner));
         let result = cleaner.detect();
         assert!(
             result.primary_target.is_some(),
@@ -1161,7 +1212,7 @@ mod tests {
         fs::create_dir_all(&cache).unwrap();
         fs::write(cache.join("dummy"), b"x").unwrap();
 
-        let cleaner = GenericCleaner::act(tmp.path(), Box::new(MissingToolRunner));
+        let cleaner = PathCleaner::act(tmp.path(), Box::new(MissingToolRunner));
         let result = cleaner.detect();
         assert!(result.primary_target.is_none());
     }
@@ -1261,15 +1312,12 @@ mod tests {
         fs::create_dir_all(&new_dir).unwrap();
         fs::write(new_dir.join("data"), b"x").unwrap();
 
-        let cleaner = GenericCleaner {
+        let cleaner = PathCleaner {
             display_name: "test",
-            method: CleanMethod::DeleteDirs(vec![old_dir.clone(), new_dir.clone()]),
+            dirs: vec![old_dir.clone(), new_dir.clone()],
             runner: Box::new(MissingToolRunner),
-            confirm_message: None,
-            fallback_delete: false,
             older_than_days: Some(30),
             larger_than_mb: None,
-            notice: None,
         };
         let result = cleaner.detect();
         assert!(matches!(result.status, ScanStatus::Pruneable(_)));
@@ -1295,15 +1343,12 @@ mod tests {
         let large_data = vec![0u8; 2_000_000];
         fs::write(large_dir.join("large_file"), &large_data).unwrap();
 
-        let cleaner = GenericCleaner {
+        let cleaner = PathCleaner {
             display_name: "test",
-            method: CleanMethod::DeleteDirs(vec![small_dir.clone(), large_dir.clone()]),
+            dirs: vec![small_dir.clone(), large_dir.clone()],
             runner: Box::new(MissingToolRunner),
-            confirm_message: None,
-            fallback_delete: false,
             older_than_days: None,
             larger_than_mb: Some(1),
-            notice: None,
         };
         let result = cleaner.detect();
         assert!(matches!(result.status, ScanStatus::Pruneable(_)));
@@ -1323,15 +1368,12 @@ mod tests {
         fs::create_dir_all(&new_dir).unwrap();
         fs::write(new_dir.join("data"), b"x").unwrap();
 
-        let cleaner = GenericCleaner {
+        let cleaner = PathCleaner {
             display_name: "test",
-            method: CleanMethod::DeleteDirs(vec![new_dir]),
+            dirs: vec![new_dir],
             runner: Box::new(MissingToolRunner),
-            confirm_message: None,
-            fallback_delete: false,
             older_than_days: Some(30),
             larger_than_mb: None,
-            notice: None,
         };
         let result = cleaner.detect();
         assert!(matches!(result.status, ScanStatus::NotFound));
@@ -1359,8 +1401,7 @@ mod tests {
             per_cleaner,
             ..crate::config::Config::default()
         };
-        let cleaner =
-            GenericCleaner::delete_dirs("test-older", data_dir.clone()).with_config(&config);
+        let cleaner = PathCleaner::delete_dirs("test-older", data_dir.clone()).with_config(&config);
         let result = cleaner.detect();
         assert!(matches!(result.status, ScanStatus::Pruneable(_)));
     }
@@ -1387,41 +1428,9 @@ mod tests {
             ..crate::config::Config::default()
         };
         let cleaner =
-            GenericCleaner::delete_dirs("no-match-cleaner", data_dir.clone()).with_config(&config);
+            PathCleaner::delete_dirs("no-match-cleaner", data_dir.clone()).with_config(&config);
         let result = cleaner.detect();
         assert!(matches!(result.status, ScanStatus::Pruneable(_)));
-    }
-
-    fn colima_filter_config() -> crate::config::Config {
-        let mut per_cleaner = std::collections::HashMap::new();
-        per_cleaner.insert(
-            "colima".to_string(),
-            crate::config::PerCleanerConfig {
-                older_than_days: Some(30),
-                larger_than_mb: None,
-            },
-        );
-        crate::config::Config {
-            per_cleaner,
-            ..crate::config::Config::default()
-        }
-    }
-
-    #[test]
-    fn colima_with_config_keeps_detect_result() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        // Freshly written, so a 30-day age filter would hide it if it were applied.
-        fs::create_dir_all(tmp.path().join(".colima/_lima/colima")).unwrap();
-        fs::write(tmp.path().join(".colima/_lima/colima/dummy.img"), b"x").unwrap();
-
-        let plain = GenericCleaner::colima_prune(tmp.path(), Box::new(MissingToolRunner)).detect();
-        let configured = GenericCleaner::colima_prune(tmp.path(), Box::new(MissingToolRunner))
-            .with_config(&colima_filter_config())
-            .detect();
-
-        assert!(matches!(plain.status, ScanStatus::Pruneable(_)));
-        assert!(matches!(configured.status, ScanStatus::Pruneable(_)));
-        assert_eq!(plain.bytes_for_test(), configured.bytes_for_test());
     }
 
     fn write_sparse_image(path: &Path) {
@@ -1440,7 +1449,7 @@ mod tests {
                 .join("Library/Containers/com.docker.docker/Data/vms/0/data/Docker.raw"),
         );
         let runner = crate::test_helpers::MockRunner::new().with_success("docker");
-        let cleaner = GenericCleaner::docker(tmp.path(), Box::new(runner));
+        let cleaner = CliCleaner::docker(tmp.path(), Box::new(runner));
         let text = cleaner.advisory().expect("advisory when Docker.raw exists");
         assert!(text.contains("Docker.raw"), "{text}");
         assert!(text.contains("Disk image size"), "{text}");
@@ -1450,7 +1459,7 @@ mod tests {
     fn docker_advisory_is_none_without_virtual_disk() {
         let tmp = tempfile::TempDir::new().unwrap();
         let runner = crate::test_helpers::MockRunner::new().with_success("docker");
-        assert!(GenericCleaner::docker(tmp.path(), Box::new(runner))
+        assert!(CliCleaner::docker(tmp.path(), Box::new(runner))
             .advisory()
             .is_none());
     }
@@ -1467,7 +1476,7 @@ mod tests {
                 true
             }
         }
-        let cleaner = GenericCleaner::docker(tmp.path(), Box::new(ExistsOnlyRunner));
+        let cleaner = CliCleaner::docker(tmp.path(), Box::new(ExistsOnlyRunner));
         assert!(matches!(cleaner.detect().status, ScanStatus::Unknown));
     }
 
@@ -1475,7 +1484,7 @@ mod tests {
     fn colima_advisory_reports_disk_images() {
         let tmp = tempfile::TempDir::new().unwrap();
         write_sparse_image(&tmp.path().join(".colima/_lima/colima/disk"));
-        let cleaner = GenericCleaner::colima_prune(tmp.path(), Box::new(MissingToolRunner));
+        let cleaner = CliCleaner::colima_prune(tmp.path(), Box::new(MissingToolRunner));
         let text = cleaner
             .advisory()
             .expect("advisory when colima disk exists");
@@ -1485,7 +1494,7 @@ mod tests {
 
     #[test]
     fn non_vm_cleaner_has_no_advisory() {
-        let cleaner = GenericCleaner::npm(Box::new(MissingToolRunner));
+        let cleaner = CliCleaner::npm(Box::new(MissingToolRunner));
         assert!(cleaner.advisory().is_none());
     }
 }

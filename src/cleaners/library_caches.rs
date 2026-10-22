@@ -13,7 +13,7 @@ pub const EXCLUDED_NAMES: &[(&str, &str)] = &[
     ("node-gyp", "node-gyp"),
     ("org.swift.swiftpm", "spm"),
     ("JetBrains", "jetbrains"),
-    ("CocoaPods", "cocoa-pods"),
+    ("CocoaPods", "cocoapods"),
     ("Yarn", "yarn"),
     ("pip", "pip"),
     ("go-build", "go"),
@@ -588,6 +588,35 @@ mod tests {
     fn name_is_library_caches() {
         let tmp = TempDir::new().unwrap();
         assert_eq!(cleaner(&tmp).name(), "library-caches");
+    }
+
+    #[test]
+    fn excluded_targets_are_registered_clean_targets() {
+        // Correspondence table test: every cache dir in EXCLUDED_NAMES maps to
+        // a registered clean target (single source of truth: the main.rs macro
+        // table plus extra_targets). EXCLUDED_PREFIXES also carries the
+        // "os-managed" marker, which is never dispatched and checked separately.
+        let registered: std::collections::HashSet<&str> = crate::SUPPORTED_TARGETS
+            .iter()
+            .chain(crate::extra_targets())
+            .map(|(n, _)| *n)
+            .collect();
+        for (_, target) in EXCLUDED_NAMES {
+            assert!(
+                registered.contains(target),
+                "cache dir excluded name maps to unregistered target {target:?}"
+            );
+        }
+        for (prefix, target) in EXCLUDED_PREFIXES {
+            if *target == "os-managed" {
+                continue;
+            }
+            assert!(
+                registered.contains(target),
+                "cache dir excluded prefix {prefix} maps to unregistered target {target:?}"
+            );
+        }
+        assert_eq!(excluded_by("CocoaPods"), Some("cocoapods"));
     }
 
     #[test]

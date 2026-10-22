@@ -49,7 +49,7 @@ use rstest::rstest;
 
 #[rstest]
 #[case("bun", "/usr/bin:/bin", true)]
-#[case("cocoa-pods", "/usr/bin:/bin", true)]
+#[case("cocoapods", "/usr/bin:/bin", true)]
 #[case("colima", "/usr/bin:/bin", true)]
 #[case("conda", "/usr/bin:/bin", true)]
 #[case("deno", "/usr/bin:/bin", true)]
