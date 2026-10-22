@@ -45,8 +45,22 @@ pub struct ProjectArtifactsSection {
     recency_days: Option<u32>,
 }
 
+/// `[policy]` section: the declarative unattended-apply policy. Conservative
+/// by construction: irreversible (Risky) targets never run unattended.
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct PolicySection {
+    #[serde(default)]
+    older_than_days: Option<u32>,
+    #[serde(default)]
+    larger_than_mb: Option<u64>,
+    #[serde(default)]
+    include_manual: bool,
+}
+
 #[derive(Debug, Clone, Deserialize, Default)]
 struct RawConfig {
+    #[serde(default)]
+    policy: PolicySection,
     #[serde(default, rename = "project-artifacts", alias = "project_artifacts")]
     project_artifacts: ProjectArtifactsSection,
     #[serde(default)]
@@ -73,6 +87,17 @@ pub struct Config {
     pub custom: Vec<CustomTarget>,
     pub per_cleaner: HashMap<String, PerCleanerConfig>,
     pub project_artifacts: ProjectArtifactsConfig,
+    pub policy: Policy,
+}
+
+/// Resolved `[policy]` settings. `None` means the section is absent, so the
+/// unattended `auto` command refuses to run (no policy, no unattended deletes).
+#[derive(Debug, Clone, Default)]
+pub struct Policy {
+    pub present: bool,
+    pub older_than_days: Option<u32>,
+    pub larger_than_mb: Option<u64>,
+    pub include_manual: bool,
 }
 
 /// Resolved `[project-artifacts]` settings with defaults applied.
@@ -105,6 +130,7 @@ impl Default for Config {
             custom: vec![],
             per_cleaner: HashMap::new(),
             project_artifacts: ProjectArtifactsConfig::default(),
+            policy: Policy::default(),
         }
     }
 }
@@ -128,6 +154,12 @@ fn parse_config_file(path: &Path) -> Result<Config> {
         exclude: raw.exclude,
         custom: raw.custom,
         per_cleaner: raw.per_cleaner,
+        policy: Policy {
+            present: true,
+            older_than_days: raw.policy.older_than_days,
+            larger_than_mb: raw.policy.larger_than_mb,
+            include_manual: raw.policy.include_manual,
+        },
         project_artifacts: ProjectArtifactsConfig {
             roots: if raw.project_artifacts.roots.is_empty() {
                 ProjectArtifactsConfig::default().roots
@@ -207,6 +239,39 @@ mod tests {
         let cfg = Config::load(tmp.path()).unwrap();
         assert_eq!(cfg.logs_keep_days, 7);
         assert!(cfg.logs_extra_targets.is_empty());
+    }
+
+    #[test]
+    fn policy_absent_marks_present_false() {
+        let tmp = TempDir::new().unwrap();
+        let cfg = Config::load(tmp.path()).unwrap();
+        assert!(!cfg.policy.present, "no section: auto must refuse to run");
+    }
+
+    #[test]
+    fn policy_section_is_resolved_with_fields() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("config.toml");
+        std::fs::write(
+            &path,
+            "[policy]\nolder_than_days = 30\nlarger_than_mb = 100\n",
+        )
+        .unwrap();
+        let cfg = Config::load_from_path(&path).unwrap();
+        assert!(cfg.policy.present);
+        assert_eq!(cfg.policy.older_than_days, Some(30));
+        assert_eq!(cfg.policy.larger_than_mb, Some(100));
+        assert!(!cfg.policy.include_manual, "conservative default");
+    }
+
+    #[test]
+    fn policy_include_manual_opt_in_resolves() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("config.toml");
+        std::fs::write(&path, "[policy]\ninclude_manual = true\n").unwrap();
+        let cfg = Config::load_from_path(&path).unwrap();
+        assert!(cfg.policy.present);
+        assert!(cfg.policy.include_manual);
     }
 
     #[test]

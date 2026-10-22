@@ -58,6 +58,7 @@ sasurahime clean orphan-containers   # leftover app containers (interactive)
 sasurahime clean library-caches      # per-app Library/Caches (interactive)
 sasurahime clean vm-swap             # /private/var/vm swap size + uptime (report only)
 sasurahime clean project-artifacts   # stale node_modules / target / .build with manifests
+sasurahime auto                      # unattended policy apply ([policy] in config.toml)
 sasurahime clean apfs-snapshot --thin 10GB   # thin local snapshots toward 10GB free (tmutil)
 
 # --- Options ---
@@ -68,6 +69,47 @@ sasurahime --yes                   # non-interactive clean of the unattended tar
 sasurahime clean uv --permanent    # permanently delete (bypass Trash)
 sasurahime --version
 ```
+
+## Unattended policy
+
+Write a `[policy]` section in `~/.config/sasurahime/config.toml`, then run
+`sasurahime auto` (or `sasurahime auto --dry-run` first):
+
+```toml
+[policy]
+older_than_days = 30   # only entries older than 30 days
+larger_than_mb = 100   # only dirs of at least 100 MB
+include_manual = false # Moderate targets need an explicit opt-in
+```
+
+`auto` cleans only what the policy allows. `Risky` targets (ios-backup,
+apfs-snapshot, ...) never run unattended; skipped targets are listed with the
+explicit `clean <target>` guidance. Results land in `history.json`.
+
+To run it periodically with launchd, save this as
+`~/Library/LaunchAgents/app.sasurahime.auto.plist`:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>app.sasurahime.auto</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/env</string>
+    <string>/opt/homebrew/bin/sasurahime</string>
+    <string>auto</string>
+  </array>
+  <key>StartCalendarInterval</key>
+  <dict><key>Hour</key><integer>10</integer><key>Minute</key><integer>0</integer></dict>
+</dict>
+</plist>
+```
+
+Then `launchctl load ~/Library/LaunchAgents/app.sasurahime.auto.plist`.
+Adjust the binary path (`which sasurahime`); no resident daemon is required.
 
 ## Safety first
 
@@ -240,6 +282,7 @@ sasurahime clean orphan-containers   # アンインストール済みアプリ�
 sasurahime clean library-caches      # アプリ別 Library/Caches（対話的）
 sasurahime clean vm-swap             # /private/var/vm のスワップサイズと稼働日数（表示のみ）
 sasurahime clean project-artifacts   # マニフェスト付きの古い node_modules / target / .build
+sasurahime auto                      # ポリシーに基づく無人実行（config.toml の [policy]）
 sasurahime clean apfs-snapshot --thin 10GB   # ローカルスナップショットを10GB目標で間引き (tmutil)
 
 # --- オプション ---
@@ -250,6 +293,48 @@ sasurahime --yes                   # 確認なしで無人実行対象のみ削�
 sasurahime clean uv --permanent    # 完全削除（ゴミ箱を経由しない）
 sasurahime --version
 ```
+
+## ポリシーによる無人実行
+
+`~/.config/sasurahime/config.toml` に `[policy]` セクションを書き、
+`sasurahime auto`（まずは `sasurahime auto --dry-run`）を実行します:
+
+```toml
+[policy]
+older_than_days = 30   # 30日より古いエントリのみ
+larger_than_mb = 100   # 100MB以上のディレクトリのみ
+include_manual = false # Moderate は明示的なオプトインが必要
+```
+
+`auto` はポリシーが許すものだけを掃除します。`Risky` ターゲット
+（ios-backup、apfs-snapshot など）は無人では動かず、スキップ対象は
+`clean <target>` の明示実行の導線と共に表示されます。結果は
+`history.json` に残ります。
+
+launchd で定期実行するには、以下を
+`~/Library/LaunchAgents/app.sasurahime.auto.plist` として保存します:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>app.sasurahime.auto</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/env</string>
+    <string>/opt/homebrew/bin/sasurahime</string>
+    <string>auto</string>
+  </array>
+  <key>StartCalendarInterval</key>
+  <dict><key>Hour</key><integer>10</integer><key>Minute</key><integer>0</integer></dict>
+</dict>
+</plist>
+```
+
+その後 `launchctl load ~/Library/LaunchAgents/app.sasurahime.auto.plist`。
+バイナリのパスは `which sasurahime` で確認してください。常駐デーモンは不要です。
 
 ## 安全性について
 
