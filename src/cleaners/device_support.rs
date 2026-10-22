@@ -90,6 +90,10 @@ struct DeviceSupportEntry {
 }
 
 impl Cleaner for DeviceSupportCleaner {
+    fn risk(&self) -> crate::cleaner::Risk {
+        crate::cleaner::Risk::Safe
+    }
+
     fn name(&self) -> &'static str {
         "device-support"
     }

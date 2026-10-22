@@ -40,6 +40,12 @@ impl Cleaner for ManualOnly {
         self.inner.is_available()
     }
 
+    fn risk(&self) -> crate::cleaner::Risk {
+        // Display passthrough: the wrapper shows the inner target's own risk
+        // (Moderate, Risky, ...) so the scan table stays informative.
+        self.inner.risk()
+    }
+
     fn sub_targets(&self) -> Vec<(&'static str, u64)> {
         self.inner.sub_targets()
     }
@@ -79,14 +85,27 @@ mod tests {
     }
 
     #[test]
-    fn default_cleaner_allows_auto_clean() {
-        assert!(Stub.auto_clean_allowed());
+    fn default_cleaner_blocks_auto_clean() {
+        // The trait default risk is Moderate, so an unclassified cleaner is
+        // never cleaned unattended.
+        assert!(!Stub.auto_clean_allowed());
+        assert_eq!(crate::cleaner::Risk::Moderate, Stub.risk());
     }
 
     #[test]
     fn manual_only_blocks_auto_clean() {
         let c = ManualOnly::new(Box::new(Stub));
         assert!(!c.auto_clean_allowed());
+    }
+
+    #[test]
+    fn manual_only_delegates_risk_for_display() {
+        let c = ManualOnly::new(Box::new(Stub));
+        assert_eq!(
+            Stub.risk(),
+            c.risk(),
+            "wrapper must pass the inner risk through"
+        );
     }
 
     #[test]

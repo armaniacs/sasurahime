@@ -113,16 +113,16 @@ pub fn run_auto(cleaners: &[Box<dyn Cleaner>]) -> Result<()> {
 
     let pruneable_indices = auto_clean_indices(&results, cleaners);
 
-    // Irreversible cleaners (ios-backup, apfs-snapshot) are only reachable by
-    // an explicit selection, so tell the user they were left out.
-    let skipped: Vec<&str> = results
+    // Non-Safe targets (Moderate, Risky) are only reachable by an explicit
+    // selection, so tell the user they were left out and why.
+    let skipped: Vec<String> = results
         .iter()
         .enumerate()
         .filter(|(i, r)| {
             matches!(r.status, ScanStatus::Pruneable(b) if b > 0)
                 && !cleaners[*i].auto_clean_allowed()
         })
-        .map(|(i, _)| cleaners[i].name())
+        .map(|(i, _)| format!("{} ({})", cleaners[i].name(), cleaners[i].risk().label()))
         .collect();
     if !skipped.is_empty() {
         println!(
@@ -361,6 +361,11 @@ mod tests {
                 skipped: vec![],
                 deleted_paths: vec![],
             })
+        }
+        // Test cleaners represent regenerable caches so the auto-clean
+        // selection logic can be exercised.
+        fn risk(&self) -> crate::cleaner::Risk {
+            crate::cleaner::Risk::Safe
         }
         fn sub_targets(&self) -> Vec<(&'static str, u64)> {
             self.subs.clone()

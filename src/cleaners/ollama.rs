@@ -74,6 +74,10 @@ fn parse_model_size(s: &str) -> u64 {
 }
 
 impl Cleaner for OllamaCleaner {
+    fn risk(&self) -> crate::cleaner::Risk {
+        crate::cleaner::Risk::Safe
+    }
+
     fn is_available(&self) -> bool {
         self.runner.exists("ollama")
     }

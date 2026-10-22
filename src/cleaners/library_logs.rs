@@ -125,6 +125,10 @@ impl LibraryLogsCleaner {
 // ── Cleaner trait ──
 
 impl Cleaner for LibraryLogsCleaner {
+    fn risk(&self) -> crate::cleaner::Risk {
+        crate::cleaner::Risk::Safe
+    }
+
     fn name(&self) -> &'static str {
         "library-logs"
     }

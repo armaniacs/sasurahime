@@ -1,5 +1,5 @@
 use crate::cleaner::{
-    CleanCancelled, CleanResult, Cleaner, PerCleanerFilters, ScanResult, ScanStatus,
+    CleanCancelled, CleanResult, Cleaner, PerCleanerFilters, Risk, ScanResult, ScanStatus,
 };
 use crate::command::CommandRunner;
 #[cfg(test)]
@@ -44,6 +44,8 @@ pub struct CliCleaner {
     fallback_delete: bool,
     /// Sparse VM disk image that pruning inside the VM may not shrink.
     notice: Option<DiskImageNotice>,
+    /// Risk classification (defaults to Moderate via `new`).
+    risk: Risk,
 }
 
 /// A cleaner that removes a fixed list of directories, with optional age and
@@ -57,6 +59,8 @@ pub struct PathCleaner {
     older_than_days: Option<u32>,
     /// Skip entries with total size below this many MiB (None = no filter).
     larger_than_mb: Option<u64>,
+    /// Risk classification (defaults to Moderate via `new`).
+    risk: Risk,
 }
 
 impl CliCleaner {
@@ -75,6 +79,7 @@ impl CliCleaner {
             confirm_message: None,
             fallback_delete: false,
             notice: None,
+            risk: Risk::Moderate,
         }
     }
 
@@ -95,6 +100,12 @@ impl CliCleaner {
         self.notice = Some(notice);
         self
     }
+
+    /// Override the risk classification (default Moderate).
+    pub fn with_risk(mut self, risk: Risk) -> Self {
+        self.risk = risk;
+        self
+    }
 }
 
 impl PathCleaner {
@@ -105,7 +116,14 @@ impl PathCleaner {
             runner,
             older_than_days: None,
             larger_than_mb: None,
+            risk: Risk::Moderate,
         }
+    }
+
+    /// Override the risk classification (default Moderate).
+    pub fn with_risk(mut self, risk: Risk) -> Self {
+        self.risk = risk;
+        self
     }
 }
 
@@ -192,6 +210,7 @@ impl CliCleaner {
                 home.join(".colima"),
                 runner,
             )
+            .with_risk(Risk::Safe)
         }
         .with_notice(DiskImageNotice::new(
             "colima",
@@ -265,7 +284,9 @@ impl PathCleaner {
     }
 
     pub fn downloads(home: &Path, runner: Box<dyn CommandRunner>) -> Self {
-        Self::new("downloads", vec![home.join("Downloads")], runner).with_older_than(30)
+        Self::new("downloads", vec![home.join("Downloads")], runner)
+            .with_older_than(30)
+            .with_risk(Risk::Manual)
     }
 
     #[expect(dead_code)]
@@ -335,7 +356,7 @@ impl PathCleaner {
             }
             Err(_) => home.join(".cache/act"),
         };
-        Self::new("act", vec![cache_dir], runner)
+        Self::new("act", vec![cache_dir], runner).with_risk(Risk::Safe)
     }
 }
 
@@ -404,6 +425,10 @@ impl Cleaner for CliCleaner {
 
     fn advisory(&self) -> Option<String> {
         self.notice.as_ref().and_then(|n| n.render())
+    }
+
+    fn risk(&self) -> Risk {
+        self.risk
     }
 
     fn name(&self) -> &'static str {
@@ -648,6 +673,10 @@ impl Cleaner for PathCleaner {
 
     fn name(&self) -> &'static str {
         self.display_name
+    }
+
+    fn risk(&self) -> Risk {
+        self.risk
     }
 
     fn detect(&self) -> ScanResult {
@@ -1316,6 +1345,7 @@ mod tests {
             display_name: "test",
             dirs: vec![old_dir.clone(), new_dir.clone()],
             runner: Box::new(MissingToolRunner),
+            risk: Risk::Moderate,
             older_than_days: Some(30),
             larger_than_mb: None,
         };
@@ -1347,6 +1377,7 @@ mod tests {
             display_name: "test",
             dirs: vec![small_dir.clone(), large_dir.clone()],
             runner: Box::new(MissingToolRunner),
+            risk: Risk::Moderate,
             older_than_days: None,
             larger_than_mb: Some(1),
         };
@@ -1372,6 +1403,7 @@ mod tests {
             display_name: "test",
             dirs: vec![new_dir],
             runner: Box::new(MissingToolRunner),
+            risk: Risk::Moderate,
             older_than_days: Some(30),
             larger_than_mb: None,
         };

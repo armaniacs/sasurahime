@@ -21,6 +21,10 @@ impl IosCleaner {
 }
 
 impl Cleaner for IosCleaner {
+    fn risk(&self) -> crate::cleaner::Risk {
+        crate::cleaner::Risk::Risky
+    }
+
     fn name(&self) -> &'static str {
         "ios-backup"
     }

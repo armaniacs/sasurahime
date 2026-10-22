@@ -200,6 +200,10 @@ impl MiseCleaner {
 }
 
 impl Cleaner for MiseCleaner {
+    fn risk(&self) -> crate::cleaner::Risk {
+        crate::cleaner::Risk::Safe
+    }
+
     fn is_available(&self) -> bool {
         self.runner.exists("mise")
     }

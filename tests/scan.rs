@@ -324,3 +324,170 @@ fn scan_json_outputs_valid_schema() {
         "scan --json schema check failed:\n{stdout}"
     );
 }
+
+#[test]
+fn scan_shows_risk_column() {
+    let tmp = TempDir::new().unwrap();
+    let bin = tmp.path().join("bin");
+    fs::create_dir_all(&bin).unwrap();
+    for tool in ["uv", "brew"] {
+        let stub = bin.join(tool);
+        fs::write(&stub, "#!/bin/sh\nexit 0\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&stub, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+    }
+    let path = format!(
+        "{}:{}",
+        bin.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+
+    let output = sasurahime(tmp.path())
+        .env("PATH", path)
+        .arg("scan")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("Risk"),
+        "expected a Risk column header, got:\n{stdout}"
+    );
+    // Every one of the four labels may appear; uv (regenerable cache) must be Safe.
+    let uv_row = stdout
+        .lines()
+        .find(|l| l.contains("uv") && l.contains("Safe"))
+        .expect("uv row classified Safe in the scan table");
+    assert!(
+        uv_row.contains("pruneable") || uv_row.contains("not found") || uv_row.contains("clean"),
+        "uv row must be a scan table row, got: {uv_row}"
+    );
+}
+
+#[test]
+fn yes_runs_only_safe_risk_targets_and_skips_the_rest() {
+    let tmp = TempDir::new().unwrap();
+    let bin_dir = tmp.path().join("bin");
+    fs::create_dir_all(&bin_dir).unwrap();
+    // uv is present (Safe target, pruneable below). cargo is intentionally
+    // absent: the Moderate cargo cache must be skipped, not cleaned.
+    let uv_stub = bin_dir.join("uv");
+    fs::write(&uv_stub, "#!/bin/sh\nexit 0\n").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&uv_stub, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    // Safe target with reclaimable data: uv cache archive.
+    let uv_cache = tmp.path().join(".cache/uv/archive-v0");
+    fs::create_dir_all(&uv_cache).unwrap();
+    fs::write(uv_cache.join("dummy"), b"x".repeat(1024)).unwrap();
+    // Moderate target with reclaimable data: cargo registry cache. `--yes`
+    // must not touch it because cargo is not Risk::Safe.
+    let cargo_cache = tmp.path().join(".cargo/registry/cache");
+    fs::create_dir_all(&cargo_cache).unwrap();
+    fs::write(cargo_cache.join("dummy.crate"), b"x".repeat(512)).unwrap();
+
+    let original_path = std::env::var("PATH").unwrap_or_default();
+    let output = sasurahime(tmp.path())
+        .env("PATH", format!("{}:{original_path}", bin_dir.display()))
+        .args(["--permanent", "--yes"])
+        .write_stdin("y\n")
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success(),
+        "exit code was not 0\nstdout:\n{stdout}\nstderr:\n{stderr}"
+    );
+
+    // The Safe target ran; the Moderate target was skipped with a reason.
+    // The stub `uv` does not actually delete, so prove selection via the
+    // confirmation summary: exactly one item (uv) was chosen for --yes.
+    assert!(
+        stdout.contains("Found 1 item"),
+        "exactly the Safe target must run under --yes, got:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("Skipped") && stdout.contains("cargo (Moderate)"),
+        "cargo (Moderate) must be skipped with a reason, got:\n{stdout}"
+    );
+    assert!(
+        cargo_cache.join("dummy.crate").exists(),
+        "cargo cache (Moderate) must not be deleted by --yes"
+    );
+}
+
+#[test]
+fn yes_never_runs_irreversible_risky_targets() {
+    let tmp = TempDir::new().unwrap();
+    // ios-backup (Risky) with pruneable data must be untouched by --yes.
+    // detect() sums the sizes of the per-device backup subdirectories.
+    let backup_dir = tmp
+        .path()
+        .join("Library/Application Support/MobileSync/Backup");
+    let device_backup = backup_dir.join("000000-AAAAAAAA");
+    fs::create_dir_all(&device_backup).unwrap();
+    fs::write(device_backup.join("manifest"), b"x".repeat(64)).unwrap();
+
+    let original_path = std::env::var("PATH").unwrap_or_default();
+    let output = sasurahime(tmp.path())
+        .env("PATH", original_path)
+        .args(["--permanent", "--yes"])
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("ios-backup") || stdout.contains("Skipped"),
+        "Risky target should be reported as skipped, got:\n{stdout}"
+    );
+    assert!(
+        backup_dir.exists(),
+        "ios-backup (Risky) must never be deleted by --yes"
+    );
+}
+
+#[test]
+fn config_exclude_removes_the_risk_from_scan() {
+    let tmp = TempDir::new().unwrap();
+    let cargo_cache = tmp.path().join(".cargo/registry/cache");
+    fs::create_dir_all(&cargo_cache).unwrap();
+    fs::write(cargo_cache.join("dummy.crate"), b"x".repeat(512)).unwrap();
+
+    let config_dir = tmp.path().join(".config/sasurahime");
+    fs::create_dir_all(&config_dir).unwrap();
+    // Excluded targets are removed from all_cleaners: no scan row, no risk.
+    fs::write(config_dir.join("config.toml"), "exclude = [\"cargo\"]\n").unwrap();
+
+    let output = sasurahime(tmp.path())
+        .arg("scan")
+        .arg("--json")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let json_path = tmp.path().join("scan.json");
+    fs::write(&json_path, stdout.as_bytes()).unwrap();
+    let check = std::process::Command::new("jq")
+        .arg("-e")
+        .arg(
+            r#"([.targets[] | select(.name == "cargo")] | length) == 0 and
+               (all(.targets[]; has("name") and has("status") and has("risk") and has("estimable")))"#,
+        )
+        .arg(&json_path)
+        .status()
+        .expect("jq must be available for the JSON schema test");
+    assert!(
+        check.success(),
+        "excluded target must not appear:\n{stdout}"
+    );
+}

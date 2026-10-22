@@ -73,9 +73,22 @@ sasurahime --version
   restore them from Finder. Use `--permanent` to permanently delete.
 - mise runtime removal checks both global and per-project `.mise.toml` before deleting.
 - macOS immutable flags (`uchg`) are handled automatically.
-- `--yes` cleans only the unattended set. `ios-backup` and `apfs-snapshot`
-  require an explicit choice (the picker or `--all`) and are listed as
-  skipped.
+- `--yes` cleans only `Safe` targets. Targets classified `Moderate` / `Risky` /
+  `Manual` are listed as skipped with their classification and require an
+  explicit choice (the picker or `clean <target>`).
+
+### Risk classification
+
+One classification per target decides `--yes` behavior, the TUI initial
+selection and the scan display (`scan`, `scan --json`). New targets default to
+`Moderate`, so an unclassified target never runs unattended.
+
+| Risk | Meaning | Behavior under `--yes` | Examples |
+|------|---------|------------------------|----------|
+| `Safe` | Regenerable developer caches | cleaned | `uv`, `brew`, `mise`, `browsers`, `xcode`, `logs`, `act`, `huggingface`, `pre-commit`, `library-logs`, `colima`, `ollama`, `device-support` |
+| `Moderate` | Large or partially user-visible data | skipped (explicit choice) | `docker`, `cargo`, `npm`, `bun`, `go`, `pip`, `rustup`, `simulator`, ... |
+| `Risky` | Destructive or irreversible | never | `ios-backup`, `apfs-snapshot` |
+| `Manual` | User data | never | `downloads`, `app-support`, `library-caches`, `orphan-containers` |
 
 ## Name
 
@@ -200,8 +213,22 @@ sasurahime --version
 - **Trash モードがデフォルトで有効**です。削除したファイルは macOS のゴミ箱に移動されるため、Finder から復元できます。完全に消去したい場合は `--permanent` フラグを使用してください。
 - mise のランタイム削除は、グローバル設定とプロジェクト固有の `.mise.toml` を両方チェックしてから実行します。
 - macOS の immutable フラグ（`uchg`）は自動的に解除してから削除します。
-- `--yes` が削除するのは無人実行対象のみです。`ios-backup` と `apfs-snapshot`
-  は明示的な選択（ピッカーまたは `--all`）が必要で、スキップとして表示されます。
+- `--yes` が削除するのは `Safe` 分類のターゲットのみです。`Moderate` /
+  `Risky` / `Manual` のターゲットは分類付きでスキップとして表示され、
+  明示的な選択（ピッカーまたは `clean <target>`）が必要です。
+
+### リスク分類
+
+ターゲットごとの分類が1つ、`--yes` の挙動・TUI の初期選択・scan の表示
+（`scan`、`scan --json`）を決めます。新規ターゲットの既定値は `Moderate` で、
+分類の付け忘れで無人実行に入ることはありません。
+
+| 分類 | 意味 | `--yes` での挙動 | 例 |
+|------|------|------------------|-----|
+| `Safe` | 再生成される開発キャッシュ | 削除する | `uv`, `brew`, `mise`, `browsers`, `xcode`, `logs`, `act`, `huggingface`, `pre-commit`, `library-logs`, `colima`, `ollama`, `device-support` |
+| `Moderate` | 大きい、または一部ユーザーデータを含む | スキップ（明示的な選択） | `docker`, `cargo`, `npm`, `bun`, `go`, `pip`, `rustup`, `simulator` など |
+| `Risky` | 破壊的・不可逆 | 動かない | `ios-backup`, `apfs-snapshot` |
+| `Manual` | ユーザーデータ | 動かない | `downloads`, `app-support`, `library-caches`, `orphan-containers` |
 
 ## 名前の由来
 

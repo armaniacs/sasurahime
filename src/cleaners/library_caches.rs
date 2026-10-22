@@ -276,6 +276,10 @@ impl LibraryCachesCleaner {
 }
 
 impl Cleaner for LibraryCachesCleaner {
+    fn risk(&self) -> crate::cleaner::Risk {
+        crate::cleaner::Risk::Manual
+    }
+
     fn name(&self) -> &'static str {
         "library-caches"
     }

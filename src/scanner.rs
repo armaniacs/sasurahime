@@ -1,4 +1,4 @@
-use crate::cleaner::{Cleaner, ScanResult, ScanStatus};
+use crate::cleaner::{Cleaner, Risk, ScanResult, ScanStatus};
 use crate::format::format_bytes;
 use comfy_table::presets::{ASCII_FULL, UTF8_FULL};
 use comfy_table::Table;
@@ -52,13 +52,19 @@ pub(crate) struct ScanJsonEntry {
     /// Measured bytes, or `null` when the size is not measurable.
     pub(crate) size_bytes: Option<u64>,
     pub(crate) status: &'static str,
+    /// Risk classification (Safe / Moderate / Risky / Manual).
+    pub(crate) risk: &'static str,
     /// Whether a byte estimate is available for this target.
     pub(crate) estimable: bool,
 }
 
-/// Builds the JSON entries for already-collected scan results.
-pub(crate) fn scan_json_entries(results: &[ScanResult]) -> Vec<ScanJsonEntry> {
-    results
+/// Serializes the scan document: entries plus the total reclaimable bytes.
+pub(crate) fn scan_json_document(
+    results: &[ScanResult],
+    total: u64,
+    risks: &std::collections::HashMap<&str, Risk>,
+) -> String {
+    let targets: Vec<ScanJsonEntry> = results
         .iter()
         .map(|r| ScanJsonEntry {
             name: r.name,
@@ -67,15 +73,12 @@ pub(crate) fn scan_json_entries(results: &[ScanResult]) -> Vec<ScanJsonEntry> {
                 _ => None,
             },
             status: status_label(&r.status),
+            risk: risks.get(r.name).map(|risk| risk.label()).unwrap_or("-"),
             estimable: matches!(r.status, ScanStatus::Pruneable(_)),
         })
-        .collect()
-}
-
-/// Serializes the scan document: entries plus the total reclaimable bytes.
-pub(crate) fn scan_json_document(results: &[ScanResult], total: u64) -> String {
+        .collect();
     let doc = serde_json::json!({
-        "targets": scan_json_entries(results),
+        "targets": targets,
         "total_reclaimable_bytes": total,
     });
     serde_json::to_string_pretty(&doc).unwrap_or_else(|_| "{}".to_string())
@@ -103,6 +106,9 @@ fn scan_results(cleaners: &[Box<dyn Cleaner>]) -> Vec<ScanResult> {
 pub fn run_scan(cleaners: &[Box<dyn Cleaner>]) {
     let results = scan_results(cleaners);
     let available: Vec<&Box<dyn Cleaner>> = cleaners.iter().filter(|c| c.is_available()).collect();
+    // Same classification as `--yes` and the TUI, shown per row.
+    let risks: std::collections::HashMap<&str, Risk> =
+        available.iter().map(|c| (c.name(), c.risk())).collect();
 
     let mut table = Table::new();
     if crate::history::USE_UNICODE.load(std::sync::atomic::Ordering::Relaxed) {
@@ -110,7 +116,7 @@ pub fn run_scan(cleaners: &[Box<dyn Cleaner>]) {
     } else {
         table.load_preset(ASCII_FULL);
     }
-    table.set_header(vec!["Category", "Size", "Status", "Target"]);
+    table.set_header(vec!["Category", "Size", "Status", "Risk", "Target"]);
 
     let mut total: u64 = 0;
     let mut unavailable: usize = 0;
@@ -123,8 +129,9 @@ pub fn run_scan(cleaners: &[Box<dyn Cleaner>]) {
         if matches!(r.status, ScanStatus::Unavailable) {
             unavailable += 1;
         }
+        let risk = risks.get(r.name).map(|risk| risk.label()).unwrap_or("-");
         let target = r.primary_target.as_deref().unwrap_or("-");
-        table.add_row(vec![r.name, &size, status, target]);
+        table.add_row(vec![r.name, &size, status, risk, target]);
     }
 
     println!("{table}");
@@ -152,6 +159,9 @@ pub fn run_scan(cleaners: &[Box<dyn Cleaner>]) {
 /// prompt. Used by `scan --json` for scripts and CI.
 pub fn run_scan_json(cleaners: &[Box<dyn Cleaner>]) {
     let results = scan_results(cleaners);
+    let available: Vec<&Box<dyn Cleaner>> = cleaners.iter().filter(|c| c.is_available()).collect();
+    let risks: std::collections::HashMap<&str, Risk> =
+        available.iter().map(|c| (c.name(), c.risk())).collect();
     let total: u64 = results
         .iter()
         .filter_map(|r| match r.status {
@@ -159,7 +169,7 @@ pub fn run_scan_json(cleaners: &[Box<dyn Cleaner>]) {
             _ => None,
         })
         .sum();
-    println!("{}", scan_json_document(&results, total));
+    println!("{}", scan_json_document(&results, total, &risks));
 }
 
 #[cfg(test)]
@@ -233,20 +243,26 @@ mod tests {
             r("gone", ScanStatus::NotFound),
             r("failed", ScanStatus::Unavailable),
         ];
-        let entries = scan_json_entries(&results);
+        let mut risks = std::collections::HashMap::new();
+        risks.insert("uv", Risk::Safe);
+        risks.insert("docker", Risk::Moderate);
+        let doc = scan_json_document(&results, 1234, &risks);
+        let parsed: serde_json::Value = serde_json::from_str(&doc).expect("valid JSON");
+        let entries = parsed["targets"].as_array().unwrap();
         assert_eq!(entries.len(), 4);
         let uv = &entries[0];
-        assert_eq!(uv.name, "uv");
-        assert_eq!(uv.size_bytes, Some(1234));
-        assert_eq!(uv.status, "pruneable");
-        assert!(uv.estimable, "measured bytes are estimable");
+        assert_eq!(uv["name"], "uv");
+        assert_eq!(uv["size_bytes"], 1234);
+        assert_eq!(uv["status"], "pruneable");
+        assert_eq!(uv["risk"], "Safe");
+        assert_eq!(uv["estimable"], true);
         let docker = &entries[1];
-        assert_eq!(docker.name, "docker");
-        assert_eq!(docker.size_bytes, None);
-        assert_eq!(docker.status, "unknown");
-        assert!(!docker.estimable);
-        assert_eq!(entries[2].status, "not found");
-        assert_eq!(entries[3].status, "unavailable");
+        assert!(docker["size_bytes"].is_null());
+        assert_eq!(docker["status"], "unknown");
+        assert_eq!(docker["risk"], "Moderate");
+        assert_eq!(docker["estimable"], false);
+        assert_eq!(entries[2]["status"], "not found");
+        assert_eq!(entries[3]["status"], "unavailable");
     }
 
     #[test]
@@ -262,11 +278,16 @@ mod tests {
                 _ => None,
             })
             .sum();
-        let doc = scan_json_document(&results, total);
+        let mut risks = std::collections::HashMap::new();
+        risks.insert("uv", Risk::Safe);
+        risks.insert("docker", Risk::Moderate);
+        let doc = scan_json_document(&results, total, &risks);
         let parsed: serde_json::Value = serde_json::from_str(&doc).expect("valid JSON");
         assert_eq!(parsed["total_reclaimable_bytes"], 100);
         assert_eq!(parsed["targets"].as_array().unwrap().len(), 2);
         assert_eq!(parsed["targets"][1]["status"], "unknown");
+        assert_eq!(parsed["targets"][0]["risk"], "Safe");
+        assert_eq!(parsed["targets"][1]["risk"], "Moderate");
     }
 
     #[test]

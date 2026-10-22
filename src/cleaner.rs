@@ -129,6 +129,35 @@ pub enum PerCleanerFilters {
     Both,
 }
 
+/// Risk classification of a clean target. One classification decides
+/// `--yes` behavior, TUI initial selection and the scan display.
+///
+/// The default is `Moderate` so a new target can never silently become
+/// safe to clean unattended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Risk {
+    /// Regenerable developer caches: safe to clean unattended.
+    Safe,
+    /// Large or partially user-visible data: requires explicit selection.
+    Moderate,
+    /// Destructive or irreversible operations.
+    Risky,
+    /// User data: cleaned only when explicitly selected.
+    Manual,
+}
+
+impl Risk {
+    /// Label used by the scan table, `scan --json` and the TUI.
+    pub fn label(self) -> &'static str {
+        match self {
+            Risk::Safe => "Safe",
+            Risk::Moderate => "Moderate",
+            Risk::Risky => "Risky",
+            Risk::Manual => "Manual",
+        }
+    }
+}
+
 pub trait Cleaner: Send + Sync {
     fn name(&self) -> &'static str;
     /// Read-only. Never deletes anything.
@@ -150,11 +179,16 @@ pub trait Cleaner: Send + Sync {
         true
     }
 
-    /// Whether `--yes` (run_auto) may clean this target. Targets that run
-    /// destructive external commands or delete user data return false and are
-    /// cleaned only when explicitly selected.
+    /// Risk classification of this target. Defaults to `Moderate`: unclassified
+    /// targets are never cleaned unattended.
+    fn risk(&self) -> Risk {
+        Risk::Moderate
+    }
+
+    /// Whether `--yes` (run_auto) may clean this target. Derived from
+    /// `risk()`: only `Risk::Safe` targets run unattended.
     fn auto_clean_allowed(&self) -> bool {
-        true
+        self.risk() == Risk::Safe
     }
 
     /// Read-only note shown under the scan table. Must not run external commands.
@@ -196,6 +230,65 @@ mod tests {
     fn is_skippable_error_permission_denied() {
         let e = anyhow::Error::from(std::io::Error::from(std::io::ErrorKind::PermissionDenied));
         assert!(is_skippable_error(&e));
+    }
+
+    // ── Risk ──
+
+    struct StubCleaner {
+        risk: Option<Risk>,
+    }
+    impl Cleaner for StubCleaner {
+        fn name(&self) -> &'static str {
+            "stub"
+        }
+        fn detect(&self) -> ScanResult {
+            ScanResult::new("stub", ScanStatus::NotFound)
+        }
+        fn clean(&self, _: bool, _: &dyn ProgressReporter) -> Result<CleanResult> {
+            unimplemented!()
+        }
+        fn risk(&self) -> Risk {
+            self.risk.unwrap_or(Risk::Moderate)
+        }
+    }
+
+    #[test]
+    fn risk_defaults_to_moderate() {
+        let c = StubCleaner { risk: None };
+        assert_eq!(
+            c.risk(),
+            Risk::Moderate,
+            "unclassified targets are Moderate"
+        );
+        assert!(!c.auto_clean_allowed(), "Moderate never runs unattended");
+    }
+
+    #[test]
+    fn risk_orders_safe_before_manual() {
+        assert!(Risk::Safe < Risk::Moderate);
+        assert!(Risk::Moderate < Risk::Risky);
+        assert!(Risk::Risky < Risk::Manual);
+    }
+
+    #[test]
+    fn risk_labels_match_display_vocabulary() {
+        assert_eq!(Risk::Safe.label(), "Safe");
+        assert_eq!(Risk::Moderate.label(), "Moderate");
+        assert_eq!(Risk::Risky.label(), "Risky");
+        assert_eq!(Risk::Manual.label(), "Manual");
+    }
+
+    #[test]
+    fn auto_clean_allowed_derives_from_safe_risk() {
+        for (risk, allowed) in [
+            (Risk::Safe, true),
+            (Risk::Moderate, false),
+            (Risk::Risky, false),
+            (Risk::Manual, false),
+        ] {
+            let c = StubCleaner { risk: Some(risk) };
+            assert_eq!(c.auto_clean_allowed(), allowed, "risk {risk:?}");
+        }
     }
 
     #[test]

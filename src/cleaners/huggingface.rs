@@ -38,6 +38,10 @@ impl HuggingFaceCleaner {
 }
 
 impl Cleaner for HuggingFaceCleaner {
+    fn risk(&self) -> crate::cleaner::Risk {
+        crate::cleaner::Risk::Safe
+    }
+
     fn name(&self) -> &'static str {
         "huggingface"
     }

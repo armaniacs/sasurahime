@@ -4,6 +4,29 @@ All notable changes to sasurahime will be documented in this file. The format is
 
 ---
 
+## [Unreleased]
+
+### Changed
+
+- **BREAKING (`--yes`):** every target now carries a risk classification
+  (`Safe` / `Moderate` / `Risky` / `Manual`) and `--yes` cleans only `Safe`
+  targets. Previously a central 13-name list decided this; `docker`, `cargo`,
+  `npm` and other large targets now require an explicit choice. Skipped
+  targets are reported with their classification (e.g. `cargo (Moderate)`).
+  Existing cron users should review the classification table in the README.
+- `scan` and `scan --json` show the classification per row (`Risk` column /
+  `risk` field); the TUI initial selection follows the same classification.
+- Unclassified targets default to `Moderate`, so adding a cleaner can never
+  silently opt it into unattended deletion.
+
+### Added
+
+- `Cleaner::risk() -> Risk` with the classification table covering all
+  registered targets; `auto_clean_allowed()` is derived from it
+  (`risk() == Safe`).
+
+---
+
 ## [0.3.0] - 2026-10-21
 
 ### Added

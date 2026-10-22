@@ -83,6 +83,10 @@ pub fn parse_snapshot_names(output: &str) -> Vec<String> {
 }
 
 impl Cleaner for ApfsSnapshotCleaner {
+    fn risk(&self) -> crate::cleaner::Risk {
+        crate::cleaner::Risk::Risky
+    }
+
     fn is_available(&self) -> bool {
         self.runner.exists("tmutil")
     }

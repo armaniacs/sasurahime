@@ -447,24 +447,9 @@ fn home() -> PathBuf {
         .unwrap_or_else(|_| home_dir().expect("cannot determine HOME directory"))
 }
 
-/// Targets that `--yes` may clean. Every other registered target is wrapped in
-/// ManualOnly so it runs only when selected in the TUI or via `clean <target>`.
-const AUTO_CLEAN_TARGETS: &[&str] = &[
-    "uv",
-    "brew",
-    "mise",
-    "browsers",
-    "xcode",
-    "logs",
-    "act",
-    "huggingface",
-    "pre-commit",
-    "library-logs",
-    "colima",
-    "ollama",
-    "device-support",
-];
-
+/// Every cleaner whose `risk()` is not `Safe` is wrapped in `ManualOnly` so it
+/// runs only when selected in the TUI or via `clean <target>`. There is no
+/// central list: the classification on each cleaner decides.
 fn special_cleaners(
     home: &std::path::Path,
     config: &config::Config,
@@ -517,7 +502,7 @@ fn all_cleaners(home: &std::path::Path, config: &config::Config) -> Vec<Box<dyn 
         .into_iter()
         .chain(special_cleaners(home, config))
         .map(|c| -> Box<dyn cleaner::Cleaner> {
-            if AUTO_CLEAN_TARGETS.contains(&c.name()) {
+            if c.auto_clean_allowed() {
                 c
             } else {
                 Box::new(cleaners::manual_only::ManualOnly::new(c))
@@ -1124,6 +1109,92 @@ mod tests {
 
     const NOT_SCANNED: &[&str] = &["caches", "trash"];
 
+    // Risk classification table: every registered cleaner must match. Listing
+    // every Moderate entry explicitly catches accidental defaults (未分類の検出).
+    const RISK_EXPECTED: &[(&str, cleaner::Risk)] = &[
+        // Safe: regenerable developer caches, safe unattended.
+        ("uv", cleaner::Risk::Safe),
+        ("brew", cleaner::Risk::Safe),
+        ("mise", cleaner::Risk::Safe),
+        ("browsers", cleaner::Risk::Safe),
+        ("act", cleaner::Risk::Safe),
+        ("xcode", cleaner::Risk::Safe),
+        ("logs", cleaner::Risk::Safe),
+        ("huggingface", cleaner::Risk::Safe),
+        ("pre-commit", cleaner::Risk::Safe),
+        ("library-logs", cleaner::Risk::Safe),
+        ("colima", cleaner::Risk::Safe),
+        ("ollama", cleaner::Risk::Safe),
+        ("device-support", cleaner::Risk::Safe),
+        // Manual: user data, only cleaned when explicitly selected.
+        ("downloads", cleaner::Risk::Manual),
+        ("app-support", cleaner::Risk::Manual),
+        ("library-caches", cleaner::Risk::Manual),
+        ("orphan-containers", cleaner::Risk::Manual),
+        // Risky: destructive or irreversible.
+        ("ios-backup", cleaner::Risk::Risky),
+        ("apfs-snapshot", cleaner::Risk::Risky),
+        // Moderate: large or partially user-visible data.
+        ("bun", cleaner::Risk::Moderate),
+        ("go", cleaner::Risk::Moderate),
+        ("pip", cleaner::Risk::Moderate),
+        ("node-gyp", cleaner::Risk::Moderate),
+        ("npm", cleaner::Risk::Moderate),
+        ("yarn", cleaner::Risk::Moderate),
+        ("pnpm", cleaner::Risk::Moderate),
+        ("cargo", cleaner::Risk::Moderate),
+        ("docker", cleaner::Risk::Moderate),
+        ("orbstack", cleaner::Risk::Moderate),
+        ("cocoapods", cleaner::Risk::Moderate),
+        ("spm", cleaner::Risk::Moderate),
+        ("conda", cleaner::Risk::Moderate),
+        ("poetry", cleaner::Risk::Moderate),
+        ("pipx", cleaner::Risk::Moderate),
+        ("deno", cleaner::Risk::Moderate),
+        ("dotnet", cleaner::Risk::Moderate),
+        ("gem", cleaner::Risk::Moderate),
+        ("bundle", cleaner::Risk::Moderate),
+        ("rustup", cleaner::Risk::Moderate),
+        ("simulator", cleaner::Risk::Moderate),
+        ("gradle", cleaner::Risk::Moderate),
+        ("jetbrains", cleaner::Risk::Moderate),
+        ("vscode-extensions", cleaner::Risk::Moderate),
+        ("maven", cleaner::Risk::Moderate),
+        ("terraform", cleaner::Risk::Moderate),
+        ("flutter", cleaner::Risk::Moderate),
+        ("volta", cleaner::Risk::Moderate),
+        ("sbt", cleaner::Risk::Moderate),
+        ("tree-sitter", cleaner::Risk::Moderate),
+    ];
+
+    #[test]
+    fn every_cleaner_has_expected_risk() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cleaners = all_cleaners(tmp.path(), &config::Config::default());
+        for (name, risk) in RISK_EXPECTED {
+            let c = cleaners
+                .iter()
+                .find(|c| c.name() == *name)
+                .unwrap_or_else(|| panic!("RISK_EXPECTED has unregistered name: {name}"));
+            assert_eq!(c.risk(), *risk, "risk mismatch for {name}");
+        }
+    }
+
+    #[test]
+    fn auto_clean_allowed_only_for_safe() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cleaners = all_cleaners(tmp.path(), &config::Config::default());
+        for c in &cleaners {
+            assert_eq!(
+                c.auto_clean_allowed(),
+                c.risk() == cleaner::Risk::Safe,
+                "auto policy mismatch for {} (risk {:?})",
+                c.name(),
+                c.risk()
+            );
+        }
+    }
+
     #[test]
     fn every_clean_target_is_registered_in_all_cleaners() {
         let tmp = tempfile::TempDir::new().unwrap();
@@ -1181,53 +1252,31 @@ mod tests {
         }
     }
 
-    // Irreversible cleaners (ios-backup, apfs-snapshot) stay registered and
-    // scanned, but must never be chosen by `--yes`.
-    const AUTO_CLEAN_EXPECTED: &[&str] = &[
-        "uv",
-        "brew",
-        "mise",
-        "browsers",
-        "xcode",
-        "logs",
-        "act",
-        "huggingface",
-        "pre-commit",
-        "library-logs",
-        "colima",
-        "ollama",
-        "device-support",
-    ];
-
     #[test]
-    fn only_auto_clean_targets_are_auto_clean_allowed() {
+    fn only_safe_risk_targets_are_auto_clean_allowed() {
+        // The single classification decides: Safe runs under --yes, everything
+        // else is wrapped in ManualOnly. Irreversible cleaners (ios-backup,
+        // apfs-snapshot, Risky) stay registered and scanned but never run
+        // unattended.
         let tmp = tempfile::TempDir::new().unwrap();
         let cleaners = all_cleaners(tmp.path(), &config::Config::default());
         for c in &cleaners {
             assert_eq!(
                 c.auto_clean_allowed(),
-                AUTO_CLEAN_TARGETS.contains(&c.name()),
+                c.risk() == cleaner::Risk::Safe,
                 "auto policy mismatch for {}",
                 c.name()
             );
         }
         let names = names_of(&cleaners);
-        for t in AUTO_CLEAN_TARGETS {
-            assert!(
-                names.contains(t),
-                "AUTO_CLEAN_TARGETS has unknown name: {t}"
-            );
-        }
-        assert_eq!(AUTO_CLEAN_TARGETS, AUTO_CLEAN_EXPECTED);
-        for irreversible in ["ios-backup", "apfs-snapshot"] {
-            assert!(
-                names.contains(&irreversible),
-                "{irreversible} must stay registered"
-            );
-            let c = cleaners.iter().find(|c| c.name() == irreversible).unwrap();
-            assert!(
-                !c.auto_clean_allowed(),
-                "{irreversible} must never run under --yes"
+        for (name, risk) in RISK_EXPECTED {
+            assert!(names.contains(name), "{name} must stay registered");
+            let expected_allowed = *risk == cleaner::Risk::Safe;
+            let c = cleaners.iter().find(|c| c.name() == *name).unwrap();
+            assert_eq!(
+                c.auto_clean_allowed(),
+                expected_allowed,
+                "auto policy for {name}"
             );
         }
     }
