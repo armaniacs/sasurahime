@@ -490,30 +490,40 @@ fn project_artifact_roots(home: &std::path::Path, config: &config::Config) -> Ve
     }
 }
 
+/// Builds the `logs` cleaner from the config's extra log targets. This is
+/// the ONE factory for the logs target: the scan registry (`special_cleaners`)
+/// and the `clean logs` arm both construct through it, so the keep-days
+/// fallback and the extra-target mapping live in exactly one place.
+/// `keep_days` overrides the config's effective keep-days (the `--keep-days`
+/// CLI flag); `None` uses the config value.
+fn log_cleaner_from_config(
+    home: &std::path::Path,
+    config: &config::Config,
+    keep_days: Option<u32>,
+) -> cleaners::log::LogCleaner {
+    let days = keep_days.unwrap_or_else(|| config.effective_logs_keep_days());
+    let extra: Vec<cleaners::log::OwnedLogTarget> = config
+        .logs_extra_targets
+        .iter()
+        .map(|t| cleaners::log::OwnedLogTarget {
+            name: t.name.clone(),
+            path: config::Config::expand_tilde(&t.path, home),
+            exclude: t.exclude.clone(),
+        })
+        .collect();
+    cleaners::log::LogCleaner::new_with_extra(home, days, extra)
+}
+
 fn special_cleaners(
     home: &std::path::Path,
     config: &config::Config,
 ) -> Vec<Box<dyn cleaner::Cleaner>> {
-    // Per-cleaner `older_than_days` for logs falls back to `config.logs_keep_days`.
-    let logs_keep_days = config.effective_logs_keep_days();
     vec![
         Box::new(cleaners::xcode::XcodeCleaner::new(
             home,
             Box::new(SystemCommandRunner),
         )),
-        Box::new(cleaners::log::LogCleaner::new_with_extra(
-            home,
-            logs_keep_days,
-            config
-                .logs_extra_targets
-                .iter()
-                .map(|t| cleaners::log::OwnedLogTarget {
-                    name: t.name.clone(),
-                    path: config::Config::expand_tilde(&t.path, home),
-                    exclude: t.exclude.clone(),
-                })
-                .collect(),
-        )),
+        Box::new(log_cleaner_from_config(home, config, None)),
         Box::new(cleaners::library_logs::LibraryLogsCleaner::new(
             home,
             Box::new(SystemCommandRunner),
@@ -522,6 +532,10 @@ fn special_cleaners(
             home,
             Box::new(SystemCommandRunner),
         )),
+        // keep=2 is the shared default: the `clean device-support` CLI flag
+        // carries the same `default_value = "2"`, so the registry and the
+        // CLI arm build identically unless --keep is passed explicitly.
+        // detect() ignores keep; only the clean path uses it.
         Box::new(cleaners::device_support::DeviceSupportCleaner::new(
             home,
             2,
@@ -1033,21 +1047,10 @@ fn main() -> anyhow::Result<()> {
                         println!("Total freed: {}", format::format_bytes(summary.total_freed));
                     }
                     CleanTarget::Logs { dry_run, keep_days } => {
-                        let days = keep_days.unwrap_or_else(|| config.effective_logs_keep_days());
-                        let extra: Vec<cleaners::log::OwnedLogTarget> = config
-                            .logs_extra_targets
-                            .iter()
-                            .map(|t| cleaners::log::OwnedLogTarget {
-                                name: t.name.clone(),
-                                path: config::Config::expand_tilde(&t.path, &home),
-                                exclude: t.exclude.clone(),
-                            })
-                            .collect();
                         run_and_exit(
                             "logs",
                             |dry, rep| {
-                                cleaners::log::LogCleaner::new_with_extra(&home, days, extra)
-                                    .clean(dry, rep)
+                                log_cleaner_from_config(&home, &config, keep_days).clean(dry, rep)
                             },
                             dry_run,
                             reporter.as_ref(),
