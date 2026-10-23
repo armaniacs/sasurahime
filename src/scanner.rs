@@ -87,25 +87,43 @@ pub(crate) fn scan_json_document(
 }
 
 /// Runs detect on every available cleaner and returns the results
-/// index-aligned with `cleaners`: `results[i]` always describes
-/// `cleaners[i]`, with unavailable cleaners keeping their `NotFound`
-/// placeholder. The one detect interface; parallel/progress mechanics move
-/// behind it.
-pub fn detect_all(cleaners: &[Box<dyn Cleaner>]) -> Vec<ScanResult> {
+/// index-aligned with `cleaners` together with the single `is_available` pass:
+/// `results[i]` always describes `cleaners[i]`, with unavailable cleaners
+/// keeping their `NotFound` placeholder, and `available` lists the indices
+/// that were scanned so callers (run_scan / run_scan_json) reuse it for their
+/// rows and risks map instead of re-filtering. A panicking detect is isolated
+/// per cleaner as `NotFound`. The one detect interface; parallel/progress
+/// mechanics move behind it.
+pub fn detect_all(cleaners: &[Box<dyn Cleaner>]) -> (Vec<ScanResult>, Vec<usize>) {
     let total = cleaners.len();
     let mut results: Vec<ScanResult> = (0..total)
         .map(|i| ScanResult::new(cleaners[i].name(), ScanStatus::NotFound))
         .collect();
 
-    let scan_indices: Vec<usize> = (0..total).filter(|&i| cleaners[i].is_available()).collect();
+    // The one `is_available` pass per call: detect_all owns it and returns the
+    // indices, so no caller ever re-filters.
+    let available: Vec<usize> = (0..total).filter(|&i| cleaners[i].is_available()).collect();
 
-    if !scan_indices.is_empty() {
+    if !available.is_empty() {
         let scanned: Vec<(usize, ScanResult)> =
-            crate::progress::with_parallel_scan(scan_indices.len(), |pb| {
-                scan_indices
+            crate::progress::with_parallel_scan(available.len(), |pb| {
+                available
                     .par_iter()
                     .map(|&i| {
-                        let r = cleaners[i].detect();
+                        // WHY: one bad cleaner must not take down scan/--yes/TUI.
+                        // detect() runs arbitrary per-cleaner logic; a panic here
+                        // used to propagate through the rayon block and abort the
+                        // whole preamble, losing every other cleaner's result.
+                        // Isolate per cleaner: the panicking one degrades to
+                        // NotFound, the rest still report. (Release builds set
+                        // panic=abort, where unwinding — and with it this
+                        // isolation — cannot apply.)
+                        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            cleaners[i].detect()
+                        }))
+                        .unwrap_or_else(|_| {
+                            ScanResult::new(cleaners[i].name(), ScanStatus::NotFound)
+                        });
                         pb.inc(1);
                         (i, r)
                     })
@@ -116,23 +134,20 @@ pub fn detect_all(cleaners: &[Box<dyn Cleaner>]) -> Vec<ScanResult> {
         }
     }
 
-    results
+    (results, available)
 }
 
-/// Shared preamble of `run_scan` and `run_scan_json`: one `is_available`
-/// pass per call feeds the risks map and the available indices, and the
-/// denied-paths probe matches `doctor`.
+/// Shared preamble of `run_scan` and `run_scan_json`: the risks map and the
+/// denied-paths probe. `available` comes from [`detect_all`]'s single
+/// `is_available` pass — one pass per call feeds both the scan and this map.
 fn scan_preamble(
     cleaners: &[Box<dyn Cleaner>],
+    available: &[usize],
     home: &std::path::Path,
 ) -> (
-    Vec<usize>,
     std::collections::HashMap<&'static str, Risk>,
     Vec<&'static str>,
 ) {
-    let available: Vec<usize> = (0..cleaners.len())
-        .filter(|&i| cleaners[i].is_available())
-        .collect();
     // Same classification as `--yes` and the TUI, shown per row.
     let risks: std::collections::HashMap<&'static str, Risk> = available
         .iter()
@@ -140,12 +155,12 @@ fn scan_preamble(
         .collect();
     // Same probe as `doctor`: protected paths blocked by missing FDA.
     let denied = crate::doctor::denied_paths(home);
-    (available, risks, denied)
+    (risks, denied)
 }
 
 pub fn run_scan(cleaners: &[Box<dyn Cleaner>], home: &std::path::Path) {
-    let results = detect_all(cleaners);
-    let (available, risks, denied) = scan_preamble(cleaners, home);
+    let (results, available) = detect_all(cleaners);
+    let (risks, denied) = scan_preamble(cleaners, &available, home);
     // Display rows: available cleaners only, sorted by size — derived from
     // the one `available` pass, never a second availability filter.
     let mut rows: Vec<ScanResult> = available.iter().map(|&i| results[i].clone()).collect();
@@ -213,8 +228,8 @@ pub fn run_scan(cleaners: &[Box<dyn Cleaner>], home: &std::path::Path) {
 /// Machine-readable scan: prints one JSON document, no table, no hints and no
 /// prompt. Used by `scan --json` for scripts and CI.
 pub fn run_scan_json(cleaners: &[Box<dyn Cleaner>], home: &std::path::Path) {
-    let results = detect_all(cleaners);
-    let (available, risks, denied) = scan_preamble(cleaners, home);
+    let (results, available) = detect_all(cleaners);
+    let (risks, denied) = scan_preamble(cleaners, &available, home);
     // Same row selection as the table: available cleaners only, sorted by
     // size, from the one `available` pass.
     let mut rows: Vec<ScanResult> = available.iter().map(|&i| results[i].clone()).collect();
@@ -403,13 +418,104 @@ mod tests {
                 available: false,
             }),
         ];
-        let results = detect_all(&cleaners);
+        let (results, available) = detect_all(&cleaners);
         assert_eq!(names(&results), vec!["alpha", "beta", "gamma"]);
         assert_eq!(results[0].bytes_for_test(), 100);
         assert_eq!(results[1].bytes_for_test(), 300);
         assert!(
             matches!(results[2].status, ScanStatus::NotFound),
             "unavailable cleaner keeps its NotFound placeholder so results stay index-aligned"
+        );
+        assert_eq!(
+            available,
+            vec![0usize, 1],
+            "the single is_available pass lists exactly the available cleaners"
+        );
+    }
+
+    /// A cleaner whose detect() panics: the scanner must contain the blast
+    /// radius per cleaner, not propagate it to the whole preamble.
+    struct PanickingCleaner(&'static str);
+
+    impl Cleaner for PanickingCleaner {
+        fn name(&self) -> &'static str {
+            self.0
+        }
+        fn detect(&self) -> ScanResult {
+            panic!("detect exploded");
+        }
+        fn clean(
+            &self,
+            _dry_run: bool,
+            _reporter: &dyn crate::progress::ProgressReporter,
+        ) -> anyhow::Result<crate::cleaner::CleanResult> {
+            Ok(crate::cleaner::CleanResult::empty(self.0))
+        }
+    }
+
+    #[test]
+    fn detect_all_isolates_a_panicking_detect() {
+        let cleaners: Vec<Box<dyn Cleaner>> = vec![
+            Box::new(StubCleaner {
+                name: "ok",
+                status: ScanStatus::Pruneable(42),
+                available: true,
+            }),
+            Box::new(PanickingCleaner("boom")),
+        ];
+        let (results, available) = detect_all(&cleaners);
+        assert_eq!(names(&results), vec!["ok", "boom"]);
+        assert_eq!(results[0].bytes_for_test(), 42);
+        assert!(
+            matches!(results[1].status, ScanStatus::NotFound),
+            "a panicking detect must be isolated as NotFound, got: {:?}",
+            results[1].status
+        );
+        assert_eq!(
+            available,
+            vec![0usize, 1],
+            "the panicking cleaner was available; the single is_available pass must list it"
+        );
+    }
+
+    /// Counts `is_available` calls so the single-pass unification is
+    /// observable through run_scan: one call, one pass.
+    struct CountingAvailability {
+        calls: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    impl Cleaner for CountingAvailability {
+        fn name(&self) -> &'static str {
+            "counting"
+        }
+        fn detect(&self) -> ScanResult {
+            ScanResult::new("counting", ScanStatus::Pruneable(10))
+        }
+        fn clean(
+            &self,
+            _dry_run: bool,
+            _reporter: &dyn crate::progress::ProgressReporter,
+        ) -> anyhow::Result<crate::cleaner::CleanResult> {
+            Ok(crate::cleaner::CleanResult::empty("counting"))
+        }
+        fn is_available(&self) -> bool {
+            self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            true
+        }
+    }
+
+    #[test]
+    fn run_scan_evaluates_is_available_once_per_call() {
+        use std::sync::Arc;
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let cleaners: Vec<Box<dyn Cleaner>> = vec![Box::new(CountingAvailability {
+            calls: Arc::clone(&calls),
+        })];
+        run_scan(&cleaners, std::path::Path::new("/"));
+        assert_eq!(
+            calls.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "is_available must be evaluated in exactly one pass per run_scan call"
         );
     }
 }
