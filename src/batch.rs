@@ -84,8 +84,15 @@ pub fn post_clean_note(bytes_freed: u64, uses_trash: bool, trash_mode: bool) -> 
     }
 }
 
-/// The one history-write guard, shared by [`run_batch`] and the single-target
+/// The one history-record guard, shared by [`run_batch`] and the single-target
 /// path: entries are recorded only for real runs that freed something.
+///
+/// WHY zero-byte runs record nothing (pre-existing policy, kept on purpose):
+/// zero-byte runs — every deletion skipped, empty-dir removals, or CLI tools
+/// reporting 0 freed (brew stdout parsing, `size_before - size_after`) — are
+/// not recorded. The history table tracks recovered bytes; a deletion without
+/// bytes has no row. This is the only place that decides: callers here and
+/// `history::write_history_entry` below do not re-check `dry_run` or bytes.
 pub fn write_history_entry_if_needed(
     label: &str,
     dry_run: bool,
@@ -225,6 +232,24 @@ mod tests {
         assert_eq!(entries[0].cleaner, "hist-a");
         assert_eq!(entries[0].freed_bytes, 100);
         assert!(!entries[0].moved_to_trash);
+    }
+
+    #[test]
+    fn write_history_entry_if_needed_records_nothing_for_zero_byte_real_runs() {
+        // Pins the zero-byte policy: a real run that freed 0 bytes (all
+        // deletions skipped, empty dirs, a CLI tool reporting 0 freed) has no
+        // history row — the history table tracks recovered bytes. The guard
+        // short-circuits before any I/O, so a unique path nobody else writes
+        // (no HOME swap: that races with the parallel EnvGuard test) must stay
+        // absent.
+        let tmp = TempDir::new().unwrap();
+        let history_path = tmp.path().join(".local/share/sasurahime/history.json");
+
+        write_history_entry_if_needed("zero-byte", false, 0, 0, false);
+        assert!(
+            !history_path.exists(),
+            "a real zero-byte run must not be recorded"
+        );
     }
 
     #[test]

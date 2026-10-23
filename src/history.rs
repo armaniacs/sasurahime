@@ -227,15 +227,15 @@ pub fn default_history_dir(home: &Path) -> PathBuf {
     home.join(".local/share/sasurahime")
 }
 
+/// Best-effort recorder for one history row. It does NOT decide whether a run
+/// is record-worthy — the dry-run and zero-bytes policy lives in one place,
+/// [`crate::batch::write_history_entry_if_needed`]. Failures are logged.
 pub fn write_history_entry(
     label: &str,
     freed_bytes: u64,
     skipped_count: usize,
     moved_to_trash: bool,
 ) {
-    if freed_bytes == 0 {
-        return;
-    }
     let home = dirs::home_dir().unwrap_or_default();
     let history_dir = default_history_dir(&home);
     let entry = HistoryEntry {
