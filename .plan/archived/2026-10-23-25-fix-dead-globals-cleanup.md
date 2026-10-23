@@ -25,11 +25,11 @@ Scenario: 表示スタイルは読み手の隣から取得される
   Then  history モジュールをまたがない
 
 ## 受け入れ基準
-- [ ] `context::DRY_RUN`（write-only、`#[allow(dead_code)]` 付き）が削除される
-- [ ] `progress::with_spinner`（本番未使用、`[OK]`-on-error 罠）が削除される
-- [ ] `USE_UNICODE` の実体が表示 seam に移動し、history は保存専用になる
-- [ ] 削除後に clippy -D warnings と fmt --check が通る
-- [ ] 削除の根拠（読み手不在・本番未使用）が WHY コメントまたはコミットメッセージに残る
+- [x] `context::DRY_RUN`（write-only、`#[allow(dead_code)]` 付き）が削除される
+- [x] `progress::with_spinner`（本番未使用、`[OK]`-on-error 罠）が削除される
+- [x] `USE_UNICODE` の実体が表示 seam に移動し、history は保存専用になる
+- [x] 削除後に clippy -D warnings と fmt --check が通る
+- [x] 削除の根拠（読み手不在・本番未使用）が WHY コメントまたはコミットメッセージに残る
 
 ## テスト戦略
 - 単体: 削除対象の既存テストを削除、フルスイートで regression を確認
@@ -39,6 +39,15 @@ Scenario: 表示スタイルは読み手の隣から取得される
 1ストーリーポイント
 
 ## Definition of Done
-- [ ] 全BDDシナリオが自動テストとして実装されパスする
-- [ ] コードレビュー完了
-- [ ] ドキュメント更新済み
+- [x] 全BDDシナリオが自動テストとして実装されパスする
+- [x] コードレビュー完了
+- [x] ドキュメント更新済み
+
+## 検証記録 (2026-10-23)
+
+- 実装: commit 1b734dc。
+- context::DRY_RUN 削除: 削除前の grep で本番の読み手が存在しないことを確認 (is_dry_run は allow(dead_code) 付き、参照は context.rs 自身と write-only の store 呼び出し main.rs:841 のみ)。static / set_dry_run / is_dry_run / テスト 2 件 / TEST_LOCK doc の言及を削除。
+- progress::with_spinner 削除: grep で本番呼び出しが存在しないことを確認 (定義と自己テストのみ、with_spinner_result 系は別関数)。FnOnce() -> R で fallible クロージャに無条件に [OK] を出す罠のため削除。
+- USE_UNICODE 移動: 実体を format.rs の private static + use_unicode() / set_use_unicode() に移動。history.rs は atomic 参照ゼロの保存専用ロジックに。読み手 (scanner.rs, explorer.rs x2, hint/cleaner.rs, main.rs) を新アクセサに更新。
+- 検証: cargo test --lib 644 passed / 4 failed (4 件は既知の TCC 環境依存)、統合 36 ターゲット green、clippy 警告 0、fmt クリーン。
+- 根拠: コミットメッセージの WHY (読み手不在・本番未使用・表示ポリシーが history モジュールを経由していた) に記録。
