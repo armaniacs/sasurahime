@@ -169,13 +169,17 @@ pub fn run_auto(cleaners: &[Box<dyn Cleaner>]) -> Result<()> {
     // Suppress secondary confirmation prompts (TUI already asked above).
     crate::cleaners::generic::set_skip_confirm(true);
 
-    let reporter = crate::progress::VerboseProgress::new();
     let mut total_freed: u64 = 0;
     for i in pruneable_indices {
         let name = cleaners[i].name();
-        let result = crate::progress::with_spinner_result(&format!("Cleaning {}...", name), || {
-            cleaners[i].clean(false, &reporter)
-        });
+        // One shared spinner: its message names the folder being deleted
+        // instead of a bare rotating character. Confirmations are suppressed
+        // here, so the animated tick cannot compete with a prompt.
+        let result = crate::progress::with_spinner_result_progress(
+            &format!("Cleaning {}...", name),
+            true,
+            |rep| cleaners[i].clean(false, rep),
+        );
         match result {
             Ok(r) => {
                 total_freed += r.bytes_freed;
@@ -275,7 +279,6 @@ pub fn run_interactive(cleaners: &[Box<dyn Cleaner>]) -> Result<()> {
     // asked "Proceed?" above; re-confirming would be confusing).
     crate::cleaners::generic::set_skip_confirm(true);
 
-    let reporter = crate::progress::VerboseProgress::new();
     let mut freed: u64 = 0;
     for &si in &selected {
         let (cleaner_idx, sub_name) = &selection_mapping[si];
@@ -305,10 +308,12 @@ pub fn run_interactive(cleaners: &[Box<dyn Cleaner>]) -> Result<()> {
             }
         } else {
             let name = cleaners[*cleaner_idx].name();
-            let result =
-                crate::progress::with_spinner_result(&format!("Cleaning {}...", name), || {
-                    cleaners[*cleaner_idx].clean(false, &reporter)
-                });
+            // One shared spinner naming the folder being deleted.
+            let result = crate::progress::with_spinner_result_progress(
+                &format!("Cleaning {}...", name),
+                true,
+                |rep| cleaners[*cleaner_idx].clean(false, rep),
+            );
             match result {
                 Ok(r) => {
                     freed += r.bytes_freed;

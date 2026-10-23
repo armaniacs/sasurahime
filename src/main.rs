@@ -742,13 +742,16 @@ where
 {
     let msg = format!("Cleaning {label}...");
     let result = if reporter.show_spinner() {
-        // Static message (no spinner animation) so the confirmation prompt
-        // inside the cleaner is not competing with a spinner tick.
-        eprint!("{msg}");
-        let r = cleaner_fn(dry_run, reporter);
+        // One shared spinner: each deletion updates its message with the
+        // folder being removed, so the user sees what is happening. No
+        // steady tick: an in-cleaner confirmation prompt must not compete
+        // with animation, but ticks still redraw the line.
+        let spinner = crate::progress::SharedSpinner::start(&msg, false);
+        let r = cleaner_fn(dry_run, &spinner.reporter());
+        spinner.finish();
         match r {
             Ok(v) => {
-                eprintln!(" [OK]");
+                eprintln!("{msg} [OK]");
                 v
             }
             Err(e) if e.is::<CleanCancelled>() => {
@@ -763,7 +766,7 @@ where
                 });
             }
             Err(e) => {
-                eprintln!(" [FAILED]");
+                eprintln!("{msg} [FAILED]");
                 return Err(e);
             }
         }

@@ -23,6 +23,103 @@ fn spinner_style() -> &'static ProgressStyle {
 
 /// `#[allow(dead_code)]`: retained for potential future use in long-running operations.
 #[allow(dead_code)]
+/// Message shown while a cleaner deletes a path: names the folder/file so
+/// the user sees what is being removed, with progress and size. `total` of 0
+/// means the count is unknown and is omitted.
+pub fn tick_message(
+    prefix: &str,
+    path: &Path,
+    current: usize,
+    total: usize,
+    size_bytes: u64,
+) -> String {
+    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("?");
+    let size = crate::format::format_bytes(size_bytes);
+    if total > 0 {
+        format!("{prefix}: {name} ({current}/{total}, {size})")
+    } else {
+        format!("{prefix}: {name} ({size})")
+    }
+}
+
+/// A single shared spinner whose message updates as the cleaner deletes each
+/// path: `progress_tick` names the folder being removed, so the user sees
+/// what is happening instead of a bare rotating character. `animated` enables
+/// the steady tick; keep it off while the cleaner may still prompt.
+pub struct SharedSpinner {
+    pb: ProgressBar,
+    prefix: String,
+}
+
+impl SharedSpinner {
+    pub fn start(msg: &str, animated: bool) -> Self {
+        let pb = ProgressBar::new_spinner();
+        pb.set_style(spinner_style().clone());
+        pb.set_message(msg.to_string());
+        if animated {
+            pb.enable_steady_tick(Duration::from_millis(100));
+        }
+        Self {
+            pb,
+            prefix: msg.trim_end_matches("...").to_string(),
+        }
+    }
+
+    pub fn reporter(&self) -> CleaningProgress {
+        CleaningProgress {
+            pb: self.pb.clone(),
+            prefix: self.prefix.clone(),
+        }
+    }
+
+    #[cfg_attr(not(test), expect(dead_code))]
+    pub fn message(&self) -> String {
+        self.pb.message()
+    }
+
+    pub fn finish(&self) {
+        self.pb.finish_and_clear();
+    }
+}
+
+/// [`ProgressReporter`] bound to a [`SharedSpinner`]: ticks update the shared
+/// spinner's message instead of creating a second competing bar.
+pub struct CleaningProgress {
+    pb: ProgressBar,
+    prefix: String,
+}
+
+impl ProgressReporter for CleaningProgress {
+    fn show_spinner(&self) -> bool {
+        true
+    }
+
+    fn progress_init(&self, _label: &str, total: usize) {
+        if total > 0 {
+            self.pb.set_length(total as u64);
+        }
+    }
+
+    fn progress_tick(&self, path: &Path, current: usize, size_bytes: u64) {
+        let total = self.pb.length().unwrap_or(0) as usize;
+        let msg = tick_message(&self.prefix, path, current, total, size_bytes);
+        // A hidden draw target (non-TTY) renders nothing: print the line so
+        // the user still sees what is being deleted.
+        if self.pb.is_hidden() {
+            eprintln!("{msg}");
+        }
+        self.pb.set_message(msg);
+        if total > 0 {
+            self.pb.set_position(current as u64);
+        }
+    }
+
+    fn progress_finish(&self) {
+        self.pb.set_message(format!("{}: done", self.prefix));
+    }
+}
+
+#[cfg_attr(not(test), expect(dead_code))]
 pub fn with_spinner<R>(msg: &str, f: impl FnOnce() -> R) -> R {
     let pb = ProgressBar::new_spinner();
     pb.set_style(spinner_style().clone());
@@ -31,6 +128,24 @@ pub fn with_spinner<R>(msg: &str, f: impl FnOnce() -> R) -> R {
     let result = f();
     pb.finish_and_clear();
     eprintln!("{msg} [OK]");
+    result
+}
+
+/// Spinner whose message updates with the path being deleted. `animated`
+/// enables the steady tick (safe only when the cleaner will not prompt).
+pub fn with_spinner_result_progress<T, E: std::fmt::Display>(
+    msg: &str,
+    animated: bool,
+    f: impl FnOnce(&dyn ProgressReporter) -> Result<T, E>,
+) -> Result<T, E> {
+    let spinner = SharedSpinner::start(msg, animated);
+    let result = f(&spinner.reporter());
+    spinner.finish();
+    if result.is_ok() {
+        eprintln!("{msg} [OK]");
+    } else {
+        eprintln!("{msg} [FAILED]");
+    }
     result
 }
 
@@ -249,6 +364,73 @@ mod tests {
         reporter.progress_init("test", 5);
         reporter.progress_tick(Path::new("/x"), 1, 512);
         reporter.progress_finish();
+    }
+
+    #[test]
+    fn tick_message_shows_the_path_being_deleted() {
+        let msg = tick_message(
+            "Cleaning app-support",
+            Path::new("/Users/u/Library/Application Support/Google/Chrome"),
+            2,
+            5,
+            4096,
+        );
+        assert!(
+            msg.contains("Chrome"),
+            "the tick must name the folder being deleted, got: {msg}"
+        );
+        assert!(
+            msg.contains("2/5"),
+            "the tick must show progress, got: {msg}"
+        );
+        assert!(
+            msg.contains("4.0 KB"),
+            "the tick must show the size, got: {msg}"
+        );
+        assert!(msg.starts_with("Cleaning app-support"));
+        // Without a total (single-item cleans) the message still names the path.
+        let msg = tick_message(
+            "Cleaning caches",
+            Path::new("/Users/u/.cache/act"),
+            1,
+            0,
+            1024,
+        );
+        assert!(msg.contains("act"), "got: {msg}");
+        assert!(msg.contains("1.0 KB"), "got: {msg}");
+    }
+
+    #[test]
+    fn cleaning_progress_updates_the_shared_spinner_message() {
+        // One shared spinner: the cleaner's progress_tick updates its message
+        // so the user sees the folder being deleted while it runs.
+        let spinner = SharedSpinner::start("Cleaning app-support...", false);
+        let rep = spinner.reporter();
+        rep.progress_init("app-support", 5);
+        rep.progress_tick(
+            Path::new("/Users/u/Library/Application Support/Google/Chrome"),
+            2,
+            4096,
+        );
+        let msg = spinner.message();
+        assert!(
+            msg.contains("Chrome"),
+            "the shared spinner must show the path being deleted, got: {msg}"
+        );
+        assert!(msg.contains("2/5"), "got: {msg}");
+        assert!(spinner.reporter().show_spinner());
+        spinner.finish();
+    }
+
+    #[test]
+    fn cleaning_progress_prints_when_the_spinner_is_hidden() {
+        // Non-TTY: indicatif hides the bar, so the tick must print the line
+        // directly or the user sees nothing while cleaning.
+        let spinner = SharedSpinner::start("Cleaning logs...", false);
+        let rep = spinner.reporter();
+        rep.progress_init("logs", 1);
+        rep.progress_tick(Path::new("/Users/u/.local/share/kilo/log/old.log"), 1, 4096);
+        spinner.finish();
     }
 
     #[test]
