@@ -91,7 +91,7 @@ fn yes_permanent_requires_confirmation() {
 }
 
 #[test]
-fn trash_mode_with_permanent_cleaner_does_not_claim_trash() {
+fn uv_trash_mode_reports_logical_freed_when_trash_succeeds() {
     let tmp = TempDir::new().unwrap();
     let bin_dir = tmp.path().join("bin");
     fs::create_dir_all(&bin_dir).unwrap();
@@ -113,10 +113,12 @@ fn trash_mode_with_permanent_cleaner_does_not_claim_trash() {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
-    // PBI-20: the old-index deletion goes through the safe_delete seam, so
-    // trash mode is honored. Which branch ran depends on the trash backend:
-    // the stale dir still existing after the run is the branch discriminator
-    // (a TCC-blocked backend makes the seam classify the failure skippable).
+    // The old-index deletion goes through the safe_delete seam, so trash mode
+    // is honored. Which branch ran depends on the trash backend: the stale dir
+    // still existing after the run is the branch discriminator (a TCC-blocked
+    // backend makes the seam classify the failure skippable). The unconditional
+    // "old cache must be removed" gate lives in the TCC-free permanent-mode
+    // test below.
     if uv_cache.join("simple-v16").exists() {
         // Skip branch: the delete failed with a skippable error, nothing was
         // freed and the clean reports exit 1.
@@ -135,10 +137,54 @@ fn trash_mode_with_permanent_cleaner_does_not_claim_trash() {
         );
         assert!(stdout.contains("Logical freed:"), "stdout:\n{stdout}");
     }
-    // In BOTH branches the freed line must not claim a Trash move.
+}
+
+// The TCC-free deletion gate (PBI-30): --permanent pins the process-global
+// trash mode off in the binary (src/main.rs), so the old-index deletion is a
+// plain `fs::remove_dir_all` — no Finder, no TCC. The old cache must be gone
+// unconditionally: a delete-path regression (wrong path into safe_delete,
+// a skippable misclassification, a broken seam) keeps the dir and fails here.
+#[test]
+fn permanent_mode_uv_clean_removes_old_indexes_unconditionally() {
+    let tmp = TempDir::new().unwrap();
+    let bin_dir = tmp.path().join("bin");
+    fs::create_dir_all(&bin_dir).unwrap();
+    install_fake_uv(&bin_dir);
+
+    let uv_cache = tmp.path().join(".cache/uv");
+    fs::create_dir_all(uv_cache.join("simple-v16")).unwrap();
+    fs::create_dir_all(uv_cache.join("simple-v21")).unwrap();
+    fs::write(uv_cache.join("simple-v16/pack.seq"), [0u8; 100]).unwrap();
+
+    let original_path = std::env::var("PATH").unwrap_or_default();
+    let new_path = format!("{}:{}", bin_dir.display(), original_path);
+
+    let output = sasurahime(tmp.path())
+        .env("PATH", &new_path)
+        .args(["--permanent", "clean", "uv"])
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        !stdout.contains("moved to Trash"),
-        "the freed line must not claim a Trash move:\n{stdout}"
+        output.status.success(),
+        "stdout: {stdout}\nstderr: {}",
+        String::from_utf8_lossy(&output.stderr),
+    );
+    // The unconditional gate: in permanent mode a surviving stale index is
+    // always a regression — no TCC skip branch exists to absorb it.
+    assert!(
+        !uv_cache.join("simple-v16").exists(),
+        "the old simple-v16 index must be removed in permanent mode"
+    );
+    assert!(
+        uv_cache.join("simple-v21").exists(),
+        "the newest simple-v21 index must remain"
+    );
+    assert!(stdout.contains("Freed:"), "stdout:\n{stdout}");
+    assert!(
+        !stdout.contains("Logical freed:"),
+        "permanent mode must not claim the Trash (Logical freed):\n{stdout}"
     );
 }
 
