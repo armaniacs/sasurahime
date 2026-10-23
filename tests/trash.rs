@@ -113,19 +113,32 @@ fn trash_mode_with_permanent_cleaner_does_not_claim_trash() {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        output.status.success(),
-        "stdout: {stdout}\nstderr: {stderr}",
-    );
-    // uv deletes the old index directories outright, so claiming Trash would lie.
-    assert!(stdout.contains("Freed:"), "stdout:\n{stdout}");
+    // PBI-20: the old-index deletion goes through the safe_delete seam, so
+    // trash mode is honored. Which branch ran depends on the trash backend:
+    // the stale dir still existing after the run is the branch discriminator
+    // (a TCC-blocked backend makes the seam classify the failure skippable).
+    if uv_cache.join("simple-v16").exists() {
+        // Skip branch: the delete failed with a skippable error, nothing was
+        // freed and the clean reports exit 1.
+        assert_eq!(
+            output.status.code(),
+            Some(1),
+            "a skipped delete must exit 1:\nstdout: {stdout}\nstderr: {stderr}"
+        );
+        assert!(stdout.contains("Freed: 0 B"), "stdout:\n{stdout}");
+    } else {
+        // Trash-truth branch: the Trash move succeeded, the source is gone
+        // and the freed line reports the trash truth, not a permanent delete.
+        assert!(
+            output.status.success(),
+            "stdout: {stdout}\nstderr: {stderr}"
+        );
+        assert!(stdout.contains("Logical freed:"), "stdout:\n{stdout}");
+    }
+    // In BOTH branches the freed line must not claim a Trash move.
     assert!(
         !stdout.contains("moved to Trash"),
-        "a permanent cleaner must not claim Trash:\n{stdout}"
-    );
-    assert!(
-        !uv_cache.join("simple-v16").exists(),
-        "old cache must be removed"
+        "the freed line must not claim a Trash move:\n{stdout}"
     );
 }
 

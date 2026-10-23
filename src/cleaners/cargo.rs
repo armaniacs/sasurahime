@@ -88,6 +88,8 @@ impl Cleaner for CargoCleaner {
     fn clean(&self, dry_run: bool, reporter: &dyn ProgressReporter) -> Result<CleanResult> {
         let mut skipped: Vec<crate::cleaner::SkippedEntry> = vec![];
         let mut freed: u64 = 0;
+        // OR-in across every deletion: the seam's resolved mode is the truth.
+        let mut uses_trash = false;
 
         let reg = self.home.join(".cargo/registry/cache");
         if reg.exists() {
@@ -99,18 +101,17 @@ impl Cleaner for CargoCleaner {
                     crate::format::format_bytes(size)
                 );
             } else {
-                self.runner
-                    .run("chflags", &["-R", "nouchg", &reg.to_string_lossy()])
-                    .ok();
-                if let Err(e) = crate::trash::delete_path(&reg) {
-                    if crate::cleaner::is_skippable_error(&e) {
-                        skipped.push(crate::cleaner::SkippedEntry {
-                            path: reg.to_path_buf(),
-                            reason: format!("{e:#}"),
-                        });
-                    } else {
-                        return Err(e);
-                    }
+                let outcome = crate::trash::safe_delete(
+                    self.runner.as_ref(),
+                    &reg,
+                    crate::trash::TrashMode::Global,
+                )?;
+                uses_trash |= outcome.uses_trash;
+                if let Some(reason) = outcome.skip_reason {
+                    skipped.push(crate::cleaner::SkippedEntry {
+                        path: reg.to_path_buf(),
+                        reason,
+                    });
                 } else {
                     freed += size;
                     println!("[cargo] removed registry cache: {}", reg.display());
@@ -131,18 +132,17 @@ impl Cleaner for CargoCleaner {
                 );
             } else {
                 reporter.progress_tick(path, i + 1, *size);
-                self.runner
-                    .run("chflags", &["-R", "nouchg", &path.to_string_lossy()])
-                    .ok();
-                if let Err(e) = crate::trash::delete_path(path) {
-                    if crate::cleaner::is_skippable_error(&e) {
-                        skipped.push(crate::cleaner::SkippedEntry {
-                            path: path.to_path_buf(),
-                            reason: format!("{e:#}"),
-                        });
-                    } else {
-                        return Err(e);
-                    }
+                let outcome = crate::trash::safe_delete(
+                    self.runner.as_ref(),
+                    path,
+                    crate::trash::TrashMode::Global,
+                )?;
+                uses_trash |= outcome.uses_trash;
+                if let Some(reason) = outcome.skip_reason {
+                    skipped.push(crate::cleaner::SkippedEntry {
+                        path: path.to_path_buf(),
+                        reason,
+                    });
                 } else {
                     freed += size;
                     println!("[cargo] removed target dir: {}", path.display());
@@ -156,7 +156,7 @@ impl Cleaner for CargoCleaner {
         Ok(CleanResult {
             name: self.name(),
             bytes_freed: freed,
-            uses_trash: true,
+            uses_trash,
             skipped,
             deleted_paths: vec![],
         })

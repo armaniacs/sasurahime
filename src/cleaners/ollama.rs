@@ -214,27 +214,23 @@ impl OllamaCleaner {
                 deleted_paths: vec![],
             });
         }
-        let path_str = dir.to_string_lossy();
-        let _ = self.runner.run("chflags", &["-R", "nouchg", &path_str]);
+        let outcome =
+            crate::trash::safe_delete(self.runner.as_ref(), dir, crate::trash::TrashMode::Global)?;
         let mut skipped: Vec<crate::cleaner::SkippedEntry> = vec![];
         let mut freed = size;
-        if let Err(e) = crate::trash::delete_path(dir) {
-            if crate::cleaner::is_skippable_error(&e) {
-                skipped.push(crate::cleaner::SkippedEntry {
-                    path: dir.to_path_buf(),
-                    reason: format!("{e:#}"),
-                });
-                freed = 0;
-            } else {
-                return Err(e);
-            }
+        if let Some(reason) = outcome.skip_reason {
+            skipped.push(crate::cleaner::SkippedEntry {
+                path: dir.to_path_buf(),
+                reason,
+            });
+            freed = 0;
         } else {
             println!("[ollama] removed: {}", dir.display());
         }
         Ok(CleanResult {
             name: self.name(),
             bytes_freed: freed,
-            uses_trash: true,
+            uses_trash: outcome.uses_trash,
             skipped,
             deleted_paths: vec![],
         })

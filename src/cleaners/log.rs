@@ -174,29 +174,29 @@ impl Cleaner for LogCleaner {
             for (target_name, path) in &all_old {
                 println!("[dry-run] [{target_name}] would remove: {}", path.display());
             }
-            return Ok(CleanResult {
-                name: self.name(),
-                bytes_freed: 0,
-                uses_trash: false,
-                skipped: vec![],
-                deleted_paths: vec![],
-            });
+            return Ok(CleanResult::empty(self.name()));
         }
 
         let mut skipped: Vec<crate::cleaner::SkippedEntry> = vec![];
+        // OR-in across every deletion: the seam's resolved mode is the truth.
+        let mut uses_trash = false;
         reporter.progress_init(self.name(), all_old.len());
         for (i, (target_name, path)) in all_old.iter().enumerate() {
             let size = fs::metadata(path).map(|m| m.blocks() * 512).unwrap_or(0);
             reporter.progress_tick(path, i + 1, size);
-            if let Err(e) = crate::trash::delete_path(path) {
-                if crate::cleaner::is_skippable_error(&e) {
-                    skipped.push(crate::cleaner::SkippedEntry {
-                        path: path.to_path_buf(),
-                        reason: format!("{e:#}"),
-                    });
-                } else {
-                    return Err(e);
-                }
+            // The cleaner has no runner field: the seam only needs one for the
+            // permanent-mode uchg clear, which the system runner performs.
+            let outcome = crate::trash::safe_delete(
+                &crate::command::SystemCommandRunner,
+                path,
+                crate::trash::TrashMode::Global,
+            )?;
+            uses_trash |= outcome.uses_trash;
+            if let Some(reason) = outcome.skip_reason {
+                skipped.push(crate::cleaner::SkippedEntry {
+                    path: path.to_path_buf(),
+                    reason,
+                });
             } else {
                 freed += size;
                 deleted += 1;
@@ -209,7 +209,7 @@ impl Cleaner for LogCleaner {
         Ok(CleanResult {
             name: self.name(),
             bytes_freed: freed,
-            uses_trash: true,
+            uses_trash,
             skipped,
             deleted_paths: vec![],
         })
