@@ -155,7 +155,11 @@ pub fn is_skippable_error(e: &anyhow::Error) -> bool {
 }
 
 /// Which `[cleaner.<name>]` filters a cleaner actually honours. Command-based
-/// cleaners never look at them; `logs` only reads `older_than_days`.
+/// cleaners never look at them; a cleaner's `per_cleaner_filters()` override
+/// is the one owner of this fact and `main`'s ineffective-setting warning
+/// reads it verbatim. (`library-logs` merges the global `CleanOptions::
+/// older_than_days` into its own recency heuristic — an orthogonal mechanism
+/// that never comes from a `[cleaner.<name>]` section.)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PerCleanerFilters {
     None,

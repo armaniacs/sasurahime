@@ -198,33 +198,9 @@ pub fn read_app_identity(plist: &Path, runner: &dyn CommandRunner) -> Option<App
     parse_app_identity_from_xml(std::str::from_utf8(&bytes).ok()?)
 }
 
-fn is_app_bundle(path: &Path) -> bool {
-    path.extension()
-        .and_then(|e| e.to_str())
-        .is_some_and(|e| e.eq_ignore_ascii_case("app"))
-        && path.is_dir()
-}
-
-/// Lists `*.app` directly under `dir` and one level of sub-folders
-/// (for example `/Applications/Utilities`). `.app` bundles are not entered.
-fn list_app_bundles(dir: &Path) -> Vec<PathBuf> {
-    let mut apps = Vec::new();
-    let Ok(read) = fs::read_dir(dir) else {
-        return apps;
-    };
-    for entry in read.flatten() {
-        let path = entry.path();
-        if is_app_bundle(&path) {
-            apps.push(path);
-        } else if path.is_dir() {
-            if let Ok(sub) = fs::read_dir(&path) {
-                apps.extend(sub.flatten().map(|e| e.path()).filter(|p| is_app_bundle(p)));
-            }
-        }
-    }
-    apps
-}
-
+/// Lists `*.app` under each root (top level plus one sub-folder level) with
+/// the shared `.app` bundle probe from the app-support cleaner, which also
+/// owns the traversal rules.
 /// Identities of the apps found under `app_dirs`, in directory order.
 /// Bundles whose `Info.plist` cannot be read are skipped.
 pub fn collect_app_identities(
@@ -233,7 +209,7 @@ pub fn collect_app_identities(
 ) -> Vec<AppIdentity> {
     app_dirs
         .iter()
-        .flat_map(|dir| list_app_bundles(dir.as_path()))
+        .flat_map(|dir| crate::cleaners::app_support::list_app_bundles(std::slice::from_ref(dir)))
         .filter_map(|app| read_app_identity(&app.join("Contents/Info.plist"), runner))
         .collect()
 }

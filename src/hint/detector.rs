@@ -1,16 +1,8 @@
 use crate::command::CommandRunner;
 use crate::format::dir_size;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-use super::{apps, BaseDir, ProcessHint};
-
-fn base_path(home: &Path, base: BaseDir) -> PathBuf {
-    match base {
-        BaseDir::Caches => home.join("Library/Caches"),
-        BaseDir::AppSupport => home.join("Library/Application Support"),
-        BaseDir::Logs => home.join("Library/Logs"),
-    }
-}
+use super::{apps, base_path, ProcessHint};
 
 pub(crate) fn is_running(process_name: &str, runner: &dyn CommandRunner) -> bool {
     runner

@@ -12,6 +12,38 @@ pub struct GradleCleaner {
     runner: Box<dyn CommandRunner>,
 }
 
+/// A version subdirectory that may become a deletion candidate: a real
+/// directory, never a symlink. Symlinked versions are stale or shared links —
+/// never deletion candidates (the browsers cleaner's rule). An unreadable file
+/// type is treated as a symlink: never touch what we cannot classify.
+pub(crate) fn is_version_dir(e: &fs::DirEntry) -> bool {
+    match e.file_type() {
+        Ok(t) => t.is_dir() && !t.is_symlink(),
+        Err(_) => false,
+    }
+}
+
+/// One owner of the "keep all but the highest version" retention rule shared
+/// by the browsers, gradle and JetBrains cleaners. Groups `candidates` by
+/// their numeric version key and returns the paths whose key is not the
+/// highest in the group. A candidate without a numeric key (a name with no
+/// digits) is never a deletion candidate.
+pub(crate) fn keep_highest(candidates: Vec<(Vec<u32>, PathBuf)>) -> Vec<PathBuf> {
+    // A name without digits has no version key: never a deletion candidate.
+    let versioned: Vec<(Vec<u32>, PathBuf)> = candidates
+        .into_iter()
+        .filter(|(k, _)| !k.is_empty())
+        .collect();
+    let Some(max) = versioned.iter().map(|(k, _)| k.clone()).max() else {
+        return vec![];
+    };
+    versioned
+        .into_iter()
+        .filter(|(k, _)| *k != max)
+        .map(|(_, p)| p)
+        .collect()
+}
+
 impl GradleCleaner {
     pub fn new(home: &Path, runner: Box<dyn CommandRunner>) -> Self {
         Self {
@@ -26,9 +58,9 @@ impl GradleCleaner {
             Err(_) => return vec![],
         };
 
-        let mut versions: Vec<(Vec<u32>, PathBuf)> = entries
+        let candidates: Vec<(Vec<u32>, PathBuf)> = entries
             .filter_map(|e| e.ok())
-            .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
+            .filter(is_version_dir)
             .filter_map(|e| {
                 let name = e.file_name().to_string_lossy().to_string();
                 if !name.starts_with(|c: char| c.is_ascii_digit()) {
@@ -42,13 +74,7 @@ impl GradleCleaner {
             })
             .collect();
 
-        if versions.len() <= 1 {
-            return vec![];
-        }
-
-        let max_key = versions.iter().map(|(k, _)| k.clone()).max().unwrap();
-        versions.retain(|(k, _)| *k != max_key);
-        versions.into_iter().map(|(_, p)| p).collect()
+        keep_highest(candidates)
     }
 }
 
@@ -154,7 +180,7 @@ impl JetBrainsCleaner {
         let mut by_ide: HashMap<String, Vec<(Vec<u32>, PathBuf)>> = HashMap::new();
 
         for entry in entries.filter_map(|e| e.ok()) {
-            if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+            if !is_version_dir(&entry) {
                 continue;
             }
             let name = entry.file_name().to_string_lossy().to_string();
@@ -180,15 +206,7 @@ impl JetBrainsCleaner {
 
         let mut old = vec![];
         for versions in by_ide.values() {
-            if versions.len() <= 1 {
-                continue;
-            }
-            let max_key = versions.iter().map(|(k, _)| k.clone()).max().unwrap();
-            for (k, p) in versions {
-                if *k != max_key {
-                    old.push(p.clone());
-                }
-            }
+            old.extend(keep_highest(versions.clone()));
         }
         old
     }
@@ -380,6 +398,74 @@ mod tests {
         assert!(result.is_empty());
     }
 
+    #[test]
+    fn gradle_find_old_caches_skips_symlinks() {
+        let tmp = TempDir::new().unwrap();
+        let caches = tmp.path().join(".gradle/caches");
+        fs::create_dir_all(caches.join("8.12.0")).unwrap();
+        fs::create_dir_all(caches.join("8.8.0")).unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(caches.join("8.8.0"), caches.join("8.10.0")).unwrap();
+        let result = GradleCleaner::find_old_caches(&caches);
+        assert!(
+            !result.iter().any(|p| p.ends_with("8.10.0")),
+            "a symlinked older version must not be a deletion candidate"
+        );
+        assert!(result.iter().any(|p| p.ends_with("8.8.0")));
+    }
+
+    // ── shared retention helpers ──
+
+    #[test]
+    fn keep_highest_returns_all_but_highest_key() {
+        let candidates = vec![
+            (vec![8, 8, 0], PathBuf::from("/c/8.8.0")),
+            (vec![8, 12, 0], PathBuf::from("/c/8.12.0")),
+            (vec![8, 10, 0], PathBuf::from("/c/8.10.0")),
+        ];
+        let old = keep_highest(candidates);
+        assert_eq!(
+            old,
+            vec![PathBuf::from("/c/8.8.0"), PathBuf::from("/c/8.10.0"),]
+        );
+    }
+
+    #[test]
+    fn keep_highest_skips_candidates_without_a_numeric_key() {
+        // A name with no digits has no version key: never a deletion
+        // candidate, even when it is the only entry in its group.
+        let candidates = vec![
+            (vec![], PathBuf::from("/c/nightly")),
+            (vec![1], PathBuf::from("/c/journal-1")),
+        ];
+        let old = keep_highest(candidates);
+        assert!(old.is_empty(), "empty-key candidates must never be deleted");
+    }
+
+    #[test]
+    fn keep_highest_single_candidate_returns_empty() {
+        let candidates = vec![(vec![8, 12, 0], PathBuf::from("/c/8.12.0"))];
+        assert!(keep_highest(candidates).is_empty());
+    }
+
+    #[test]
+    fn is_version_dir_rejects_symlinks() {
+        let tmp = TempDir::new().unwrap();
+        let target = tmp.path().join("8.12.0");
+        fs::create_dir_all(&target).unwrap();
+        let link = tmp.path().join("8.10.0");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        let entries: Vec<std::fs::DirEntry> = fs::read_dir(tmp.path()).unwrap().flatten().collect();
+        let linked = entries.iter().find(|e| e.file_name() == "8.10.0").unwrap();
+        let real = entries.iter().find(|e| e.file_name() == "8.12.0").unwrap();
+        assert!(
+            !is_version_dir(linked),
+            "a symlinked version is never a deletion candidate"
+        );
+        assert!(is_version_dir(real));
+    }
+
     // ── JetBrainsCleaner (H01) ──
 
     #[test]
@@ -487,5 +573,21 @@ mod tests {
         fs::create_dir_all(jb.join(".hidden")).unwrap();
         let result = JetBrainsCleaner::find_old_caches(&jb);
         assert!(result.is_empty(), "unparseable names must be skipped");
+    }
+
+    #[test]
+    fn jetbrains_find_old_caches_skips_symlinks() {
+        let tmp = TempDir::new().unwrap();
+        let jb = tmp.path().join("Library/Caches/JetBrains");
+        fs::create_dir_all(jb.join("GoLand2024.2")).unwrap();
+        fs::create_dir_all(jb.join("GoLand2025.1")).unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(jb.join("GoLand2024.2"), jb.join("GoLand2024.9")).unwrap();
+        let result = JetBrainsCleaner::find_old_caches(&jb);
+        assert!(
+            !result.iter().any(|p| p.ends_with("GoLand2024.9")),
+            "a symlinked older version must not be a deletion candidate"
+        );
+        assert!(result.iter().any(|p| p.ends_with("GoLand2024.2")));
     }
 }
