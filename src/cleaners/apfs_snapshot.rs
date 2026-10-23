@@ -83,10 +83,12 @@ pub fn parse_size_decimal(s: &str) -> Option<u64> {
     if !v.is_finite() || v <= 0.0 {
         return None;
     }
-    // The product saturates on cast: 1e11GB -> 1e20 -> u64::MAX would tell
-    // tmutil to thin everything. Reject anything that does not fit.
+    // Sane values are capped at 1 PB (1e15 bytes): no snapshot thinning
+    // target is ever that large. Bigger products either saturate on cast
+    // (1e11GB -> 1e20 -> u64::MAX) or cast to a gigantic u64 — both would
+    // tell tmutil to thin everything. Reject them all.
     let product = v * mult;
-    if !product.is_finite() || product >= u64::MAX as f64 {
+    if !product.is_finite() || product >= 1e15 {
         return None;
     }
     Some(product as u64)
@@ -1100,6 +1102,33 @@ mod tests {
         // Valid specs still parse.
         assert_eq!(parse_size_decimal("10GB"), Some(10_000_000_000));
         assert_eq!(parse_size_decimal("0.5GB"), Some(500_000_000));
+    }
+
+    #[test]
+    fn parse_size_decimal_rejects_1e10_gb_product() {
+        // 1e10GB -> 1e19: passes the old `>= u64::MAX` guard and casts to
+        // 10 EB, a thin-everything target. No real thinning target is
+        // remotely this large.
+        assert_eq!(parse_size_decimal("1e10GB"), None);
+    }
+
+    #[test]
+    fn parse_size_decimal_rejects_product_casting_just_below_u64_max() {
+        // 18446744073.709549GB -> ~1.844674407370955e19, which casts to
+        // u64::MAX - 2048: still absurd for a thinning target.
+        assert_eq!(parse_size_decimal("18446744073.709549GB"), None);
+    }
+
+    #[test]
+    fn parse_size_decimal_caps_products_at_one_pb() {
+        // The cap is 1 PB (1e15 bytes): at or above is rejected; just below
+        // still parses.
+        assert_eq!(parse_size_decimal("1e6GB"), None, "1e15 (1 PB) is rejected");
+        assert_eq!(
+            parse_size_decimal("999999GB"),
+            Some(999_999_000_000_000),
+            "just under 1 PB still parses"
+        );
     }
 
     #[test]
