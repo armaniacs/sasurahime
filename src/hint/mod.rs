@@ -583,6 +583,33 @@ mod tests {
         assert!(runner.recorded_calls().is_empty());
     }
 
+    static QUOTED_QUIT_ENTRY: HintEntry = HintEntry {
+        base_dir: BaseDir::Caches,
+        path_suffixes: &["x"],
+        display_name: "QuotedApp",
+        process_name: Some("QuotedApp"),
+        commands: &[],
+        threshold_bytes: 0,
+        skip: false,
+        quit_app: Some("Foo\"Bar"),
+        relaunch_app: None,
+    };
+
+    #[test]
+    fn quit_app_and_wait_escapes_quotes_in_quit_app() {
+        // A `"` in the app name must not close the `quit app "..."` literal
+        // early: the recorded osascript argument carries it escaped.
+        let runner = RecordingRunner::new(&[], 0);
+        cleaner::quit_app_and_wait(&QUOTED_QUIT_ENTRY, &runner).expect("quit should succeed");
+        let calls = runner.recorded_calls();
+        let osascript = calls
+            .iter()
+            .find(|(p, _)| p == "osascript")
+            .expect("osascript must be invoked");
+        assert_eq!(osascript.1[0], "-e");
+        assert_eq!(osascript.1[1], "quit app \"Foo\\\"Bar\"");
+    }
+
     #[test]
     fn relaunch_app_opens_configured_app() {
         let runner = RecordingRunner::new(&[], 0);
