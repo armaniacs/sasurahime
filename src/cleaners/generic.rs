@@ -239,20 +239,7 @@ impl CliCleaner {
     }
 
     pub fn flutter(home: &Path, runner: Box<dyn CommandRunner>) -> Self {
-        let cache = match std::env::var("PUB_CACHE") {
-            Ok(dir) => {
-                let p = PathBuf::from(&dir);
-                if !is_safe_delete_target(&p) {
-                    eprintln!(
-                        "[flutter] WARNING: PUB_CACHE={dir} points to an unsafe path, using default"
-                    );
-                    home.join(".pub-cache")
-                } else {
-                    p
-                }
-            }
-            Err(_) => home.join(".pub-cache"),
-        };
+        let cache = resolve_env_dir("PUB_CACHE", "", home.join(".pub-cache"), "flutter");
         Self::with_detect_dir("flutter", "dart", &["pub", "cache", "clean"], cache, runner)
     }
 
@@ -307,20 +294,12 @@ impl PathCleaner {
     }
 
     pub fn terraform(home: &Path, runner: Box<dyn CommandRunner>) -> Self {
-        let cache = match std::env::var("TF_PLUGIN_CACHE_DIR") {
-            Ok(dir) => {
-                let p = PathBuf::from(&dir);
-                if !is_safe_delete_target(&p) {
-                    eprintln!(
-                        "[terraform] WARNING: TF_PLUGIN_CACHE_DIR={dir} points to an unsafe path, using default"
-                    );
-                    home.join(".terraform.d/plugin-cache")
-                } else {
-                    p
-                }
-            }
-            Err(_) => home.join(".terraform.d/plugin-cache"),
-        };
+        let cache = resolve_env_dir(
+            "TF_PLUGIN_CACHE_DIR",
+            "",
+            home.join(".terraform.d/plugin-cache"),
+            "terraform",
+        );
         Self::new("terraform", vec![cache], runner)
     }
 
@@ -341,21 +320,7 @@ impl PathCleaner {
     }
 
     pub fn act(home: &Path, runner: Box<dyn CommandRunner>) -> Self {
-        let cache_dir = match std::env::var("ACT_CACHE_DIR") {
-            Ok(dir) => {
-                let p = PathBuf::from(&dir);
-                if !is_safe_delete_target(&p) {
-                    eprintln!(
-                        "[act] WARNING: ACT_CACHE_DIR={} points to an unsafe path, using default",
-                        dir
-                    );
-                    home.join(".cache/act")
-                } else {
-                    p
-                }
-            }
-            Err(_) => home.join(".cache/act"),
-        };
+        let cache_dir = resolve_env_dir("ACT_CACHE_DIR", "", home.join(".cache/act"), "act");
         Self::new("act", vec![cache_dir], runner).with_risk(Risk::Safe)
     }
 }
@@ -865,6 +830,34 @@ pub fn is_safe_delete_target(path: &Path) -> bool {
         && !is_exact("/var")
 }
 
+/// Resolves a cache directory that may be overridden by `var`. The
+/// OVERRIDE VALUE ITSELF is validated BEFORE any subpath is joined, so a
+/// root-adjacent value (e.g. `HF_HOME=/`) can never yield a joined path
+/// that passes the safety check. Unsafe values warn and fall back.
+pub fn resolve_env_dir(
+    var: &str,
+    subpath: &str,
+    default: std::path::PathBuf,
+    label: &str,
+) -> std::path::PathBuf {
+    match std::env::var(var) {
+        Ok(value) => {
+            let base = PathBuf::from(&value);
+            if !is_safe_delete_target(&base) {
+                eprintln!(
+                    "[{label}] WARNING: {var}={value} points to an unsafe path, using default"
+                );
+                default
+            } else if subpath.is_empty() {
+                base
+            } else {
+                base.join(subpath)
+            }
+        }
+        Err(_) => default,
+    }
+}
+
 /// Returns `true` if the file or directory at `path` has a modification time
 /// older than `days` days. Returns `false` if the path does not exist or
 /// its mtime cannot be determined.
@@ -1357,10 +1350,124 @@ mod tests {
             .lock()
             .unwrap_or_else(|p| p.into_inner());
         let tmp = tempfile::TempDir::new().unwrap();
+        let default = tmp.path().join(".cache/act");
         let _guard = crate::test_helpers::EnvGuard::set("ACT_CACHE_DIR", "/");
+        // The resolver validates the OVERRIDE VALUE itself: ACT_CACHE_DIR=/
+        // is unsafe, so the default is used, not a root-adjacent path.
+        assert_eq!(
+            resolve_env_dir("ACT_CACHE_DIR", "", default.clone(), "act"),
+            default,
+            "unsafe ACT_CACHE_DIR=/ must fall back to the default"
+        );
         let cleaner = PathCleaner::act(tmp.path(), Box::new(crate::command::SystemCommandRunner));
+        assert_eq!(
+            cleaner.primary_target_display(),
+            Some(default.to_string_lossy().to_string()),
+            "act must resolve to the default when the env override is unsafe"
+        );
         let result = cleaner.detect();
         assert!(matches!(result.status, ScanStatus::NotFound));
+    }
+
+    // ── resolve_env_dir ──────────────────────────────────────────────────────
+
+    #[test]
+    fn resolve_env_dir_falls_back_when_value_is_root() {
+        // PBI 19 acceptance at the resolver level: the OVERRIDE VALUE is
+        // validated BEFORE any subpath is joined, so HF_HOME=/ can never
+        // yield /hub. Unsafe values fall back to the default.
+        let _lock = crate::context::TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let tmp = tempfile::TempDir::new().unwrap();
+        let default = tmp.path().join("default/hub");
+        let _guard = crate::test_helpers::EnvGuard::set("HF_HOME", "/");
+        assert_eq!(
+            resolve_env_dir("HF_HOME", "hub", default.clone(), "huggingface"),
+            default,
+            "a root-adjacent override (HF_HOME=/) must fall back to the default"
+        );
+    }
+
+    #[test]
+    fn resolve_env_dir_warns_and_falls_back_when_value_is_unsafe() {
+        // An unsafe override value (/etc) warns on stderr and falls back to
+        // the default instead of being used as the delete target.
+        let _lock = crate::context::TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let tmp = tempfile::TempDir::new().unwrap();
+        let default = tmp.path().join("default-cache");
+        let _guard = crate::test_helpers::EnvGuard::set("SASURAHIME_TEST_RESOLVE_VAR", "/etc");
+        assert_eq!(
+            resolve_env_dir(
+                "SASURAHIME_TEST_RESOLVE_VAR",
+                "hub",
+                default.clone(),
+                "test"
+            ),
+            default,
+            "an unsafe override (/etc) must warn and fall back to the default"
+        );
+    }
+
+    #[test]
+    fn resolve_env_dir_returns_joined_path_when_value_is_safe() {
+        // A safe override is used and the subpath is joined: the joined path
+        // is returned unchanged.
+        let _lock = crate::context::TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let tmp = tempfile::TempDir::new().unwrap();
+        let default = tmp.path().join("default-cache");
+        let _guard =
+            crate::test_helpers::EnvGuard::set("SASURAHIME_TEST_RESOLVE_VAR", "/Users/u/hf");
+        assert_eq!(
+            resolve_env_dir("SASURAHIME_TEST_RESOLVE_VAR", "hub", default, "test"),
+            PathBuf::from("/Users/u/hf/hub"),
+            "a safe override must be used with the subpath joined"
+        );
+    }
+
+    #[test]
+    fn resolve_env_dir_returns_base_when_subpath_is_empty() {
+        // An empty subpath (terraform, act, flutter) returns the override
+        // value itself, unchanged.
+        let _lock = crate::context::TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let tmp = tempfile::TempDir::new().unwrap();
+        let default = tmp.path().join("default-cache");
+        let _guard =
+            crate::test_helpers::EnvGuard::set("SASURAHIME_TEST_RESOLVE_VAR", "/Users/u/hf");
+        assert_eq!(
+            resolve_env_dir("SASURAHIME_TEST_RESOLVE_VAR", "", default, "test"),
+            PathBuf::from("/Users/u/hf"),
+            "an empty subpath must return the override unchanged"
+        );
+    }
+
+    #[test]
+    fn resolve_env_dir_returns_default_when_var_unset() {
+        let _lock = crate::context::TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let tmp = tempfile::TempDir::new().unwrap();
+        let default = tmp.path().join("default-cache");
+        // The test var must be absent: we only remove a stale value and never
+        // set it, so nothing can leak into parallel tests.
+        std::env::remove_var("SASURAHIME_TEST_UNSET_RESOLVE_VAR");
+        assert!(std::env::var("SASURAHIME_TEST_UNSET_RESOLVE_VAR").is_err());
+        assert_eq!(
+            resolve_env_dir(
+                "SASURAHIME_TEST_UNSET_RESOLVE_VAR",
+                "hub",
+                default.clone(),
+                "test"
+            ),
+            default,
+            "an unset var must yield the default"
+        );
     }
 
     // ── primary_target_display tests ────────────────────────────────────────

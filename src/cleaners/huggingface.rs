@@ -19,21 +19,15 @@ impl HuggingFaceCleaner {
     }
 
     fn cache_dir(&self) -> PathBuf {
-        match std::env::var("HF_HOME") {
-            Ok(h) => {
-                let p = PathBuf::from(&h).join("hub");
-                if !super::generic::is_safe_delete_target(&p) {
-                    eprintln!(
-                        "[huggingface] WARNING: HF_HOME={} points to an unsafe path, using default",
-                        h
-                    );
-                    self.home.join(".cache/huggingface/hub")
-                } else {
-                    p
-                }
-            }
-            Err(_) => self.home.join(".cache/huggingface/hub"),
-        }
+        // The HF_HOME value itself is validated BEFORE "hub" is joined, so a
+        // root-adjacent value (e.g. HF_HOME=/) falls back to the default
+        // instead of producing a joined path that passes the safety check.
+        super::generic::resolve_env_dir(
+            "HF_HOME",
+            "hub",
+            self.home.join(".cache/huggingface/hub"),
+            "huggingface",
+        )
     }
 }
 
@@ -80,6 +74,7 @@ impl Cleaner for HuggingFaceCleaner {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cleaners::generic::resolve_env_dir;
     use crate::command::{CommandRunner, SystemCommandRunner};
     use crate::test_helpers::EnvGuard;
     use std::fs;
@@ -241,17 +236,22 @@ mod tests {
             .lock()
             .unwrap_or_else(|p| p.into_inner());
         let tmp = TempDir::new().unwrap();
+        let default = tmp.path().join(".cache/huggingface/hub");
         // HF_HOME must still hold the unsafe value while cache_dir() runs:
         // the guard is alive until the end of the test, so the restore happens
-        // after the call and the assertion. HF_HOME=/ would NOT exercise the
-        // fallback here — cache_dir() joins "hub" first, and /hub passes
-        // is_safe_delete_target — so the joined path must be a blocked one.
+        // after the call and the assertion.
         let _guard = EnvGuard::set("HF_HOME", "/etc");
-        let cleaner = HuggingFaceCleaner::new(tmp.path(), Box::new(SystemCommandRunner));
-        let dir = cleaner.cache_dir();
+        // The resolver validates the HF_HOME value itself BEFORE "hub" is
+        // joined, so /etc/hub is never even constructed.
         assert_eq!(
-            dir,
-            tmp.path().join(".cache/huggingface/hub"),
+            resolve_env_dir("HF_HOME", "hub", default.clone(), "huggingface"),
+            default,
+            "unsafe HF_HOME=/etc must fall back to the default at the resolver"
+        );
+        let cleaner = HuggingFaceCleaner::new(tmp.path(), Box::new(SystemCommandRunner));
+        assert_eq!(
+            cleaner.cache_dir(),
+            default,
             "unsafe HF_HOME=/etc should fall back to default"
         );
     }
@@ -262,16 +262,71 @@ mod tests {
             .lock()
             .unwrap_or_else(|p| p.into_inner());
         let tmp = TempDir::new().unwrap();
+        let default = tmp.path().join(".cache/huggingface/hub");
         // HF_HOME must still hold the unsafe value while cache_dir() runs:
         // the guard is alive until the end of the test, so the restore happens
         // after the call and the assertion.
         let _guard = EnvGuard::set("HF_HOME", "/tmp");
+        // The resolver validates the HF_HOME value itself BEFORE "hub" is
+        // joined.
+        assert_eq!(
+            resolve_env_dir("HF_HOME", "hub", default.clone(), "huggingface"),
+            default,
+            "unsafe HF_HOME=/tmp must fall back to the default at the resolver"
+        );
+        let cleaner = HuggingFaceCleaner::new(tmp.path(), Box::new(SystemCommandRunner));
+        assert_eq!(
+            cleaner.cache_dir(),
+            default,
+            "unsafe HF_HOME=/tmp should fall back to default"
+        );
+    }
+
+    #[test]
+    fn cache_dir_returns_joined_path_when_hf_home_is_safe() {
+        // A normal HF_HOME is unaffected: the override value is safe, so the
+        // subpath is joined and the joined path is returned unchanged.
+        let _lock = crate::context::TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let tmp = TempDir::new().unwrap();
+        let _guard = EnvGuard::set("HF_HOME", "/Users/u/hf");
+        assert_eq!(
+            resolve_env_dir(
+                "HF_HOME",
+                "hub",
+                tmp.path().join(".cache/huggingface/hub"),
+                "huggingface"
+            ),
+            PathBuf::from("/Users/u/hf/hub"),
+            "a safe HF_HOME must be used with the subpath joined"
+        );
+        let cleaner = HuggingFaceCleaner::new(tmp.path(), Box::new(SystemCommandRunner));
+        assert_eq!(
+            cleaner.cache_dir(),
+            PathBuf::from("/Users/u/hf/hub"),
+            "a safe HF_HOME must not fall back to the default"
+        );
+    }
+
+    #[test]
+    fn cache_dir_falls_back_when_hf_home_is_root() {
+        // THE FIX (PBI 19): cache_dir() used to join "hub" BEFORE validating,
+        // so HF_HOME=/ produced /hub, which passed is_safe_delete_target and
+        // made a root-adjacent directory the delete target. The HF_HOME value
+        // itself must be validated BEFORE joining: HF_HOME=/ is unsafe, so
+        // cache_dir() must fall back to the default instead of /hub.
+        let _lock = crate::context::TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let tmp = TempDir::new().unwrap();
+        let _guard = EnvGuard::set("HF_HOME", "/");
         let cleaner = HuggingFaceCleaner::new(tmp.path(), Box::new(SystemCommandRunner));
         let dir = cleaner.cache_dir();
         assert_eq!(
             dir,
             tmp.path().join(".cache/huggingface/hub"),
-            "unsafe HF_HOME=/tmp should fall back to default"
+            "HF_HOME=/ must fall back to the default, not the root-adjacent /hub"
         );
     }
 

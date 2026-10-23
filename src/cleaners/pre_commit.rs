@@ -20,29 +20,21 @@ impl PreCommitCleaner {
 
     fn cache_dir(&self) -> PathBuf {
         // Priority: $PRE_COMMIT_HOME > $XDG_CACHE_HOME/pre-commit > ~/.cache/pre-commit
-        if let Ok(dir) = std::env::var("PRE_COMMIT_HOME") {
-            let p = PathBuf::from(&dir);
-            if !super::generic::is_safe_delete_target(&p) {
-                eprintln!(
-                    "[pre-commit] WARNING: PRE_COMMIT_HOME={} points to an unsafe path, using default",
-                    dir
-                );
-                return self.home.join(".cache/pre-commit");
-            }
-            return p;
+        // Each override value is validated BEFORE any subpath is joined.
+        if std::env::var("PRE_COMMIT_HOME").is_ok() {
+            return super::generic::resolve_env_dir(
+                "PRE_COMMIT_HOME",
+                "",
+                self.home.join(".cache/pre-commit"),
+                "pre-commit",
+            );
         }
-        if let Ok(xdg) = std::env::var("XDG_CACHE_HOME") {
-            let p = PathBuf::from(&xdg).join("pre-commit");
-            if !super::generic::is_safe_delete_target(&p) {
-                eprintln!(
-                    "[pre-commit] WARNING: XDG_CACHE_HOME={} points to an unsafe path, using default",
-                    xdg
-                );
-                return self.home.join(".cache/pre-commit");
-            }
-            return p;
-        }
-        self.home.join(".cache/pre-commit")
+        super::generic::resolve_env_dir(
+            "XDG_CACHE_HOME",
+            "pre-commit",
+            self.home.join(".cache/pre-commit"),
+            "pre-commit",
+        )
     }
 }
 
@@ -89,6 +81,7 @@ impl Cleaner for PreCommitCleaner {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cleaners::generic::resolve_env_dir;
     use crate::command::{CommandRunner, SystemCommandRunner};
     use crate::test_helpers::EnvGuard;
     use std::fs;
@@ -272,12 +265,19 @@ mod tests {
             .lock()
             .unwrap_or_else(|p| p.into_inner());
         let tmp = TempDir::new().unwrap();
+        let default = tmp.path().join(".cache/pre-commit");
         let _guard = EnvGuard::set("PRE_COMMIT_HOME", "/");
-        let cleaner = PreCommitCleaner::new(tmp.path(), Box::new(SystemCommandRunner));
-        let dir = cleaner.cache_dir();
+        // The resolver validates the override value itself BEFORE any
+        // subpath is joined.
         assert_eq!(
-            dir,
-            tmp.path().join(".cache/pre-commit"),
+            resolve_env_dir("PRE_COMMIT_HOME", "", default.clone(), "pre-commit"),
+            default,
+            "unsafe PRE_COMMIT_HOME=/ must fall back to the default at the resolver"
+        );
+        let cleaner = PreCommitCleaner::new(tmp.path(), Box::new(SystemCommandRunner));
+        assert_eq!(
+            cleaner.cache_dir(),
+            default,
             "unsafe PRE_COMMIT_HOME=/ should fall back to default"
         );
     }
@@ -288,13 +288,32 @@ mod tests {
             .lock()
             .unwrap_or_else(|p| p.into_inner());
         let tmp = TempDir::new().unwrap();
+        let default = tmp.path().join(".cache/pre-commit");
         let _pre_guard = EnvGuard::set("PRE_COMMIT_HOME", "");
         let _xdg_guard = EnvGuard::set("XDG_CACHE_HOME", "/etc");
-        let cleaner = PreCommitCleaner::new(tmp.path(), Box::new(SystemCommandRunner));
-        let dir = cleaner.cache_dir();
+        // A set-but-empty PRE_COMMIT_HOME is unsafe at the resolver, so the
+        // XDG override is never consulted and the default wins.
         assert_eq!(
-            dir,
-            tmp.path().join(".cache/pre-commit"),
+            resolve_env_dir("PRE_COMMIT_HOME", "", default.clone(), "pre-commit"),
+            default,
+            "an empty PRE_COMMIT_HOME must fall back to the default at the resolver"
+        );
+        // The XDG branch validates the override value BEFORE joining
+        // "pre-commit".
+        assert_eq!(
+            resolve_env_dir(
+                "XDG_CACHE_HOME",
+                "pre-commit",
+                default.clone(),
+                "pre-commit"
+            ),
+            default,
+            "unsafe XDG_CACHE_HOME=/etc must fall back to the default at the resolver"
+        );
+        let cleaner = PreCommitCleaner::new(tmp.path(), Box::new(SystemCommandRunner));
+        assert_eq!(
+            cleaner.cache_dir(),
+            default,
             "unsafe XDG_CACHE_HOME=/etc should fall back to default"
         );
     }
