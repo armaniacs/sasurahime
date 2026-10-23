@@ -349,13 +349,7 @@ impl AppSupportCleaner {
     }
 
     fn empty_result() -> CleanResult {
-        CleanResult {
-            name: NAME,
-            bytes_freed: 0,
-            uses_trash: false,
-            skipped: vec![],
-            deleted_paths: vec![],
-        }
+        CleanResult::empty(NAME)
     }
 
     fn running_apps(&self, cands: &[Candidate]) -> HashSet<&'static str> {
@@ -470,10 +464,11 @@ impl AppSupportCleaner {
         selected: &[Candidate],
         quit_approved: &HashSet<&'static str>,
         reporter: &dyn ProgressReporter,
-    ) -> CleanResult {
+    ) -> Result<CleanResult> {
         let base = self.base();
         let mut states: Vec<(&'static str, AppState)> = Vec::new();
         let mut freed = 0u64;
+        let mut uses_trash = false;
         let mut skipped = Vec::new();
         let mut deleted = Vec::new();
 
@@ -506,27 +501,27 @@ impl AppSupportCleaner {
                     continue;
                 }
             };
-            let _ = self
-                .runner
-                .run("chflags", &["-R", "nouchg", &path.to_string_lossy()]);
-            match crate::trash::delete_path(&path) {
-                Ok(()) => {
-                    freed += cand.size;
-                    println!(
-                        "[{NAME}] removed: {} (freed {})",
-                        path.display(),
-                        format_bytes(cand.size)
-                    );
-                    deleted.push(path);
-                }
-                Err(e) => {
-                    eprintln!("[{NAME}] error removing {}: {e}", path.display());
-                    skipped.push(SkippedEntry {
-                        path: cand.path.clone(),
-                        reason: format!("{e}"),
-                    });
-                }
+            let outcome = crate::trash::safe_delete(
+                self.runner.as_ref(),
+                &path,
+                crate::trash::TrashMode::Global,
+            )?;
+            if let Some(reason) = outcome.skip_reason {
+                eprintln!("[{NAME}] error removing {}: {reason}", path.display());
+                skipped.push(SkippedEntry {
+                    path: path.clone(),
+                    reason,
+                });
+                continue;
             }
+            uses_trash |= outcome.uses_trash;
+            freed += cand.size;
+            println!(
+                "[{NAME}] removed: {} (freed {})",
+                path.display(),
+                format_bytes(cand.size)
+            );
+            deleted.push(path);
         }
         reporter.progress_finish();
 
@@ -545,13 +540,13 @@ impl AppSupportCleaner {
             }
         }
 
-        CleanResult {
+        Ok(CleanResult {
             name: NAME,
             bytes_freed: freed,
-            uses_trash: true,
+            uses_trash,
             skipped,
             deleted_paths: deleted,
-        }
+        })
     }
 
     fn clean_cache_dirs(
@@ -586,7 +581,7 @@ impl AppSupportCleaner {
             return Ok(Self::empty_result());
         }
         let approved = self.confirm_quits(&selected, &running)?;
-        let result = self.apply_selection(&selected, &approved, reporter);
+        let result = self.apply_selection(&selected, &approved, reporter)?;
         println!("[{NAME}] total freed: {}", format_bytes(result.bytes_freed));
         Ok(result)
     }
@@ -1369,7 +1364,9 @@ mod tests {
         let c = cleaner_for(&tmp, &fake);
         let all = scan_candidates(&base, Some(0));
         let sel: Vec<Candidate> = all.into_iter().filter(|x| x.sub == "Cache").collect();
-        let r = c.apply_selection(&sel, &HashSet::new(), &DeepSuppressReporter);
+        let r = c
+            .apply_selection(&sel, &HashSet::new(), &DeepSuppressReporter)
+            .unwrap();
         assert!(!base.join("Slack/Cache").exists());
         assert!(base.join("Slack/logs/l.log").exists());
         assert!(base.join("Slack/Local Storage/u.bin").exists());
@@ -1391,7 +1388,9 @@ mod tests {
         let fake = Fake::with_running(&["Slack"]);
         let c = cleaner_for(&tmp, &fake);
         let sel = scan_candidates(&base, Some(0));
-        let r = c.apply_selection(&sel, &HashSet::new(), &DeepSuppressReporter);
+        let r = c
+            .apply_selection(&sel, &HashSet::new(), &DeepSuppressReporter)
+            .unwrap();
         assert!(base.join("Slack/Cache/a.bin").exists());
         assert_eq!(r.bytes_freed, 0);
         assert_eq!(r.skipped.len(), 1);
@@ -1414,7 +1413,9 @@ mod tests {
         let c = cleaner_for(&tmp, &fake);
         let sel = scan_candidates(&base, Some(0));
         let approved: HashSet<&'static str> = HashSet::from(["Obsidian"]);
-        let r = c.apply_selection(&sel, &approved, &DeepSuppressReporter);
+        let r = c
+            .apply_selection(&sel, &approved, &DeepSuppressReporter)
+            .unwrap();
         assert!(!base.join("obsidian/Cache").exists());
         assert!(r.bytes_freed > 0);
         let calls = fake.calls();
@@ -1442,7 +1443,8 @@ mod tests {
         let fake = Fake::default();
         let c = cleaner_for(&tmp, &fake);
         let sel = scan_candidates(&base, Some(0));
-        c.apply_selection(&sel, &HashSet::new(), &DeepSuppressReporter);
+        c.apply_selection(&sel, &HashSet::new(), &DeepSuppressReporter)
+            .unwrap();
         assert!(!fake.calls().iter().any(|c| c.starts_with("open")));
         crate::trash::set_trash_mode(true);
     }
@@ -1463,7 +1465,9 @@ mod tests {
             path: base.join("Slack/Local Storage"),
             size: 1,
         };
-        let r = c.apply_selection(&[forged], &HashSet::new(), &DeepSuppressReporter);
+        let r = c
+            .apply_selection(&[forged], &HashSet::new(), &DeepSuppressReporter)
+            .unwrap();
         assert!(base.join("Slack/Local Storage/u.bin").exists());
         assert_eq!(r.bytes_freed, 0);
         assert_eq!(r.skipped.len(), 1);
@@ -1488,7 +1492,8 @@ mod tests {
             path: base.join("Slack/Local Storage"),
             size: 5,
         };
-        c.apply_selection(&[forged], &HashSet::new(), &DeepSuppressReporter);
+        c.apply_selection(&[forged], &HashSet::new(), &DeepSuppressReporter)
+            .unwrap();
         assert!(!base.join("Slack/Cache").exists());
         assert!(base.join("Slack/Local Storage/u.bin").exists());
         crate::trash::set_trash_mode(true);
@@ -1510,7 +1515,8 @@ mod tests {
         std::os::unix::fs::symlink(outside.join("dir"), base.join("Slack/Cache/d")).unwrap();
         let c = cleaner_for(&tmp, &Fake::default());
         let sel = scan_candidates(&base, Some(0));
-        c.apply_selection(&sel, &HashSet::new(), &DeepSuppressReporter);
+        c.apply_selection(&sel, &HashSet::new(), &DeepSuppressReporter)
+            .unwrap();
         assert!(!base.join("Slack/Cache").exists());
         assert!(outside.join("keep.txt").exists());
         assert!(outside.join("dir/keep2.txt").exists());
@@ -1532,7 +1538,9 @@ mod tests {
         put(&outside, "keep.txt", 100);
         fs::remove_dir_all(base.join("Slack/Cache")).unwrap();
         std::os::unix::fs::symlink(&outside, base.join("Slack/Cache")).unwrap();
-        let r = c.apply_selection(&sel, &HashSet::new(), &DeepSuppressReporter);
+        let r = c
+            .apply_selection(&sel, &HashSet::new(), &DeepSuppressReporter)
+            .unwrap();
         assert!(outside.join("keep.txt").exists());
         assert_eq!(r.bytes_freed, 0);
         assert_eq!(r.skipped.len(), 1);

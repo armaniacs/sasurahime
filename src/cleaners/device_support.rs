@@ -115,13 +115,7 @@ impl Cleaner for DeviceSupportCleaner {
         let to_delete = self.versions_to_delete();
         if to_delete.is_empty() {
             println!("[device-support] nothing to clean");
-            return Ok(CleanResult {
-                name: self.name(),
-                bytes_freed: 0,
-                uses_trash: false,
-                skipped: vec![],
-                deleted_paths: vec![],
-            });
+            return Ok(CleanResult::empty(self.name()));
         }
 
         if dry_run {
@@ -133,34 +127,33 @@ impl Cleaner for DeviceSupportCleaner {
                     crate::format::format_bytes(size)
                 );
             }
-            return Ok(CleanResult {
-                name: self.name(),
-                bytes_freed: 0,
-                uses_trash: false,
-                skipped: vec![],
-                deleted_paths: vec![],
-            });
+            return Ok(CleanResult::empty(self.name()));
         }
 
         reporter.progress_init(self.name(), to_delete.len());
 
         let mut freed: u64 = 0;
+        let mut uses_trash = false;
         let mut skipped = vec![];
         for (i, p) in to_delete.iter().enumerate() {
             let size = dir_size(p);
             reporter.progress_tick(p, i + 1, size);
-            let path_str = p.to_string_lossy();
-            let _ = self.runner.run("chflags", &["-R", "nouchg", &path_str]);
-            if let Err(e) = crate::trash::delete_path(p) {
+            let outcome = crate::trash::safe_delete(
+                self.runner.as_ref(),
+                p,
+                crate::trash::TrashMode::Global,
+            )?;
+            if let Some(reason) = outcome.skip_reason {
+                log::error!("[device-support] error removing {}: {reason}", p.display());
                 skipped.push(SkippedEntry {
                     path: p.to_path_buf(),
-                    reason: format!("{e:#}"),
+                    reason,
                 });
-                log::error!("[device-support] error removing {}: {e}", p.display());
-            } else {
-                freed += size;
-                println!("[device-support] removed: {}", p.display());
+                continue;
             }
+            uses_trash |= outcome.uses_trash;
+            freed += size;
+            println!("[device-support] removed: {}", p.display());
         }
 
         reporter.progress_finish();
@@ -168,7 +161,7 @@ impl Cleaner for DeviceSupportCleaner {
         Ok(CleanResult {
             name: self.name(),
             bytes_freed: freed,
-            uses_trash: true,
+            uses_trash,
             skipped,
             deleted_paths: vec![],
         })

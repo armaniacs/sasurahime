@@ -63,13 +63,7 @@ impl Cleaner for IosCleaner {
 
     fn clean(&self, dry_run: bool, reporter: &dyn ProgressReporter) -> Result<CleanResult> {
         if !self.backup_dir.exists() {
-            return Ok(CleanResult {
-                name: self.name(),
-                bytes_freed: 0,
-                uses_trash: false,
-                skipped: vec![],
-                deleted_paths: vec![],
-            });
+            return Ok(CleanResult::empty(self.name()));
         }
 
         let entries: Vec<(PathBuf, u64)> = match fs::read_dir(&self.backup_dir) {
@@ -87,13 +81,7 @@ impl Cleaner for IosCleaner {
 
         if entries.is_empty() {
             println!("[ios-backup] nothing to clean");
-            return Ok(CleanResult {
-                name: self.name(),
-                bytes_freed: 0,
-                uses_trash: false,
-                skipped: vec![],
-                deleted_paths: vec![],
-            });
+            return Ok(CleanResult::empty(self.name()));
         }
 
         eprintln!("⚠  iOS backups contain personal data (contacts, messages, photos, etc.) and cannot be restored once deleted. Proceed with caution.");
@@ -109,13 +97,7 @@ impl Cleaner for IosCleaner {
                     crate::format::format_bytes(*size)
                 );
             }
-            return Ok(CleanResult {
-                name: self.name(),
-                bytes_freed: 0,
-                uses_trash: false,
-                skipped: vec![],
-                deleted_paths: vec![],
-            });
+            return Ok(CleanResult::empty(self.name()));
         }
 
         // Safety: iOS backups are irreversible and must only be deleted
@@ -125,57 +107,43 @@ impl Cleaner for IosCleaner {
                 "[ios-backup] not a terminal — skipping. Use `sasurahime clean ios-backup` \
                  for interactive selection."
             );
-            return Ok(CleanResult {
-                name: self.name(),
-                bytes_freed: 0,
-                uses_trash: false,
-                skipped: vec![],
-                deleted_paths: vec![],
-            });
+            return Ok(CleanResult::empty(self.name()));
         }
 
         let selected = self.interactive_select(&entries)?;
         if selected.is_empty() {
             println!("[ios-backup] nothing selected");
-            return Ok(CleanResult {
-                name: self.name(),
-                bytes_freed: 0,
-                uses_trash: false,
-                skipped: vec![],
-                deleted_paths: vec![],
-            });
+            return Ok(CleanResult::empty(self.name()));
         }
 
         let mut total_freed: u64 = 0;
+        let mut uses_trash = false;
         reporter.progress_init(self.name(), selected.len());
         for (i, (path, size)) in selected.iter().enumerate() {
             reporter.progress_tick(path, i + 1, *size);
-            let path_str = path.to_string_lossy();
-            let _ = self.runner.run("chflags", &["-R", "nouchg", &path_str]);
-            match crate::trash::delete_path(path) {
-                Ok(_) => {
-                    total_freed += size;
-                    println!(
-                        "[ios-backup] removed: {}  (freed {})",
-                        path.display(),
-                        crate::format::format_bytes(*size)
-                    );
-                }
-                Err(e) => log::error!("[ios-backup] error removing {}: {e}", path.display()),
+            let outcome = crate::trash::safe_delete(
+                self.runner.as_ref(),
+                path,
+                crate::trash::TrashMode::Global,
+            )?;
+            if let Some(reason) = outcome.skip_reason {
+                log::error!("[ios-backup] error removing {}: {reason}", path.display());
+                continue;
             }
+            uses_trash |= outcome.uses_trash;
+            total_freed += size;
+            println!(
+                "[ios-backup] removed: {}  (freed {})",
+                path.display(),
+                crate::format::format_bytes(*size)
+            );
         }
         reporter.progress_finish();
         println!(
             "[ios-backup] total freed: {}",
             crate::format::format_bytes(total_freed)
         );
-        Ok(CleanResult {
-            name: self.name(),
-            bytes_freed: total_freed,
-            uses_trash: true,
-            skipped: vec![],
-            deleted_paths: vec![],
-        })
+        Ok(CleanResult::freed(self.name(), total_freed, uses_trash))
     }
 }
 

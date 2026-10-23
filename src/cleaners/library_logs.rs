@@ -156,25 +156,13 @@ impl Cleaner for LibraryLogsCleaner {
     fn clean(&self, dry_run: bool, reporter: &dyn ProgressReporter) -> Result<CleanResult> {
         let dir = self.logs_dir();
         if !dir.exists() {
-            return Ok(CleanResult {
-                name: self.name(),
-                bytes_freed: 0,
-                uses_trash: false,
-                skipped: vec![],
-                deleted_paths: vec![],
-            });
+            return Ok(CleanResult::empty(self.name()));
         }
 
         let entries = self.scan();
         if entries.is_empty() {
             println!("[library-logs] nothing to clean");
-            return Ok(CleanResult {
-                name: self.name(),
-                bytes_freed: 0,
-                uses_trash: false,
-                skipped: vec![],
-                deleted_paths: vec![],
-            });
+            return Ok(CleanResult::empty(self.name()));
         }
 
         if dry_run {
@@ -199,48 +187,41 @@ impl Cleaner for LibraryLogsCleaner {
                     tags.join(", ")
                 );
             }
-            return Ok(CleanResult {
-                name: self.name(),
-                bytes_freed: 0,
-                uses_trash: false,
-                skipped: vec![],
-                deleted_paths: vec![],
-            });
+            return Ok(CleanResult::empty(self.name()));
         }
 
         let selected = self.interactive_select(&entries)?;
 
         if selected.is_empty() {
             println!("[library-logs] nothing selected");
-            return Ok(CleanResult {
-                name: self.name(),
-                bytes_freed: 0,
-                uses_trash: false,
-                skipped: vec![],
-                deleted_paths: vec![],
-            });
+            return Ok(CleanResult::empty(self.name()));
         }
 
         let mut total_freed: u64 = 0;
+        let mut uses_trash = false;
         reporter.progress_init(self.name(), selected.len());
         for (i, entry) in selected.iter().enumerate() {
             reporter.progress_tick(&entry.path, i + 1, entry.size);
-            let path_str = entry.path.to_string_lossy();
-            let _ = self.runner.run("chflags", &["-R", "nouchg", &path_str]);
-            if let Err(e) = crate::trash::delete_path(&entry.path) {
+            let outcome = crate::trash::safe_delete(
+                self.runner.as_ref(),
+                &entry.path,
+                crate::trash::TrashMode::Global,
+            )?;
+            if let Some(reason) = outcome.skip_reason {
                 eprintln!(
-                    "[library-logs] error removing {}: {e}",
+                    "[library-logs] error removing {}: {reason}",
                     entry.path.display()
                 );
-            } else {
-                let size = entry.size;
-                total_freed += size;
-                println!(
-                    "[library-logs] removed: {} (freed {})",
-                    entry.path.display(),
-                    crate::format::format_bytes(size)
-                );
+                continue;
             }
+            uses_trash |= outcome.uses_trash;
+            let size = entry.size;
+            total_freed += size;
+            println!(
+                "[library-logs] removed: {} (freed {})",
+                entry.path.display(),
+                crate::format::format_bytes(size)
+            );
         }
         reporter.progress_finish();
 
@@ -248,13 +229,7 @@ impl Cleaner for LibraryLogsCleaner {
             "[library-logs] total freed: {}",
             crate::format::format_bytes(total_freed)
         );
-        Ok(CleanResult {
-            name: self.name(),
-            bytes_freed: total_freed,
-            uses_trash: true,
-            skipped: vec![],
-            deleted_paths: vec![],
-        })
+        Ok(CleanResult::freed(self.name(), total_freed, uses_trash))
     }
 
     fn clean_with_opts(
@@ -269,13 +244,7 @@ impl Cleaner for LibraryLogsCleaner {
         let entries = self.scan();
         if entries.is_empty() {
             println!("[library-logs] nothing to clean");
-            return Ok(CleanResult {
-                name: "library-logs",
-                bytes_freed: 0,
-                uses_trash: false,
-                skipped: vec![],
-                deleted_paths: vec![],
-            });
+            return Ok(CleanResult::empty("library-logs"));
         }
         if dry_run {
             println!(
@@ -299,42 +268,35 @@ impl Cleaner for LibraryLogsCleaner {
                     tags.join(", ")
                 );
             }
-            return Ok(CleanResult {
-                name: "library-logs",
-                bytes_freed: 0,
-                uses_trash: false,
-                skipped: vec![],
-                deleted_paths: vec![],
-            });
+            return Ok(CleanResult::empty("library-logs"));
         }
         let mut total_freed: u64 = 0;
+        let mut uses_trash = false;
         reporter.progress_init("library-logs", entries.len());
         for (i, entry) in entries.iter().enumerate() {
             reporter.progress_tick(&entry.path, i + 1, entry.size);
-            let path_str = entry.path.to_string_lossy();
-            let _ = self.runner.run("chflags", &["-R", "nouchg", &path_str]);
-            if let Err(e) = crate::trash::delete_path(&entry.path) {
+            let outcome = crate::trash::safe_delete(
+                self.runner.as_ref(),
+                &entry.path,
+                crate::trash::TrashMode::Global,
+            )?;
+            if let Some(reason) = outcome.skip_reason {
                 eprintln!(
-                    "[library-logs] error removing {}: {e}",
+                    "[library-logs] error removing {}: {reason}",
                     entry.path.display()
                 );
-            } else {
-                total_freed += entry.size;
-                println!(
-                    "[library-logs] removed: {} (freed {})",
-                    entry.path.display(),
-                    crate::format::format_bytes(entry.size)
-                );
+                continue;
             }
+            uses_trash |= outcome.uses_trash;
+            total_freed += entry.size;
+            println!(
+                "[library-logs] removed: {} (freed {})",
+                entry.path.display(),
+                crate::format::format_bytes(entry.size)
+            );
         }
         reporter.progress_finish();
-        Ok(CleanResult {
-            name: "library-logs",
-            bytes_freed: total_freed,
-            uses_trash: true,
-            skipped: vec![],
-            deleted_paths: vec![],
-        })
+        Ok(CleanResult::freed("library-logs", total_freed, uses_trash))
     }
 }
 

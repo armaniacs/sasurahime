@@ -193,13 +193,7 @@ pub fn split_running(selected: Vec<CacheEntry>) -> (Vec<CacheEntry>, Vec<Skipped
 }
 
 fn empty_result(name: &'static str) -> CleanResult {
-    CleanResult {
-        name,
-        bytes_freed: 0,
-        uses_trash: false,
-        skipped: vec![],
-        deleted_paths: vec![],
-    }
+    CleanResult::empty(name)
 }
 
 pub struct LibraryCachesCleaner {
@@ -229,37 +223,45 @@ impl LibraryCachesCleaner {
         &self,
         entries: &[CacheEntry],
         reporter: &dyn ProgressReporter,
-    ) -> CleanResult {
-        let mut result = empty_result(self.name());
-        result.uses_trash = true;
+    ) -> Result<CleanResult> {
+        let mut freed: u64 = 0;
+        let mut uses_trash = false;
+        let mut skipped = Vec::new();
         reporter.progress_init(self.name(), entries.len());
         for (i, e) in entries.iter().enumerate() {
             reporter.progress_tick(&e.path, i + 1, e.size);
-            let path_str = e.path.to_string_lossy();
-            let _ = self.runner.run("chflags", &["-R", "nouchg", &path_str]);
-            match crate::trash::delete_path(&e.path) {
-                Ok(()) => {
-                    result.bytes_freed += e.size;
-                    println!(
-                        "[library-caches] removed: {} (freed {})",
-                        e.path.display(),
-                        format_bytes(e.size)
-                    );
-                }
-                Err(err) => {
-                    eprintln!(
-                        "[library-caches] error removing {}: {err}",
-                        e.path.display()
-                    );
-                    result.skipped.push(SkippedEntry {
-                        path: e.path.clone(),
-                        reason: err.to_string(),
-                    });
-                }
+            let outcome = crate::trash::safe_delete(
+                self.runner.as_ref(),
+                &e.path,
+                crate::trash::TrashMode::Global,
+            )?;
+            if let Some(reason) = outcome.skip_reason {
+                eprintln!(
+                    "[library-caches] error removing {}: {reason}",
+                    e.path.display()
+                );
+                skipped.push(SkippedEntry {
+                    path: e.path.clone(),
+                    reason,
+                });
+                continue;
             }
+            uses_trash |= outcome.uses_trash;
+            freed += e.size;
+            println!(
+                "[library-caches] removed: {} (freed {})",
+                e.path.display(),
+                format_bytes(e.size)
+            );
         }
         reporter.progress_finish();
-        result
+        Ok(CleanResult {
+            name: self.name(),
+            bytes_freed: freed,
+            uses_trash,
+            skipped,
+            deleted_paths: vec![],
+        })
     }
 
     fn interactive_select(&self, entries: &[CacheEntry]) -> Result<Vec<CacheEntry>> {
@@ -358,7 +360,7 @@ impl Cleaner for LibraryCachesCleaner {
             return Ok(empty_result(self.name()));
         }
         let (to_delete, mut skipped) = split_running(selected);
-        let mut result = self.delete_entries(&to_delete, reporter);
+        let mut result = self.delete_entries(&to_delete, reporter)?;
         result.skipped.append(&mut skipped);
         println!(
             "[library-caches] total freed: {}",
@@ -678,26 +680,34 @@ mod tests {
         cl.threshold_override = Some(1);
         let entries = cl.scan(false);
         let size = entries[0].size;
-        let r = cl.delete_entries(&entries, &crate::progress::DeepSuppressReporter);
+        let r = cl
+            .delete_entries(&entries, &crate::progress::DeepSuppressReporter)
+            .unwrap();
         assert!(!c.join("typescript").exists());
         assert_eq!(r.bytes_freed, size);
         assert!(r.skipped.is_empty());
-        assert!(r.uses_trash);
+        // The global pin is permanent here: the seam-resolved truth must not
+        // claim Trash for a permanent removal.
+        assert!(!r.uses_trash);
         crate::trash::set_trash_mode(true);
     }
 
     #[test]
     fn delete_entries_records_failures_as_skipped() {
+        // A Trash-mode delete failure is skippable and must be recorded as a
+        // skipped entry; pin the global mode to Trash for determinism.
         let _lock = crate::context::TEST_LOCK
             .lock()
             .unwrap_or_else(|p| p.into_inner());
-        crate::trash::set_trash_mode(false);
+        crate::trash::set_trash_mode(true);
         let tmp = TempDir::new().unwrap();
         let ghost = entry("ghost", 100, Disposition::Deletable, None);
         let mut ghost = ghost;
         ghost.path = tmp.path().join("does-not-exist");
         let cl = cleaner(&tmp);
-        let r = cl.delete_entries(&[ghost], &crate::progress::DeepSuppressReporter);
+        let r = cl
+            .delete_entries(&[ghost], &crate::progress::DeepSuppressReporter)
+            .unwrap();
         assert_eq!(r.bytes_freed, 0);
         assert_eq!(r.skipped.len(), 1);
         assert_eq!(r.exit_code(), 1);

@@ -400,13 +400,7 @@ pub fn unreadable_hint(count: usize) -> Option<String> {
 }
 
 fn empty_result(name: &'static str) -> CleanResult {
-    CleanResult {
-        name,
-        bytes_freed: 0,
-        uses_trash: false,
-        skipped: vec![],
-        deleted_paths: vec![],
-    }
+    CleanResult::empty(name)
 }
 
 fn print_unreadable_hint(count: usize) {
@@ -435,46 +429,48 @@ impl OrphanContainersCleaner {
         &self,
         selected: &[OrphanCandidate],
         reporter: &dyn ProgressReporter,
-    ) -> CleanResult {
+    ) -> Result<CleanResult> {
         let mut freed: u64 = 0;
+        let mut uses_trash = false;
         let mut skipped = Vec::new();
         let mut deleted_paths = Vec::new();
         reporter.progress_init(self.name(), selected.len());
         for (i, c) in selected.iter().enumerate() {
             reporter.progress_tick(&c.path, i + 1, c.size);
-            let path_str = c.path.to_string_lossy();
-            let _ = self.runner.run("chflags", &["-R", "nouchg", &path_str]);
-            match crate::trash::delete_path(&c.path) {
-                Ok(()) => {
-                    freed += c.size;
-                    deleted_paths.push(c.path.clone());
-                    println!(
-                        "[orphan-containers] removed: {} (freed {})",
-                        c.path.display(),
-                        format_bytes(c.size)
-                    );
-                }
-                Err(e) => {
-                    eprintln!(
-                        "[orphan-containers] error removing {}: {e}",
-                        c.path.display()
-                    );
-                    skipped.push(SkippedEntry {
-                        path: c.path.clone(),
-                        reason: format!("{e:#}"),
-                    });
-                }
+            let outcome = crate::trash::safe_delete(
+                self.runner.as_ref(),
+                &c.path,
+                crate::trash::TrashMode::Global,
+            )?;
+            if let Some(reason) = outcome.skip_reason {
+                eprintln!(
+                    "[orphan-containers] error removing {}: {reason}",
+                    c.path.display()
+                );
+                skipped.push(SkippedEntry {
+                    path: c.path.clone(),
+                    reason,
+                });
+                continue;
             }
+            uses_trash |= outcome.uses_trash;
+            freed += c.size;
+            deleted_paths.push(c.path.clone());
+            println!(
+                "[orphan-containers] removed: {} (freed {})",
+                c.path.display(),
+                format_bytes(c.size)
+            );
         }
         reporter.progress_finish();
         println!("[orphan-containers] total freed: {}", format_bytes(freed));
-        CleanResult {
+        Ok(CleanResult {
             name: self.name(),
             bytes_freed: freed,
-            uses_trash: crate::trash::is_trash_mode(),
+            uses_trash,
             skipped,
             deleted_paths,
-        }
+        })
     }
 }
 
@@ -545,7 +541,7 @@ impl Cleaner for OrphanContainersCleaner {
             return Ok(empty_result(self.name()));
         }
 
-        let result = self.delete_selected(&selected, reporter);
+        let result = self.delete_selected(&selected, reporter)?;
         print_unreadable_hint(scan.unreadable);
         Ok(result)
     }
@@ -1241,6 +1237,13 @@ mod tests {
 
     #[test]
     fn delete_selected_records_failures_as_skipped() {
+        // The seam classifies a Trash-mode delete failure as skippable; pin
+        // the global mode to Trash under the lock so the classification is
+        // deterministic against parallel tests that flip the global pin.
+        let _lock = crate::context::TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        crate::trash::set_trash_mode(true);
         let tmp = TempDir::new().unwrap();
         let missing = OrphanCandidate {
             path: tmp.path().join("does-not-exist"),
@@ -1248,10 +1251,13 @@ mod tests {
             kind: ContainerKind::Containers,
             size: 4096,
         };
-        let result = cleaner_for(&tmp).delete_selected(&[missing], &SuppressReporter);
+        let result = cleaner_for(&tmp)
+            .delete_selected(&[missing], &SuppressReporter)
+            .unwrap();
         assert_eq!(result.bytes_freed, 0);
         assert_eq!(result.skipped.len(), 1);
         assert_eq!(result.exit_code(), 1);
+        crate::trash::set_trash_mode(true);
     }
 
     #[test]

@@ -1,6 +1,6 @@
 use crate::cleaner::{
     CleanCancelled, CleanOptions, CleanResult, Cleaner, PerCleanerFilters, Risk, ScanResult,
-    ScanStatus,
+    ScanStatus, SkippedEntry,
 };
 use crate::command::CommandRunner;
 #[cfg(test)]
@@ -476,23 +476,11 @@ impl Cleaner for CliCleaner {
             None => {
                 if !self.runner.exists(program) {
                     println!("{}: not found, skipping", self.display_name);
-                    return Ok(CleanResult {
-                        name: self.name(),
-                        bytes_freed: 0,
-                        uses_trash: false,
-                        skipped: vec![],
-                        deleted_paths: vec![],
-                    });
+                    return Ok(CleanResult::empty(self.name()));
                 }
                 if dry_run {
                     println!("[dry-run] would run: {program} {}", args.join(" "));
-                    return Ok(CleanResult {
-                        name: self.name(),
-                        bytes_freed: 0,
-                        uses_trash: false,
-                        skipped: vec![],
-                        deleted_paths: vec![],
-                    });
+                    return Ok(CleanResult::empty(self.name()));
                 }
                 println!("$ {program} {}", args.join(" "));
                 let image_before = self.notice.as_ref().map_or(0, |n| n.physical_total());
@@ -556,13 +544,7 @@ impl Cleaner for CliCleaner {
                                 detect_dir.display(),
                                 crate::format::format_bytes(size_before)
                             );
-                            return Ok(CleanResult {
-                                name: self.name(),
-                                bytes_freed: 0,
-                                uses_trash: false,
-                                skipped: vec![],
-                                deleted_paths: vec![],
-                            });
+                            return Ok(CleanResult::empty(self.name()));
                         }
                         // TOCTOU mitigation: re-validate fallback delete path.
                         if !is_safe_delete_target(detect_dir) {
@@ -579,36 +561,36 @@ impl Cleaner for CliCleaner {
                                 deleted_paths: vec![],
                             });
                         }
-                        let path_str = detect_dir.to_string_lossy();
-                        if let Err(e) = self.runner.run("chflags", &["-R", "nouchg", &path_str]) {
-                            eprintln!(
-                                "[{}] warning: chflags failed for {}: {e}",
-                                self.display_name,
-                                detect_dir.display()
-                            );
+                        let outcome = crate::trash::safe_delete(
+                            self.runner.as_ref(),
+                            detect_dir,
+                            crate::trash::TrashMode::Global,
+                        )?;
+                        if let Some(reason) = outcome.skip_reason {
+                            return Ok(CleanResult {
+                                name: self.name(),
+                                bytes_freed: 0,
+                                uses_trash: outcome.uses_trash,
+                                skipped: vec![SkippedEntry {
+                                    path: detect_dir.to_path_buf(),
+                                    reason,
+                                }],
+                                deleted_paths: vec![],
+                            });
                         }
-                        crate::trash::delete_path(detect_dir)?;
                         println!(
                             "[{}] removed cache: {}",
                             self.display_name,
                             detect_dir.display()
                         );
-                        return Ok(CleanResult {
-                            name: self.name(),
-                            bytes_freed: size_before,
-                            uses_trash: crate::trash::is_trash_mode(),
-                            skipped: vec![],
-                            deleted_paths: vec![],
-                        });
+                        return Ok(CleanResult::freed(
+                            self.name(),
+                            size_before,
+                            outcome.uses_trash,
+                        ));
                     }
                     println!("{}: not found, skipping", self.display_name);
-                    return Ok(CleanResult {
-                        name: self.name(),
-                        bytes_freed: 0,
-                        uses_trash: false,
-                        skipped: vec![],
-                        deleted_paths: vec![],
-                    });
+                    return Ok(CleanResult::empty(self.name()));
                 }
                 if dry_run {
                     println!("[dry-run] would run: {program} {}", args.join(" "));
@@ -618,13 +600,7 @@ impl Cleaner for CliCleaner {
                             crate::format::format_bytes(size_before)
                         );
                     }
-                    return Ok(CleanResult {
-                        name: self.name(),
-                        bytes_freed: 0,
-                        uses_trash: false,
-                        skipped: vec![],
-                        deleted_paths: vec![],
-                    });
+                    return Ok(CleanResult::empty(self.name()));
                 }
                 println!("$ {program} {}", args.join(" "));
                 let output = self.runner.run(program, args)?;
@@ -821,15 +797,15 @@ impl PathCleaner {
             return Ok(0);
         }
         reporter.progress_tick(dir, 1, size);
-        let path_str = dir.to_string_lossy();
-        if let Err(e) = self.runner.run("chflags", &["-R", "nouchg", &path_str]) {
+        let outcome = crate::trash::safe_delete(self.runner.as_ref(), dir, mode)?;
+        if let Some(reason) = outcome.skip_reason {
             log::warn!(
-                "[{}] chflags failed for {}: {e}",
+                "[{}] skipping {}: {reason}",
                 self.display_name,
                 dir.display()
             );
+            return Ok(0);
         }
-        crate::trash::DeleteCtx::new(mode).delete_path(dir)?;
         println!("Removed: {}", dir.display());
         Ok(size)
     }
@@ -948,13 +924,7 @@ pub fn clean_cli_or_fallback(
     dry_run: bool,
 ) -> Result<CleanResult> {
     if !dir.exists() {
-        return Ok(CleanResult {
-            name,
-            bytes_freed: 0,
-            uses_trash: false,
-            skipped: vec![],
-            deleted_paths: vec![],
-        });
+        return Ok(CleanResult::empty(name));
     }
 
     // Prefer CLI if available
@@ -970,13 +940,7 @@ pub fn clean_cli_or_fallback(
                 "[dry-run] [{name}] would free: {}",
                 crate::format::format_bytes(size)
             );
-            return Ok(CleanResult {
-                name,
-                bytes_freed: 0,
-                uses_trash: false,
-                skipped: vec![],
-                deleted_paths: vec![],
-            });
+            return Ok(CleanResult::empty(name));
         }
         let size_before = dir_size(dir);
         let output = runner.run(config.tool, config.args)?;
@@ -994,13 +958,7 @@ pub fn clean_cli_or_fallback(
             );
         }
         println!("[{name}] ran {} {}", config.tool, config.args.join(" "));
-        return Ok(CleanResult {
-            name,
-            bytes_freed: size_before,
-            uses_trash: false,
-            skipped: vec![],
-            deleted_paths: vec![],
-        });
+        return Ok(CleanResult::freed(name, size_before, false));
     }
 
     // Fallback: delete directly
@@ -1011,13 +969,7 @@ pub fn clean_cli_or_fallback(
             dir.display(),
             crate::format::format_bytes(size)
         );
-        return Ok(CleanResult {
-            name,
-            bytes_freed: 0,
-            uses_trash: false,
-            skipped: vec![],
-            deleted_paths: vec![],
-        });
+        return Ok(CleanResult::empty(name));
     }
     // Clean-time safety re-validation, same as the other deletion sinks:
     // env-var-derived dirs are only checked at construction. This is
@@ -1025,34 +977,27 @@ pub fn clean_cli_or_fallback(
     // parent dir between this check and the delete remains possible.
     if !is_safe_delete_target(dir) {
         eprintln!("[{name}] warning: unsafe path, skipping: {}", dir.display());
+        return Ok(CleanResult::empty(name));
+    }
+
+    let outcome = crate::trash::safe_delete(runner, dir, crate::trash::TrashMode::Global)?;
+    if let Some(reason) = outcome.skip_reason {
         return Ok(CleanResult {
             name,
             bytes_freed: 0,
-            uses_trash: false,
-            skipped: vec![],
+            uses_trash: outcome.uses_trash,
+            skipped: vec![SkippedEntry {
+                path: dir.to_path_buf(),
+                reason,
+            }],
             deleted_paths: vec![],
         });
     }
-
-    let path_str = dir.to_string_lossy();
-    if let Err(e) = runner.run("chflags", &["-R", "nouchg", &path_str]) {
-        eprintln!(
-            "[{name}] warning: chflags failed for {}: {e}",
-            dir.display()
-        );
-    }
-    crate::trash::delete_path(dir)?;
     if config.recreate {
         fs::create_dir_all(dir)?;
     }
     println!("[{name}] removed cache: {}", dir.display());
-    Ok(CleanResult {
-        name,
-        bytes_freed: size,
-        uses_trash: crate::trash::is_trash_mode(),
-        skipped: vec![],
-        deleted_paths: vec![],
-    })
+    Ok(CleanResult::freed(name, size, outcome.uses_trash))
 }
 
 #[cfg(test)]

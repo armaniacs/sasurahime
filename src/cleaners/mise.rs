@@ -186,16 +186,15 @@ impl MiseCleaner {
         }
     }
 
-    /// Clears macOS `uchg` immutable flags then deletes the directory.
-    ///
-    /// Returns an error if `chflags -R nouchg` fails, so callers get a clear
-    /// diagnostic instead of a confusing `remove_dir_all` failure.
-    fn remove_with_uchg(path: &Path, runner: &dyn CommandRunner) -> Result<()> {
-        let path_str = path.to_string_lossy();
-        runner
-            .run("chflags", &["-R", "nouchg", &path_str])
-            .map_err(|e| anyhow::anyhow!("chflags -R nouchg {:?}: {}", path, e))?;
-        crate::trash::delete_path(path)
+    /// Deletes the directory through the [`crate::trash::safe_delete`] seam:
+    /// the seam clears macOS `uchg` immutable flags before a permanent remove
+    /// (warning and continuing when the clear fails, the PBI-20 decided
+    /// semantic), then deletes and classifies failures into skippable vs fatal.
+    fn remove_with_uchg(
+        path: &Path,
+        runner: &dyn CommandRunner,
+    ) -> Result<crate::trash::DeleteOutcome> {
+        crate::trash::safe_delete(runner, path, crate::trash::TrashMode::Global)
     }
 }
 
@@ -243,25 +242,13 @@ impl Cleaner for MiseCleaner {
     fn clean(&self, dry_run: bool, reporter: &dyn ProgressReporter) -> Result<CleanResult> {
         if !self.runner.exists("mise") {
             println!("mise: not found, skipping");
-            return Ok(CleanResult {
-                name: self.name(),
-                bytes_freed: 0,
-                uses_trash: true,
-                skipped: vec![],
-                deleted_paths: vec![],
-            });
+            return Ok(CleanResult::empty(self.name()));
         }
         let stdout = match self.get_mise_output() {
             Some(ref s) => s.clone(),
             None => {
                 println!("mise: ls --current failed, nothing to clean");
-                return Ok(CleanResult {
-                    name: self.name(),
-                    bytes_freed: 0,
-                    uses_trash: true,
-                    skipped: vec![],
-                    deleted_paths: vec![],
-                });
+                return Ok(CleanResult::empty(self.name()));
             }
         };
         let active = Self::parse_active_versions(&stdout);
@@ -280,6 +267,7 @@ impl Cleaner for MiseCleaner {
         }
 
         let mut freed: u64 = 0;
+        let mut uses_trash = false;
         for (i, (tool, version, path)) in unused.iter().enumerate() {
             let size = dir_size(path);
             if dry_run {
@@ -289,29 +277,22 @@ impl Cleaner for MiseCleaner {
                 );
             } else {
                 reporter.progress_tick(path, i + 1, size);
-                match Self::remove_with_uchg(path, self.runner.as_ref()) {
-                    Ok(()) => {
-                        freed += size;
-                        println!("Removed: {tool} {version}");
-                    }
-                    Err(e) => {
-                        eprintln!("Error removing {tool} {version}: {e}");
-                        // Continue with remaining items on error
-                    }
+                let outcome = Self::remove_with_uchg(path, self.runner.as_ref())?;
+                if let Some(reason) = outcome.skip_reason {
+                    eprintln!("Error removing {tool} {version}: {reason}");
+                    // Continue with remaining items on error
+                    continue;
                 }
+                uses_trash |= outcome.uses_trash;
+                freed += size;
+                println!("Removed: {tool} {version}");
             }
         }
 
         if !dry_run && !unused.is_empty() {
             reporter.progress_finish();
         }
-        Ok(CleanResult {
-            name: self.name(),
-            bytes_freed: freed,
-            uses_trash: false,
-            skipped: vec![],
-            deleted_paths: vec![],
-        })
+        Ok(CleanResult::freed(self.name(), freed, uses_trash))
     }
 }
 
