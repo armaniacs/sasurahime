@@ -152,7 +152,7 @@ pub fn run_scan(cleaners: &[Box<dyn Cleaner>], home: &std::path::Path) {
     sort_by_size(&mut rows);
 
     let mut table = Table::new();
-    if crate::history::USE_UNICODE.load(std::sync::atomic::Ordering::Relaxed) {
+    if crate::format::use_unicode() {
         table.load_preset(UTF8_FULL);
     } else {
         table.load_preset(ASCII_FULL);

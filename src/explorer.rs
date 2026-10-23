@@ -202,7 +202,7 @@ fn display_path(path: &Path, home: &Path) -> String {
 
 fn print_managed_table(entries: &[ExploreEntry], home: &Path) {
     let mut table = Table::new();
-    if crate::history::USE_UNICODE.load(std::sync::atomic::Ordering::Relaxed) {
+    if crate::format::use_unicode() {
         table.load_preset(UTF8_FULL);
     } else {
         table.load_preset(ASCII_FULL);
@@ -217,7 +217,7 @@ fn print_managed_table(entries: &[ExploreEntry], home: &Path) {
 
 fn print_unmanaged_table(entries: &[ExploreEntry], home: &Path) {
     let mut table = Table::new();
-    if crate::history::USE_UNICODE.load(std::sync::atomic::Ordering::Relaxed) {
+    if crate::format::use_unicode() {
         table.load_preset(UTF8_FULL);
     } else {
         table.load_preset(ASCII_FULL);

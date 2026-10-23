@@ -838,7 +838,6 @@ fn main() -> anyhow::Result<()> {
 
     // Set global context flags before any subcommand runs.
     sasurahime::context::set_verbose(cli.verbose);
-    sasurahime::context::set_dry_run(cli.dry_run);
 
     // Default: trash mode enabled.
     // --permanent flag overrides to permanent deletion.
@@ -847,7 +846,7 @@ fn main() -> anyhow::Result<()> {
     sasurahime::trash::set_trash_mode(trash_mode);
 
     if cli.no_unicode {
-        sasurahime::history::USE_UNICODE.store(false, std::sync::atomic::Ordering::Relaxed);
+        format::set_use_unicode(false);
     }
 
     // Persistent scan cache: enabled unless --no-cache. Loaded once per
