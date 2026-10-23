@@ -18,7 +18,7 @@ pub(crate) fn quit_app_and_wait(
     };
 
     eprintln!("  Quitting {}...", entry.display_name);
-    runner.run("osascript", &["-e", &format!("quit app \"{quit_app}\"")])?;
+    runner.run("osascript", &["-e", &quit_app_script(quit_app)])?;
 
     let process_name = entry.process_name.unwrap_or(quit_app);
     for _ in 0..QUIT_TIMEOUT_SECS {
@@ -43,6 +43,18 @@ pub(crate) fn quit_app_and_wait(
         );
     }
     Ok(())
+}
+
+/// Builds the `quit app "..."` AppleScript for an entry's app name.
+///
+/// quit_app comes from the compile-time KNOWN_ENTRIES table (every current
+/// value is quote- and backslash-free), but nothing in the type forbids such
+/// a character in a future entry; escaping the AppleScript string delimiters
+/// here means a future value can never close the `quit app "..."` literal
+/// early and interpolate arbitrary AppleScript.
+fn quit_app_script(quit_app: &str) -> String {
+    let escaped = quit_app.replace('\\', "\\\\").replace('"', "\\\"");
+    format!("quit app \"{escaped}\"")
 }
 
 /// Relaunch the app if the entry configures `relaunch_app`.
@@ -71,6 +83,7 @@ pub fn auto_clean_hint(
 
     let base = base_path(home, entry.base_dir);
     eprintln!("  Clearing cache...");
+    let mut skip_reasons: Vec<String> = Vec::new();
     for suffix in entry.path_suffixes {
         let path = base.join(suffix);
         if path.exists() {
@@ -80,10 +93,11 @@ pub fn auto_clean_hint(
                 crate::trash::safe_delete(runner, &path, crate::trash::TrashMode::Global)?;
             if let Some(reason) = outcome.skip_reason {
                 log::warn!("failed to delete {}: {reason}", path.display());
+                skip_reasons.push(reason);
             }
         }
     }
-    eprintln!("  [OK]");
+    eprintln!("{}", completion_line(&skip_reasons));
 
     relaunch_app(entry, runner)
 }
@@ -97,6 +111,7 @@ fn clean_hint_dirs(
     let entry = hint.entry;
     let base = base_path(home, entry.base_dir);
     eprintln!("  Clearing cache...");
+    let mut skip_reasons: Vec<String> = Vec::new();
     for suffix in entry.path_suffixes {
         let path = base.join(suffix);
         if path.exists() {
@@ -106,10 +121,11 @@ fn clean_hint_dirs(
                 crate::trash::safe_delete(runner, &path, crate::trash::TrashMode::Global)?;
             if let Some(reason) = outcome.skip_reason {
                 log::warn!("failed to delete {}: {reason}", path.display());
+                skip_reasons.push(reason);
             }
         }
     }
-    eprintln!("  [OK]");
+    eprintln!("{}", completion_line(&skip_reasons));
     Ok(())
 }
 
@@ -161,6 +177,19 @@ pub fn offer_auto_clean(
     }
 }
 
+/// The line printed after a hint's delete loop: `  [OK]` only when every
+/// attempted deletion succeeded. Any skipped deletion (the seam returned a
+/// skip reason) yields a truthful `  [SKIPPED]` line instead, so a cache
+/// that was not cleared never reports OK. Fatal errors propagate as `Err`
+/// before this line is reached.
+fn completion_line(skip_reasons: &[String]) -> String {
+    if skip_reasons.is_empty() {
+        "  [OK]".to_string()
+    } else {
+        format!("  [SKIPPED] {}", skip_reasons.join("; "))
+    }
+}
+
 /// Print an overview of reclaimable hints to stderr.
 pub fn print_hints(hints: &[ProcessHint]) {
     if hints.is_empty() {
@@ -191,4 +220,58 @@ pub fn print_hints(hints: &[ProcessHint]) {
         }
     }
     eprintln!("{sep}");
+}
+
+// ─── tests ───────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn completion_line_ok_when_every_delete_succeeded() {
+        assert_eq!(completion_line(&[]), "  [OK]");
+    }
+
+    #[test]
+    fn completion_line_never_reports_ok_after_a_skipped_delete() {
+        let line = completion_line(&["trash failed: Finder denied access".to_string()]);
+        assert!(
+            !line.contains("[OK]"),
+            "a skipped delete must not report [OK], got: {line}"
+        );
+        assert!(
+            line.contains("[SKIPPED]"),
+            "the skip must be reported truthfully, got: {line}"
+        );
+    }
+
+    #[test]
+    fn completion_line_reports_every_skip_reason() {
+        let line = completion_line(&["first".to_string(), "second".to_string()]);
+        assert!(
+            line.contains("first") && line.contains("second"),
+            "got: {line}"
+        );
+        assert!(!line.contains("[OK]"), "got: {line}");
+    }
+
+    #[test]
+    fn quit_app_script_never_closes_the_string_early() {
+        // A `"` in the app name must not close the `quit app "..."` literal
+        // early and turn the rest into executable AppleScript.
+        let script = quit_app_script("\" & do shell script \"pwned");
+        assert_eq!(script, "quit app \"\\\" & do shell script \\\"pwned\"");
+    }
+
+    #[test]
+    fn quit_app_script_leaves_known_entries_untouched() {
+        // Every current KNOWN_ENTRIES value is quote- and backslash-free;
+        // escaping must not mangle those names.
+        assert_eq!(
+            quit_app_script("Visual Studio Code"),
+            "quit app \"Visual Studio Code\""
+        );
+        assert_eq!(quit_app_script("Slack"), "quit app \"Slack\"");
+    }
 }
