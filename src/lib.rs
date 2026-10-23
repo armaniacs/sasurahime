@@ -12,6 +12,7 @@
 //! * macOS `uchg` immutable flags are cleared with `chflags -R nouchg`
 //!   before a delete.
 
+pub mod batch;
 pub mod cleaner;
 pub mod cleaners;
 pub mod command;

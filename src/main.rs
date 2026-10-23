@@ -1,6 +1,6 @@
 use sasurahime::{
-    cleaner, cleaners, command, config, doctor, explorer, format, hint, history, interactive,
-    progress, scan_cache, scanner,
+    batch, cleaner, cleaners, command, config, doctor, explorer, format, hint, history,
+    interactive, progress, scan_cache, scanner,
 };
 
 use clap::{Parser, Subcommand};
@@ -603,23 +603,6 @@ fn freed_message(bytes_freed: u64, uses_trash: bool, trash_mode: bool) -> String
     }
 }
 
-/// Minimal audit trail / restore guidance printed after a clean, so the
-/// record exists even without `--verbose`. `None` when nothing was freed.
-fn post_clean_note(bytes_freed: u64, uses_trash: bool, trash_mode: bool) -> Option<String> {
-    if bytes_freed == 0 {
-        return None;
-    }
-    if trash_mode {
-        if uses_trash {
-            Some("Restore from Finder (Trash) or run `open ~/.Trash`.".to_string())
-        } else {
-            None
-        }
-    } else {
-        Some("Permanently deleted: no Trash copy was kept.".to_string())
-    }
-}
-
 /// Cleaners that accept `[cleaner.<name>]` filters, keyed by `Cleaner::name()`.
 fn filter_support(
     home: &std::path::Path,
@@ -748,7 +731,7 @@ where
                 sasurahime::trash::is_trash_mode()
             )
         );
-        if let Some(note) = post_clean_note(
+        if let Some(note) = batch::post_clean_note(
             result.bytes_freed,
             result.uses_trash,
             sasurahime::trash::is_trash_mode(),
@@ -767,14 +750,16 @@ where
         }
     }
 
-    if !dry_run && result.bytes_freed > 0 {
-        history::write_history_entry(
-            label,
-            result.bytes_freed,
-            result.skipped.len(),
-            result.uses_trash,
-        );
-    }
+    // The single-target path keeps its own flow (CleanCancelled, per-target
+    // freed_message) but funnels the history write through the one guard in
+    // batch.rs, so `!dry_run && bytes_freed > 0` has exactly one owner.
+    batch::write_history_entry_if_needed(
+        label,
+        dry_run,
+        result.bytes_freed,
+        result.skipped.len(),
+        result.uses_trash,
+    );
 
     Ok(result)
 }
@@ -869,7 +854,6 @@ fn main() -> anyhow::Result<()> {
                 );
                 std::process::exit(1);
             }
-            let trash_mode = sasurahime::trash::is_trash_mode();
             let opts = cleaner::CleanOptions {
                 all: true,
                 include_manual: config.policy.include_manual,
@@ -878,12 +862,14 @@ fn main() -> anyhow::Result<()> {
                 trash_mode: Some(sasurahime::trash::TrashMode::Global),
             };
             let cleaners_list = all_cleaners(&home, &config);
-            let mut total: u64 = 0;
             let mut skipped: Vec<String> = Vec::new();
+            // Skip policies stay at the call site: the wording is specific to
+            // `auto`. Risky (destructive/irreversible) and Manual
+            // (review-first) targets never run unattended, even with
+            // include_manual: whole-dir removals must never happen without a
+            // human.
+            let mut batch_cleaners: Vec<&dyn cleaner::Cleaner> = Vec::new();
             for c in &cleaners_list {
-                // Risky (destructive/irreversible) and Manual (review-first)
-                // targets never run unattended, even with include_manual:
-                // whole-dir removals must never happen without a human.
                 if matches!(c.risk(), cleaner::Risk::Risky | cleaner::Risk::Manual) {
                     skipped.push(format!(
                         "{} ({}): never runs unattended",
@@ -904,27 +890,18 @@ fn main() -> anyhow::Result<()> {
                     ));
                     continue;
                 }
-                match sasurahime::progress::with_spinner_result(
-                    &format!("Cleaning {}...", c.name()),
-                    || c.clean_with_opts(dry_run, reporter.as_ref(), &opts),
-                ) {
-                    Ok(r) => {
-                        total += r.bytes_freed;
-                        if let Some(note) = post_clean_note(r.bytes_freed, r.uses_trash, trash_mode)
-                        {
-                            println!("{note}");
-                        }
-                        if !dry_run && r.bytes_freed > 0 {
-                            history::write_history_entry(
-                                c.name(),
-                                r.bytes_freed,
-                                r.skipped.len(),
-                                r.uses_trash,
-                            );
-                        }
-                    }
-                    Err(e) => eprintln!("Error cleaning {}: {e}", c.name()),
-                }
+                batch_cleaners.push(c.as_ref());
+            }
+            let summary = batch::run_batch(
+                &batch_cleaners,
+                &opts,
+                reporter.as_ref(),
+                dry_run,
+                false,
+                true,
+            );
+            for (name, e) in &summary.failures {
+                eprintln!("Error cleaning {name}: {e}");
             }
             if !skipped.is_empty() {
                 eprintln!("Skipped {} target(s):", skipped.len());
@@ -933,7 +910,7 @@ fn main() -> anyhow::Result<()> {
                 }
                 eprintln!("Run `sasurahime clean <target>` explicitly for those.");
             }
-            println!("Total freed: {}", format::format_bytes(total));
+            println!("Total freed: {}", format::format_bytes(summary.total_freed));
         }
         Some(Commands::Scan { json }) => {
             let cleaners = all_cleaners(&home, &config);
@@ -1036,27 +1013,25 @@ fn main() -> anyhow::Result<()> {
                                 SystemCommandRunner,
                             ))),
                         ];
-                        let mut total: u64 = 0;
-                        for c in &caches {
-                            match sasurahime::progress::with_spinner_result(
-                                &format!("Cleaning {}...", c.name()),
-                                || c.clean(dry_run, reporter.as_ref()),
-                            ) {
-                                Ok(r) => {
-                                    total += r.bytes_freed;
-                                    if !dry_run && r.bytes_freed > 0 {
-                                        history::write_history_entry(
-                                            c.name(),
-                                            r.bytes_freed,
-                                            r.skipped.len(),
-                                            r.uses_trash,
-                                        );
-                                    }
-                                }
-                                Err(e) => eprintln!("Error cleaning {}: {e}", c.name()),
-                            }
+                        // Bare batch: no post-clean notes (this entry point
+                        // never printed them). Passing the default options is
+                        // behavior-identical to the old bare `clean()` calls:
+                        // every caches cleaner computes the same filters from
+                        // its own fields when the options carry none.
+                        let batch_cleaners: Vec<&dyn cleaner::Cleaner> =
+                            caches.iter().map(|c| c.as_ref()).collect();
+                        let summary = batch::run_batch(
+                            &batch_cleaners,
+                            &cleaner::CleanOptions::default(),
+                            reporter.as_ref(),
+                            dry_run,
+                            false,
+                            false,
+                        );
+                        for (name, e) in &summary.failures {
+                            eprintln!("Error cleaning {name}: {e}");
                         }
-                        println!("Total freed: {}", format::format_bytes(total));
+                        println!("Total freed: {}", format::format_bytes(summary.total_freed));
                     }
                     CleanTarget::Logs { dry_run, keep_days } => {
                         let days = keep_days.unwrap_or_else(|| config.effective_logs_keep_days());
@@ -1219,7 +1194,6 @@ fn main() -> anyhow::Result<()> {
                         // Explicit full clean: the user picked every target on
                         // purpose. Safe targets run without --include-manual;
                         // Moderate/Risky/Manual need it.
-                        let trash_mode = sasurahime::trash::is_trash_mode();
                         let opts = cleaner::CleanOptions {
                             all: true,
                             include_manual,
@@ -1228,8 +1202,10 @@ fn main() -> anyhow::Result<()> {
                             trash_mode: Some(sasurahime::trash::TrashMode::Global),
                         };
                         let cleaners_list = all_cleaners(&home, &config);
-                        let mut total: u64 = 0;
                         let mut skipped_targets: usize = 0;
+                        // Skip policy stays at the call site: the wording is
+                        // specific to `clean all`.
+                        let mut batch_cleaners: Vec<&dyn cleaner::Cleaner> = Vec::new();
                         for c in &cleaners_list {
                             if !opts.include_manual && !c.auto_clean_allowed() {
                                 skipped_targets += 1;
@@ -1240,35 +1216,25 @@ fn main() -> anyhow::Result<()> {
                                 );
                                 continue;
                             }
-                            match sasurahime::progress::with_spinner_result(
-                                &format!("Cleaning {}...", c.name()),
-                                || c.clean_with_opts(dry_run, reporter.as_ref(), &opts),
-                            ) {
-                                Ok(r) => {
-                                    total += r.bytes_freed;
-                                    if let Some(note) =
-                                        post_clean_note(r.bytes_freed, r.uses_trash, trash_mode)
-                                    {
-                                        println!("{note}");
-                                    }
-                                    if !dry_run && r.bytes_freed > 0 {
-                                        history::write_history_entry(
-                                            c.name(),
-                                            r.bytes_freed,
-                                            r.skipped.len(),
-                                            r.uses_trash,
-                                        );
-                                    }
-                                }
-                                Err(e) => eprintln!("Error cleaning {}: {e}", c.name()),
-                            }
+                            batch_cleaners.push(c.as_ref());
+                        }
+                        let summary = batch::run_batch(
+                            &batch_cleaners,
+                            &opts,
+                            reporter.as_ref(),
+                            dry_run,
+                            false,
+                            true,
+                        );
+                        for (name, e) in &summary.failures {
+                            eprintln!("Error cleaning {name}: {e}");
                         }
                         if skipped_targets > 0 {
                             eprintln!(
                                 "Skipped {skipped_targets} target(s) that need --include-manual."
                             );
                         }
-                        println!("Total freed: {}", format::format_bytes(total));
+                        println!("Total freed: {}", format::format_bytes(summary.total_freed));
                     }
                     CleanTarget::ProjectArtifacts { dry_run } => {
                         let roots = project_artifact_roots(&home, &config);
@@ -1708,36 +1674,6 @@ mod tests {
             freed_message(bytes, false, false),
             format!("Freed: {shown}")
         );
-    }
-
-    #[test]
-    fn post_clean_note_shows_restore_guidance_for_trash_runs() {
-        let note = post_clean_note(2048, true, true).expect("restore note");
-        assert!(
-            note.contains("Finder") && note.contains("~/.Trash"),
-            "restore guidance must mention Finder and ~/.Trash, got: {note}"
-        );
-        // A cleaner that never moves to Trash prints nothing in trash mode.
-        assert_eq!(post_clean_note(2048, false, true), None);
-    }
-
-    #[test]
-    fn post_clean_note_keeps_a_permanent_audit_trail() {
-        let note = post_clean_note(2048, true, false).expect("audit note");
-        assert!(
-            note.contains("Permanently deleted"),
-            "permanent runs must keep a minimal audit trail, got: {note}"
-        );
-        assert_eq!(
-            post_clean_note(2048, false, false).expect("audit note"),
-            "Permanently deleted: no Trash copy was kept."
-        );
-    }
-
-    #[test]
-    fn post_clean_note_is_silent_when_nothing_was_freed() {
-        assert_eq!(post_clean_note(0, true, true), None);
-        assert_eq!(post_clean_note(0, false, false), None);
     }
 
     fn pcc(older: Option<u32>, larger: Option<u64>) -> config::PerCleanerConfig {

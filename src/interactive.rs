@@ -146,38 +146,31 @@ pub fn run_auto(cleaners: &[Box<dyn Cleaner>]) -> Result<()> {
     // Suppress secondary confirmation prompts (TUI already asked above).
     crate::cleaners::generic::set_skip_confirm(true);
 
-    let mut total_freed: u64 = 0;
-    for i in pruneable_indices {
-        let name = cleaners[i].name();
-        // One shared spinner: its message names the folder being deleted
-        // instead of a bare rotating character. generic.rs prompts are
-        // suppressed here, but app-support and apfs-snapshot still prompt
-        // inside clean(); the animated tick redraws over them (the old
-        // two-bar layout competed with them more).
-        let result = crate::progress::with_spinner_result_progress(
-            &format!("Cleaning {}...", name),
-            true,
-            |rep| cleaners[i].clean(false, rep),
-        );
-        match result {
-            Ok(r) => {
-                total_freed += r.bytes_freed;
-                if r.bytes_freed > 0 {
-                    crate::history::write_history_entry(
-                        name,
-                        r.bytes_freed,
-                        r.skipped.len(),
-                        r.uses_trash,
-                    );
-                }
-            }
-            Err(e) => eprintln!("Error cleaning {name}: {e}"),
-        }
+    // The one batch path: animated spinner per cleaner, accumulation, the
+    // history guard and per-target error collection all live in
+    // batch::run_batch. with_notes=false: this flow never printed notes, and
+    // passing the default options is behavior-identical to the old bare
+    // `clean(false, rep)` calls (every reachable cleaner computes the same
+    // work when the options carry nothing). dry_run is always false here.
+    let selected: Vec<&dyn Cleaner> = pruneable_indices
+        .iter()
+        .map(|&i| cleaners[i].as_ref())
+        .collect();
+    let summary = crate::batch::run_batch(
+        &selected,
+        &crate::cleaner::CleanOptions::default(),
+        &crate::progress::SuppressReporter,
+        false, // dry_run: interactive always deletes
+        true,  // animated
+        false, // with_notes
+    );
+    for (name, e) in &summary.failures {
+        eprintln!("Error cleaning {name}: {e}");
     }
 
     crate::cleaners::generic::set_skip_confirm(false);
 
-    println!("\nTotal freed: {}", format_bytes(total_freed));
+    println!("\nTotal freed: {}", format_bytes(summary.total_freed));
     Ok(())
 }
 
@@ -264,26 +257,24 @@ pub fn run_interactive(cleaners: &[Box<dyn Cleaner>]) -> Result<()> {
                 Err(e) => eprintln!("Error cleaning {} {}: {e}", name, sub_name),
             }
         } else {
-            let name = cleaners[*cleaner_idx].name();
-            // One shared spinner naming the folder being deleted.
-            let result = crate::progress::with_spinner_result_progress(
-                &format!("Cleaning {}...", name),
-                true,
-                |rep| cleaners[*cleaner_idx].clean(false, rep),
+            // Whole-target selection through the one batch path: the same
+            // animated spinner, history guard and error collection as every
+            // other batch loop. One target per call keeps the selection order
+            // interleaved with the sub-target subprocess branch above.
+            // with_notes=false: this flow never printed notes.
+            let batch_targets = [cleaners[*cleaner_idx].as_ref()];
+            let summary = crate::batch::run_batch(
+                &batch_targets,
+                &crate::cleaner::CleanOptions::default(),
+                &crate::progress::SuppressReporter,
+                false, // dry_run: interactive always deletes
+                true,  // animated
+                false, // with_notes
             );
-            match result {
-                Ok(r) => {
-                    freed += r.bytes_freed;
-                    if r.bytes_freed > 0 {
-                        crate::history::write_history_entry(
-                            name,
-                            r.bytes_freed,
-                            r.skipped.len(),
-                            r.uses_trash,
-                        );
-                    }
-                }
-                Err(e) => eprintln!("Error: {e}"),
+            freed += summary.total_freed;
+            // This flow's error line names no cleaner.
+            for (_, e) in &summary.failures {
+                eprintln!("Error: {e}");
             }
         }
     }
