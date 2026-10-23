@@ -166,7 +166,7 @@ pub fn print_hints(hints: &[ProcessHint]) {
     if hints.is_empty() {
         return;
     }
-    let sep = if crate::history::USE_UNICODE.load(std::sync::atomic::Ordering::Relaxed) {
+    let sep = if crate::format::use_unicode() {
         "─".repeat(60)
     } else {
         "-".repeat(60)

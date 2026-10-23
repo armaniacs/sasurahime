@@ -128,17 +128,6 @@ impl ProgressReporter for CleaningProgress {
     }
 }
 
-pub fn with_spinner<R>(msg: &str, f: impl FnOnce() -> R) -> R {
-    let pb = ProgressBar::new_spinner();
-    pb.set_style(spinner_style().clone());
-    pb.set_message(msg.to_string());
-    pb.enable_steady_tick(Duration::from_millis(100));
-    let result = f();
-    pb.finish_and_clear();
-    eprintln!("{msg} [OK]");
-    result
-}
-
 /// Spinner whose message updates with the path being deleted. `animated`
 /// enables the steady tick (safe only when the cleaner will not prompt).
 pub fn with_spinner_result_progress<T, E: std::fmt::Display>(
@@ -328,12 +317,6 @@ fn format_speed(size_bytes: u64, elapsed_secs: f64) -> String {
 mod tests {
     use super::*;
     use std::path::Path;
-
-    #[test]
-    fn with_spinner_returns_value() {
-        let result = with_spinner("test", || 42);
-        assert_eq!(result, 42);
-    }
 
     #[test]
     fn verbose_progress_shows_spinner() {

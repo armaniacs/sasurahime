@@ -3,15 +3,10 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Maximum number of history entries kept in the file.
 /// Oldest entries are trimmed on append.
 const MAX_HISTORY_ENTRIES: usize = 1000;
-
-/// Global flag: set to false to disable Unicode box-drawing characters
-/// in stats output (for screen-reader compatibility).
-pub static USE_UNICODE: AtomicBool = AtomicBool::new(true);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HistoryEntry {
@@ -52,7 +47,7 @@ fn format_inner_line(content: &str, inner: usize) -> String {
 
 fn build_box(lines: &[String]) -> String {
     let inner = inner_width();
-    let (tl, h, tr, vl, bl, br, hl) = if USE_UNICODE.load(Ordering::Relaxed) {
+    let (tl, h, tr, vl, bl, br, hl) = if crate::format::use_unicode() {
         ('╔', '═', '╗', '║', '╚', '╝', '═')
     } else {
         ('+', '-', '+', '|', '+', '+', '-')
@@ -496,7 +491,7 @@ mod tests {
 
     #[test]
     fn format_stats_uses_unicode_by_default() {
-        USE_UNICODE.store(true, Ordering::Relaxed);
+        crate::format::set_use_unicode(true);
         let entries = vec![HistoryEntry {
             timestamp: "2026-05-25T10:30:00+09:00".to_string(),
             cleaner: "uv".to_string(),
@@ -518,7 +513,7 @@ mod tests {
 
     #[test]
     fn format_stats_no_unicode_uses_ascii() {
-        USE_UNICODE.store(false, Ordering::Relaxed);
+        crate::format::set_use_unicode(false);
         let entries = vec![HistoryEntry {
             timestamp: "2026-05-25T10:30:00+09:00".to_string(),
             cleaner: "uv".to_string(),
@@ -536,7 +531,7 @@ mod tests {
             !output.contains('╔'),
             "--no-unicode should NOT contain Unicode: {output}"
         );
-        USE_UNICODE.store(true, Ordering::Relaxed);
+        crate::format::set_use_unicode(true);
     }
 
     #[test]

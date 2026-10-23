@@ -1,4 +1,19 @@
 use std::os::unix::fs::MetadataExt;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+/// Display policy: set to false to disable Unicode box-drawing characters
+/// in display output (for screen-reader compatibility).
+static USE_UNICODE: AtomicBool = AtomicBool::new(true);
+
+/// Whether display output may use Unicode box-drawing characters.
+pub fn use_unicode() -> bool {
+    USE_UNICODE.load(Ordering::Relaxed)
+}
+
+/// Enable or disable Unicode box-drawing characters in display output.
+pub fn set_use_unicode(v: bool) {
+    USE_UNICODE.store(v, Ordering::Relaxed);
+}
 
 /// Returns the total physical disk usage in bytes of all files under `path`.
 /// Uses `st_blocks × 512` (physical blocks) instead of logical file size so
