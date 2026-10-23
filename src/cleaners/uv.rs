@@ -108,7 +108,6 @@ impl Cleaner for UvCleaner {
                     &old,
                     crate::trash::TrashMode::Global,
                 )?;
-                uses_trash |= outcome.uses_trash;
                 if let Some(reason) = outcome.skip_reason {
                     skipped.push(crate::cleaner::SkippedEntry {
                         path: old.clone(),
@@ -116,6 +115,9 @@ impl Cleaner for UvCleaner {
                     });
                     continue;
                 }
+                // OR-in only when the deletion actually happened: a skipped
+                // Trash move never claims Trash.
+                uses_trash |= outcome.uses_trash;
                 println!("Removed: {}", old.display());
             }
         }

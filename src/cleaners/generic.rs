@@ -518,10 +518,14 @@ impl Cleaner for CliCleaner {
                                 self.display_name,
                                 detect_dir.display()
                             );
+                            // The fallback was refused before any deletion: the
+                            // seam was never invoked, so no Trash claim may be
+                            // made (same as the free `clean_cli_or_fallback`'s
+                            // unsafe-path return).
                             return Ok(CleanResult {
                                 name: self.name(),
                                 bytes_freed: 0,
-                                uses_trash: crate::trash::is_trash_mode(),
+                                uses_trash: false,
                                 skipped: vec![],
                                 deleted_paths: vec![],
                             });

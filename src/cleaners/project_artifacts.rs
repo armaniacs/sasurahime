@@ -201,6 +201,8 @@ impl Cleaner for ProjectArtifactsCleaner {
     ) -> Result<CleanResult> {
         let mut freed: u64 = 0;
         let mut skipped: Vec<crate::cleaner::SkippedEntry> = vec![];
+        // The seam outcome is the one owner of the Trash claim.
+        let mut uses_trash = false;
         for artifact in self.detect_artifacts_inner(false) {
             if dry_run {
                 println!("[dry-run] would remove: {}", artifact.path.display());
@@ -227,13 +229,14 @@ impl Cleaner for ProjectArtifactsCleaner {
                 });
                 continue;
             }
+            uses_trash |= outcome.uses_trash;
             freed += artifact.size;
             println!("Removed: {}", artifact.path.display());
         }
         Ok(CleanResult {
             name: self.name(),
             bytes_freed: freed,
-            uses_trash: crate::trash::is_trash_mode(),
+            uses_trash,
             skipped,
             deleted_paths: vec![],
         })

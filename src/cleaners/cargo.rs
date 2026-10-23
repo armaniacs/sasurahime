@@ -106,13 +106,15 @@ impl Cleaner for CargoCleaner {
                     &reg,
                     crate::trash::TrashMode::Global,
                 )?;
-                uses_trash |= outcome.uses_trash;
                 if let Some(reason) = outcome.skip_reason {
                     skipped.push(crate::cleaner::SkippedEntry {
                         path: reg.to_path_buf(),
                         reason,
                     });
                 } else {
+                    // OR-in only when the deletion actually happened: a
+                    // skipped Trash move never claims Trash.
+                    uses_trash |= outcome.uses_trash;
                     freed += size;
                     println!("[cargo] removed registry cache: {}", reg.display());
                 }
@@ -137,13 +139,15 @@ impl Cleaner for CargoCleaner {
                     path,
                     crate::trash::TrashMode::Global,
                 )?;
-                uses_trash |= outcome.uses_trash;
                 if let Some(reason) = outcome.skip_reason {
                     skipped.push(crate::cleaner::SkippedEntry {
                         path: path.to_path_buf(),
                         reason,
                     });
                 } else {
+                    // OR-in only when the deletion actually happened: a
+                    // skipped Trash move never claims Trash.
+                    uses_trash |= outcome.uses_trash;
                     freed += size;
                     println!("[cargo] removed target dir: {}", path.display());
                 }

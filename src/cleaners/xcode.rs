@@ -235,13 +235,15 @@ impl Cleaner for XcodeCleaner {
                         entry,
                         crate::trash::TrashMode::Global,
                     )?;
-                    uses_trash |= outcome.uses_trash;
                     if let Some(reason) = outcome.skip_reason {
                         all_skipped.push(crate::cleaner::SkippedEntry {
                             path: entry.to_path_buf(),
                             reason,
                         });
                     } else {
+                        // OR-in only when the deletion actually happened: a
+                        // skipped Trash move never claims Trash.
+                        uses_trash |= outcome.uses_trash;
                         total_freed += size;
                         println!("Removed: {label}/{entry_name}");
                     }

@@ -112,10 +112,12 @@ impl Cleaner for GradleCleaner {
     fn clean(&self, dry_run: bool, _reporter: &dyn ProgressReporter) -> Result<CleanResult> {
         let caches = self.home.join(".gradle/caches");
         if !caches.exists() {
+            // Nothing is deleted on this path: the seam is never invoked, so
+            // no Trash claim may be made.
             return Ok(CleanResult {
                 name: self.name(),
                 bytes_freed: 0,
-                uses_trash: crate::trash::is_trash_mode(),
+                uses_trash: false,
                 skipped: vec![],
                 deleted_paths: vec![],
             });
@@ -123,6 +125,8 @@ impl Cleaner for GradleCleaner {
         let old = Self::find_old_caches(&caches);
         let mut freed: u64 = 0;
         let mut skipped: Vec<crate::cleaner::SkippedEntry> = vec![];
+        // The seam outcome is the one owner of the Trash claim.
+        let mut uses_trash = false;
         for path in &old {
             let size = dir_size(path);
             if dry_run {
@@ -143,6 +147,7 @@ impl Cleaner for GradleCleaner {
                         reason,
                     });
                 } else {
+                    uses_trash |= outcome.uses_trash;
                     freed += size;
                     println!("[gradle] removed: {}", path.display());
                 }
@@ -151,7 +156,7 @@ impl Cleaner for GradleCleaner {
         Ok(CleanResult {
             name: self.name(),
             bytes_freed: freed,
-            uses_trash: crate::trash::is_trash_mode(),
+            uses_trash,
             skipped,
             deleted_paths: vec![],
         })
@@ -246,10 +251,12 @@ impl Cleaner for JetBrainsCleaner {
     fn clean(&self, dry_run: bool, _reporter: &dyn ProgressReporter) -> Result<CleanResult> {
         let dir = self.home.join("Library/Caches/JetBrains");
         if !dir.exists() {
+            // Nothing is deleted on this path: the seam is never invoked, so
+            // no Trash claim may be made.
             return Ok(CleanResult {
                 name: self.name(),
                 bytes_freed: 0,
-                uses_trash: crate::trash::is_trash_mode(),
+                uses_trash: false,
                 skipped: vec![],
                 deleted_paths: vec![],
             });
@@ -257,6 +264,8 @@ impl Cleaner for JetBrainsCleaner {
         let old = Self::find_old_caches(&dir);
         let mut freed: u64 = 0;
         let mut skipped: Vec<crate::cleaner::SkippedEntry> = vec![];
+        // The seam outcome is the one owner of the Trash claim.
+        let mut uses_trash = false;
         for path in &old {
             let size = dir_size(path);
             if dry_run {
@@ -277,6 +286,7 @@ impl Cleaner for JetBrainsCleaner {
                         reason,
                     });
                 } else {
+                    uses_trash |= outcome.uses_trash;
                     freed += size;
                     println!("[jetbrains] removed: {}", path.display());
                 }
@@ -285,7 +295,7 @@ impl Cleaner for JetBrainsCleaner {
         Ok(CleanResult {
             name: self.name(),
             bytes_freed: freed,
-            uses_trash: crate::trash::is_trash_mode(),
+            uses_trash,
             skipped,
             deleted_paths: vec![],
         })
@@ -320,7 +330,7 @@ mod tests {
     #[test]
     fn gradle_clean_uses_trash_true() {
         // Hold the test lock so parallel trash-mode mutators serialize with
-        // this read, and pin the mode so the assertion is deterministic.
+        // this read, and pin the mode so the seam resolution is deterministic.
         let _lock = crate::context::TEST_LOCK
             .lock()
             .unwrap_or_else(|p| p.into_inner());
@@ -334,9 +344,89 @@ mod tests {
         let result = cleaner
             .clean(false, &crate::progress::DeepSuppressReporter)
             .unwrap();
+        // The seam outcome is the one owner of the Trash claim: uses_trash
+        // must come from the deletion outcomes, never from a global read. A
+        // candidate is either deleted or skipped, so under the trash pin
+        // Trash is claimed exactly when a deletion actually happened. (In a
+        // TCC-restricted sandbox the Trash move is denied and every deletion
+        // comes back skipped: there the truthful claim is false, which is
+        // what this assertion then checks.)
+        let deletions_happened = result.skipped.is_empty();
+        assert_eq!(
+            result.uses_trash, deletions_happened,
+            "uses_trash must come from the deletion outcomes' seam truth"
+        );
+    }
+
+    #[test]
+    fn gradle_clean_without_deletion_candidates_reports_uses_trash_false() {
+        // Zero deletions: the seam is never invoked, so no Trash claim may be
+        // made, even with the global pinned to trash.
+        let _lock = crate::context::TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let _mode = crate::test_helpers::TrashModeGuard::set(true);
+        let tmp = TempDir::new().unwrap();
+        let caches = tmp.path().join(".gradle/caches");
+        // Only non-version names: find_old_caches returns no candidate.
+        fs::create_dir_all(caches.join("modules-2")).unwrap();
+        fs::create_dir_all(caches.join("wrapper")).unwrap();
+        let runner = MockRunner::new().with_success("chflags");
+        let cleaner = GradleCleaner::new(tmp.path(), Box::new(runner));
+        let result = cleaner
+            .clean(false, &crate::progress::DeepSuppressReporter)
+            .unwrap();
+        assert!(result.skipped.is_empty(), "nothing was attempted");
+        assert_eq!(result.bytes_freed, 0, "nothing was deleted");
         assert!(
-            result.uses_trash,
-            "GradleCleaner should report uses_trash=true (default trash mode)"
+            !result.uses_trash,
+            "a run with zero deletions must not claim Trash"
+        );
+    }
+
+    #[test]
+    fn gradle_clean_all_deletions_skipped_reports_uses_trash_false() {
+        // Every deletion comes back skipped: the parent of the candidate is
+        // readable (the scan lists the candidate) but not writable, so the
+        // Trash move of the candidate can never succeed. A run where nothing
+        // was deleted must not claim Trash, even with the global pinned to
+        // trash.
+        let _lock = crate::context::TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let _mode = crate::test_helpers::TrashModeGuard::set(true);
+        let tmp = TempDir::new().unwrap();
+        let caches = tmp.path().join(".gradle/caches");
+        // Two candidates: keep_highest retains 8.12.0 and selects 8.8.0 for
+        // deletion, so exactly one deletion is attempted.
+        fs::create_dir_all(caches.join("8.12.0")).unwrap();
+        fs::create_dir_all(caches.join("8.8.0")).unwrap();
+        fs::write(caches.join("8.8.0").join("cache.dat"), b"data").unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        let original = fs::metadata(&caches).unwrap().permissions();
+        let mut perms = original.clone();
+        perms.set_mode(0o555);
+        fs::set_permissions(&caches, perms).unwrap();
+        let runner = MockRunner::new().with_success("chflags");
+        let cleaner = GradleCleaner::new(tmp.path(), Box::new(runner));
+        let result = cleaner.clean(false, &crate::progress::DeepSuppressReporter);
+        // Restore before TempDir cleanup: an unwritable parent would make the
+        // tempdir's own removal fail.
+        fs::set_permissions(&caches, original).unwrap();
+        let result = result.unwrap();
+        assert_eq!(
+            result.skipped.len(),
+            1,
+            "the only deletion candidate must come back skipped, not deleted"
+        );
+        assert!(
+            caches.join("8.8.0").exists(),
+            "a skipped deletion must not remove the candidate"
+        );
+        assert_eq!(result.bytes_freed, 0, "a skipped deletion frees no bytes");
+        assert!(
+            !result.uses_trash,
+            "a run where every deletion was skipped must not claim Trash"
         );
     }
 
@@ -501,9 +591,13 @@ mod tests {
         let result = cleaner
             .clean(false, &crate::progress::DeepSuppressReporter)
             .unwrap();
-        assert!(
-            result.uses_trash,
-            "JetBrainsCleaner should report uses_trash=true (default trash mode)"
+        // Same seam-truth contract as the gradle test: Trash is claimed
+        // exactly when a deletion actually happened (see the gradle test's
+        // TCC note).
+        let deletions_happened = result.skipped.is_empty();
+        assert_eq!(
+            result.uses_trash, deletions_happened,
+            "uses_trash must come from the deletion outcomes' seam truth"
         );
     }
 

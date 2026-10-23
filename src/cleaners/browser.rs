@@ -148,13 +148,15 @@ impl Cleaner for BrowserCleaner {
                     path,
                     crate::trash::TrashMode::Global,
                 )?;
-                uses_trash |= outcome.uses_trash;
                 if let Some(reason) = outcome.skip_reason {
                     skipped.push(crate::cleaner::SkippedEntry {
                         path: path.to_path_buf(),
                         reason,
                     });
                 } else {
+                    // OR-in only when the deletion actually happened: a
+                    // skipped Trash move never claims Trash.
+                    uses_trash |= outcome.uses_trash;
                     freed += size;
                     println!("Removed: {entry_name}");
                 }
