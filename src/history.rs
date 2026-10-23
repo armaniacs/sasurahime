@@ -98,26 +98,18 @@ fn table_row(i: usize, ts: &str, cleaner: &str, size: &str, method: &str) -> Str
 
 pub fn append_history(entry: &HistoryEntry, history_dir: &Path) -> anyhow::Result<()> {
     let history_path = history_dir.join("history.json");
-    // Ensure the directory exists before opening the file for locking.
-    if !history_path.exists() {
-        fs::create_dir_all(history_dir)?;
-    }
-    // Open (or create) the file and acquire an exclusive advisory lock
-    // to prevent concurrent sasurahime processes from losing entries.
-    let file = if history_path.exists() {
-        fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(&history_path)?
-    } else {
-        fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .open(&history_path)?
-    };
-    file.lock_exclusive()?;
+    fs::create_dir_all(history_dir)?;
+    // The exclusive lock must live on a file the rename never replaces: a lock
+    // on history.json is inherited by the new inode after every rename, which
+    // lets two processes serialize against different inodes and lose entries.
+    let lock_path = history_dir.join("history.json.lock");
+    let lock = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(&lock_path)?;
+    lock.lock_exclusive()?;
 
     let mut entries = load_history(&history_path);
     entries.push(entry.clone());
@@ -128,6 +120,8 @@ pub fn append_history(entry: &HistoryEntry, history_dir: &Path) -> anyhow::Resul
     let tmp_path = history_dir.join("history.json.tmp");
     // Write via an owned file handle so the temp file is fsynced before the
     // rename: an interruption (or crash) can then never leave a torn file.
+    // Content always comes from load_history under the lock, so the file is
+    // never truncated outside the critical section.
     {
         use std::io::Write;
         let mut tmp = fs::OpenOptions::new()
@@ -139,6 +133,11 @@ pub fn append_history(entry: &HistoryEntry, history_dir: &Path) -> anyhow::Resul
         tmp.sync_all()?;
     }
     fs::rename(&tmp_path, &history_path)?;
+    // fsync the directory too: the rename is not durable on power loss until
+    // the directory entry is synced.
+    if let Ok(dir) = fs::File::open(history_dir) {
+        let _ = dir.sync_all();
+    }
 
     // Lock is released on drop.
     Ok(())
@@ -533,6 +532,69 @@ mod tests {
             "--no-unicode should NOT contain Unicode: {output}"
         );
         USE_UNICODE.store(true, Ordering::Relaxed);
+    }
+
+    #[test]
+    fn append_history_locks_a_dedicated_never_renamed_lock_file() {
+        // The lock must live on a file the rename never replaces, so two
+        // overlapping processes serialize on the same inode.
+        let tmp = TempDir::new().unwrap();
+        let history_dir = tmp.path().join(".local/share/sasurahime");
+        append_history(
+            &HistoryEntry {
+                timestamp: "2026-05-25T00:00:00+09:00".to_string(),
+                cleaner: "uv".to_string(),
+                freed_bytes: 100,
+                skipped_count: 0,
+                moved_to_trash: false,
+            },
+            &history_dir,
+        )
+        .unwrap();
+        let lock_path = history_dir.join("history.json.lock");
+        assert!(
+            lock_path.exists(),
+            "the exclusive lock must be a dedicated file, not history.json"
+        );
+    }
+
+    #[test]
+    fn concurrent_appends_all_land() {
+        // 8 processes x 5 entries: the old truncate-before-lock + renamed-inode
+        // lock lost entries under overlap; every entry must land.
+        let tmp = TempDir::new().unwrap();
+        let history_dir = tmp.path().join(".local/share/sasurahime");
+        std::fs::create_dir_all(&history_dir).unwrap();
+        let dir = history_dir.clone();
+        let handles: Vec<_> = (0..8)
+            .map(|t| {
+                let dir = dir.clone();
+                std::thread::spawn(move || {
+                    for i in 0..5 {
+                        append_history(
+                            &HistoryEntry {
+                                timestamp: format!("2026-05-25T00:0{t}:0{i}+09:00"),
+                                cleaner: format!("cleaner-{t}"),
+                                freed_bytes: 100,
+                                skipped_count: 0,
+                                moved_to_trash: false,
+                            },
+                            &dir,
+                        )
+                        .unwrap();
+                    }
+                })
+            })
+            .collect();
+        for h in handles {
+            h.join().unwrap();
+        }
+        let loaded = load_history(&history_dir.join("history.json"));
+        assert_eq!(
+            loaded.len(),
+            40,
+            "every concurrent append must land in history"
+        );
     }
 
     #[test]

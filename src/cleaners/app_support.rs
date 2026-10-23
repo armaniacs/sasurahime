@@ -1356,7 +1356,9 @@ mod tests {
 
     #[test]
     fn apply_deletes_only_selected_candidates() {
-        let _lock = crate::context::TEST_LOCK.lock().unwrap();
+        let _lock = crate::context::TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         crate::trash::set_trash_mode(false);
         let tmp = TempDir::new().unwrap();
         let base = base_of(&tmp);
@@ -1379,7 +1381,9 @@ mod tests {
 
     #[test]
     fn apply_blocks_running_app_without_approval() {
-        let _lock = crate::context::TEST_LOCK.lock().unwrap();
+        let _lock = crate::context::TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         crate::trash::set_trash_mode(false);
         let tmp = TempDir::new().unwrap();
         let base = base_of(&tmp);
@@ -1399,7 +1403,9 @@ mod tests {
 
     #[test]
     fn apply_quits_approved_running_app_then_deletes_and_relaunches() {
-        let _lock = crate::context::TEST_LOCK.lock().unwrap();
+        let _lock = crate::context::TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         crate::trash::set_trash_mode(false);
         let tmp = TempDir::new().unwrap();
         let base = base_of(&tmp);
@@ -1426,7 +1432,9 @@ mod tests {
 
     #[test]
     fn apply_does_not_relaunch_app_that_was_not_running() {
-        let _lock = crate::context::TEST_LOCK.lock().unwrap();
+        let _lock = crate::context::TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         crate::trash::set_trash_mode(false);
         let tmp = TempDir::new().unwrap();
         let base = base_of(&tmp);
@@ -1441,7 +1449,9 @@ mod tests {
 
     #[test]
     fn apply_never_deletes_forged_unlisted_sub() {
-        let _lock = crate::context::TEST_LOCK.lock().unwrap();
+        let _lock = crate::context::TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         crate::trash::set_trash_mode(false);
         let tmp = TempDir::new().unwrap();
         let base = base_of(&tmp);
@@ -1463,7 +1473,9 @@ mod tests {
 
     #[test]
     fn apply_ignores_forged_path_field() {
-        let _lock = crate::context::TEST_LOCK.lock().unwrap();
+        let _lock = crate::context::TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         crate::trash::set_trash_mode(false);
         let tmp = TempDir::new().unwrap();
         let base = base_of(&tmp);
@@ -1484,7 +1496,9 @@ mod tests {
 
     #[test]
     fn apply_does_not_follow_symlinks_inside_cache() {
-        let _lock = crate::context::TEST_LOCK.lock().unwrap();
+        let _lock = crate::context::TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         crate::trash::set_trash_mode(false);
         let tmp = TempDir::new().unwrap();
         let base = base_of(&tmp);
@@ -1505,7 +1519,9 @@ mod tests {
 
     #[test]
     fn apply_rejects_dir_replaced_by_symlink_after_scan() {
-        let _lock = crate::context::TEST_LOCK.lock().unwrap();
+        let _lock = crate::context::TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         crate::trash::set_trash_mode(false);
         let tmp = TempDir::new().unwrap();
         let base = base_of(&tmp);

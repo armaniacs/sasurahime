@@ -116,7 +116,9 @@ mod tests {
     #[test]
     fn compat_wrapper_reads_the_global_mode() {
         // The wrapper is the only global reader left; one locked test covers it.
-        let _lock = crate::context::TEST_LOCK.lock().unwrap();
+        let _lock = crate::context::TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         set_trash_mode(true);
         assert!(is_trash_mode());
         set_trash_mode(false);

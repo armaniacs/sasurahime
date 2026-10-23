@@ -67,6 +67,12 @@ pub fn parse_size_decimal(s: &str) -> Option<u64> {
         .or_else(|| upper.strip_suffix("MB"))
         .or_else(|| upper.strip_suffix("KB"))?;
     let v: f64 = num.trim().parse().ok()?;
+    // A 0 (or negative, which saturates to 0) target tells tmutil to thin
+    // everything, and a non-finite target saturates to u64::MAX. Both are
+    // rejected: thinning must always aim at a positive finite amount.
+    if !v.is_finite() || v <= 0.0 {
+        return None;
+    }
     Some((v * mult) as u64)
 }
 
@@ -409,7 +415,12 @@ impl ApfsSnapshotCleaner {
             ],
         )?;
         let after = (self.free_space)();
-        let freed = freed_bytes(before.unwrap_or(0), after.unwrap_or(0));
+        // Both readings must exist: a missing before-reading would report the
+        // entire free space as freed.
+        let freed = match (before, after) {
+            (Some(b), Some(a)) => freed_bytes(b, a),
+            _ => 0,
+        };
         println!(
             "Freed: {} (purgeable space is updated lazily by macOS; the change may not be visible immediately.)",
             crate::format::format_bytes(freed)
@@ -1052,5 +1063,44 @@ mod tests {
         .with_thin(10_000_000_000, 5);
         let reporter = crate::progress::DeepSuppressReporter;
         assert!(cleaner.clean(false, &reporter).is_err());
+    }
+
+    #[test]
+    fn parse_size_decimal_rejects_zero_negative_and_non_finite() {
+        // A 0 target tells tmutil to thin everything: it must never parse.
+        assert_eq!(parse_size_decimal("0GB"), None, "0GB would thin all");
+        assert_eq!(parse_size_decimal("0.0GB"), None);
+        assert_eq!(parse_size_decimal("-5GB"), None, "negative wraps to 0");
+        assert_eq!(parse_size_decimal("-0GB"), None);
+        assert_eq!(parse_size_decimal("infGB"), None, "non-finite target");
+        assert_eq!(parse_size_decimal("nanGB"), None);
+        // Valid specs still parse.
+        assert_eq!(parse_size_decimal("10GB"), Some(10_000_000_000));
+        assert_eq!(parse_size_decimal("0.5GB"), Some(500_000_000));
+    }
+
+    #[test]
+    fn thin_freed_stays_zero_when_before_reading_is_missing() {
+        // free_space failing BEFORE the run and succeeding after must not
+        // report the entire free space as freed.
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let calls = AtomicUsize::new(0);
+        let cleaner = ApfsSnapshotCleaner::new(Box::new(
+            crate::test_helpers::MockRunner::new().with_success("tmutil"),
+        ))
+        .with_thin(10_000_000_000, 2)
+        .with_free_space(move || {
+            if calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                None // before: fs error
+            } else {
+                Some(500_000_000_000) // after: full free space
+            }
+        });
+        let reporter = crate::progress::DeepSuppressReporter;
+        let result = cleaner.clean(false, &reporter).unwrap();
+        assert_eq!(
+            result.bytes_freed, 0,
+            "a missing before-reading must not report the free space as freed"
+        );
     }
 }

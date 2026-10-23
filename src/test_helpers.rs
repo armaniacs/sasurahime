@@ -115,6 +115,27 @@ pub fn write_aged_file(path: &Path, days_old: u64, content: &[u8]) {
 /// A panic-safe guard that sets an environment variable for the duration of a
 /// test and restores the original value (or removes it) on `Drop`, even during
 /// a panic.
+/// Sets the process-global trash mode for a test, restoring the previous
+/// mode on drop — even when the test panics, so a failed test cannot leave
+/// the global mutated for parallel tests.
+pub struct TrashModeGuard {
+    previous: bool,
+}
+
+impl TrashModeGuard {
+    pub fn set(enabled: bool) -> Self {
+        let previous = crate::trash::is_trash_mode();
+        crate::trash::set_trash_mode(enabled);
+        Self { previous }
+    }
+}
+
+impl Drop for TrashModeGuard {
+    fn drop(&mut self) {
+        crate::trash::set_trash_mode(self.previous);
+    }
+}
+
 pub struct EnvGuard {
     key: &'static str,
     previous: Option<String>,

@@ -160,3 +160,38 @@ fn auto_with_age_filter_skips_fresh_entries() {
         "the skip reason must be shown, got:\n{combined}"
     );
 }
+
+#[test]
+fn auto_never_runs_manual_targets_even_with_include_manual() {
+    // A Manual target (downloads: whole-dir removal) must never run
+    // unattended, even when [policy] sets include_manual = true.
+    let tmp = TempDir::new().unwrap();
+    write_policy(
+        tmp.path(),
+        "[policy]\nolder_than_days = 30\ninclude_manual = true\n",
+    );
+    let downloads = tmp.path().join("Downloads");
+    fs::create_dir_all(&downloads).unwrap();
+    fs::write(downloads.join("installer.dmg"), [0u8; 4096]).unwrap();
+    let status = Command::new("touch")
+        .args(["-t", "202001010000"])
+        .arg(&downloads)
+        .status()
+        .unwrap();
+    assert!(status.success());
+    let output = sasurahime(tmp.path()).arg("auto").output().unwrap();
+    assert!(output.status.success(), "auto must succeed");
+    assert!(
+        downloads.join("installer.dmg").exists(),
+        "a Manual target must never be deleted by auto, even with include_manual"
+    );
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        combined.contains("downloads"),
+        "the skipped Manual target must be reported, got:\n{combined}"
+    );
+}

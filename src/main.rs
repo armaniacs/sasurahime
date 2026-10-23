@@ -452,10 +452,6 @@ impl CleanTarget {
             CleanTarget::VmSwap { .. } => "vm-swap",
             CleanTarget::All { .. } => "all",
             CleanTarget::ProjectArtifacts { .. } => "project-artifacts",
-            CleanTarget::External(args) => {
-                let name = args.first().cloned().unwrap_or_default();
-                Box::leak(name.into_boxed_str())
-            }
             _ => self.dispatch_command_name(),
         }
     }
@@ -474,7 +470,6 @@ impl CleanTarget {
             CleanTarget::VmSwap { dry_run } => *dry_run,
             CleanTarget::All { dry_run, .. } => *dry_run,
             CleanTarget::ProjectArtifacts { dry_run } => *dry_run,
-            CleanTarget::External(args) => args.iter().any(|a| a == "--dry-run"),
             _ => self.dispatch_dry_run(),
         }
     }
@@ -601,12 +596,21 @@ fn special_cleaners(
     ]
 }
 
+/// Built-in target names a plugin must never impersonate.
+fn builtin_target_names() -> Vec<&'static str> {
+    SUPPORTED_TARGETS
+        .iter()
+        .chain(extra_targets())
+        .map(|(name, _)| *name)
+        .collect()
+}
+
 fn all_cleaners(home: &std::path::Path, config: &config::Config) -> Vec<Box<dyn cleaner::Cleaner>> {
     let mut cleaners: Vec<Box<dyn cleaner::Cleaner>> = standard_cleaners(home, config)
         .into_iter()
         .chain(special_cleaners(home, config))
         .chain(
-            cleaners::plugin::PluginCleaner::discover()
+            cleaners::plugin::PluginCleaner::discover_excluding(&builtin_target_names())
                 .into_iter()
                 .map(|p| Box::new(p) as Box<dyn cleaner::Cleaner>),
         )
@@ -910,23 +914,30 @@ fn main() -> anyhow::Result<()> {
                 );
                 std::process::exit(1);
             }
+            let trash_mode = crate::trash::is_trash_mode();
             let opts = cleaner::CleanOptions {
                 all: true,
                 include_manual: config.policy.include_manual,
                 older_than_days: config.policy.older_than_days,
                 larger_than_mb: config.policy.larger_than_mb,
+                trash_mode: Some(trash_mode),
             };
             let cleaners_list = all_cleaners(&home, &config);
             let mut total: u64 = 0;
             let mut skipped: Vec<String> = Vec::new();
             for c in &cleaners_list {
-                // Risky (destructive/irreversible) targets never run
-                // unattended, even with include_manual.
-                if c.risk() == cleaner::Risk::Risky {
-                    skipped.push(format!("{} (Risky): never runs unattended", c.name()));
+                // Risky (destructive/irreversible) and Manual (review-first)
+                // targets never run unattended, even with include_manual:
+                // whole-dir removals must never happen without a human.
+                if matches!(c.risk(), cleaner::Risk::Risky | cleaner::Risk::Manual) {
+                    skipped.push(format!(
+                        "{} ({}): never runs unattended",
+                        c.name(),
+                        c.risk().label()
+                    ));
                     continue;
                 }
-                if !opts.include_manual && !c.auto_clean_allowed() {
+                if !c.auto_clean_allowed() {
                     skipped.push(format!(
                         "{} ({}): needs --include-manual",
                         c.name(),
@@ -940,11 +951,8 @@ fn main() -> anyhow::Result<()> {
                 ) {
                     Ok(r) => {
                         total += r.bytes_freed;
-                        if let Some(note) = post_clean_note(
-                            r.bytes_freed,
-                            r.uses_trash,
-                            crate::trash::is_trash_mode(),
-                        ) {
+                        if let Some(note) = post_clean_note(r.bytes_freed, r.uses_trash, trash_mode)
+                        {
                             println!("{note}");
                         }
                         if !dry_run && r.bytes_freed > 0 {
@@ -990,7 +998,7 @@ fn main() -> anyhow::Result<()> {
             }
             // Plugin-derived targets are marked so they can be told apart
             // from built-ins.
-            for p in cleaners::plugin::PluginCleaner::discover() {
+            for p in cleaners::plugin::PluginCleaner::discover_excluding(&builtin_target_names()) {
                 println!("{:<12} (plugin)", p.name());
             }
         }
@@ -1252,11 +1260,13 @@ fn main() -> anyhow::Result<()> {
                         // Explicit full clean: the user picked every target on
                         // purpose. Safe targets run without --include-manual;
                         // Moderate/Risky/Manual need it.
+                        let trash_mode = crate::trash::is_trash_mode();
                         let opts = cleaner::CleanOptions {
                             all: true,
                             include_manual,
                             older_than_days: cli.older_than,
                             larger_than_mb: cli.larger_than,
+                            trash_mode: Some(trash_mode),
                         };
                         let cleaners_list = all_cleaners(&home, &config);
                         let mut total: u64 = 0;
@@ -1277,11 +1287,9 @@ fn main() -> anyhow::Result<()> {
                             ) {
                                 Ok(r) => {
                                     total += r.bytes_freed;
-                                    if let Some(note) = post_clean_note(
-                                        r.bytes_freed,
-                                        r.uses_trash,
-                                        crate::trash::is_trash_mode(),
-                                    ) {
+                                    if let Some(note) =
+                                        post_clean_note(r.bytes_freed, r.uses_trash, trash_mode)
+                                    {
                                         println!("{note}");
                                     }
                                     if !dry_run && r.bytes_freed > 0 {
@@ -1321,17 +1329,16 @@ fn main() -> anyhow::Result<()> {
                             eprintln!("Error: missing target name.");
                             std::process::exit(1);
                         };
-                        let Some(plugin) = cleaners::plugin::PluginCleaner::discover()
+                        let Some(plugin) = cleaners::plugin::PluginCleaner::discover_excluding(&[])
                             .into_iter()
                             .find(|p| p.name() == name)
                         else {
                             eprintln!("Error: no plugin named '{name}' on PATH.");
                             std::process::exit(1);
                         };
-                        let label: &'static str = Box::leak(name.clone().into_boxed_str());
                         let dry_run = args.iter().any(|a| a == "--dry-run");
                         run_and_exit(
-                            label,
+                            plugin.name(),
                             move |dry, rep| plugin.clean(dry, rep),
                             dry_run,
                             reporter.as_ref(),

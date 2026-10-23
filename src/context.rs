@@ -38,7 +38,9 @@ mod tests {
     where
         F: FnOnce() -> T,
     {
-        let _guard = crate::context::TEST_LOCK.lock().unwrap();
+        let _guard = crate::context::TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         f()
     }
 

@@ -311,6 +311,12 @@ mod tests {
 
     #[test]
     fn gradle_clean_uses_trash_true() {
+        // Hold the test lock so parallel trash-mode mutators serialize with
+        // this read, and pin the mode so the assertion is deterministic.
+        let _lock = crate::context::TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let _mode = crate::test_helpers::TrashModeGuard::set(true);
         let tmp = TempDir::new().unwrap();
         let caches = tmp.path().join(".gradle/caches");
         fs::create_dir_all(caches.join("8.12.0")).unwrap();
@@ -405,6 +411,11 @@ mod tests {
 
     #[test]
     fn jetbrains_clean_uses_trash_true() {
+        // Hold the test lock and pin the mode, same as the gradle test.
+        let _lock = crate::context::TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let _mode = crate::test_helpers::TrashModeGuard::set(true);
         let tmp = TempDir::new().unwrap();
         let jb = tmp.path().join("Library/Caches/JetBrains");
         fs::create_dir_all(jb.join("GoLand2024.2")).unwrap();

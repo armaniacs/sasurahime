@@ -717,12 +717,14 @@ impl Cleaner for PathCleaner {
 
     fn clean(&self, dry_run: bool, reporter: &dyn ProgressReporter) -> Result<CleanResult> {
         let any_filter = self.older_than_days.is_some() || self.larger_than_mb.is_some();
+        // Plain clean keeps the process-global trash mode (compat path).
         self.clean_filtered(
             dry_run,
             reporter,
             self.older_than_days,
             self.larger_than_mb,
             any_filter,
+            crate::trash::is_trash_mode(),
         )
     }
 
@@ -745,7 +747,8 @@ impl Cleaner for PathCleaner {
             (a, b) => a.or(b),
         };
         let any_filter = older.is_some() || larger.is_some();
-        self.clean_filtered(dry_run, reporter, older, larger, any_filter)
+        let trash_mode = opts.trash_mode.unwrap_or_else(crate::trash::is_trash_mode);
+        self.clean_filtered(dry_run, reporter, older, larger, any_filter, trash_mode)
     }
 }
 
@@ -757,6 +760,7 @@ impl PathCleaner {
         older_than_days: Option<u32>,
         larger_than_mb: Option<u64>,
         explain_skips: bool,
+        trash_mode: bool,
     ) -> Result<CleanResult> {
         let mut freed: u64 = 0;
         for d in &self.dirs {
@@ -784,12 +788,12 @@ impl PathCleaner {
                 }
                 continue;
             }
-            freed += self.clean_one(d, size, dry_run, reporter)?;
+            freed += self.clean_one(d, size, dry_run, reporter, trash_mode)?;
         }
         Ok(CleanResult {
             name: self.name(),
             bytes_freed: freed,
-            uses_trash: crate::trash::is_trash_mode(),
+            uses_trash: trash_mode,
             skipped: vec![],
             deleted_paths: vec![],
         })
@@ -801,6 +805,7 @@ impl PathCleaner {
         size: u64,
         dry_run: bool,
         reporter: &dyn ProgressReporter,
+        trash_mode: bool,
     ) -> Result<u64> {
         if dry_run {
             println!("[dry-run] would remove: {}", dir.display());
@@ -825,7 +830,7 @@ impl PathCleaner {
                 dir.display()
             );
         }
-        crate::trash::delete_path(dir)?;
+        crate::trash::DeleteCtx::new(trash_mode).delete_path(dir)?;
         println!("Removed: {}", dir.display());
         Ok(size)
     }
@@ -839,6 +844,16 @@ pub fn is_safe_delete_target(path: &Path) -> bool {
     }
     if path_str.contains("..") {
         return false;
+    }
+    // Block HOME itself and every ancestor of HOME: an env-var redirect
+    // (ACT_CACHE_DIR=$HOME, TF_PLUGIN_CACHE_DIR=/Users) must never be
+    // deletable, and subdirectories of HOME stay allowed.
+    let home = std::env::var("HOME").unwrap_or_default();
+    if !home.is_empty() {
+        let home_path = Path::new(&home);
+        if check == home_path || home_path.starts_with(&check) {
+            return false;
+        }
     }
     // Block exact sensitive roots and system paths.
     // Allow macOS tempdirs (/var/folders/...) while blocking /var itself
@@ -901,7 +916,7 @@ pub fn meets_age_filter(metadata: &fs::Metadata, older_than_days: Option<u32>) -
 /// threshold in mebibytes.
 pub fn meets_size_filter(size: u64, larger_than_mb: Option<u64>) -> bool {
     match larger_than_mb {
-        Some(mb) => size >= mb * 1_048_576,
+        Some(mb) => size >= mb.saturating_mul(1_048_576),
         None => true,
     }
 }
@@ -998,6 +1013,18 @@ pub fn clean_cli_or_fallback(
             deleted_paths: vec![],
         });
     }
+    // Clean-time safety re-validation (TOCTOU mitigation), same as the other
+    // deletion sinks: env-var-derived dirs are only checked at construction.
+    if !is_safe_delete_target(dir) {
+        eprintln!("[{name}] warning: unsafe path, skipping: {}", dir.display());
+        return Ok(CleanResult {
+            name,
+            bytes_freed: 0,
+            uses_trash: false,
+            skipped: vec![],
+            deleted_paths: vec![],
+        });
+    }
 
     let path_str = dir.to_string_lossy();
     if let Err(e) = runner.run("chflags", &["-R", "nouchg", &path_str]) {
@@ -1024,6 +1051,82 @@ pub fn clean_cli_or_fallback(
 mod tests {
     use super::*;
     use crate::command::CommandRunner;
+
+    #[test]
+    fn clean_with_opts_trash_mode_overrides_the_global() {
+        // CleanOptions.trash_mode must pin the deletion mode: uses_trash and
+        // the actual deletion can never disagree with the global read.
+        let _lock = crate::context::TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let tmp = tempfile::TempDir::new().unwrap();
+        // PathCleaner::downloads targets HOME/Downloads and carries a
+        // 30-day age filter, so the dir mtime must be old.
+        let dir = tmp.path().join("Downloads");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("data.bin"), vec![0u8; 1024]).unwrap();
+        let status = std::process::Command::new("touch")
+            .args(["-t", "202001010000"])
+            .arg(&dir)
+            .status()
+            .unwrap();
+        assert!(status.success());
+        // Simulate the global default: trash. A Trash op would be TCC-denied
+        // here, so the pinned permanent mode is observable.
+        crate::trash::set_trash_mode(true);
+        let cleaner =
+            PathCleaner::downloads(tmp.path(), Box::new(crate::command::SystemCommandRunner));
+        let opts = crate::cleaner::CleanOptions {
+            all: true,
+            include_manual: true,
+            older_than_days: None,
+            larger_than_mb: None,
+            trash_mode: Some(false),
+        };
+        let reporter = crate::progress::DeepSuppressReporter;
+        let result = cleaner.clean_with_opts(false, &reporter, &opts).unwrap();
+        assert!(
+            !dir.exists(),
+            "the pinned permanent mode must delete for real"
+        );
+        assert!(
+            !result.uses_trash,
+            "uses_trash must come from the pinned mode, not the global"
+        );
+        crate::trash::set_trash_mode(false);
+        drop(_lock);
+    }
+
+    #[test]
+    fn clean_cli_or_fallback_revalidates_safety_at_clean_time() {
+        // A dir that is unsafe at clean time (here: HOME itself) must be
+        // skipped by the fallback delete, not removed.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let home = tmp.path().canonicalize().unwrap();
+        let _guard = crate::test_helpers::EnvGuard::set("HOME", &home.to_string_lossy());
+        std::fs::write(home.join("keep.txt"), b"data").unwrap();
+        let config = CliFallbackConfig {
+            tool: "definitely-not-installed-tool",
+            args: &[],
+            recreate: false,
+        };
+        let result = clean_cli_or_fallback(
+            "test-fallback",
+            &home,
+            &crate::command::SystemCommandRunner,
+            &config,
+            false,
+        )
+        .unwrap();
+        assert_eq!(
+            result.bytes_freed, 0,
+            "an unsafe dir must not be deleted by the fallback"
+        );
+        assert!(
+            home.join("keep.txt").exists(),
+            "the unsafe dir must survive"
+        );
+    }
 
     struct MissingToolRunner;
     impl CommandRunner for MissingToolRunner {
@@ -1137,11 +1240,47 @@ mod tests {
     }
 
     #[test]
+    fn is_safe_delete_target_rejects_home_and_ancestors() {
+        // ACT_CACHE_DIR=$HOME or a /Users redirect must never be deletable:
+        // an env var can point a Risk::Safe target at the whole home.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let home = tmp.path().canonicalize().unwrap();
+        let _guard = crate::test_helpers::EnvGuard::set("HOME", &home.to_string_lossy());
+        assert!(
+            !is_safe_delete_target(&home),
+            "HOME itself is never a delete target"
+        );
+        assert!(
+            !is_safe_delete_target(home.parent().unwrap()),
+            "an ancestor of HOME is never a delete target"
+        );
+        // Subdirectories of HOME stay deletable.
+        let cache = home.join(".cache/act");
+        std::fs::create_dir_all(&cache).unwrap();
+        assert!(
+            is_safe_delete_target(&cache),
+            "subdirs of HOME remain deletable"
+        );
+    }
+
+    #[test]
     fn is_safe_delete_target_allows_home_cache() {
         assert!(is_safe_delete_target(Path::new("/Users/test/.cache/act")));
         assert!(is_safe_delete_target(Path::new(
             "/Users/test/Library/Caches"
         )));
+    }
+
+    #[test]
+    fn meets_size_filter_saturates_on_overflow() {
+        // mb = 2^44 wraps mb * 1_048_576 to 0, which would pass every size
+        // and delete more than configured.
+        assert!(
+            !meets_size_filter(0, Some(1 << 44)),
+            "an overflowing threshold must saturate, not wrap to 0"
+        );
+        assert!(meets_size_filter(1_048_576, Some(1)));
+        assert!(!meets_size_filter(0, Some(1)));
     }
 
     #[test]
@@ -1237,7 +1376,9 @@ mod tests {
 
     #[test]
     fn act_path_validates_env_var_and_falls_back() {
-        let _lock = crate::context::TEST_LOCK.lock().unwrap();
+        let _lock = crate::context::TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         let tmp = tempfile::TempDir::new().unwrap();
         let _guard = crate::test_helpers::EnvGuard::set("ACT_CACHE_DIR", "/");
         let cleaner = PathCleaner::act(tmp.path(), Box::new(crate::command::SystemCommandRunner));

@@ -99,6 +99,10 @@ pub struct CleanOptions {
     pub older_than_days: Option<u32>,
     /// Global size filter (MB): only dirs of at least this size are cleaned.
     pub larger_than_mb: Option<u64>,
+    /// Deletion mode carried as an argument. `None` reads the process-global
+    /// mode (compat); `Some(v)` pins the mode so `uses_trash` and the actual
+    /// deletion can never disagree. `main` sets it once per run.
+    pub trash_mode: Option<bool>,
 }
 
 #[derive(Debug)]

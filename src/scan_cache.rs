@@ -76,6 +76,23 @@ impl ScanCache {
             },
         );
     }
+
+    /// Caches `size_bytes` only when the directory mtime was identical before
+    /// and after the walk. A directory changed mid-walk would otherwise be
+    /// cached under its post-change mtime and serve a stale size for up to an
+    /// hour. A missing reading is never cached.
+    pub(crate) fn record_if_unchanged(
+        &mut self,
+        dir: &Path,
+        before: Option<u64>,
+        after: Option<u64>,
+        size_bytes: u64,
+    ) {
+        if before.is_none() || before != after {
+            return;
+        }
+        self.record(dir, size_bytes);
+    }
 }
 
 fn now_secs() -> u64 {
@@ -118,18 +135,29 @@ pub fn flush(cache_path: &Path) {
 }
 
 /// Apparent size of `dir`, using the persistent cache when the directory
-/// mtime is unchanged. Falls back to a full walk on any mismatch. Safe under
-/// rayon's parallel scan: the cache is mutex-protected.
+/// mtime is unchanged. Falls back to a full walk on any mismatch. The global
+/// mutex is held only for lookup and record: holding it across the walk would
+/// serialize rayon's parallel scan behind one multi-GB walk.
 pub fn cached_dir_size(dir: &Path) -> u64 {
-    let mut cell = cache_cell().lock().unwrap_or_else(|p| p.into_inner());
-    let Some(cache) = cell.as_mut() else {
-        return crate::format::dir_size(dir);
+    let cached = {
+        let cell = cache_cell().lock().unwrap_or_else(|p| p.into_inner());
+        match cell.as_ref() {
+            Some(cache) => cache.cached_size(dir),
+            None => return crate::format::dir_size(dir),
+        }
     };
-    if let Some(cached) = cache.cached_size(dir) {
-        return cached;
+    if let Some(size) = cached {
+        return size;
     }
+    // The mtime is captured BEFORE the walk: a directory changed mid-walk
+    // must not be cached under its post-change mtime.
+    let before = dir_mtime_nanos(dir);
     let size = crate::format::dir_size(dir);
-    cache.record(dir, size);
+    let after = dir_mtime_nanos(dir);
+    let mut cell = cache_cell().lock().unwrap_or_else(|p| p.into_inner());
+    if let Some(cache) = cell.as_mut() {
+        cache.record_if_unchanged(dir, before, after, size);
+    }
     size
 }
 
@@ -139,6 +167,29 @@ mod tests {
 
     fn write_file(dir: &Path, name: &str, bytes: usize) {
         std::fs::write(dir.join(name), vec![0u8; bytes]).unwrap();
+    }
+
+    #[test]
+    fn record_if_unchanged_rejects_mid_walk_changes() {
+        // A directory changed during the walk must not be cached under its
+        // post-change mtime: that would serve a stale size for up to 1 hour.
+        let tmp = tempfile::TempDir::new().unwrap();
+        write_file(tmp.path(), "a", 1024);
+        let before = dir_mtime_nanos(tmp.path());
+        let mut cache = ScanCache::default();
+        let changed = before.map(|m| m.wrapping_add(1)); // simulated mid-walk change
+        cache.record_if_unchanged(tmp.path(), before, changed, 999);
+        assert_eq!(
+            cache.cached_size(tmp.path()),
+            None,
+            "a mid-walk change must not be cached"
+        );
+        // Equal mtimes cache normally.
+        cache.record_if_unchanged(tmp.path(), before, before, 1024);
+        assert_eq!(cache.cached_size(tmp.path()), Some(1024));
+        // A missing reading is never cached.
+        cache.record_if_unchanged(tmp.path(), None, None, 512);
+        assert_eq!(cache.entries.len(), 1);
     }
 
     #[test]

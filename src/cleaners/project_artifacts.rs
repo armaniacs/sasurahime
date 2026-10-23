@@ -46,6 +46,8 @@ pub struct ProjectArtifactsCleaner {
     roots: Vec<PathBuf>,
     max_depth: usize,
     recency_days: u32,
+    /// Global size filter: projects smaller than this are skipped.
+    larger_than_mb: Option<u64>,
 }
 
 impl ProjectArtifactsCleaner {
@@ -54,6 +56,7 @@ impl ProjectArtifactsCleaner {
             roots,
             max_depth: 5,
             recency_days: 7,
+            larger_than_mb: None,
         }
     }
 
@@ -68,6 +71,12 @@ impl ProjectArtifactsCleaner {
     }
 
     fn detect_artifacts(&self) -> Vec<DetectedArtifact> {
+        self.detect_artifacts_inner(true)
+    }
+
+    /// `use_cache` is false for the deletion path: removed sizes and the
+    /// size==0 skip must never ride on scan-cache freshness.
+    fn detect_artifacts_inner(&self, use_cache: bool) -> Vec<DetectedArtifact> {
         let mut out = Vec::new();
         for root in &self.roots {
             if !root.exists() {
@@ -90,15 +99,29 @@ impl ProjectArtifactsCleaner {
                 let Some(project_dir) = entry.path().parent() else {
                     continue;
                 };
-                if !project_dir.join(manifest).exists() {
+                // The manifest must be a real file: a symlinked manifest is
+                // not evidence the directory belongs to a project here.
+                let is_real_manifest = std::fs::symlink_metadata(project_dir.join(manifest))
+                    .map(|m| m.is_file())
+                    .unwrap_or(false);
+                if !is_real_manifest {
                     continue;
                 }
                 if self.project_is_recent(project_dir) {
                     continue;
                 }
-                let size = crate::scan_cache::cached_dir_size(entry.path());
+                let size = if use_cache {
+                    crate::scan_cache::cached_dir_size(entry.path())
+                } else {
+                    crate::format::dir_size(entry.path())
+                };
                 if size == 0 {
                     continue;
+                }
+                if let Some(mb) = self.larger_than_mb {
+                    if size < mb.saturating_mul(1_048_576) {
+                        continue;
+                    }
                 }
                 out.push(DetectedArtifact {
                     path: entry.path().to_path_buf(),
@@ -116,6 +139,7 @@ impl ProjectArtifactsCleaner {
     fn project_is_recent(&self, project_dir: &Path) -> bool {
         let now = now();
         let newest = walkdir::WalkDir::new(project_dir)
+            .max_depth(self.max_depth)
             .into_iter()
             .filter_entry(|e| {
                 if !e.file_type().is_dir() {
@@ -142,6 +166,25 @@ impl Cleaner for ProjectArtifactsCleaner {
         "project-artifacts"
     }
 
+    fn clean_with_opts(
+        &self,
+        dry_run: bool,
+        reporter: &dyn crate::progress::ProgressReporter,
+        opts: &crate::cleaner::CleanOptions,
+    ) -> Result<CleanResult> {
+        // Stricter wins: the global age filter tightens the recency window,
+        // and the global size filter applies to whole project dirs.
+        let effective = ProjectArtifactsCleaner {
+            roots: self.roots.clone(),
+            max_depth: self.max_depth,
+            recency_days: self
+                .recency_days
+                .max(opts.older_than_days.unwrap_or(self.recency_days)),
+            larger_than_mb: opts.larger_than_mb,
+        };
+        effective.clean(dry_run, reporter)
+    }
+
     fn detect(&self) -> ScanResult {
         let artifacts = self.detect_artifacts();
         if artifacts.is_empty() {
@@ -157,7 +200,7 @@ impl Cleaner for ProjectArtifactsCleaner {
         _reporter: &dyn crate::progress::ProgressReporter,
     ) -> Result<CleanResult> {
         let mut freed: u64 = 0;
-        for artifact in self.detect_artifacts() {
+        for artifact in self.detect_artifacts_inner(false) {
             if dry_run {
                 println!("[dry-run] would remove: {}", artifact.path.display());
                 continue;
@@ -320,5 +363,183 @@ mod tests {
         assert_eq!(cleaner.risk(), Risk::Manual);
         assert!(!cleaner.auto_clean_allowed());
         assert!(cleaner.is_available());
+    }
+
+    #[test]
+    fn symlinked_manifest_is_not_a_manifest() {
+        // A symlinked package.json is not a real manifest: the artifact dir
+        // next to it must not be detected.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let project = tmp.path().join("proj");
+        std::fs::create_dir_all(project.join("node_modules")).unwrap();
+        std::fs::write(project.join("node_modules/stale.js"), b"code").unwrap();
+        std::fs::write(project.join("package.json"), b"{}").unwrap();
+        make_old(&project.join("package.json"));
+        make_old(&project.join("node_modules"));
+        let cleaner = ProjectArtifactsCleaner::new(vec![tmp.path().to_path_buf()]);
+        assert_eq!(
+            cleaner.detect_artifacts().len(),
+            1,
+            "a real manifest detects the artifact"
+        );
+        // Replace the manifest with a symlink to an outside file.
+        let outside = tmp.path().join("outside.json");
+        std::fs::write(&outside, b"{}").unwrap();
+        std::fs::remove_file(project.join("package.json")).unwrap();
+        std::os::unix::fs::symlink(&outside, project.join("package.json")).unwrap();
+        assert_eq!(
+            cleaner.detect_artifacts().len(),
+            0,
+            "a symlinked manifest must not count"
+        );
+    }
+
+    #[test]
+    fn clean_uses_fresh_sizes_not_the_cache() {
+        // The deletion path must not ride on scan-cache freshness: a poisoned
+        // cache entry claiming size 0 must not suppress the removal.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let project = tmp.path().join("proj");
+        std::fs::create_dir_all(project.join("node_modules")).unwrap();
+        std::fs::write(project.join("node_modules/stale.js"), b"code").unwrap();
+        std::fs::write(project.join("package.json"), b"{}").unwrap();
+        make_old(&project.join("package.json"));
+        make_old(&project.join("node_modules"));
+        // Poison the cache: the artifact dir claims size 0.
+        let cache_path = tmp.path().join("cache.json");
+        let mut cache = crate::scan_cache::ScanCache::default();
+        cache.record(&project.join("node_modules"), 0);
+        cache.save(&cache_path);
+        crate::scan_cache::init(&cache_path);
+        let cleaner = ProjectArtifactsCleaner::new(vec![tmp.path().to_path_buf()]);
+        let reporter = crate::progress::DeepSuppressReporter;
+        let _lock = crate::context::TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        crate::trash::set_trash_mode(false);
+        let result = cleaner.clean(false, &reporter).unwrap();
+        assert!(
+            !project.join("node_modules").exists(),
+            "the stale artifact must be removed even with a poisoned cache"
+        );
+        assert!(
+            result.bytes_freed > 0,
+            "freed must use the fresh size, not the cached 0"
+        );
+    }
+
+    #[test]
+    fn project_is_recent_walk_respects_max_depth() {
+        // A source file deeper than max_depth is invisible to the recency
+        // walk, which must conservatively count the project as recent.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let project = tmp.path().join("proj");
+        let deep = project.join("a/b/c/d/e/f");
+        std::fs::create_dir_all(&deep).unwrap();
+        std::fs::write(deep.join("old.rs"), b"code").unwrap();
+        make_old(&deep.join("old.rs"));
+        let cleaner = ProjectArtifactsCleaner::new(vec![tmp.path().to_path_buf()]);
+        assert!(
+            cleaner.project_is_recent(&project),
+            "a source beyond max_depth counts as recent (conservative)"
+        );
+        // Within max_depth the file is seen and the project counts as old.
+        let cleaner3 =
+            ProjectArtifactsCleaner::new(vec![tmp.path().to_path_buf()]).with_max_depth(4);
+        std::fs::create_dir_all(project.join("a/b/c")).unwrap();
+        std::fs::write(project.join("a/b/c/old.rs"), b"code").unwrap();
+        make_old(&project.join("a/b/c/old.rs"));
+        assert!(
+            !cleaner3.project_is_recent(&project),
+            "a source within max_depth makes the project old"
+        );
+    }
+
+    #[test]
+    fn clean_with_opts_applies_global_filters() {
+        // The global age filter must tighten the recency window: a project
+        // 10 days old is deletable under recency_days=7 but kept when the
+        // policy demands older_than_days=30.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let project = tmp.path().join("proj");
+        std::fs::create_dir_all(project.join("node_modules")).unwrap();
+        std::fs::write(project.join("node_modules/stale.js"), b"code").unwrap();
+        std::fs::write(project.join("package.json"), b"{}").unwrap();
+        make_old(&project.join("package.json"));
+        make_old(&project.join("node_modules"));
+        // Newest source: 10 days old.
+        let ten_days_ago = {
+            let secs = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs()
+                - 10 * 86_400;
+            let (y, mo, d, h, mi) = epoch_to_touch(secs);
+            format!("{y:04}{mo:02}{d:02}{h:02}{mi:02}")
+        };
+        std::fs::write(project.join("src.rs"), b"code").unwrap();
+        let status = std::process::Command::new("touch")
+            .args(["-t", &ten_days_ago])
+            .arg(project.join("src.rs"))
+            .status()
+            .unwrap();
+        assert!(status.success());
+
+        let cleaner = ProjectArtifactsCleaner::new(vec![tmp.path().to_path_buf()]);
+        let reporter = crate::progress::DeepSuppressReporter;
+        let _lock = crate::context::TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        crate::trash::set_trash_mode(false);
+        // Plain clean (recency_days=7): the project is deletable.
+        cleaner.clean(false, &reporter).unwrap();
+        assert!(
+            !project.join("node_modules").exists(),
+            "recency_days=7 deletes a 10-day-old project"
+        );
+        // Rebuild and apply the stricter global filter.
+        std::fs::create_dir_all(project.join("node_modules")).unwrap();
+        std::fs::write(project.join("node_modules/stale.js"), b"code").unwrap();
+        make_old(&project.join("node_modules"));
+        std::fs::write(project.join("src.rs"), b"code").unwrap();
+        let status = std::process::Command::new("touch")
+            .args(["-t", &ten_days_ago])
+            .arg(project.join("src.rs"))
+            .status()
+            .unwrap();
+        assert!(status.success());
+        let cleaner = ProjectArtifactsCleaner::new(vec![tmp.path().to_path_buf()]);
+        let opts = crate::cleaner::CleanOptions {
+            all: true,
+            include_manual: true,
+            older_than_days: Some(30),
+            larger_than_mb: None,
+            trash_mode: None,
+        };
+        cleaner.clean_with_opts(false, &reporter, &opts).unwrap();
+        drop(_lock);
+        assert!(
+            project.join("node_modules").exists(),
+            "the global older_than_days=30 must keep a 10-day-old project"
+        );
+    }
+
+    /// Formats seconds since epoch as a `touch -t` stamp (YYYYMMDDHHMM).
+    fn epoch_to_touch(secs: u64) -> (u64, u64, u64, u64, u64) {
+        let days = secs / 86_400;
+        let rem = secs % 86_400;
+        let (h, mi) = (rem / 3600, (rem % 3600) / 60);
+        // Civil-from-days (Howard Hinnant's algorithm).
+        let z = days as i64 + 719_468;
+        let era = z.div_euclid(146_097);
+        let doe = z.rem_euclid(146_097);
+        let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+        let y = yoe + era * 400;
+        let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+        let mp = (5 * doy + 2) / 153;
+        let d = doy - (153 * mp + 2) / 5 + 1;
+        let m = if mp < 10 { mp + 3 } else { mp - 9 };
+        let y = if m <= 2 { y + 1 } else { y };
+        (y as u64, m as u64, d as u64, h, mi)
     }
 }

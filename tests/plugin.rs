@@ -152,3 +152,92 @@ fn plugin_clean_uses_the_protocol() {
     assert!(output.status.success(), "the plugin clean must run");
     assert!(!cache.exists(), "the plugin must have cleaned its cache");
 }
+
+#[test]
+fn chatty_plugin_is_measured_not_unavailable() {
+    // A plugin writing more than the pipe buffer to stderr must be measured,
+    // not killed at the deadline and reported unavailable.
+    let tmp = TempDir::new().unwrap();
+    let bin_dir = tmp.path().join("bin");
+    fs::create_dir_all(&bin_dir).unwrap();
+    install_plugin(
+        &bin_dir,
+        "sasurahime-chatty",
+        "#!/bin/sh\nhead -c 1048576 /dev/zero | tr '\\0' 'x' >&2\necho '{\"status\":\"pruneable\",\"bytes\":512}'\nexit 0\n",
+    );
+    let path = format!("{}:/usr/bin:/bin", bin_dir.display());
+    let output = sasurahime(tmp.path(), &path).arg("scan").output().unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let row = stdout
+        .lines()
+        .find(|l| l.contains("chatty"))
+        .expect("chatty row");
+    assert!(
+        row.contains("pruneable"),
+        "a chatty plugin must be measured: {row}"
+    );
+}
+
+#[test]
+fn grandchild_holding_pipe_does_not_hang_the_scan() {
+    // A plugin that exits but leaves a grandchild holding stdout must not
+    // hang the scan past the timeout.
+    let tmp = TempDir::new().unwrap();
+    let bin_dir = tmp.path().join("bin");
+    fs::create_dir_all(&bin_dir).unwrap();
+    install_plugin(
+        &bin_dir,
+        "sasurahime-daemon",
+        "#!/bin/sh\n(sleep 30 &)\necho '{\"status\":\"clean\",\"bytes\":0}'\nexit 0\n",
+    );
+    let path = format!("{}:/usr/bin:/bin", bin_dir.display());
+    let start = std::time::Instant::now();
+    let output = sasurahime(tmp.path(), &path)
+        .env("SASURAHIME_PLUGIN_TIMEOUT_SECS", "1")
+        .arg("scan")
+        .output()
+        .unwrap();
+    let elapsed = start.elapsed();
+    assert!(output.status.success(), "the scan must succeed");
+    assert!(
+        elapsed.as_secs() < 5,
+        "the grandchild must not hang the scan: {elapsed:?}"
+    );
+    // The plugin's output could not be fully read within the timeout, so it
+    // is isolated as unavailable: the important property is that the scan
+    // returns fast instead of hanging on the grandchild.
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let row = stdout
+        .lines()
+        .find(|l| l.contains("daemon"))
+        .expect("daemon row");
+    assert!(
+        row.contains("unavailable"),
+        "the plugin must be isolated: {row}"
+    );
+}
+
+#[test]
+fn clean_forwards_dry_run_to_the_plugin() {
+    // The protocol contract "clean [--dry-run]" must actually forward the flag.
+    let tmp = TempDir::new().unwrap();
+    let bin_dir = tmp.path().join("bin");
+    fs::create_dir_all(&bin_dir).unwrap();
+    install_plugin(
+        &bin_dir,
+        "sasurahime-foo",
+        "#!/bin/sh\nif [ \"$1\" = \"scan\" ]; then echo '{\"status\":\"pruneable\",\"bytes\":512}'; exit 0; fi\nprintf '%s\\n' \"$@\" > \"$HOME/args.txt\"\nexit 0\n",
+    );
+    let path = format!("{}:/usr/bin:/bin", bin_dir.display());
+    let output = sasurahime(tmp.path(), &path)
+        .args(["clean", "foo", "--dry-run"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let args = fs::read_to_string(tmp.path().join("args.txt")).unwrap();
+    assert!(
+        args.contains("--dry-run"),
+        "clean --dry-run must forward --dry-run to the plugin, got: {args}"
+    );
+}

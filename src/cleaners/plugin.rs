@@ -46,9 +46,40 @@ pub struct ProtocolStatus {
     pub bytes: u64,
 }
 
+/// Extracts the last balanced top-level JSON object from noisy stdout: real
+/// plugins print log lines around the object. Returns the whole trimmed input
+/// when no balanced object is found (the caller's parse then fails closed).
+pub fn extract_last_json_object(s: &str) -> &str {
+    let bytes = s.as_bytes();
+    let (mut depth, mut start, mut last) = (0i32, None, None);
+    for (i, &b) in bytes.iter().enumerate() {
+        match b {
+            b'{' => {
+                if depth == 0 {
+                    start = Some(i);
+                }
+                depth += 1;
+            }
+            b'}' if depth > 0 => {
+                depth -= 1;
+                if depth == 0 {
+                    if let Some(s0) = start {
+                        last = Some((s0, i + 1));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    match last {
+        Some((a, b)) => &s[a..b],
+        None => s.trim(),
+    }
+}
+
 /// Parses the `scan --json` protocol output.
 pub fn parse_protocol_output(stdout: &str) -> Option<ProtocolStatus> {
-    let value: serde_json::Value = serde_json::from_str(stdout.trim()).ok()?;
+    let value: serde_json::Value = serde_json::from_str(extract_last_json_object(stdout)).ok()?;
     let status = value.get("status")?.as_str()?.to_string();
     let bytes = value.get("bytes").and_then(|b| b.as_u64()).unwrap_or(0);
     Some(ProtocolStatus { status, bytes })
@@ -81,8 +112,10 @@ impl PluginCleaner {
     }
 
     /// Discovers `sasurahime-*` executables on PATH. The first match on PATH
-    /// wins per plugin name.
-    pub fn discover() -> Vec<PluginCleaner> {
+    /// wins per plugin name. `reserved` lists built-in target names: a plugin
+    /// named like a built-in would impersonate it in scan output, so it is
+    /// never discovered.
+    pub fn discover_excluding(reserved: &[&str]) -> Vec<PluginCleaner> {
         let path_var = std::env::var("PATH").unwrap_or_default();
         let mut seen: Vec<String> = Vec::new();
         let mut out = Vec::new();
@@ -101,6 +134,9 @@ impl PluginCleaner {
                 if seen.contains(&name) {
                     continue;
                 }
+                if reserved.contains(&name.as_str()) {
+                    continue;
+                }
                 let path = entry.path();
                 if !is_plugin_candidate(&path) {
                     continue;
@@ -114,35 +150,102 @@ impl PluginCleaner {
     }
 
     /// Runs a protocol command with the plugin timeout. `None` on timeout or
-    /// spawn failure.
+    /// spawn failure. Both pipes are drained concurrently with a 1 MiB cap, so
+    /// a chatty plugin cannot deadlock on a full pipe buffer, and the deadline
+    /// bounds the total runtime: a grandchild that inherits the pipes must not
+    /// hang the CLI past the timeout.
     fn run_protocol(&self, args: &[&str]) -> Option<(i32, String)> {
+        use std::os::unix::process::CommandExt;
+        const PIPE_CAP: usize = 1 << 20;
         let mut child = Command::new(&self.path)
             .args(args)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
+            .process_group(0) // a kill never reaches sasurahime's own group
             .spawn()
             .ok()?;
         let deadline = Instant::now() + Duration::from_secs(timeout_secs());
+        // Reader threads with a cap: stdout holds the protocol JSON, stderr
+        // the diagnostics that would otherwise be discarded.
+        let stdout_buf = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let stderr_buf = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let remaining = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let mut readers = Vec::new();
+        if let Some(out) = child.stdout.take() {
+            readers.push(spawn_reader(
+                out,
+                stdout_buf.clone(),
+                remaining.clone(),
+                PIPE_CAP,
+            ));
+        }
+        if let Some(err) = child.stderr.take() {
+            readers.push(spawn_reader(
+                err,
+                stderr_buf.clone(),
+                remaining.clone(),
+                PIPE_CAP,
+            ));
+        }
+        let timed_out = |deadline: Instant| Instant::now() >= deadline;
+        // Wait for the child within the deadline.
         let status = loop {
             match child.try_wait() {
                 Ok(Some(status)) => break status,
                 Ok(None) => {
-                    if Instant::now() >= deadline {
+                    if timed_out(deadline) {
                         let _ = child.kill();
-                        let _ = child.wait();
-                        return None;
+                        return None; // reader threads detach; the CLI returns
                     }
                     std::thread::sleep(Duration::from_millis(25));
                 }
                 Err(_) => return None,
             }
         };
-        let mut stdout = String::new();
-        if let Some(mut handle) = child.stdout.take() {
-            let _ = handle.read_to_string(&mut stdout);
+        // The child exited; bound the read too. A grandchild inheriting the
+        // pipes keeps them open, so the readers must not be waited on forever.
+        while remaining.load(std::sync::atomic::Ordering::SeqCst) > 0 {
+            if timed_out(deadline) {
+                let _ = child.kill();
+                return None; // detach the blocked readers
+            }
+            std::thread::sleep(Duration::from_millis(25));
         }
+        for r in readers {
+            let _ = r.join();
+        }
+        let stdout = String::from_utf8_lossy(&stdout_buf.lock().unwrap_or_else(|p| p.into_inner()))
+            .to_string();
         Some((status.code().unwrap_or(-1), stdout))
     }
+}
+
+/// Drains one pipe into a capped buffer, decrementing `remaining` on exit.
+fn spawn_reader(
+    mut stream: impl Read + Send + 'static,
+    buf: std::sync::Arc<std::sync::Mutex<Vec<u8>>>,
+    remaining: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    cap: usize,
+) -> std::thread::JoinHandle<()> {
+    remaining.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    std::thread::spawn(move || {
+        let mut chunk = [0u8; 8192];
+        loop {
+            match stream.read(&mut chunk) {
+                Ok(0) | Err(_) => break,
+                Ok(n) => {
+                    let mut guard = buf.lock().unwrap_or_else(|p| p.into_inner());
+                    if guard.len() < cap {
+                        let room = cap - guard.len();
+                        guard.extend_from_slice(&chunk[..n.min(room)]);
+                    }
+                    // Past the cap: keep draining but stop storing, so the
+                    // child never deadlocks on a full pipe.
+                }
+            }
+        }
+        remaining.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+    })
 }
 
 impl Cleaner for PluginCleaner {
@@ -217,7 +320,7 @@ pub fn is_plugin_candidate(path: &Path) -> bool {
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
-                m.permissions().mode() & 0o111 != 0
+                m.is_file() && m.permissions().mode() & 0o111 != 0
             }
             #[cfg(not(unix))]
             {
@@ -230,6 +333,64 @@ pub fn is_plugin_candidate(path: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parse_protocol_output_extracts_json_from_noisy_output() {
+        // Real-world plugins print log lines around the JSON object.
+        let ok =
+            parse_protocol_output("[plugin] starting...\n{\"status\": \"clean\"}\n[plugin] done")
+                .unwrap();
+        assert_eq!(ok.status, "clean");
+        // Nested braces inside the object survive the extraction.
+        let nested =
+            parse_protocol_output("log {\"x\": 1}\n{\"status\": \"pruneable\", \"bytes\": 512}")
+                .unwrap();
+        assert_eq!(nested.status, "pruneable");
+        assert_eq!(nested.bytes, 512);
+    }
+
+    #[test]
+    fn is_plugin_candidate_rejects_directories() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let dir = tmp.path().join("sasurahime-dirname");
+        std::fs::create_dir_all(&dir).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        assert!(
+            !is_plugin_candidate(&dir),
+            "a directory named like a plugin is not a plugin"
+        );
+    }
+
+    #[test]
+    fn discover_rejects_builtin_name_collisions() {
+        // A `sasurahime-uv` executable on PATH must not impersonate the
+        // trusted `uv` target.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let bin_dir = tmp.path().join("bin");
+        std::fs::create_dir_all(&bin_dir).unwrap();
+        let plugin = bin_dir.join("sasurahime-uv");
+        std::fs::write(&plugin, b"#!/bin/sh\n").unwrap();
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&plugin, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let path = bin_dir.to_string_lossy().to_string();
+        let _guard = crate::test_helpers::EnvGuard::set("PATH", &path);
+        assert_eq!(
+            PluginCleaner::discover_excluding(&["uv"]).len(),
+            0,
+            "a built-in name must never be discovered as a plugin"
+        );
+        assert_eq!(
+            PluginCleaner::discover_excluding(&[]).len(),
+            1,
+            "without reservation the plugin is discovered"
+        );
+    }
 
     #[test]
     fn plugin_name_extraction() {
