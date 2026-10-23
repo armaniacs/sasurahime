@@ -21,8 +21,6 @@ fn spinner_style() -> &'static ProgressStyle {
     })
 }
 
-/// `#[allow(dead_code)]`: retained for potential future use in long-running operations.
-#[allow(dead_code)]
 /// Message shown while a cleaner deletes a path: names the folder/file so
 /// the user sees what is being removed, with progress and size. `total` of 0
 /// means the count is unknown and is omitted.
@@ -103,11 +101,9 @@ impl ProgressReporter for CleaningProgress {
     fn progress_tick(&self, path: &Path, current: usize, size_bytes: u64) {
         let total = self.pb.length().unwrap_or(0) as usize;
         let msg = tick_message(&self.prefix, path, current, total, size_bytes);
-        // A hidden draw target (non-TTY) renders nothing: print the line so
-        // the user still sees what is being deleted.
-        if self.pb.is_hidden() {
-            eprintln!("{msg}");
-        }
+        // No hidden-target print: the cleaners print one line per deletion
+        // themselves, and a tick line here would double the piped output.
+        // The live spinner (TTY) carries the per-path progress.
         self.pb.set_message(msg);
         if total > 0 {
             self.pb.set_position(current as u64);
@@ -115,7 +111,7 @@ impl ProgressReporter for CleaningProgress {
     }
 
     fn progress_finish(&self) {
-        self.pb.set_message(format!("{}: done", self.prefix));
+        // The caller clears the bar right after; nothing to render here.
     }
 }
 
@@ -419,17 +415,6 @@ mod tests {
         );
         assert!(msg.contains("2/5"), "got: {msg}");
         assert!(spinner.reporter().show_spinner());
-        spinner.finish();
-    }
-
-    #[test]
-    fn cleaning_progress_prints_when_the_spinner_is_hidden() {
-        // Non-TTY: indicatif hides the bar, so the tick must print the line
-        // directly or the user sees nothing while cleaning.
-        let spinner = SharedSpinner::start("Cleaning logs...", false);
-        let rep = spinner.reporter();
-        rep.progress_init("logs", 1);
-        rep.progress_tick(Path::new("/Users/u/.local/share/kilo/log/old.log"), 1, 4096);
         spinner.finish();
     }
 

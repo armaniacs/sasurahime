@@ -173,8 +173,10 @@ pub fn run_auto(cleaners: &[Box<dyn Cleaner>]) -> Result<()> {
     for i in pruneable_indices {
         let name = cleaners[i].name();
         // One shared spinner: its message names the folder being deleted
-        // instead of a bare rotating character. Confirmations are suppressed
-        // here, so the animated tick cannot compete with a prompt.
+        // instead of a bare rotating character. generic.rs prompts are
+        // suppressed here, but app-support and apfs-snapshot still prompt
+        // inside clean(); the animated tick redraws over them (the old
+        // two-bar layout competed with them more).
         let result = crate::progress::with_spinner_result_progress(
             &format!("Cleaning {}...", name),
             true,

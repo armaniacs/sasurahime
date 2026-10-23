@@ -195,6 +195,14 @@ impl PluginCleaner {
                 Ok(None) => {
                     if timed_out(deadline) {
                         let _ = child.kill();
+                        // The child is its own process group leader
+                        // (process_group(0)), so killing the group takes any
+                        // grandchild with it: their inherited pipes close and
+                        // the detached readers reach EOF instead of blocking
+                        // forever.
+                        unsafe {
+                            libc::killpg(child.id() as libc::pid_t, libc::SIGKILL);
+                        }
                         return None; // reader threads detach; the CLI returns
                     }
                     std::thread::sleep(Duration::from_millis(25));
@@ -206,6 +214,9 @@ impl PluginCleaner {
         // pipes keeps them open, so the readers must not be waited on forever.
         while remaining.load(std::sync::atomic::Ordering::SeqCst) > 0 {
             if timed_out(deadline) {
+                // kill on an already-reaped child is a documented no-op that
+                // also guards against recycled PIDs; the group kill above is
+                // what actually closes inherited pipes.
                 let _ = child.kill();
                 return None; // detach the blocked readers
             }

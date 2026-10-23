@@ -195,3 +195,32 @@ fn auto_never_runs_manual_targets_even_with_include_manual() {
         "the skipped Manual target must be reported, got:\n{combined}"
     );
 }
+
+#[test]
+fn auto_runs_moderate_targets_when_include_manual() {
+    // [policy] include_manual = true must let Moderate targets (node-gyp)
+    // run in auto; only Risky and Manual are blocked unconditionally.
+    let tmp = TempDir::new().unwrap();
+    write_policy(
+        tmp.path(),
+        "[policy]\nolder_than_days = 30\ninclude_manual = true\n",
+    );
+    let cache = tmp.path().join(".cache/node-gyp");
+    fs::create_dir_all(&cache).unwrap();
+    fs::write(cache.join("api.json"), [0u8; 4096]).unwrap();
+    let status = Command::new("touch")
+        .args(["-t", "202001010000"])
+        .arg(&cache)
+        .status()
+        .unwrap();
+    assert!(status.success());
+    let output = sasurahime(tmp.path())
+        .args(["--permanent", "auto"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    assert!(
+        !cache.exists(),
+        "[policy] include_manual = true must let Moderate targets run in auto"
+    );
+}

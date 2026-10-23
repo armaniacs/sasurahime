@@ -1041,6 +1041,7 @@ dependencies = [
  "filetime",
  "fs2",
  "indicatif",
+ "libc",
  "log",
  "rayon",
  "rstest",

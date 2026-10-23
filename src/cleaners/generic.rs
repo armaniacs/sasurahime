@@ -850,10 +850,17 @@ pub fn is_safe_delete_target(path: &Path) -> bool {
     // deletable, and subdirectories of HOME stay allowed.
     let home = std::env::var("HOME").unwrap_or_default();
     if !home.is_empty() {
-        let home_path = Path::new(&home);
+        // HOME must be canonicalized with the target: a symlinked HOME would
+        // otherwise defeat this check (canonical(HOME) != raw HOME).
+        let home_path = fs::canonicalize(&home).unwrap_or_else(|_| PathBuf::from(&home));
         if check == home_path || home_path.starts_with(&check) {
             return false;
         }
+    }
+    // A relative path resolves against the process CWD: env vars like
+    // XDG_CACHE_HOME="" must never yield a deletable target.
+    if !check.is_absolute() {
+        return false;
     }
     // Block exact sensitive roots and system paths.
     // Allow macOS tempdirs (/var/folders/...) while blocking /var itself
@@ -1013,8 +1020,10 @@ pub fn clean_cli_or_fallback(
             deleted_paths: vec![],
         });
     }
-    // Clean-time safety re-validation (TOCTOU mitigation), same as the other
-    // deletion sinks: env-var-derived dirs are only checked at construction.
+    // Clean-time safety re-validation, same as the other deletion sinks:
+    // env-var-derived dirs are only checked at construction. This is
+    // validate-then-use (not an atomic guarantee): a concurrent swap in the
+    // parent dir between this check and the delete remains possible.
     if !is_safe_delete_target(dir) {
         eprintln!("[{name}] warning: unsafe path, skipping: {}", dir.display());
         return Ok(CleanResult {
@@ -1261,6 +1270,30 @@ mod tests {
             is_safe_delete_target(&cache),
             "subdirs of HOME remain deletable"
         );
+    }
+
+    #[test]
+    fn is_safe_delete_target_canonicalizes_home() {
+        // A symlinked HOME must not defeat the guard: a target equal to
+        // canonical(HOME) is still HOME.
+        let real = tempfile::TempDir::new().unwrap();
+        let link_dir = tempfile::TempDir::new().unwrap();
+        let link = link_dir.path().join("linkhome");
+        std::os::unix::fs::symlink(real.path(), &link).unwrap();
+        let _guard = crate::test_helpers::EnvGuard::set("HOME", &link.to_string_lossy());
+        let canonical_home = std::fs::canonicalize(real.path()).unwrap();
+        assert!(
+            !is_safe_delete_target(&canonical_home),
+            "canonical(HOME) is still HOME even when HOME itself is a symlink"
+        );
+    }
+
+    #[test]
+    fn is_safe_delete_target_rejects_relative_paths() {
+        // A relative env-derived target resolves against the process CWD:
+        // never a safe delete target.
+        assert!(!is_safe_delete_target(Path::new("relative/cache")));
+        assert!(!is_safe_delete_target(Path::new("pre-commit")));
     }
 
     #[test]

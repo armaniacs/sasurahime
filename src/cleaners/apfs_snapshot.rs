@@ -73,7 +73,13 @@ pub fn parse_size_decimal(s: &str) -> Option<u64> {
     if !v.is_finite() || v <= 0.0 {
         return None;
     }
-    Some((v * mult) as u64)
+    // The product saturates on cast: 1e11GB -> 1e20 -> u64::MAX would tell
+    // tmutil to thin everything. Reject anything that does not fit.
+    let product = v * mult;
+    if !product.is_finite() || product >= u64::MAX as f64 {
+        return None;
+    }
+    Some(product as u64)
 }
 
 /// Urgency must be 1..=4; anything else is rejected. 4 interrupts running
@@ -1074,6 +1080,13 @@ mod tests {
         assert_eq!(parse_size_decimal("-0GB"), None);
         assert_eq!(parse_size_decimal("infGB"), None, "non-finite target");
         assert_eq!(parse_size_decimal("nanGB"), None);
+        // Product overflow saturates to u64::MAX = thin-everything.
+        assert_eq!(
+            parse_size_decimal("1e11GB"),
+            None,
+            "1e20 saturates to u64::MAX"
+        );
+        assert_eq!(parse_size_decimal("99999999999GB"), None);
         // Valid specs still parse.
         assert_eq!(parse_size_decimal("10GB"), Some(10_000_000_000));
         assert_eq!(parse_size_decimal("0.5GB"), Some(500_000_000));

@@ -940,9 +940,13 @@ fn main() -> anyhow::Result<()> {
                     ));
                     continue;
                 }
-                if !c.auto_clean_allowed() {
+                // Moderate targets still honor [policy] include_manual;
+                // only Safe runs without it.
+                if !c.auto_clean_allowed()
+                    && !(opts.include_manual && c.risk() == cleaner::Risk::Moderate)
+                {
                     skipped.push(format!(
-                        "{} ({}): needs --include-manual",
+                        "{} ({}): set [policy] include_manual = true to include",
                         c.name(),
                         c.risk().label()
                     ));
