@@ -1,7 +1,6 @@
 use crate::cleaner::{Cleaner, ScanResult, ScanStatus};
 use crate::format::format_bytes;
 use anyhow::Result;
-use rayon::prelude::*;
 use std::io::IsTerminal;
 
 /// Build display items and their mapping to (cleaner_index, optional_sub_target).
@@ -87,29 +86,7 @@ pub(crate) fn auto_clean_indices(
 /// Non-interactive: clean every pruneable cleaner without prompting.
 /// Used by `--yes` flag.
 pub fn run_auto(cleaners: &[Box<dyn Cleaner>]) -> Result<()> {
-    let total = cleaners.len();
-    let mut results: Vec<ScanResult> = (0..total)
-        .map(|i| ScanResult::new(cleaners[i].name(), ScanStatus::NotFound))
-        .collect();
-
-    let scan_indices: Vec<usize> = (0..total).filter(|&i| cleaners[i].is_available()).collect();
-
-    if !scan_indices.is_empty() {
-        let scanned: Vec<(usize, ScanResult)> =
-            crate::progress::with_parallel_scan(scan_indices.len(), |pb| {
-                scan_indices
-                    .par_iter()
-                    .map(|&i| {
-                        let r = cleaners[i].detect();
-                        pb.inc(1);
-                        (i, r)
-                    })
-                    .collect()
-            });
-        for (i, r) in scanned {
-            results[i] = r;
-        }
-    }
+    let results = crate::scanner::detect_all(cleaners);
 
     let pruneable_indices = auto_clean_indices(&results, cleaners);
 
@@ -212,29 +189,7 @@ pub fn run_interactive(cleaners: &[Box<dyn Cleaner>]) -> Result<()> {
         std::process::exit(1);
     }
 
-    let total = cleaners.len();
-    let mut results: Vec<ScanResult> = (0..total)
-        .map(|i| ScanResult::new(cleaners[i].name(), ScanStatus::NotFound))
-        .collect();
-
-    let scan_indices: Vec<usize> = (0..total).filter(|&i| cleaners[i].is_available()).collect();
-
-    if !scan_indices.is_empty() {
-        let scanned: Vec<(usize, ScanResult)> =
-            crate::progress::with_parallel_scan(scan_indices.len(), |pb| {
-                scan_indices
-                    .par_iter()
-                    .map(|&i| {
-                        let r = cleaners[i].detect();
-                        pb.inc(1);
-                        (i, r)
-                    })
-                    .collect()
-            });
-        for (i, r) in scanned {
-            results[i] = r;
-        }
-    }
+    let results = crate::scanner::detect_all(cleaners);
 
     // Collect indices of pruneable cleaners only — nothing to select otherwise.
     let pruneable_indices: Vec<usize> = results

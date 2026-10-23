@@ -86,33 +86,70 @@ pub(crate) fn scan_json_document(
     serde_json::to_string_pretty(&doc).unwrap_or_else(|_| "{}".to_string())
 }
 
-/// Runs detect on every available cleaner, sorted by size.
-fn scan_results(cleaners: &[Box<dyn Cleaner>]) -> Vec<ScanResult> {
-    let available: Vec<&Box<dyn Cleaner>> = cleaners.iter().filter(|c| c.is_available()).collect();
-    let total_available = available.len();
+/// Runs detect on every available cleaner and returns the results
+/// index-aligned with `cleaners`: `results[i]` always describes
+/// `cleaners[i]`, with unavailable cleaners keeping their `NotFound`
+/// placeholder. The one detect interface; parallel/progress mechanics move
+/// behind it.
+pub fn detect_all(cleaners: &[Box<dyn Cleaner>]) -> Vec<ScanResult> {
+    let total = cleaners.len();
+    let mut results: Vec<ScanResult> = (0..total)
+        .map(|i| ScanResult::new(cleaners[i].name(), ScanStatus::NotFound))
+        .collect();
 
-    let mut results: Vec<_> = crate::progress::with_parallel_scan(total_available, |pb| {
-        available
-            .par_iter()
-            .map(|c| {
-                let r = c.detect();
-                pb.inc(1);
-                r
-            })
-            .collect()
-    });
-    sort_by_size(&mut results);
+    let scan_indices: Vec<usize> = (0..total).filter(|&i| cleaners[i].is_available()).collect();
+
+    if !scan_indices.is_empty() {
+        let scanned: Vec<(usize, ScanResult)> =
+            crate::progress::with_parallel_scan(scan_indices.len(), |pb| {
+                scan_indices
+                    .par_iter()
+                    .map(|&i| {
+                        let r = cleaners[i].detect();
+                        pb.inc(1);
+                        (i, r)
+                    })
+                    .collect()
+            });
+        for (i, r) in scanned {
+            results[i] = r;
+        }
+    }
+
     results
 }
 
-pub fn run_scan(cleaners: &[Box<dyn Cleaner>], home: &std::path::Path) {
-    let results = scan_results(cleaners);
-    let available: Vec<&Box<dyn Cleaner>> = cleaners.iter().filter(|c| c.is_available()).collect();
+/// Shared preamble of `run_scan` and `run_scan_json`: one `is_available`
+/// pass per call feeds the risks map and the available indices, and the
+/// denied-paths probe matches `doctor`.
+fn scan_preamble(
+    cleaners: &[Box<dyn Cleaner>],
+    home: &std::path::Path,
+) -> (
+    Vec<usize>,
+    std::collections::HashMap<&'static str, Risk>,
+    Vec<&'static str>,
+) {
+    let available: Vec<usize> = (0..cleaners.len())
+        .filter(|&i| cleaners[i].is_available())
+        .collect();
     // Same classification as `--yes` and the TUI, shown per row.
-    let risks: std::collections::HashMap<&str, Risk> =
-        available.iter().map(|c| (c.name(), c.risk())).collect();
+    let risks: std::collections::HashMap<&'static str, Risk> = available
+        .iter()
+        .map(|&i| (cleaners[i].name(), cleaners[i].risk()))
+        .collect();
     // Same probe as `doctor`: protected paths blocked by missing FDA.
     let denied = crate::doctor::denied_paths(home);
+    (available, risks, denied)
+}
+
+pub fn run_scan(cleaners: &[Box<dyn Cleaner>], home: &std::path::Path) {
+    let results = detect_all(cleaners);
+    let (available, risks, denied) = scan_preamble(cleaners, home);
+    // Display rows: available cleaners only, sorted by size — derived from
+    // the one `available` pass, never a second availability filter.
+    let mut rows: Vec<ScanResult> = available.iter().map(|&i| results[i].clone()).collect();
+    sort_by_size(&mut rows);
 
     let mut table = Table::new();
     if crate::history::USE_UNICODE.load(std::sync::atomic::Ordering::Relaxed) {
@@ -125,7 +162,7 @@ pub fn run_scan(cleaners: &[Box<dyn Cleaner>], home: &std::path::Path) {
     let mut total: u64 = 0;
     let mut unavailable: usize = 0;
 
-    for r in &results {
+    for r in &rows {
         let (size, status, counted) = status_columns(&r.status);
         if let Some(b) = counted {
             total += b;
@@ -161,7 +198,10 @@ pub fn run_scan(cleaners: &[Box<dyn Cleaner>], home: &std::path::Path) {
         println!("Run `sasurahime doctor` for details.");
     }
 
-    let notes: Vec<String> = available.iter().filter_map(|c| c.advisory()).collect();
+    let notes: Vec<String> = available
+        .iter()
+        .filter_map(|&i| cleaners[i].advisory())
+        .collect();
     if !notes.is_empty() {
         println!("\nNotes:");
         for note in notes {
@@ -173,20 +213,20 @@ pub fn run_scan(cleaners: &[Box<dyn Cleaner>], home: &std::path::Path) {
 /// Machine-readable scan: prints one JSON document, no table, no hints and no
 /// prompt. Used by `scan --json` for scripts and CI.
 pub fn run_scan_json(cleaners: &[Box<dyn Cleaner>], home: &std::path::Path) {
-    let results = scan_results(cleaners);
-    let available: Vec<&Box<dyn Cleaner>> = cleaners.iter().filter(|c| c.is_available()).collect();
-    let risks: std::collections::HashMap<&str, Risk> =
-        available.iter().map(|c| (c.name(), c.risk())).collect();
-    // Same probe as `doctor`: protected paths blocked by missing FDA.
-    let denied: Vec<&'static str> = crate::doctor::denied_paths(home);
-    let total: u64 = results
+    let results = detect_all(cleaners);
+    let (available, risks, denied) = scan_preamble(cleaners, home);
+    // Same row selection as the table: available cleaners only, sorted by
+    // size, from the one `available` pass.
+    let mut rows: Vec<ScanResult> = available.iter().map(|&i| results[i].clone()).collect();
+    sort_by_size(&mut rows);
+    let total: u64 = rows
         .iter()
         .filter_map(|r| match r.status {
             ScanStatus::Pruneable(b) => Some(b),
             _ => None,
         })
         .sum();
-    println!("{}", scan_json_document(&results, total, &risks, &denied));
+    println!("{}", scan_json_document(&rows, total, &risks, &denied));
 }
 
 #[cfg(test)]
@@ -313,5 +353,63 @@ mod tests {
         assert_eq!(status, "pruneable");
         assert_eq!(counted, Some(1234));
         assert!(!size.is_empty());
+    }
+
+    /// Tiny stub cleaner for `detect_all`: fixed name, detect status, and
+    /// availability. `clean` is a no-op.
+    struct StubCleaner {
+        name: &'static str,
+        status: ScanStatus,
+        available: bool,
+    }
+
+    impl Cleaner for StubCleaner {
+        fn name(&self) -> &'static str {
+            self.name
+        }
+        fn detect(&self) -> ScanResult {
+            ScanResult::new(self.name, self.status.clone())
+        }
+        fn clean(
+            &self,
+            _dry_run: bool,
+            _reporter: &dyn crate::progress::ProgressReporter,
+        ) -> anyhow::Result<crate::cleaner::CleanResult> {
+            Ok(crate::cleaner::CleanResult::empty(self.name))
+        }
+        fn is_available(&self) -> bool {
+            self.available
+        }
+    }
+
+    #[test]
+    fn detect_all_preserves_cleaner_order_and_names() {
+        // 100 B then 300 B on purpose: not size-descending, so the assertion
+        // locks registration order (detect_all must not sort).
+        let cleaners: Vec<Box<dyn Cleaner>> = vec![
+            Box::new(StubCleaner {
+                name: "alpha",
+                status: ScanStatus::Pruneable(100),
+                available: true,
+            }),
+            Box::new(StubCleaner {
+                name: "beta",
+                status: ScanStatus::Pruneable(300),
+                available: true,
+            }),
+            Box::new(StubCleaner {
+                name: "gamma",
+                status: ScanStatus::NotFound,
+                available: false,
+            }),
+        ];
+        let results = detect_all(&cleaners);
+        assert_eq!(names(&results), vec!["alpha", "beta", "gamma"]);
+        assert_eq!(results[0].bytes_for_test(), 100);
+        assert_eq!(results[1].bytes_for_test(), 300);
+        assert!(
+            matches!(results[2].status, ScanStatus::NotFound),
+            "unavailable cleaner keeps its NotFound placeholder so results stay index-aligned"
+        );
     }
 }
