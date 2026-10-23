@@ -230,11 +230,27 @@ impl LibraryCachesCleaner {
         reporter.progress_init(self.name(), entries.len());
         for (i, e) in entries.iter().enumerate() {
             reporter.progress_tick(&e.path, i + 1, e.size);
-            let outcome = crate::trash::safe_delete(
+            let outcome = match crate::trash::safe_delete(
                 self.runner.as_ref(),
                 &e.path,
                 crate::trash::TrashMode::Global,
-            )?;
+            ) {
+                Ok(outcome) => outcome,
+                // A fatal per-entry error (e.g. the path vanished between
+                // scan and delete) must not abort the whole run: report it
+                // and continue with the remaining entries.
+                Err(err) => {
+                    eprintln!(
+                        "[library-caches] error removing {}: {err:#}",
+                        e.path.display()
+                    );
+                    skipped.push(SkippedEntry {
+                        path: e.path.clone(),
+                        reason: format!("{err:#}"),
+                    });
+                    continue;
+                }
+            };
             if let Some(reason) = outcome.skip_reason {
                 eprintln!(
                     "[library-caches] error removing {}: {reason}",
@@ -712,6 +728,54 @@ mod tests {
         assert_eq!(r.skipped.len(), 1);
         assert_eq!(r.exit_code(), 1);
         crate::trash::set_trash_mode(true);
+    }
+
+    #[test]
+    fn delete_entries_continues_past_fatal_permanent_delete() {
+        // PBI 31: under a pinned --permanent mode, a path that vanishes
+        // between scan and delete fails at the seam with a fatal NotFound
+        // (by design). The per-entry loop must catch it, report it and still
+        // process the remaining entries instead of aborting the whole run.
+        let _lock = crate::context::TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        // Panic-safe pin: the guard restores the previous mode on drop.
+        let _mode = crate::test_helpers::TrashModeGuard::set(false);
+        let tmp = TempDir::new().unwrap();
+        let c = caches(&tmp);
+        put(&c, "gopls", 20_000);
+        put(&c, "typescript", 20_000);
+        let mut cl = LibraryCachesCleaner::new(
+            tmp.path(),
+            Box::new(MockRunner::new().with_success("chflags")),
+        );
+        cl.threshold_override = Some(1);
+        let entries = cl.scan(false);
+        assert_eq!(entries.len(), 2, "both entries must scan as deletable");
+        // Simulate the TOCTOU: the first entry vanishes after the scan.
+        let vanished = entries[0].path.clone();
+        fs::remove_dir_all(&vanished).unwrap();
+        let surviving = entries[1].path.clone();
+        let r = cl
+            .delete_entries(&entries, &crate::progress::DeepSuppressReporter)
+            .unwrap();
+        // The surviving entry was still processed...
+        assert!(
+            !surviving.exists(),
+            "the surviving entry must still be deleted after a fatal per-entry error"
+        );
+        assert_eq!(
+            r.bytes_freed, entries[1].size,
+            "only the surviving entry's bytes are counted"
+        );
+        // ...and the vanished one was reported with its cause.
+        assert_eq!(r.skipped.len(), 1, "the vanished entry must be reported");
+        assert_eq!(r.skipped[0].path, vanished);
+        assert!(
+            r.skipped[0].reason.contains("No such file"),
+            "the report must carry the failure cause: {}",
+            r.skipped[0].reason
+        );
     }
 
     #[test]

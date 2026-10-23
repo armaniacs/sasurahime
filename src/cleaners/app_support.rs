@@ -501,11 +501,24 @@ impl AppSupportCleaner {
                     continue;
                 }
             };
-            let outcome = crate::trash::safe_delete(
+            let outcome = match crate::trash::safe_delete(
                 self.runner.as_ref(),
                 &path,
                 crate::trash::TrashMode::Global,
-            )?;
+            ) {
+                Ok(outcome) => outcome,
+                // A fatal per-entry error (e.g. the path vanished between
+                // scan and delete) must not abort the whole run: report it
+                // and continue with the remaining candidates.
+                Err(err) => {
+                    eprintln!("[{NAME}] error removing {}: {err:#}", path.display());
+                    skipped.push(SkippedEntry {
+                        path: path.clone(),
+                        reason: format!("{err:#}"),
+                    });
+                    continue;
+                }
+            };
             if let Some(reason) = outcome.skip_reason {
                 eprintln!("[{NAME}] error removing {}: {reason}", path.display());
                 skipped.push(SkippedEntry {

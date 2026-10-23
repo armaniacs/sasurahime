@@ -277,7 +277,17 @@ impl Cleaner for MiseCleaner {
                 );
             } else {
                 reporter.progress_tick(path, i + 1, size);
-                let outcome = Self::remove_with_uchg(path, self.runner.as_ref())?;
+                let outcome = match Self::remove_with_uchg(path, self.runner.as_ref()) {
+                    Ok(outcome) => outcome,
+                    // A fatal per-entry error (e.g. the runtime vanished
+                    // between scan and delete) must not abort the run:
+                    // report it and continue with the remaining items.
+                    Err(err) => {
+                        eprintln!("Error removing {tool} {version}: {err:#}");
+                        // Continue with remaining items on error
+                        continue;
+                    }
+                };
                 if let Some(reason) = outcome.skip_reason {
                     eprintln!("Error removing {tool} {version}: {reason}");
                     // Continue with remaining items on error

@@ -413,11 +413,27 @@ impl OrphanContainersCleaner {
         reporter.progress_init(self.name(), selected.len());
         for (i, c) in selected.iter().enumerate() {
             reporter.progress_tick(&c.path, i + 1, c.size);
-            let outcome = crate::trash::safe_delete(
+            let outcome = match crate::trash::safe_delete(
                 self.runner.as_ref(),
                 &c.path,
                 crate::trash::TrashMode::Global,
-            )?;
+            ) {
+                Ok(outcome) => outcome,
+                // A fatal per-entry error (e.g. the path vanished between
+                // scan and delete) must not abort the whole run: report it
+                // and continue with the remaining entries.
+                Err(err) => {
+                    eprintln!(
+                        "[orphan-containers] error removing {}: {err:#}",
+                        c.path.display()
+                    );
+                    skipped.push(SkippedEntry {
+                        path: c.path.clone(),
+                        reason: format!("{err:#}"),
+                    });
+                    continue;
+                }
+            };
             if let Some(reason) = outcome.skip_reason {
                 eprintln!(
                     "[orphan-containers] error removing {}: {reason}",

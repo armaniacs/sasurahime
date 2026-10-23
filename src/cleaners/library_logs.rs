@@ -1,4 +1,4 @@
-use crate::cleaner::{CleanResult, Cleaner, ScanResult, ScanStatus};
+use crate::cleaner::{CleanResult, Cleaner, ScanResult, ScanStatus, SkippedEntry};
 use crate::command::CommandRunner;
 use crate::format::dir_size;
 use crate::progress::ProgressReporter;
@@ -147,7 +147,9 @@ impl LibraryLogsCleaner {
     }
 
     /// The one delete loop shared by `clean` and `clean_with_opts`. ORs the
-    /// seam-resolved trash truth across every deletion.
+    /// seam-resolved trash truth across every deletion and records every
+    /// failure (skippable or fatal) into the skipped channel instead of
+    /// aborting the run.
     fn delete_entries(
         &self,
         entries: &[LogEntry],
@@ -156,15 +158,36 @@ impl LibraryLogsCleaner {
     ) -> Result<CleanResult> {
         let mut total_freed: u64 = 0;
         let mut uses_trash = false;
+        let mut skipped = Vec::new();
         reporter.progress_init(self.name(), entries.len());
         for (i, entry) in entries.iter().enumerate() {
             reporter.progress_tick(&entry.path, i + 1, entry.size);
-            let outcome = crate::trash::safe_delete(self.runner.as_ref(), &entry.path, mode)?;
+            let outcome = match crate::trash::safe_delete(self.runner.as_ref(), &entry.path, mode) {
+                Ok(outcome) => outcome,
+                // A fatal per-entry error (e.g. the path vanished between
+                // scan and delete) must not abort the whole run: report
+                // it and continue with the remaining entries.
+                Err(err) => {
+                    eprintln!(
+                        "[library-logs] error removing {}: {err:#}",
+                        entry.path.display()
+                    );
+                    skipped.push(SkippedEntry {
+                        path: entry.path.clone(),
+                        reason: format!("{err:#}"),
+                    });
+                    continue;
+                }
+            };
             if let Some(reason) = outcome.skip_reason {
                 eprintln!(
                     "[library-logs] error removing {}: {reason}",
                     entry.path.display()
                 );
+                skipped.push(SkippedEntry {
+                    path: entry.path.clone(),
+                    reason,
+                });
                 continue;
             }
             uses_trash |= outcome.uses_trash;
@@ -176,7 +199,13 @@ impl LibraryLogsCleaner {
             );
         }
         reporter.progress_finish();
-        Ok(CleanResult::freed(self.name(), total_freed, uses_trash))
+        Ok(CleanResult {
+            name: self.name(),
+            bytes_freed: total_freed,
+            uses_trash,
+            skipped,
+            deleted_paths: vec![],
+        })
     }
 }
 
