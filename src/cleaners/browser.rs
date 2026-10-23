@@ -12,8 +12,9 @@ struct BrowserGroup {
 
 pub struct BrowserCleaner {
     groups: Vec<BrowserGroup>,
-    // Held for interface consistency; browser detection is filesystem-only.
-    _runner: Box<dyn CommandRunner>,
+    /// Passed to the deletion seam, which clears uchg flags through it in
+    /// permanent mode.
+    runner: Box<dyn CommandRunner>,
 }
 
 impl BrowserCleaner {
@@ -33,7 +34,7 @@ impl BrowserCleaner {
                     parent: home.join("Library/Caches/ms-playwright-go"),
                 },
             ],
-            _runner: runner,
+            runner,
         }
     }
 
@@ -121,13 +122,7 @@ impl Cleaner for BrowserCleaner {
         let any_found = self.groups.iter().any(|g| g.parent.exists());
         if !any_found {
             println!("browsers: not found, skipping");
-            return Ok(CleanResult {
-                name: self.name(),
-                bytes_freed: 0,
-                uses_trash: false,
-                skipped: vec![],
-                deleted_paths: vec![],
-            });
+            return Ok(CleanResult::empty(self.name()));
         }
 
         let mut candidates: Vec<(PathBuf, u64)> = Vec::new();
@@ -144,6 +139,8 @@ impl Cleaner for BrowserCleaner {
 
         let mut skipped: Vec<crate::cleaner::SkippedEntry> = vec![];
         let mut freed: u64 = 0;
+        // OR-in across every deletion: the seam's resolved mode is the truth.
+        let mut uses_trash = false;
         for (i, (path, size)) in candidates.iter().enumerate() {
             let entry_name = path.file_name().unwrap_or_default().to_string_lossy();
             if dry_run {
@@ -153,15 +150,17 @@ impl Cleaner for BrowserCleaner {
                 );
             } else {
                 reporter.progress_tick(path, i + 1, *size);
-                if let Err(e) = crate::trash::delete_path(path) {
-                    if crate::cleaner::is_skippable_error(&e) {
-                        skipped.push(crate::cleaner::SkippedEntry {
-                            path: path.to_path_buf(),
-                            reason: format!("{e:#}"),
-                        });
-                    } else {
-                        return Err(e);
-                    }
+                let outcome = crate::trash::safe_delete(
+                    self.runner.as_ref(),
+                    path,
+                    crate::trash::TrashMode::Global,
+                )?;
+                uses_trash |= outcome.uses_trash;
+                if let Some(reason) = outcome.skip_reason {
+                    skipped.push(crate::cleaner::SkippedEntry {
+                        path: path.to_path_buf(),
+                        reason,
+                    });
                 } else {
                     freed += size;
                     println!("Removed: {entry_name}");
@@ -176,7 +175,7 @@ impl Cleaner for BrowserCleaner {
         Ok(CleanResult {
             name: self.name(),
             bytes_freed: freed,
-            uses_trash: true,
+            uses_trash,
             skipped,
             deleted_paths: vec![],
         })

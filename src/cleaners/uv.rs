@@ -89,23 +89,33 @@ impl Cleaner for UvCleaner {
     fn clean(&self, dry_run: bool, _reporter: &dyn ProgressReporter) -> Result<CleanResult> {
         if !self.runner.exists("uv") {
             println!("uv: not found, skipping");
-            return Ok(CleanResult {
-                name: self.name(),
-                bytes_freed: 0,
-                uses_trash: false,
-                skipped: vec![],
-                deleted_paths: vec![],
-            });
+            return Ok(CleanResult::empty(self.name()));
         }
 
         let before = dir_size(&self.cache_dir);
+
+        let mut skipped: Vec<crate::cleaner::SkippedEntry> = vec![];
+        // OR-in across every deletion: the seam's resolved mode is the truth.
+        let mut uses_trash = false;
 
         // Remove old simple-vN index caches
         for old in self.detect_old_indexes() {
             if dry_run {
                 println!("[dry-run] would remove: {}", old.display());
             } else {
-                fs::remove_dir_all(&old)?;
+                let outcome = crate::trash::safe_delete(
+                    self.runner.as_ref(),
+                    &old,
+                    crate::trash::TrashMode::Global,
+                )?;
+                uses_trash |= outcome.uses_trash;
+                if let Some(reason) = outcome.skip_reason {
+                    skipped.push(crate::cleaner::SkippedEntry {
+                        path: old.clone(),
+                        reason,
+                    });
+                    continue;
+                }
                 println!("Removed: {}", old.display());
             }
         }
@@ -127,8 +137,8 @@ impl Cleaner for UvCleaner {
         Ok(CleanResult {
             name: self.name(),
             bytes_freed: freed,
-            uses_trash: false,
-            skipped: vec![],
+            uses_trash,
+            skipped,
             deleted_paths: vec![],
         })
     }

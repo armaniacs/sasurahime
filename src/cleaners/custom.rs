@@ -57,36 +57,16 @@ impl Cleaner for CustomPathCleaner {
                 "{}: path {:?} is not safe to delete, skipping",
                 self.name, path
             );
-            return Ok(CleanResult {
-                name: self.name,
-                bytes_freed: 0,
-                uses_trash: true,
-                skipped: vec![],
-                deleted_paths: vec![],
-            });
+            return Ok(CleanResult::empty(self.name));
         }
         if !self.path.exists() {
             println!("{}: not found, skipping", self.name);
-            return Ok(CleanResult {
-                name: self.name,
-                bytes_freed: 0,
-                uses_trash: true,
-                skipped: vec![],
-                deleted_paths: vec![],
-            });
+            return Ok(CleanResult::empty(self.name));
         }
 
         let entries: Vec<fs::DirEntry> = match fs::read_dir(&self.path) {
             Ok(e) => e.filter_map(|e| e.ok()).collect(),
-            Err(_) => {
-                return Ok(CleanResult {
-                    name: self.name,
-                    bytes_freed: 0,
-                    uses_trash: true,
-                    skipped: vec![],
-                    deleted_paths: vec![],
-                })
-            }
+            Err(_) => return Ok(CleanResult::empty(self.name)),
         };
 
         if !dry_run && !entries.is_empty() {
@@ -94,6 +74,9 @@ impl Cleaner for CustomPathCleaner {
         }
 
         let mut freed: u64 = 0;
+        let mut skipped: Vec<crate::cleaner::SkippedEntry> = vec![];
+        // OR-in across every deletion: the seam's resolved mode is the truth.
+        let mut uses_trash = false;
         for (i, entry) in entries.iter().enumerate() {
             let path = entry.path();
             let size = crate::format::dir_size(&path);
@@ -105,11 +88,19 @@ impl Cleaner for CustomPathCleaner {
                 );
             } else {
                 reporter.progress_tick(&path, i + 1, size);
-                let _ = std::process::Command::new("chflags")
-                    .args(["-R", "nouchg"])
-                    .arg(&path)
-                    .status();
-                crate::trash::delete_path(&path)?;
+                let outcome = crate::trash::safe_delete(
+                    &crate::command::SystemCommandRunner,
+                    &path,
+                    crate::trash::TrashMode::Global,
+                )?;
+                uses_trash |= outcome.uses_trash;
+                if let Some(reason) = outcome.skip_reason {
+                    skipped.push(crate::cleaner::SkippedEntry {
+                        path: path.clone(),
+                        reason,
+                    });
+                    continue;
+                }
                 freed += size;
                 println!("Removed: {entry_name}");
             }
@@ -122,8 +113,8 @@ impl Cleaner for CustomPathCleaner {
         Ok(CleanResult {
             name: self.name,
             bytes_freed: freed,
-            uses_trash: true,
-            skipped: vec![],
+            uses_trash,
+            skipped,
             deleted_paths: vec![],
         })
     }

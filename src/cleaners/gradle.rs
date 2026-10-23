@@ -106,21 +106,16 @@ impl Cleaner for GradleCleaner {
                     crate::format::format_bytes(size)
                 );
             } else {
-                if let Err(e) = self
-                    .runner
-                    .run("chflags", &["-R", "nouchg", &path.to_string_lossy()])
-                {
-                    log::warn!("[gradle] chflags failed for {}: {e}", path.display());
-                }
-                if let Err(e) = crate::trash::delete_path(path) {
-                    if crate::cleaner::is_skippable_error(&e) {
-                        skipped.push(crate::cleaner::SkippedEntry {
-                            path: path.to_path_buf(),
-                            reason: format!("{e:#}"),
-                        });
-                    } else {
-                        return Err(e);
-                    }
+                let outcome = crate::trash::safe_delete(
+                    self.runner.as_ref(),
+                    path,
+                    crate::trash::TrashMode::Global,
+                )?;
+                if let Some(reason) = outcome.skip_reason {
+                    skipped.push(crate::cleaner::SkippedEntry {
+                        path: path.to_path_buf(),
+                        reason,
+                    });
                 } else {
                     freed += size;
                     println!("[gradle] removed: {}", path.display());
@@ -253,21 +248,16 @@ impl Cleaner for JetBrainsCleaner {
                     crate::format::format_bytes(size)
                 );
             } else {
-                if let Err(e) = self
-                    .runner
-                    .run("chflags", &["-R", "nouchg", &path.to_string_lossy()])
-                {
-                    log::warn!("[jetbrains] chflags failed for {}: {e}", path.display());
-                }
-                if let Err(e) = crate::trash::delete_path(path) {
-                    if crate::cleaner::is_skippable_error(&e) {
-                        skipped.push(crate::cleaner::SkippedEntry {
-                            path: path.to_path_buf(),
-                            reason: format!("{e:#}"),
-                        });
-                    } else {
-                        return Err(e);
-                    }
+                let outcome = crate::trash::safe_delete(
+                    self.runner.as_ref(),
+                    path,
+                    crate::trash::TrashMode::Global,
+                )?;
+                if let Some(reason) = outcome.skip_reason {
+                    skipped.push(crate::cleaner::SkippedEntry {
+                        path: path.to_path_buf(),
+                        reason,
+                    });
                 } else {
                     freed += size;
                     println!("[jetbrains] removed: {}", path.display());

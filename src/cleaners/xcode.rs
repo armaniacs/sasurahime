@@ -187,6 +187,8 @@ impl Cleaner for XcodeCleaner {
 
         let mut total_freed = 0u64;
         let mut all_skipped = vec![];
+        // OR-in across every deletion: the seam's resolved mode is the truth.
+        let mut uses_trash = false;
 
         for sub in subs {
             let (dir, label) = match sub {
@@ -228,15 +230,17 @@ impl Cleaner for XcodeCleaner {
                     );
                 } else {
                     reporter.progress_tick(entry, i + 1, size);
-                    if let Err(e) = crate::trash::delete_path(entry) {
-                        if crate::cleaner::is_skippable_error(&e) {
-                            all_skipped.push(crate::cleaner::SkippedEntry {
-                                path: entry.to_path_buf(),
-                                reason: format!("{e:#}"),
-                            });
-                        } else {
-                            return Err(e);
-                        }
+                    let outcome = crate::trash::safe_delete(
+                        self.runner.as_ref(),
+                        entry,
+                        crate::trash::TrashMode::Global,
+                    )?;
+                    uses_trash |= outcome.uses_trash;
+                    if let Some(reason) = outcome.skip_reason {
+                        all_skipped.push(crate::cleaner::SkippedEntry {
+                            path: entry.to_path_buf(),
+                            reason,
+                        });
                     } else {
                         total_freed += size;
                         println!("Removed: {label}/{entry_name}");
@@ -252,7 +256,7 @@ impl Cleaner for XcodeCleaner {
         Ok(CleanResult {
             name: self.name(),
             bytes_freed: total_freed,
-            uses_trash: true,
+            uses_trash,
             skipped: all_skipped,
             deleted_paths: vec![],
         })

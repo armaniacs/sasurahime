@@ -74,8 +74,13 @@ pub fn auto_clean_hint(
     for suffix in entry.path_suffixes {
         let path = base.join(suffix);
         if path.exists() {
-            let path_str = path.to_string_lossy();
-            runner.run("rm", &["-rf", &path_str])?;
+            // The seam clears uchg flags in permanent mode and honors the
+            // trash-mode decision instead of a blind `rm -rf`.
+            let outcome =
+                crate::trash::safe_delete(runner, &path, crate::trash::TrashMode::Global)?;
+            if let Some(reason) = outcome.skip_reason {
+                log::warn!("failed to delete {}: {reason}", path.display());
+            }
         }
     }
     eprintln!("  [OK]");
@@ -95,7 +100,13 @@ fn clean_hint_dirs(
     for suffix in entry.path_suffixes {
         let path = base.join(suffix);
         if path.exists() {
-            runner.run("rm", &["-rf", &path.to_string_lossy()])?;
+            // The seam clears uchg flags in permanent mode and honors the
+            // trash-mode decision instead of a blind `rm -rf`.
+            let outcome =
+                crate::trash::safe_delete(runner, &path, crate::trash::TrashMode::Global)?;
+            if let Some(reason) = outcome.skip_reason {
+                log::warn!("failed to delete {}: {reason}", path.display());
+            }
         }
     }
     eprintln!("  [OK]");

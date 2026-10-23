@@ -200,6 +200,7 @@ impl Cleaner for ProjectArtifactsCleaner {
         _reporter: &dyn crate::progress::ProgressReporter,
     ) -> Result<CleanResult> {
         let mut freed: u64 = 0;
+        let mut skipped: Vec<crate::cleaner::SkippedEntry> = vec![];
         for artifact in self.detect_artifacts_inner(false) {
             if dry_run {
                 println!("[dry-run] would remove: {}", artifact.path.display());
@@ -212,7 +213,20 @@ impl Cleaner for ProjectArtifactsCleaner {
                 );
                 continue;
             }
-            crate::trash::delete_path(&artifact.path)?;
+            // The cleaner has no runner field: the seam only needs one for the
+            // permanent-mode uchg clear, which the system runner performs.
+            let outcome = crate::trash::safe_delete(
+                &crate::command::SystemCommandRunner,
+                &artifact.path,
+                crate::trash::TrashMode::Global,
+            )?;
+            if let Some(reason) = outcome.skip_reason {
+                skipped.push(crate::cleaner::SkippedEntry {
+                    path: artifact.path.clone(),
+                    reason,
+                });
+                continue;
+            }
             freed += artifact.size;
             println!("Removed: {}", artifact.path.display());
         }
@@ -220,7 +234,7 @@ impl Cleaner for ProjectArtifactsCleaner {
             name: self.name(),
             bytes_freed: freed,
             uses_trash: crate::trash::is_trash_mode(),
-            skipped: vec![],
+            skipped,
             deleted_paths: vec![],
         })
     }

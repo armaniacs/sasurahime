@@ -402,6 +402,15 @@ mod tests {
             &["Code/Cache", "Code/CachedExtensionVSIXs", "Code/CachedData"],
         );
 
+        // Hold the test lock so parallel trash-mode mutators serialize with
+        // this read, and pin the global mode to permanent: the seam's Trash
+        // move is TCC-environment-dependent, but the permanent path (uchg
+        // clear + fs removal) is deterministic here.
+        let _lock = crate::context::TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        crate::trash::set_trash_mode(false);
+
         let runner = RecordingRunner::new(&["Code"], 1);
         let hint = ProcessHint {
             entry: &VSCODE_ENTRY,
@@ -410,9 +419,29 @@ mod tests {
         };
 
         auto_clean_hint(&hint, home, &runner).expect("should succeed");
+        // The seam attempted one uchg clear per deleted path (the recording
+        // runner rejects `chflags`, which exercises the warn-and-continue
+        // contract), and the permanent removal actually deleted the dirs.
         let calls = runner.recorded_calls();
-        let rm_calls: Vec<_> = calls.iter().filter(|(p, _)| p == "rm").collect();
-        assert_eq!(rm_calls.len(), 3);
+        let chflags_calls = calls.iter().filter(|(p, _)| p == "chflags").count();
+        assert_eq!(chflags_calls, 3, "one uchg clear attempt per deleted path");
+        assert!(
+            !home.join("Library/Application Support/Code/Cache").exists(),
+            "Code/Cache must be deleted"
+        );
+        assert!(
+            !home
+                .join("Library/Application Support/Code/CachedExtensionVSIXs")
+                .exists(),
+            "Code/CachedExtensionVSIXs must be deleted"
+        );
+        assert!(
+            !home
+                .join("Library/Application Support/Code/CachedData")
+                .exists(),
+            "Code/CachedData must be deleted"
+        );
+        crate::trash::set_trash_mode(true);
     }
 
     #[test]
