@@ -86,7 +86,7 @@ pub(crate) fn auto_clean_indices(
 /// Non-interactive: clean every pruneable cleaner without prompting.
 /// Used by `--yes` flag.
 pub fn run_auto(cleaners: &[Box<dyn Cleaner>]) -> Result<()> {
-    let results = crate::scanner::detect_all(cleaners);
+    let (results, _available) = crate::scanner::detect_all(cleaners);
 
     let pruneable_indices = auto_clean_indices(&results, cleaners);
 
@@ -164,6 +164,13 @@ pub fn run_auto(cleaners: &[Box<dyn Cleaner>]) -> Result<()> {
         true,  // animated
         false, // with_notes
     );
+    // Failure output (PBI-33 recorded decision, option b): run_batch collects
+    // per-target failures and every caller prints them after the batch. The
+    // old per-cleaner immediacy (`Error cleaning {name}: {e}` inside the
+    // loop) is deliberately not restored: a per-failure callback would fork
+    // run_batch's signature for one entry point while clean all, `auto`,
+    // `caches` and the TUI whole-target branch already print collected
+    // failures after the batch — one shared path wins over immediacy.
     for (name, e) in &summary.failures {
         eprintln!("Error cleaning {name}: {e}");
     }
@@ -182,7 +189,7 @@ pub fn run_interactive(cleaners: &[Box<dyn Cleaner>]) -> Result<()> {
         std::process::exit(1);
     }
 
-    let results = crate::scanner::detect_all(cleaners);
+    let (results, _available) = crate::scanner::detect_all(cleaners);
 
     // Collect indices of pruneable cleaners only — nothing to select otherwise.
     let pruneable_indices: Vec<usize> = results
