@@ -1235,7 +1235,9 @@ mod tests {
         let _lock = crate::context::TEST_LOCK
             .lock()
             .unwrap_or_else(|p| p.into_inner());
-        crate::trash::set_trash_mode(true);
+        // Panic-safe pin: the guard restores the previous mode on drop, even
+        // when an assert fails mid-test.
+        let _mode = crate::test_helpers::TrashModeGuard::set(true);
         let tmp = TempDir::new().unwrap();
         let missing = OrphanCandidate {
             path: tmp.path().join("does-not-exist"),
@@ -1249,7 +1251,6 @@ mod tests {
         assert_eq!(result.bytes_freed, 0);
         assert_eq!(result.skipped.len(), 1);
         assert_eq!(result.exit_code(), 1);
-        crate::trash::set_trash_mode(true);
     }
 
     #[test]

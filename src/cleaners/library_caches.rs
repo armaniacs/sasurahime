@@ -528,7 +528,7 @@ mod tests {
     }
 
     use crate::cleaner::{Cleaner, ScanStatus};
-    use crate::test_helpers::MockRunner;
+    use crate::test_helpers::{MockRunner, TrashModeGuard};
 
     fn entry(name: &str, size: u64, d: Disposition, proc_name: Option<&'static str>) -> CacheEntry {
         CacheEntry {
@@ -685,7 +685,8 @@ mod tests {
         let _lock = crate::context::TEST_LOCK
             .lock()
             .unwrap_or_else(|p| p.into_inner());
-        crate::trash::set_trash_mode(false);
+        // Panic-safe pin: the guard restores the previous mode on drop.
+        let _mode = TrashModeGuard::set(false);
         let tmp = TempDir::new().unwrap();
         let c = caches(&tmp);
         put(&c, "typescript", 20_000);
@@ -705,7 +706,6 @@ mod tests {
         // The global pin is permanent here: the seam-resolved truth must not
         // claim Trash for a permanent removal.
         assert!(!r.uses_trash);
-        crate::trash::set_trash_mode(true);
     }
 
     #[test]
@@ -715,7 +715,8 @@ mod tests {
         let _lock = crate::context::TEST_LOCK
             .lock()
             .unwrap_or_else(|p| p.into_inner());
-        crate::trash::set_trash_mode(true);
+        // Panic-safe pin: the guard restores the previous mode on drop.
+        let _mode = TrashModeGuard::set(true);
         let tmp = TempDir::new().unwrap();
         let ghost = entry("ghost", 100, Disposition::Deletable, None);
         let mut ghost = ghost;
@@ -727,7 +728,6 @@ mod tests {
         assert_eq!(r.bytes_freed, 0);
         assert_eq!(r.skipped.len(), 1);
         assert_eq!(r.exit_code(), 1);
-        crate::trash::set_trash_mode(true);
     }
 
     #[test]
@@ -740,7 +740,7 @@ mod tests {
             .lock()
             .unwrap_or_else(|p| p.into_inner());
         // Panic-safe pin: the guard restores the previous mode on drop.
-        let _mode = crate::test_helpers::TrashModeGuard::set(false);
+        let _mode = TrashModeGuard::set(false);
         let tmp = TempDir::new().unwrap();
         let c = caches(&tmp);
         put(&c, "gopls", 20_000);

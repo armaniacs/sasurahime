@@ -906,6 +906,7 @@ pub fn find_leftovers(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_helpers::TrashModeGuard;
     use std::collections::HashSet;
     use std::path::Component;
 
@@ -1374,7 +1375,8 @@ mod tests {
         let _lock = crate::context::TEST_LOCK
             .lock()
             .unwrap_or_else(|p| p.into_inner());
-        crate::trash::set_trash_mode(false);
+        // Panic-safe pin: the guard restores the previous mode on drop.
+        let _mode = TrashModeGuard::set(false);
         let tmp = TempDir::new().unwrap();
         let base = base_of(&tmp);
         put(&base, "Slack/Cache/a.bin", 10_000);
@@ -1393,7 +1395,6 @@ mod tests {
         assert_eq!(r.bytes_freed, sel[0].size);
         assert!(r.skipped.is_empty());
         assert_eq!(r.exit_code(), 0);
-        crate::trash::set_trash_mode(true);
     }
 
     #[test]
@@ -1401,7 +1402,8 @@ mod tests {
         let _lock = crate::context::TEST_LOCK
             .lock()
             .unwrap_or_else(|p| p.into_inner());
-        crate::trash::set_trash_mode(false);
+        // Panic-safe pin: the guard restores the previous mode on drop.
+        let _mode = TrashModeGuard::set(false);
         let tmp = TempDir::new().unwrap();
         let base = base_of(&tmp);
         put(&base, "Slack/Cache/a.bin", 10_000);
@@ -1417,7 +1419,6 @@ mod tests {
         assert!(r.skipped[0].reason.contains("running"));
         assert!(!fake.calls().iter().any(|c| c.starts_with("osascript")));
         assert_eq!(r.exit_code(), 1);
-        crate::trash::set_trash_mode(true);
     }
 
     #[test]
@@ -1425,7 +1426,8 @@ mod tests {
         let _lock = crate::context::TEST_LOCK
             .lock()
             .unwrap_or_else(|p| p.into_inner());
-        crate::trash::set_trash_mode(false);
+        // Panic-safe pin: the guard restores the previous mode on drop.
+        let _mode = TrashModeGuard::set(false);
         let tmp = TempDir::new().unwrap();
         let base = base_of(&tmp);
         put(&base, "obsidian/Cache/a.bin", 10_000);
@@ -1448,7 +1450,6 @@ mod tests {
             .position(|c| c == "open -a Obsidian")
             .expect("relaunch call");
         assert!(q < o);
-        crate::trash::set_trash_mode(true);
     }
 
     #[test]
@@ -1456,7 +1457,8 @@ mod tests {
         let _lock = crate::context::TEST_LOCK
             .lock()
             .unwrap_or_else(|p| p.into_inner());
-        crate::trash::set_trash_mode(false);
+        // Panic-safe pin: the guard restores the previous mode on drop.
+        let _mode = TrashModeGuard::set(false);
         let tmp = TempDir::new().unwrap();
         let base = base_of(&tmp);
         put(&base, "obsidian/Cache/a.bin", 10_000);
@@ -1466,7 +1468,6 @@ mod tests {
         c.apply_selection(&sel, &HashSet::new(), &DeepSuppressReporter)
             .unwrap();
         assert!(!fake.calls().iter().any(|c| c.starts_with("open")));
-        crate::trash::set_trash_mode(true);
     }
 
     #[test]
@@ -1474,7 +1475,8 @@ mod tests {
         let _lock = crate::context::TEST_LOCK
             .lock()
             .unwrap_or_else(|p| p.into_inner());
-        crate::trash::set_trash_mode(false);
+        // Panic-safe pin: the guard restores the previous mode on drop.
+        let _mode = TrashModeGuard::set(false);
         let tmp = TempDir::new().unwrap();
         let base = base_of(&tmp);
         put(&base, "Slack/Local Storage/u.bin", 10_000);
@@ -1492,7 +1494,6 @@ mod tests {
         assert_eq!(r.bytes_freed, 0);
         assert_eq!(r.skipped.len(), 1);
         assert_eq!(r.exit_code(), 1);
-        crate::trash::set_trash_mode(true);
     }
 
     #[test]
@@ -1500,7 +1501,8 @@ mod tests {
         let _lock = crate::context::TEST_LOCK
             .lock()
             .unwrap_or_else(|p| p.into_inner());
-        crate::trash::set_trash_mode(false);
+        // Panic-safe pin: the guard restores the previous mode on drop.
+        let _mode = TrashModeGuard::set(false);
         let tmp = TempDir::new().unwrap();
         let base = base_of(&tmp);
         put(&base, "Slack/Cache/a.bin", 10_000);
@@ -1516,7 +1518,6 @@ mod tests {
             .unwrap();
         assert!(!base.join("Slack/Cache").exists());
         assert!(base.join("Slack/Local Storage/u.bin").exists());
-        crate::trash::set_trash_mode(true);
     }
 
     #[test]
@@ -1524,7 +1525,8 @@ mod tests {
         let _lock = crate::context::TEST_LOCK
             .lock()
             .unwrap_or_else(|p| p.into_inner());
-        crate::trash::set_trash_mode(false);
+        // Panic-safe pin: the guard restores the previous mode on drop.
+        let _mode = TrashModeGuard::set(false);
         let tmp = TempDir::new().unwrap();
         let base = base_of(&tmp);
         let outside = tmp.path().join("Documents");
@@ -1540,7 +1542,6 @@ mod tests {
         assert!(!base.join("Slack/Cache").exists());
         assert!(outside.join("keep.txt").exists());
         assert!(outside.join("dir/keep2.txt").exists());
-        crate::trash::set_trash_mode(true);
     }
 
     #[test]
@@ -1548,7 +1549,8 @@ mod tests {
         let _lock = crate::context::TEST_LOCK
             .lock()
             .unwrap_or_else(|p| p.into_inner());
-        crate::trash::set_trash_mode(false);
+        // Panic-safe pin: the guard restores the previous mode on drop.
+        let _mode = TrashModeGuard::set(false);
         let tmp = TempDir::new().unwrap();
         let base = base_of(&tmp);
         put(&base, "Slack/Cache/a.bin", 10_000);
@@ -1564,7 +1566,6 @@ mod tests {
         assert!(outside.join("keep.txt").exists());
         assert_eq!(r.bytes_freed, 0);
         assert_eq!(r.skipped.len(), 1);
-        crate::trash::set_trash_mode(true);
     }
 
     #[test]
