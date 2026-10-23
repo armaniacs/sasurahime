@@ -24,6 +24,19 @@ fn spinner_style() -> &'static ProgressStyle {
 /// Message shown while a cleaner deletes a path: names the folder/file so
 /// the user sees what is being removed, with progress and size. `total` of 0
 /// means the count is unknown and is omitted.
+/// ```
+/// use sasurahime::progress::tick_message;
+/// use std::path::Path;
+/// let msg = tick_message(
+///     "logs",
+///     Path::new("/Users/u/.local/share/kilo/log/old.log"),
+///     1,
+///     3,
+///     4096,
+/// );
+/// assert!(msg.contains("old.log"), "{msg}");
+/// assert!(msg.contains("1/3"), "{msg}");
+/// ```
 pub fn tick_message(
     prefix: &str,
     path: &Path,
@@ -70,7 +83,7 @@ impl SharedSpinner {
         }
     }
 
-    #[cfg_attr(not(test), expect(dead_code))]
+    #[cfg(test)]
     pub fn message(&self) -> String {
         self.pb.message()
     }
@@ -115,7 +128,6 @@ impl ProgressReporter for CleaningProgress {
     }
 }
 
-#[cfg_attr(not(test), expect(dead_code))]
 pub fn with_spinner<R>(msg: &str, f: impl FnOnce() -> R) -> R {
     let pb = ProgressBar::new_spinner();
     pb.set_style(spinner_style().clone());
@@ -186,6 +198,12 @@ pub fn with_parallel_scan<R>(total: usize, f: impl FnOnce(&ProgressBar) -> R) ->
 pub struct VerboseProgress {
     pb: Mutex<Option<ProgressBar>>,
     last_tick: Mutex<Option<Instant>>,
+}
+
+impl Default for VerboseProgress {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl VerboseProgress {

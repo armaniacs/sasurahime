@@ -49,6 +49,19 @@ pub struct ProtocolStatus {
 /// Extracts the last balanced top-level JSON object from noisy stdout: real
 /// plugins print log lines around the object. Returns the whole trimmed input
 /// when no balanced object is found (the caller's parse then fails closed).
+/// ```
+/// use sasurahime::cleaners::plugin::extract_last_json_object;
+/// assert_eq!(
+///     extract_last_json_object("[kilo] ok\n{\"status\":\"clean\",\"bytes\":10}"),
+///     "{\"status\":\"clean\",\"bytes\":10}"
+/// );
+/// // A brace inside a JSON string truncates the extraction: the region is
+/// // invalid JSON (unterminated string), so the caller's parse fails closed.
+/// assert_eq!(
+///     extract_last_json_object("{\"status\":\"clean\"} {\"note\":\"a}b\"}"),
+///     "{\"note\":\"a}"
+/// );
+/// ```
 pub fn extract_last_json_object(s: &str) -> &str {
     let bytes = s.as_bytes();
     let (mut depth, mut start, mut last) = (0i32, None, None);
@@ -154,7 +167,7 @@ impl PluginCleaner {
     /// a chatty plugin cannot deadlock on a full pipe buffer, and the deadline
     /// bounds the total runtime: a grandchild that inherits the pipes must not
     /// hang the CLI past the timeout.
-    fn run_protocol(&self, args: &[&str]) -> Option<(i32, String)> {
+    fn run_protocol(&self, args: &[&str]) -> Option<PluginOutput> {
         use std::os::unix::process::CommandExt;
         const PIPE_CAP: usize = 1 << 20;
         let mut child = Command::new(&self.path)
@@ -194,15 +207,7 @@ impl PluginCleaner {
                 Ok(Some(status)) => break status,
                 Ok(None) => {
                     if timed_out(deadline) {
-                        let _ = child.kill();
-                        // The child is its own process group leader
-                        // (process_group(0)), so killing the group takes any
-                        // grandchild with it: their inherited pipes close and
-                        // the detached readers reach EOF instead of blocking
-                        // forever.
-                        unsafe {
-                            libc::killpg(child.id() as libc::pid_t, libc::SIGKILL);
-                        }
+                        kill_tree(&mut child);
                         return None; // reader threads detach; the CLI returns
                     }
                     std::thread::sleep(Duration::from_millis(25));
@@ -215,8 +220,11 @@ impl PluginCleaner {
         while remaining.load(std::sync::atomic::Ordering::SeqCst) > 0 {
             if timed_out(deadline) {
                 // kill on an already-reaped child is a documented no-op that
-                // also guards against recycled PIDs; the group kill above is
-                // what actually closes inherited pipes.
+                // also guards against recycled PIDs. A group kill must NOT be
+                // used here: the child's pid may have been recycled by an
+                // unrelated process group leader, and killpg would then hit
+                // that group. The group kill in kill_tree above already ran
+                // on the timed-out path.
                 let _ = child.kill();
                 return None; // detach the blocked readers
             }
@@ -225,9 +233,46 @@ impl PluginCleaner {
         for r in readers {
             let _ = r.join();
         }
-        let stdout = String::from_utf8_lossy(&stdout_buf.lock().unwrap_or_else(|p| p.into_inner()))
-            .to_string();
-        Some((status.code().unwrap_or(-1), stdout))
+        // The readers have all finished (or we returned early on timeout), so
+        // taking the buffer out of the mutex is a zero-copy move.
+        let mut buf = stdout_buf.lock().unwrap_or_else(|p| p.into_inner());
+        let stdout = match String::from_utf8(std::mem::take(&mut *buf)) {
+            Ok(s) => s,
+            Err(e) => String::from_utf8_lossy(&e.into_bytes()).into_owned(),
+        };
+        Some(PluginOutput {
+            code: status.code().unwrap_or(-1),
+            stdout,
+        })
+    }
+}
+
+/// Exit code and captured stdout of a plugin protocol run. Named fields keep
+/// call sites self-describing instead of relying on tuple positions.
+struct PluginOutput {
+    code: i32,
+    stdout: String,
+}
+
+/// Kills the child and its whole process group. Callers reach this only while
+/// the child is alive and not yet reaped: `process_group(0)` made the child
+/// its own group leader, so pgid == pid and the group kill takes any
+/// grandchild with it — their inherited pipes close and the detached readers
+/// reach EOF instead of blocking forever.
+fn kill_tree(child: &mut std::process::Child) {
+    let _ = child.kill();
+    // SAFETY: `child.id()` is a live pid here (the caller saw try_wait return
+    // Ok(None), so the child is not yet reaped), and `process_group(0)` made
+    // the child its own group leader, so pgid == pid. The group kill can
+    // therefore never hit an unrelated process. SIGKILL is uncatchable, so a
+    // grandchild cannot survive it.
+    let killed = unsafe { libc::killpg(child.id() as libc::pid_t, libc::SIGKILL) };
+    if killed != 0 {
+        log::debug!(
+            "killpg for plugin child {} failed: {}",
+            child.id(),
+            std::io::Error::last_os_error()
+        );
     }
 }
 
@@ -266,13 +311,13 @@ impl Cleaner for PluginCleaner {
 
     fn detect(&self) -> ScanResult {
         let unavailable = || ScanResult::new(self.name(), ScanStatus::Unavailable);
-        let Some((code, stdout)) = self.run_protocol(&["scan", "--json"]) else {
+        let Some(out) = self.run_protocol(&["scan", "--json"]) else {
             return unavailable(); // timeout or spawn failure: isolated
         };
-        if code != 0 {
+        if out.code != 0 {
             return unavailable();
         }
-        match parse_protocol_output(&stdout)
+        match parse_protocol_output(&out.stdout)
             .as_ref()
             .and_then(status_from_protocol)
         {
@@ -293,14 +338,14 @@ impl Cleaner for PluginCleaner {
         match self.run_protocol(&args) {
             // The minimal protocol reports success by exit code only; bytes
             // are unknown, so nothing is recorded as freed.
-            Some((0, _)) => Ok(CleanResult {
+            Some(out) if out.code == 0 => Ok(CleanResult {
                 name: self.name(),
                 bytes_freed: 0,
                 uses_trash: false,
                 skipped: vec![],
                 deleted_paths: vec![],
             }),
-            Some((code, _)) => Err(anyhow::anyhow!("plugin exited with code {code}")),
+            Some(out) => Err(anyhow::anyhow!("plugin exited with code {}", out.code)),
             None => Err(anyhow::anyhow!("plugin timed out or failed to spawn")),
         }
     }

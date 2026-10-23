@@ -63,7 +63,6 @@ pub struct SkippedEntry {
 #[derive(Debug)]
 pub struct CleanResult {
     /// Cleaner name — pub field for downstream inspection.
-    #[cfg_attr(not(test), expect(dead_code, reason = "pub API — callers may read"))]
     pub name: &'static str,
     pub bytes_freed: u64,
     /// Whether the operation used macOS Trash (vs permanent deletion).
@@ -71,7 +70,6 @@ pub struct CleanResult {
     pub skipped: Vec<SkippedEntry>,
     /// Paths that were successfully deleted (populated when --verbose is active).
     /// Primarily used for audit trail in --permanent mode.
-    #[expect(dead_code, reason = "pub API — callers may read")]
     pub deleted_paths: Vec<PathBuf>,
 }
 
@@ -87,7 +85,6 @@ impl CleanResult {
 
 /// Options for fine-grained control over clean operations.
 /// The default (`all: false`) preserves existing behavior.
-#[non_exhaustive]
 #[derive(Debug, Clone, Default)]
 pub struct CleanOptions {
     pub all: bool,
@@ -101,8 +98,8 @@ pub struct CleanOptions {
     pub larger_than_mb: Option<u64>,
     /// Deletion mode carried as an argument. `None` reads the process-global
     /// mode (compat); `Some(v)` pins the mode so `uses_trash` and the actual
-    /// deletion can never disagree. `main` sets it once per run.
-    pub trash_mode: Option<bool>,
+    /// deletion can never disagree. `main` sets the global once per run.
+    pub trash_mode: Option<crate::trash::TrashMode>,
 }
 
 #[derive(Debug)]
@@ -218,6 +215,46 @@ pub trait Cleaner: Send + Sync {
     fn sub_targets(&self) -> Vec<(&'static str, u64)> {
         vec![]
     }
+}
+
+// Builtin target names that live outside the main.rs macro table (shared with
+// the library's correspondence-table tests and `main`'s PBI metadata).
+pub fn extra_targets() -> &'static [(&'static str, &'static str)] {
+    &[
+        (
+            "caches",
+            "All generic caches (bun/go/pip/node-gyp/npm/yarn/pnpm)",
+        ),
+        ("logs", "Log files older than N days"),
+        ("xcode", "Xcode DerivedData project directories"),
+        ("trash", "~/.Trash size (scan only)"),
+        ("ollama", "Ollama model cache"),
+        (
+            "library-logs",
+            "Analyze and clean ~/Library/Logs/ with heuristic recommendations",
+        ),
+        ("device-support", "Xcode DeviceSupport old version cleanup"),
+        (
+            "ios-backup",
+            "iOS device backups (irreversible — backed up to Trash)",
+        ),
+        (
+            "apfs-snapshot",
+            "APFS local Time Machine snapshots (tmutil deletelocalsnapshot)",
+        ),
+        (
+            "vm-swap",
+            "/private/var/vm swap files (report only; re-initialized on reboot)",
+        ),
+        (
+            "all",
+            "Explicit full clean (Safe targets; --include-manual for the rest)",
+        ),
+        (
+            "project-artifacts",
+            "Stale project artifacts (node_modules / target / .build with manifests)",
+        ),
+    ]
 }
 
 #[cfg(test)]

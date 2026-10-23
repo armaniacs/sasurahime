@@ -170,6 +170,12 @@ pub struct VerboseGuard {
     _lock: Option<std::sync::MutexGuard<'static, ()>>,
 }
 
+impl Default for VerboseGuard {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl VerboseGuard {
     pub fn new() -> Self {
         let lock = crate::context::TEST_LOCK.lock().ok();

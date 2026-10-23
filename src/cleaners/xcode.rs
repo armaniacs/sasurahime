@@ -26,7 +26,7 @@ impl XcodeSubcategory {
         }
     }
 
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse(s: &str) -> Option<Self> {
         match s {
             "derived-data" | "deriveddata" => Some(Self::DerivedData),
             "archives" => Some(Self::Archives),
@@ -42,7 +42,6 @@ impl XcodeSubcategory {
     }
 }
 
-#[expect(dead_code)]
 pub struct SubcategoryInfo {
     pub sub: XcodeSubcategory,
     pub path: PathBuf,
@@ -329,11 +328,11 @@ mod tests {
     #[test]
     fn from_str_derived_data_variants() {
         assert_eq!(
-            XcodeSubcategory::from_str("derived-data"),
+            XcodeSubcategory::parse("derived-data"),
             Some(XcodeSubcategory::DerivedData)
         );
         assert_eq!(
-            XcodeSubcategory::from_str("deriveddata"),
+            XcodeSubcategory::parse("deriveddata"),
             Some(XcodeSubcategory::DerivedData)
         );
     }
@@ -341,15 +340,15 @@ mod tests {
     #[test]
     fn from_str_archives() {
         assert_eq!(
-            XcodeSubcategory::from_str("archives"),
+            XcodeSubcategory::parse("archives"),
             Some(XcodeSubcategory::Archives)
         );
     }
 
     #[test]
     fn from_str_invalid_returns_none() {
-        assert_eq!(XcodeSubcategory::from_str("invalid"), None);
-        assert_eq!(XcodeSubcategory::from_str("simulators"), None);
+        assert_eq!(XcodeSubcategory::parse("invalid"), None);
+        assert_eq!(XcodeSubcategory::parse("simulators"), None);
     }
 
     #[test]

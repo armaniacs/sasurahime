@@ -1,22 +1,7 @@
-mod cleaner;
-mod cleaners;
-mod command;
-mod config;
-mod context;
-mod disk_image;
-mod doctor;
-mod explorer;
-mod format;
-mod hint;
-mod history;
-mod interactive;
-mod progress;
-mod scan_cache;
-mod scanner;
-mod trash;
-
-#[cfg(test)]
-pub(crate) mod test_helpers;
+use sasurahime::{
+    cleaner, cleaners, command, config, doctor, explorer, format, hint, history, interactive,
+    progress, scan_cache, scanner,
+};
 
 use clap::{Parser, Subcommand};
 use cleaner::{CleanCancelled, CleanResult, Cleaner};
@@ -475,43 +460,10 @@ impl CleanTarget {
     }
 }
 
-// Manual SUPPORTED_TARGETS entries for special targets not in the macro table.
+// Manual SUPPORTED_TARGETS entries for special targets not in the macro table
+// (shared with the library's correspondence-table tests).
 fn extra_targets() -> &'static [(&'static str, &'static str)] {
-    &[
-        (
-            "caches",
-            "All generic caches (bun/go/pip/node-gyp/npm/yarn/pnpm)",
-        ),
-        ("logs", "Log files older than N days"),
-        ("xcode", "Xcode DerivedData project directories"),
-        ("trash", "~/.Trash size (scan only)"),
-        ("ollama", "Ollama model cache"),
-        (
-            "library-logs",
-            "Analyze and clean ~/Library/Logs/ with heuristic recommendations",
-        ),
-        ("device-support", "Xcode DeviceSupport old version cleanup"),
-        (
-            "ios-backup",
-            "iOS device backups (irreversible — backed up to Trash)",
-        ),
-        (
-            "apfs-snapshot",
-            "APFS local Time Machine snapshots (tmutil deletelocalsnapshot)",
-        ),
-        (
-            "vm-swap",
-            "/private/var/vm swap files (report only; re-initialized on reboot)",
-        ),
-        (
-            "all",
-            "Explicit full clean (Safe targets; --include-manual for the rest)",
-        ),
-        (
-            "project-artifacts",
-            "Stale project artifacts (node_modules / target / .build with manifests)",
-        ),
-    ]
+    crate::cleaner::extra_targets()
 }
 
 fn home() -> PathBuf {
@@ -644,10 +596,10 @@ fn freed_message(bytes_freed: u64, uses_trash: bool, trash_mode: bool) -> String
         // still sit in the Trash until it is emptied.
         format!(
             "Logical freed: {} / Physical freed: 0 B (in Trash)",
-            crate::format::format_bytes(bytes_freed)
+            sasurahime::format::format_bytes(bytes_freed)
         )
     } else {
-        format!("Freed: {}", crate::format::format_bytes(bytes_freed))
+        format!("Freed: {}", sasurahime::format::format_bytes(bytes_freed))
     }
 }
 
@@ -746,7 +698,7 @@ where
         // folder being removed, so the user sees what is happening. No
         // steady tick: an in-cleaner confirmation prompt must not compete
         // with animation, but ticks still redraw the line.
-        let spinner = crate::progress::SharedSpinner::start(&msg, false);
+        let spinner = sasurahime::progress::SharedSpinner::start(&msg, false);
         let r = cleaner_fn(dry_run, &spinner.reporter());
         spinner.finish();
         match r {
@@ -793,13 +745,13 @@ where
             freed_message(
                 result.bytes_freed,
                 result.uses_trash,
-                crate::trash::is_trash_mode()
+                sasurahime::trash::is_trash_mode()
             )
         );
         if let Some(note) = post_clean_note(
             result.bytes_freed,
             result.uses_trash,
-            crate::trash::is_trash_mode(),
+            sasurahime::trash::is_trash_mode(),
         ) {
             println!("{note}");
         }
@@ -885,17 +837,17 @@ fn main() -> anyhow::Result<()> {
     let reporter = build_reporter(&cli, &config);
 
     // Set global context flags before any subcommand runs.
-    crate::context::set_verbose(cli.verbose);
-    crate::context::set_dry_run(cli.dry_run);
+    sasurahime::context::set_verbose(cli.verbose);
+    sasurahime::context::set_dry_run(cli.dry_run);
 
     // Default: trash mode enabled.
     // --permanent flag overrides to permanent deletion.
     // Config trash_mode = false also overrides to permanent deletion.
     let trash_mode = !cli.permanent && config.trash_mode;
-    crate::trash::set_trash_mode(trash_mode);
+    sasurahime::trash::set_trash_mode(trash_mode);
 
     if cli.no_unicode {
-        crate::history::USE_UNICODE.store(false, std::sync::atomic::Ordering::Relaxed);
+        sasurahime::history::USE_UNICODE.store(false, std::sync::atomic::Ordering::Relaxed);
     }
 
     // Persistent scan cache: enabled unless --no-cache. Loaded once per
@@ -917,13 +869,13 @@ fn main() -> anyhow::Result<()> {
                 );
                 std::process::exit(1);
             }
-            let trash_mode = crate::trash::is_trash_mode();
+            let trash_mode = sasurahime::trash::is_trash_mode();
             let opts = cleaner::CleanOptions {
                 all: true,
                 include_manual: config.policy.include_manual,
                 older_than_days: config.policy.older_than_days,
                 larger_than_mb: config.policy.larger_than_mb,
-                trash_mode: Some(trash_mode),
+                trash_mode: Some(sasurahime::trash::TrashMode::Global),
             };
             let cleaners_list = all_cleaners(&home, &config);
             let mut total: u64 = 0;
@@ -952,7 +904,7 @@ fn main() -> anyhow::Result<()> {
                     ));
                     continue;
                 }
-                match crate::progress::with_spinner_result(
+                match sasurahime::progress::with_spinner_result(
                     &format!("Cleaning {}...", c.name()),
                     || c.clean_with_opts(dry_run, reporter.as_ref(), &opts),
                 ) {
@@ -1086,7 +1038,7 @@ fn main() -> anyhow::Result<()> {
                         ];
                         let mut total: u64 = 0;
                         for c in &caches {
-                            match crate::progress::with_spinner_result(
+                            match sasurahime::progress::with_spinner_result(
                                 &format!("Cleaning {}...", c.name()),
                                 || c.clean(dry_run, reporter.as_ref()),
                             ) {
@@ -1135,7 +1087,7 @@ fn main() -> anyhow::Result<()> {
                         if let Some(ref subs) = sub {
                             let parsed: Vec<_> = subs
                                 .iter()
-                                .filter_map(|s| cleaners::xcode::XcodeSubcategory::from_str(s))
+                                .filter_map(|s| cleaners::xcode::XcodeSubcategory::parse(s))
                                 .collect();
                             if !parsed.is_empty() {
                                 xcode_cleaner = xcode_cleaner.with_subcategories(parsed);
@@ -1182,7 +1134,7 @@ fn main() -> anyhow::Result<()> {
                             &home,
                             Box::new(SystemCommandRunner),
                         );
-                        let opts = crate::cleaner::CleanOptions {
+                        let opts = sasurahime::cleaner::CleanOptions {
                             all,
                             ..Default::default()
                         };
@@ -1267,13 +1219,13 @@ fn main() -> anyhow::Result<()> {
                         // Explicit full clean: the user picked every target on
                         // purpose. Safe targets run without --include-manual;
                         // Moderate/Risky/Manual need it.
-                        let trash_mode = crate::trash::is_trash_mode();
+                        let trash_mode = sasurahime::trash::is_trash_mode();
                         let opts = cleaner::CleanOptions {
                             all: true,
                             include_manual,
                             older_than_days: cli.older_than,
                             larger_than_mb: cli.larger_than,
-                            trash_mode: Some(trash_mode),
+                            trash_mode: Some(sasurahime::trash::TrashMode::Global),
                         };
                         let cleaners_list = all_cleaners(&home, &config);
                         let mut total: u64 = 0;
@@ -1288,7 +1240,7 @@ fn main() -> anyhow::Result<()> {
                                 );
                                 continue;
                             }
-                            match crate::progress::with_spinner_result(
+                            match sasurahime::progress::with_spinner_result(
                                 &format!("Cleaning {}...", c.name()),
                                 || c.clean_with_opts(dry_run, reporter.as_ref(), &opts),
                             ) {
@@ -1389,11 +1341,11 @@ fn main() -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cleaner::CleanCancelled;
+    use sasurahime::cleaner::CleanCancelled;
 
     #[test]
     fn run_clean_target_cancelled_returns_ok_zero() {
-        let reporter = crate::progress::VerboseProgress::new();
+        let reporter = sasurahime::progress::VerboseProgress::new();
         let result = run_clean_target(
             "cancelled-test",
             |_dry_run, _reporter| Err(anyhow::Error::from(CleanCancelled)),
@@ -1408,7 +1360,7 @@ mod tests {
 
     #[test]
     fn run_clean_target_skipped_entries_do_not_panic() {
-        let reporter = crate::progress::VerboseProgress::new();
+        let reporter = sasurahime::progress::VerboseProgress::new();
         let result = run_clean_target(
             "skipped-test",
             |_dry_run, _reporter| {
@@ -1416,7 +1368,7 @@ mod tests {
                     name: "mock-cleaner",
                     bytes_freed: 100,
                     uses_trash: false,
-                    skipped: vec![crate::cleaner::SkippedEntry {
+                    skipped: vec![sasurahime::cleaner::SkippedEntry {
                         path: std::path::PathBuf::from("/tmp/skipped-file"),
                         reason: "Permission denied".to_string(),
                     }],
@@ -1741,7 +1693,7 @@ mod tests {
 
     #[test]
     fn freed_message_reports_trash_only_when_the_cleaner_used_it() {
-        use crate::format::format_bytes;
+        use sasurahime::format::format_bytes;
         let bytes = 2048;
         let shown = format_bytes(bytes);
         assert_eq!(freed_message(0, false, true), "Freed: 0 B");
@@ -1919,5 +1871,36 @@ mod tests {
                 pat.clean_target
             );
         }
+    }
+    #[test]
+    fn excluded_targets_are_registered_clean_targets() {
+        // Correspondence table test: every cache dir in EXCLUDED_NAMES maps to
+        // a registered clean target (single source of truth: the main.rs macro
+        // table plus extra_targets). EXCLUDED_PREFIXES also carries the
+        // "os-managed" marker, which is never dispatched and checked separately.
+        let registered: std::collections::HashSet<&str> = SUPPORTED_TARGETS
+            .iter()
+            .chain(extra_targets())
+            .map(|(n, _)| *n)
+            .collect();
+        for (_, target) in cleaners::library_caches::EXCLUDED_NAMES {
+            assert!(
+                registered.contains(target),
+                "cache dir excluded name maps to unregistered target {target:?}"
+            );
+        }
+        for (prefix, target) in cleaners::library_caches::EXCLUDED_PREFIXES {
+            if *target == "os-managed" {
+                continue;
+            }
+            assert!(
+                registered.contains(target),
+                "cache dir excluded prefix {prefix} maps to unregistered target {target:?}"
+            );
+        }
+        assert_eq!(
+            cleaners::library_caches::excluded_by("CocoaPods"),
+            Some("cocoapods")
+        );
     }
 }

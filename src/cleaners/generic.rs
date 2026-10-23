@@ -290,7 +290,6 @@ impl PathCleaner {
             .with_risk(Risk::Manual)
     }
 
-    #[expect(dead_code)]
     pub fn cargo_registry(home: &Path, runner: Box<dyn CommandRunner>) -> Self {
         Self::new(
             "cargo-registry",
@@ -724,7 +723,7 @@ impl Cleaner for PathCleaner {
             self.older_than_days,
             self.larger_than_mb,
             any_filter,
-            crate::trash::is_trash_mode(),
+            crate::trash::TrashMode::Global,
         )
     }
 
@@ -747,8 +746,8 @@ impl Cleaner for PathCleaner {
             (a, b) => a.or(b),
         };
         let any_filter = older.is_some() || larger.is_some();
-        let trash_mode = opts.trash_mode.unwrap_or_else(crate::trash::is_trash_mode);
-        self.clean_filtered(dry_run, reporter, older, larger, any_filter, trash_mode)
+        let mode = opts.trash_mode.unwrap_or(crate::trash::TrashMode::Global);
+        self.clean_filtered(dry_run, reporter, older, larger, any_filter, mode)
     }
 }
 
@@ -760,7 +759,7 @@ impl PathCleaner {
         older_than_days: Option<u32>,
         larger_than_mb: Option<u64>,
         explain_skips: bool,
-        trash_mode: bool,
+        mode: crate::trash::TrashMode,
     ) -> Result<CleanResult> {
         let mut freed: u64 = 0;
         for d in &self.dirs {
@@ -788,12 +787,12 @@ impl PathCleaner {
                 }
                 continue;
             }
-            freed += self.clean_one(d, size, dry_run, reporter, trash_mode)?;
+            freed += self.clean_one(d, size, dry_run, reporter, mode)?;
         }
         Ok(CleanResult {
             name: self.name(),
             bytes_freed: freed,
-            uses_trash: trash_mode,
+            uses_trash: mode.resolve(),
             skipped: vec![],
             deleted_paths: vec![],
         })
@@ -805,7 +804,7 @@ impl PathCleaner {
         size: u64,
         dry_run: bool,
         reporter: &dyn ProgressReporter,
-        trash_mode: bool,
+        mode: crate::trash::TrashMode,
     ) -> Result<u64> {
         if dry_run {
             println!("[dry-run] would remove: {}", dir.display());
@@ -830,7 +829,7 @@ impl PathCleaner {
                 dir.display()
             );
         }
-        crate::trash::DeleteCtx::new(trash_mode).delete_path(dir)?;
+        crate::trash::DeleteCtx::new(mode).delete_path(dir)?;
         println!("Removed: {}", dir.display());
         Ok(size)
     }
@@ -1090,7 +1089,7 @@ mod tests {
             include_manual: true,
             older_than_days: None,
             larger_than_mb: None,
-            trash_mode: Some(false),
+            trash_mode: Some(crate::trash::TrashMode::Permanent),
         };
         let reporter = crate::progress::DeepSuppressReporter;
         let result = cleaner.clean_with_opts(false, &reporter, &opts).unwrap();

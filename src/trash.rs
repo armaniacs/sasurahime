@@ -5,23 +5,47 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 static TRASH_MODE: AtomicBool = AtomicBool::new(true);
 
+/// Deletion mode carried through the clean flow. `Global` reads the
+/// process-global mode that `main` pins once per run; `Trash` and `Permanent`
+/// pin the mode so `uses_trash` and the actual deletion can never disagree.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TrashMode {
+    /// Read the process-global mode (pinned once per run by `main`).
+    Global,
+    /// Move to Trash.
+    Trash,
+    /// Delete permanently.
+    Permanent,
+}
+
+impl TrashMode {
+    /// Resolves `Global` against the process-global mode.
+    pub fn resolve(self) -> bool {
+        match self {
+            TrashMode::Global => TRASH_MODE.load(Ordering::Relaxed),
+            TrashMode::Trash => true,
+            TrashMode::Permanent => false,
+        }
+    }
+}
+
 /// Deletion context: carries the deletion mode as an argument instead of
 /// reading process-global state, so parallel tests never leak modes into each
 /// other. New code should prefer this over the global wrapper.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DeleteCtx {
-    pub trash_mode: bool,
+    pub trash_mode: TrashMode,
 }
 
 impl DeleteCtx {
-    pub fn new(trash_mode: bool) -> Self {
+    pub fn new(trash_mode: TrashMode) -> Self {
         Self { trash_mode }
     }
 
     /// Deletes `path` according to this context: macOS Trash when trash mode
     /// is on, otherwise a permanent remove.
     pub fn delete_path(&self, path: &Path) -> Result<()> {
-        if self.trash_mode {
+        if self.trash_mode.resolve() {
             trash::delete(path).map_err(|e| anyhow::anyhow!("trash failed: {e}"))
         } else if path.is_dir() {
             fs::remove_dir_all(path)
@@ -44,7 +68,7 @@ pub fn is_trash_mode() -> bool {
 /// `main` sets once per run. Cleaner-level call sites keep using this until
 /// the trait carries a `DeleteCtx`.
 pub fn delete_path(path: &Path) -> Result<()> {
-    DeleteCtx::new(TRASH_MODE.load(Ordering::Relaxed)).delete_path(path)
+    DeleteCtx::new(TrashMode::Global).delete_path(path)
 }
 
 #[cfg(test)]
@@ -58,7 +82,7 @@ mod tests {
 
     #[test]
     fn delete_ctx_trash_mode_moves_to_trash() {
-        let ctx = DeleteCtx::new(true);
+        let ctx = DeleteCtx::new(TrashMode::Trash);
         let tmp = TempDir::new().unwrap();
         let d = tmp.path().join("dir_to_trash");
         fs::create_dir_all(&d).unwrap();
@@ -68,7 +92,7 @@ mod tests {
 
     #[test]
     fn delete_ctx_permanent_mode_removes_directory() {
-        let ctx = DeleteCtx::new(false);
+        let ctx = DeleteCtx::new(TrashMode::Permanent);
         let tmp = TempDir::new().unwrap();
         let d = tmp.path().join("testdir");
         fs::create_dir_all(&d).unwrap();
@@ -78,7 +102,7 @@ mod tests {
 
     #[test]
     fn delete_ctx_permanent_mode_removes_file() {
-        let ctx = DeleteCtx::new(false);
+        let ctx = DeleteCtx::new(TrashMode::Permanent);
         let tmp = TempDir::new().unwrap();
         let f = tmp.path().join("test.txt");
         fs::write(&f, b"hello").unwrap();
@@ -88,7 +112,7 @@ mod tests {
 
     #[test]
     fn delete_ctx_trash_mode_returns_error_on_failure() {
-        let ctx = DeleteCtx::new(true);
+        let ctx = DeleteCtx::new(TrashMode::Trash);
         let result = ctx.delete_path(Path::new("/nonexistent/path/that/cannot/be/trashed"));
         assert!(result.is_err(), "trash of nonexistent path must return Err");
         let err = format!("{}", result.unwrap_err());
@@ -100,16 +124,16 @@ mod tests {
 
     #[test]
     fn delete_ctx_permanent_mode_returns_error_on_missing_path() {
-        let ctx = DeleteCtx::new(false);
+        let ctx = DeleteCtx::new(TrashMode::Permanent);
         let result = ctx.delete_path(Path::new("/nonexistent/path/12345"));
         assert!(result.is_err(), "removing a missing path must return Err");
     }
 
     #[test]
     fn delete_ctx_is_copiable_and_comparable() {
-        let trash_ctx = DeleteCtx::new(true);
-        let perm_ctx = DeleteCtx::new(false);
-        assert_eq!(trash_ctx, DeleteCtx::new(true));
+        let trash_ctx = DeleteCtx::new(TrashMode::Trash);
+        let perm_ctx = DeleteCtx::new(TrashMode::Permanent);
+        assert_eq!(trash_ctx, DeleteCtx::new(TrashMode::Trash));
         assert_ne!(trash_ctx, perm_ctx);
     }
 

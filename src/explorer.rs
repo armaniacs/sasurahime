@@ -7,12 +7,12 @@ use dialoguer::{Confirm, MultiSelect};
 
 use crate::format::{dir_size, format_bytes};
 
-pub(crate) struct ManagedPattern {
-    pub(crate) path_pattern: &'static str,
-    pub(crate) clean_target: &'static str,
+pub struct ManagedPattern {
+    pub path_pattern: &'static str,
+    pub clean_target: &'static str,
 }
 
-pub(crate) static MANAGED_PATTERNS: &[ManagedPattern] = &[
+pub static MANAGED_PATTERNS: &[ManagedPattern] = &[
     ManagedPattern {
         path_pattern: "~/.cache/uv",
         clean_target: "uv",

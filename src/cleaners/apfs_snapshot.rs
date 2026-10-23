@@ -51,6 +51,16 @@ fn root_free_space() -> Option<u64> {
 /// Parses a decimal size string for tmutil: `10GB` -> 10_000_000_000.
 /// tmutil thinlocalsnapshots takes the target free space in decimal bytes,
 /// unlike the binary units sasurahime prints elsewhere.
+/// Parses a human size spec like `10GB` into bytes for `tmutil thin`.
+///
+/// ```
+/// use sasurahime::cleaners::apfs_snapshot::parse_size_decimal;
+/// assert_eq!(parse_size_decimal("10GB"), Some(10_000_000_000));
+/// assert_eq!(parse_size_decimal("500MB"), Some(500_000_000));
+/// // Absurd targets (practically thin-everything) are rejected.
+/// assert_eq!(parse_size_decimal("1e10GB"), None);
+/// assert_eq!(parse_size_decimal("abc"), None);
+/// ```
 pub fn parse_size_decimal(s: &str) -> Option<u64> {
     let upper = s.trim().to_ascii_uppercase();
     let mult = if upper.ends_with("GB") {

@@ -11,7 +11,6 @@ use std::time::SystemTime;
 pub struct LogEntry {
     pub path: PathBuf,
     pub size: u64,
-    #[expect(dead_code)]
     pub last_modified: SystemTime,
     pub reasons: Vec<DeleteReason>,
 }
