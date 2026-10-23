@@ -81,6 +81,7 @@ impl Cleaner for HuggingFaceCleaner {
 mod tests {
     use super::*;
     use crate::command::{CommandRunner, SystemCommandRunner};
+    use crate::test_helpers::EnvGuard;
     use std::fs;
     use std::process::Output;
     use tempfile::TempDir;
@@ -236,32 +237,36 @@ mod tests {
 
     #[test]
     fn cache_dir_uses_safe_default_when_hf_home_is_unsafe() {
+        let _lock = crate::context::TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         let tmp = TempDir::new().unwrap();
-        let prev = std::env::var("HF_HOME").ok();
-        std::env::set_var("HF_HOME", "/");
+        // HF_HOME must still hold the unsafe value while cache_dir() runs:
+        // the guard is alive until the end of the test, so the restore happens
+        // after the call and the assertion. HF_HOME=/ would NOT exercise the
+        // fallback here — cache_dir() joins "hub" first, and /hub passes
+        // is_safe_delete_target — so the joined path must be a blocked one.
+        let _guard = EnvGuard::set("HF_HOME", "/etc");
         let cleaner = HuggingFaceCleaner::new(tmp.path(), Box::new(SystemCommandRunner));
-        match prev {
-            Some(v) => std::env::set_var("HF_HOME", v),
-            None => std::env::remove_var("HF_HOME"),
-        }
         let dir = cleaner.cache_dir();
         assert_eq!(
             dir,
             tmp.path().join(".cache/huggingface/hub"),
-            "unsafe HF_HOME=/ should fall back to default"
+            "unsafe HF_HOME=/etc should fall back to default"
         );
     }
 
     #[test]
     fn cache_dir_uses_safe_default_when_hf_home_is_tmp() {
+        let _lock = crate::context::TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         let tmp = TempDir::new().unwrap();
-        let prev = std::env::var("HF_HOME").ok();
-        std::env::set_var("HF_HOME", "/tmp");
+        // HF_HOME must still hold the unsafe value while cache_dir() runs:
+        // the guard is alive until the end of the test, so the restore happens
+        // after the call and the assertion.
+        let _guard = EnvGuard::set("HF_HOME", "/tmp");
         let cleaner = HuggingFaceCleaner::new(tmp.path(), Box::new(SystemCommandRunner));
-        match prev {
-            Some(v) => std::env::set_var("HF_HOME", v),
-            None => std::env::remove_var("HF_HOME"),
-        }
         let dir = cleaner.cache_dir();
         assert_eq!(
             dir,
