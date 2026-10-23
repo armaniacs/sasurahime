@@ -252,7 +252,12 @@ pub fn write_history_entry(
         skipped_count,
         moved_to_trash,
     };
-    let _ = append_history(&entry, &history_dir);
+    if let Err(e) = append_history(&entry, &history_dir) {
+        log::warn!(
+            "failed to write history entry to {}: {e}",
+            history_dir.display()
+        );
+    }
 }
 
 #[cfg(test)]
@@ -619,5 +624,41 @@ mod tests {
         let history_path = history_dir.join("history.json");
         let loaded = load_history(&history_path);
         assert_eq!(loaded.len(), MAX_HISTORY_ENTRIES);
+    }
+
+    #[test]
+    fn write_history_entry_with_normal_home_does_not_panic() {
+        // Regression guard for the best-effort writer: append_history may fail
+        // (fs2 lock errors on non-flock filesystems, permission errors, disk
+        // full), but write_history_entry must never panic or propagate the
+        // error. The failure is logged instead of silently dropped.
+        assert!(
+            dirs::home_dir().is_some(),
+            "HOME must resolve in the test environment"
+        );
+        write_history_entry("probe", 1024, 0, false);
+    }
+
+    #[test]
+    fn append_history_fails_on_unwritable_directory() {
+        // Documents the error path write_history_entry must surface: a history
+        // dir under a regular file cannot be created, so append_history must
+        // return Err instead of pretending the entry was stored.
+        let tmp = TempDir::new().unwrap();
+        let blocker = tmp.path().join("blocker");
+        fs::write(&blocker, "not a directory").unwrap();
+        let history_dir = blocker.join("sasurahime");
+        let entry = HistoryEntry {
+            timestamp: "2026-05-25T10:30:00+09:00".to_string(),
+            cleaner: "uv".to_string(),
+            freed_bytes: 100,
+            skipped_count: 0,
+            moved_to_trash: false,
+        };
+        let result = append_history(&entry, &history_dir);
+        assert!(
+            result.is_err(),
+            "append_history must fail when the history dir cannot be created"
+        );
     }
 }
