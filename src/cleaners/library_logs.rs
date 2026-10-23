@@ -4,6 +4,7 @@ use crate::format::dir_size;
 use crate::progress::ProgressReporter;
 use anyhow::Result;
 use std::fs;
+use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
@@ -119,6 +120,64 @@ impl LibraryLogsCleaner {
     pub(crate) fn scan(&self) -> Vec<LogEntry> {
         scan_logs(&self.logs_dir(), self.keep_days, self.size_threshold)
     }
+
+    /// The one dry-run tag printer shared by `clean` and `clean_with_opts`.
+    fn print_dry_run(&self, entries: &[LogEntry]) {
+        println!(
+            "[library-logs] dry-run: {} cleanable entries",
+            entries.len()
+        );
+        for e in entries {
+            let tags: Vec<String> = e
+                .reasons
+                .iter()
+                .map(|r| match r {
+                    DeleteReason::Oversized { bytes } => {
+                        format!("large {}", crate::format::format_bytes(*bytes))
+                    }
+                    DeleteReason::Stale { days } => format!("stale {}d", days),
+                })
+                .collect();
+            println!(
+                "  would remove: {}  [{}]",
+                e.path.display(),
+                tags.join(", ")
+            );
+        }
+    }
+
+    /// The one delete loop shared by `clean` and `clean_with_opts`. ORs the
+    /// seam-resolved trash truth across every deletion.
+    fn delete_entries(
+        &self,
+        entries: &[LogEntry],
+        reporter: &dyn ProgressReporter,
+        mode: crate::trash::TrashMode,
+    ) -> Result<CleanResult> {
+        let mut total_freed: u64 = 0;
+        let mut uses_trash = false;
+        reporter.progress_init(self.name(), entries.len());
+        for (i, entry) in entries.iter().enumerate() {
+            reporter.progress_tick(&entry.path, i + 1, entry.size);
+            let outcome = crate::trash::safe_delete(self.runner.as_ref(), &entry.path, mode)?;
+            if let Some(reason) = outcome.skip_reason {
+                eprintln!(
+                    "[library-logs] error removing {}: {reason}",
+                    entry.path.display()
+                );
+                continue;
+            }
+            uses_trash |= outcome.uses_trash;
+            total_freed += entry.size;
+            println!(
+                "[library-logs] removed: {} (freed {})",
+                entry.path.display(),
+                crate::format::format_bytes(entry.size)
+            );
+        }
+        reporter.progress_finish();
+        Ok(CleanResult::freed(self.name(), total_freed, uses_trash))
+    }
 }
 
 // ── Cleaner trait ──
@@ -153,150 +212,71 @@ impl Cleaner for LibraryLogsCleaner {
         r
     }
 
+    /// Delegates to `clean_with_opts` with the default options, so the
+    /// interactive flow has one owner.
     fn clean(&self, dry_run: bool, reporter: &dyn ProgressReporter) -> Result<CleanResult> {
-        let dir = self.logs_dir();
-        if !dir.exists() {
-            return Ok(CleanResult::empty(self.name()));
-        }
-
-        let entries = self.scan();
-        if entries.is_empty() {
-            println!("[library-logs] nothing to clean");
-            return Ok(CleanResult::empty(self.name()));
-        }
-
-        if dry_run {
-            println!(
-                "[library-logs] dry-run: {} cleanable entries",
-                entries.len()
-            );
-            for e in &entries {
-                let tags: Vec<String> = e
-                    .reasons
-                    .iter()
-                    .map(|r| match r {
-                        DeleteReason::Oversized { bytes } => {
-                            format!("large {}", crate::format::format_bytes(*bytes))
-                        }
-                        DeleteReason::Stale { days } => format!("stale {}d", days),
-                    })
-                    .collect();
-                println!(
-                    "  would remove: {}  [{}]",
-                    e.path.display(),
-                    tags.join(", ")
-                );
-            }
-            return Ok(CleanResult::empty(self.name()));
-        }
-
-        let selected = self.interactive_select(&entries)?;
-
-        if selected.is_empty() {
-            println!("[library-logs] nothing selected");
-            return Ok(CleanResult::empty(self.name()));
-        }
-
-        let mut total_freed: u64 = 0;
-        let mut uses_trash = false;
-        reporter.progress_init(self.name(), selected.len());
-        for (i, entry) in selected.iter().enumerate() {
-            reporter.progress_tick(&entry.path, i + 1, entry.size);
-            let outcome = crate::trash::safe_delete(
-                self.runner.as_ref(),
-                &entry.path,
-                crate::trash::TrashMode::Global,
-            )?;
-            if let Some(reason) = outcome.skip_reason {
-                eprintln!(
-                    "[library-logs] error removing {}: {reason}",
-                    entry.path.display()
-                );
-                continue;
-            }
-            uses_trash |= outcome.uses_trash;
-            let size = entry.size;
-            total_freed += size;
-            println!(
-                "[library-logs] removed: {} (freed {})",
-                entry.path.display(),
-                crate::format::format_bytes(size)
-            );
-        }
-        reporter.progress_finish();
-
-        println!(
-            "[library-logs] total freed: {}",
-            crate::format::format_bytes(total_freed)
-        );
-        Ok(CleanResult::freed(self.name(), total_freed, uses_trash))
+        self.clean_with_opts(dry_run, reporter, &crate::cleaner::CleanOptions::default())
     }
 
+    /// One body for both entry points. `opts.all` switches between the
+    /// interactive selection and the non-interactive process-everything run.
+    /// The global `older_than_days` combines with the cleaner's own recency
+    /// heuristic (the stricter wins: the LARGER day count) and `trash_mode`
+    /// pins the deletion mode when set (`None` reads the process-global mode).
     fn clean_with_opts(
         &self,
         dry_run: bool,
         reporter: &dyn ProgressReporter,
         opts: &crate::cleaner::CleanOptions,
     ) -> Result<CleanResult> {
-        if !opts.all {
-            return self.clean(dry_run, reporter);
+        let dir = self.logs_dir();
+        if !dir.exists() {
+            return Ok(CleanResult::empty(self.name()));
         }
-        let entries = self.scan();
+
+        // Stricter wins: a global older-than filter raises the day floor.
+        let keep_days = opts
+            .older_than_days
+            .map_or(self.keep_days, |days| self.keep_days.max(u64::from(days)));
+
+        let entries = scan_logs(&dir, keep_days, self.size_threshold);
         if entries.is_empty() {
             println!("[library-logs] nothing to clean");
-            return Ok(CleanResult::empty("library-logs"));
+            return Ok(CleanResult::empty(self.name()));
         }
+
         if dry_run {
-            println!(
-                "[library-logs] dry-run: {} cleanable entries",
-                entries.len()
-            );
-            for e in &entries {
-                let tags: Vec<String> = e
-                    .reasons
-                    .iter()
-                    .map(|r| match r {
-                        DeleteReason::Oversized { bytes } => {
-                            format!("large {}", crate::format::format_bytes(*bytes))
-                        }
-                        DeleteReason::Stale { days } => format!("stale {}d", days),
-                    })
-                    .collect();
-                println!(
-                    "  would remove: {}  [{}]",
-                    e.path.display(),
-                    tags.join(", ")
-                );
-            }
-            return Ok(CleanResult::empty("library-logs"));
+            self.print_dry_run(&entries);
+            return Ok(CleanResult::empty(self.name()));
         }
-        let mut total_freed: u64 = 0;
-        let mut uses_trash = false;
-        reporter.progress_init("library-logs", entries.len());
-        for (i, entry) in entries.iter().enumerate() {
-            reporter.progress_tick(&entry.path, i + 1, entry.size);
-            let outcome = crate::trash::safe_delete(
-                self.runner.as_ref(),
-                &entry.path,
-                crate::trash::TrashMode::Global,
-            )?;
-            if let Some(reason) = outcome.skip_reason {
+
+        let mode = opts.trash_mode.unwrap_or(crate::trash::TrashMode::Global);
+
+        if opts.all {
+            // Non-interactive run: process every scanned entry.
+            self.delete_entries(&entries, reporter, mode)
+        } else {
+            // The interactive select is the only prompt this cleaner has:
+            // without a terminal, skip instead of hanging on a hidden prompt.
+            if !std::io::stdin().is_terminal() {
                 eprintln!(
-                    "[library-logs] error removing {}: {reason}",
-                    entry.path.display()
+                    "[library-logs] not a terminal - skipping. \
+                     Run `sasurahime clean library-logs` interactively."
                 );
-                continue;
+                return Ok(CleanResult::empty(self.name()));
             }
-            uses_trash |= outcome.uses_trash;
-            total_freed += entry.size;
+            let selected = self.interactive_select(&entries)?;
+            if selected.is_empty() {
+                println!("[library-logs] nothing selected");
+                return Ok(CleanResult::empty(self.name()));
+            }
+            let result = self.delete_entries(&selected, reporter, mode)?;
             println!(
-                "[library-logs] removed: {} (freed {})",
-                entry.path.display(),
-                crate::format::format_bytes(entry.size)
+                "[library-logs] total freed: {}",
+                crate::format::format_bytes(result.bytes_freed)
             );
+            Ok(result)
         }
-        reporter.progress_finish();
-        Ok(CleanResult::freed("library-logs", total_freed, uses_trash))
     }
 }
 
@@ -505,5 +485,92 @@ mod tests {
             .unwrap();
         // dry run should succeed without interactive prompt
         assert_eq!(result.bytes_freed, 0);
+    }
+
+    #[test]
+    fn clean_all_via_opts_merges_older_than_days_stricter_wins() {
+        let tmp = TempDir::new().unwrap();
+        let logs = logs_dir(&tmp);
+        fs::write(logs.join("aged.log"), b"x").unwrap();
+        let past = SystemTime::now() - Duration::from_secs(200 * 86400);
+        set_file_mtime(logs.join("aged.log"), FileTime::from_system_time(past)).unwrap();
+
+        let runner = crate::test_helpers::MockRunner::new().with_success("chflags");
+        let cleaner = LibraryLogsCleaner::new(tmp.path(), Box::new(runner));
+        // Cleaner heuristic: 90 days; global filter: 300 days. The stricter
+        // wins (the LARGER day count), so a 200d entry must be kept.
+        let opts = crate::cleaner::CleanOptions {
+            all: true,
+            older_than_days: Some(300),
+            trash_mode: Some(crate::trash::TrashMode::Permanent),
+            ..Default::default()
+        };
+        let result = cleaner
+            .clean_with_opts(false, &crate::progress::DeepSuppressReporter, &opts)
+            .unwrap();
+        assert_eq!(
+            result.bytes_freed, 0,
+            "a 200d entry is younger than the merged 300d floor"
+        );
+        assert!(
+            logs.join("aged.log").exists(),
+            "an entry younger than the stricter floor must be kept"
+        );
+    }
+
+    #[test]
+    fn clean_all_via_opts_honors_pinned_trash_mode() {
+        let tmp = TempDir::new().unwrap();
+        let logs = logs_dir(&tmp);
+        fs::write(logs.join("aged.log"), b"x").unwrap();
+        let past = SystemTime::now() - Duration::from_secs(200 * 86400);
+        set_file_mtime(logs.join("aged.log"), FileTime::from_system_time(past)).unwrap();
+
+        let runner = crate::test_helpers::MockRunner::new().with_success("chflags");
+        let cleaner = LibraryLogsCleaner::new(tmp.path(), Box::new(runner));
+        let opts = crate::cleaner::CleanOptions {
+            all: true,
+            trash_mode: Some(crate::trash::TrashMode::Permanent),
+            ..Default::default()
+        };
+        let result = cleaner
+            .clean_with_opts(false, &crate::progress::DeepSuppressReporter, &opts)
+            .unwrap();
+        assert!(result.bytes_freed > 0, "the pinned mode still deletes");
+        assert!(
+            !result.uses_trash,
+            "a pinned Permanent mode must never claim trash"
+        );
+        assert!(
+            !logs.join("aged.log").exists(),
+            "the pinned mode decides the deletion"
+        );
+    }
+
+    #[test]
+    fn clean_skips_interactive_select_without_a_terminal() {
+        if std::io::stdin().is_terminal() {
+            // An interactive `cargo test` would otherwise hang on the prompt.
+            return;
+        }
+        let tmp = TempDir::new().unwrap();
+        let logs = logs_dir(&tmp);
+        fs::write(logs.join("aged.log"), b"x").unwrap();
+        let past = SystemTime::now() - Duration::from_secs(200 * 86400);
+        set_file_mtime(logs.join("aged.log"), FileTime::from_system_time(past)).unwrap();
+
+        let runner = crate::test_helpers::MockRunner::new().with_success("chflags");
+        let cleaner = LibraryLogsCleaner::new(tmp.path(), Box::new(runner));
+        let result = cleaner
+            .clean(false, &crate::progress::DeepSuppressReporter)
+            .unwrap();
+        assert_eq!(
+            result.bytes_freed, 0,
+            "non-terminal stdin must skip the interactive select"
+        );
+        assert!(
+            logs.join("aged.log").exists(),
+            "nothing is deleted without a terminal"
+        );
     }
 }

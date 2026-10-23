@@ -1,4 +1,5 @@
 use crate::cleaner::{CleanResult, Cleaner, ScanResult, ScanStatus};
+use crate::cleaners::gradle::{is_version_dir, keep_highest};
 use crate::command::CommandRunner;
 use crate::format::dir_size;
 use crate::progress::ProgressReporter;
@@ -51,32 +52,24 @@ impl BrowserCleaner {
 
     /// Returns paths of all version subdirectories except the one with the highest key.
     /// Returns empty if directory is missing or contains zero or one entries.
-    /// Symlinks and directories whose name contains no digits are both skipped.
+    /// Symlinks and directories whose name contains no digits are both skipped
+    /// (the shared retention helper owns both rules).
     pub fn find_old_versions(parent: &Path) -> Vec<PathBuf> {
         let entries = match fs::read_dir(parent) {
             Ok(e) => e,
             Err(_) => return vec![],
         };
 
-        let mut versions: Vec<(Vec<u32>, PathBuf)> = entries
+        let candidates: Vec<(Vec<u32>, PathBuf)> = entries
             .filter_map(|e| e.ok())
-            // Skip symlinks to avoid following stale / shared links
-            .filter(|e| !e.file_type().map(|t| t.is_symlink()).unwrap_or(true))
-            .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
+            .filter(is_version_dir)
             .map(|e| {
                 let key = Self::version_key(&e.file_name().to_string_lossy());
                 (key, e.path())
             })
-            .filter(|(k, _)| !k.is_empty()) // skip unparseable directory names
             .collect();
 
-        if versions.len() <= 1 {
-            return vec![];
-        }
-
-        let max = versions.iter().map(|(k, _)| k.clone()).max().unwrap();
-        versions.retain(|(k, _)| *k != max);
-        versions.into_iter().map(|(_, p)| p).collect()
+        keep_highest(candidates)
     }
 }
 

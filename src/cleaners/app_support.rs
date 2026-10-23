@@ -769,13 +769,20 @@ pub fn matches_installed(dir_name: &str, installed: &InstalledApps) -> bool {
     false
 }
 
-fn is_app_bundle(p: &Path) -> bool {
-    p.extension().is_some_and(|e| e == "app")
+/// An `.app` bundle probe shared with the orphan-containers cleaner:
+/// case-insensitive `.app` extension plus a directory check, so a plain file
+/// named `Foo.app` is never treated as a bundle.
+pub(crate) fn is_app_bundle(p: &Path) -> bool {
+    p.extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case("app"))
+        && p.is_dir()
 }
 
 /// `.app` bundles directly under each root, plus one level of subfolders
-/// (for example `/Applications/Setapp/*.app`). Symlinked folders are not followed.
-fn list_app_bundles(roots: &[PathBuf]) -> Vec<PathBuf> {
+/// (for example `/Applications/Setapp/*.app`). Symlinked folders are not
+/// followed: an unreadable file type is treated as a symlink.
+pub(crate) fn list_app_bundles(roots: &[PathBuf]) -> Vec<PathBuf> {
     let mut found = Vec::new();
     for root in roots {
         let Ok(rd) = fs::read_dir(root) else {
