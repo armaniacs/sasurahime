@@ -787,12 +787,19 @@ pub fn is_safe_delete_target(path: &Path) -> bool {
     }
     // Block HOME itself and every ancestor of HOME: an env-var redirect
     // (ACT_CACHE_DIR=$HOME, TF_PLUGIN_CACHE_DIR=/Users) must never be
-    // deletable, and subdirectories of HOME stay allowed.
-    let home = std::env::var("HOME").unwrap_or_default();
-    if !home.is_empty() {
+    // deletable, and subdirectories of HOME stay allowed. HOME is resolved
+    // with the same `std::env::var("HOME") -> dirs::home_dir()` fallback
+    // `main::home` uses, so an unset (or empty) HOME can no longer silently
+    // disable this check.
+    let home = std::env::var("HOME")
+        .ok()
+        .filter(|h| !h.is_empty())
+        .map(PathBuf::from)
+        .or_else(dirs::home_dir);
+    if let Some(home) = home {
         // HOME must be canonicalized with the target: a symlinked HOME would
         // otherwise defeat this check (canonical(HOME) != raw HOME).
-        let home_path = fs::canonicalize(&home).unwrap_or_else(|_| PathBuf::from(&home));
+        let home_path = fs::canonicalize(&home).unwrap_or_else(|_| home.clone());
         if check == home_path || home_path.starts_with(&check) {
             return false;
         }
@@ -1046,7 +1053,12 @@ mod tests {
     #[test]
     fn clean_cli_or_fallback_revalidates_safety_at_clean_time() {
         // A dir that is unsafe at clean time (here: HOME itself) must be
-        // skipped by the fallback delete, not removed.
+        // skipped by the fallback delete, not removed. TEST_LOCK serializes
+        // the process-global HOME mutation against the other HOME-scoped
+        // tests.
+        let _lock = crate::context::TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         let tmp = tempfile::TempDir::new().unwrap();
         let home = tmp.path().canonicalize().unwrap();
         let _guard = crate::test_helpers::EnvGuard::set("HOME", &home.to_string_lossy());
@@ -1189,6 +1201,11 @@ mod tests {
     fn is_safe_delete_target_rejects_home_and_ancestors() {
         // ACT_CACHE_DIR=$HOME or a /Users redirect must never be deletable:
         // an env var can point a Risk::Safe target at the whole home.
+        // TEST_LOCK serializes the process-global HOME mutation against the
+        // other HOME-scoped tests.
+        let _lock = crate::context::TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         let tmp = tempfile::TempDir::new().unwrap();
         let home = tmp.path().canonicalize().unwrap();
         let _guard = crate::test_helpers::EnvGuard::set("HOME", &home.to_string_lossy());
@@ -1212,7 +1229,11 @@ mod tests {
     #[test]
     fn is_safe_delete_target_canonicalizes_home() {
         // A symlinked HOME must not defeat the guard: a target equal to
-        // canonical(HOME) is still HOME.
+        // canonical(HOME) is still HOME. TEST_LOCK serializes the
+        // process-global HOME mutation against the other HOME-scoped tests.
+        let _lock = crate::context::TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         let real = tempfile::TempDir::new().unwrap();
         let link_dir = tempfile::TempDir::new().unwrap();
         let link = link_dir.path().join("linkhome");
@@ -1222,6 +1243,57 @@ mod tests {
         assert!(
             !is_safe_delete_target(&canonical_home),
             "canonical(HOME) is still HOME even when HOME itself is a symlink"
+        );
+    }
+
+    /// Removes an env var for the test body and restores it on drop, even
+    /// during a panic, so a failed test cannot unset it for parallel tests.
+    /// (`test_helpers::EnvGuard` can only set a value.)
+    struct UnsetEnvGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl UnsetEnvGuard {
+        fn unset(key: &'static str) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::remove_var(key);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for UnsetEnvGuard {
+        fn drop(&mut self) {
+            match &self.previous {
+                Some(v) => std::env::set_var(self.key, v),
+                None => std::env::remove_var(self.key),
+            }
+        }
+    }
+
+    #[test]
+    fn is_safe_delete_target_stays_active_when_home_unset() {
+        // HOME unset used to silently disable the HOME/ancestor guard. The
+        // dirs::home_dir fallback (the same one `main::home` uses) must keep
+        // it resolved: the real home stays refused with HOME removed.
+        // TEST_LOCK serializes the process-global HOME mutation against the
+        // other HOME-scoped tests.
+        let _lock = crate::context::TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let _guard = UnsetEnvGuard::unset("HOME");
+        let real_home = dirs::home_dir().expect("dirs fallback must resolve without HOME");
+        assert!(
+            !is_safe_delete_target(&real_home),
+            "with HOME unset, the fallback-resolved home must still be refused"
+        );
+        // Unsetting HOME must not flip the whole check off: an unrelated path
+        // stays deletable.
+        let other = tempfile::TempDir::new().unwrap();
+        let other_canon = other.path().canonicalize().unwrap();
+        assert!(
+            is_safe_delete_target(&other_canon),
+            "unsetting HOME must not disable the check for unrelated paths"
         );
     }
 

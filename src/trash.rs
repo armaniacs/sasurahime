@@ -85,18 +85,32 @@ pub struct DeleteOutcome {
     pub skip_reason: Option<String>,
 }
 
-/// The one deletion seam: clears macOS `uchg` immutable flags before a
-/// permanent remove (warning and continuing when the clear fails), deletes
-/// according to `mode`, and classifies failures into skippable vs fatal.
+/// The one deletion seam: first enforces the scope check
+/// ([`crate::cleaners::generic::is_safe_delete_target`]) so HOME, its
+/// ancestors and system roots are refused before anything is touched, then
+/// clears macOS `uchg` immutable flags before a permanent remove (warning and
+/// continuing when the clear fails), deletes according to `mode`, and
+/// classifies failures into skippable vs fatal.
 ///
 /// Every deletion in the codebase goes through here so the CLAUDE.md safety
 /// rules concentrate in one module instead of living as copy-pasted
-/// incantations at each call site.
+/// incantations at each call site: uchg handling, mode resolution and skip
+/// classification are the seam's job, and the enforced scope check keeps the
+/// deletion safety rules (which paths may be deleted at all) in that same
+/// single module.
 pub fn safe_delete(
     runner: &dyn crate::command::CommandRunner,
     path: &Path,
     mode: TrashMode,
 ) -> Result<DeleteOutcome> {
+    // Scope tripwire: refuse paths that must never be deleted (HOME, its
+    // ancestors, system roots, relative targets). This runs before the
+    // chflags call and the delete itself, so a misdirected override (e.g.
+    // ACT_CACHE_DIR=$HOME) can never reach the deletion sink.
+    if !crate::cleaners::generic::is_safe_delete_target(path) {
+        log::warn!("refusing to delete unsafe path: {}", path.display());
+        anyhow::bail!("refusing to delete unsafe path: {}", path.display());
+    }
     // The uchg rule guards permanent removal (`rm -rf`); a Trash move is
     // reversible and Finder handles flags itself.
     if !mode.resolve() {
@@ -341,5 +355,68 @@ mod tests {
         assert!(outcome.uses_trash);
         // The trash move's success is TCC-environment-dependent; the seam's
         // contract under test is only the resolved truth.
+    }
+
+    // ── safe_delete scope tripwire (PBI 28) ──
+
+    #[test]
+    fn safe_delete_refuses_home_itself() {
+        // The refusal must happen BEFORE any deletion, so HOME is pointed at
+        // a throwaway tempdir: even a tripwire-less build can only lose that
+        // tempdir, never a real home directory. TEST_LOCK serializes the
+        // process-global HOME mutation against the other HOME-scoped tests.
+        let _lock = crate::context::TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let tmp = TempDir::new().unwrap();
+        let home = tmp.path().canonicalize().unwrap();
+        let _guard = crate::test_helpers::EnvGuard::set("HOME", &home.to_string_lossy());
+        let runner = RecordingRunner::new();
+        let err = safe_delete(&runner, &home, TrashMode::Permanent)
+            .expect_err("HOME itself must be refused before any deletion attempt");
+        assert!(
+            err.to_string().contains("refusing to delete unsafe path"),
+            "the refusal error must say so, got: {err:#}"
+        );
+        assert!(home.exists(), "the refused path must still exist");
+        assert!(
+            !runner.ran("chflags"),
+            "no chflags may run on a refused path"
+        );
+    }
+
+    #[test]
+    fn safe_delete_refuses_filesystem_root() {
+        let runner = RecordingRunner::new();
+        let err = safe_delete(&runner, Path::new("/"), TrashMode::Trash)
+            .expect_err("/ must be refused before any deletion attempt");
+        assert!(
+            err.to_string().contains("refusing to delete unsafe path"),
+            "the refusal error must say so, got: {err:#}"
+        );
+        assert!(Path::new("/").exists(), "the refused path must still exist");
+        assert!(
+            !runner.ran("chflags"),
+            "no chflags may run on a refused path"
+        );
+    }
+
+    #[test]
+    fn safe_delete_refuses_etc() {
+        let runner = RecordingRunner::new();
+        let err = safe_delete(&runner, Path::new("/etc"), TrashMode::Trash)
+            .expect_err("/etc must be refused before any deletion attempt");
+        assert!(
+            err.to_string().contains("refusing to delete unsafe path"),
+            "the refusal error must say so, got: {err:#}"
+        );
+        assert!(
+            Path::new("/etc").exists(),
+            "the refused path must still exist"
+        );
+        assert!(
+            !runner.ran("chflags"),
+            "no chflags may run on a refused path"
+        );
     }
 }
