@@ -71,6 +71,59 @@ pub fn delete_path(path: &Path) -> Result<()> {
     DeleteCtx::new(TrashMode::Global).delete_path(path)
 }
 
+/// Outcome of a single deletion through the [`safe_delete`] seam. The seam
+/// returns its own truth: `uses_trash` is the mode that was actually
+/// resolved at deletion time, so a cleaner can never report Trash for a
+/// permanent removal.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeleteOutcome {
+    /// Whether the resolved mode moved the entry to the Trash.
+    pub uses_trash: bool,
+    /// Set when the delete failed with a skippable error (permission denied,
+    /// resource busy, ...): the entry was NOT deleted, but the clean run
+    /// should continue. Fatal errors propagate as `Err` instead.
+    pub skip_reason: Option<String>,
+}
+
+/// The one deletion seam: clears macOS `uchg` immutable flags before a
+/// permanent remove (warning and continuing when the clear fails), deletes
+/// according to `mode`, and classifies failures into skippable vs fatal.
+///
+/// Every deletion in the codebase goes through here so the CLAUDE.md safety
+/// rules concentrate in one module instead of living as copy-pasted
+/// incantations at each call site.
+pub fn safe_delete(
+    runner: &dyn crate::command::CommandRunner,
+    path: &Path,
+    mode: TrashMode,
+) -> Result<DeleteOutcome> {
+    // The uchg rule guards permanent removal (`rm -rf`); a Trash move is
+    // reversible and Finder handles flags itself.
+    if !mode.resolve() {
+        let path_str = path.to_string_lossy();
+        if let Err(e) = runner.run("chflags", &["-R", "nouchg", &path_str]) {
+            log::warn!("chflags -R nouchg {} failed: {e}", path.display());
+        }
+    }
+    let uses_trash = mode.resolve();
+    match DeleteCtx::new(mode).delete_path(path) {
+        Ok(()) => Ok(DeleteOutcome {
+            uses_trash,
+            skip_reason: None,
+        }),
+        Err(e) => {
+            if crate::cleaner::is_skippable_error(&e) {
+                Ok(DeleteOutcome {
+                    uses_trash,
+                    skip_reason: Some(format!("{e:#}")),
+                })
+            } else {
+                Err(e)
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -149,5 +202,144 @@ mod tests {
         assert!(!is_trash_mode());
         set_trash_mode(true);
         assert!(is_trash_mode());
+    }
+
+    // ── safe_delete seam tests ──
+
+    /// Records every (program, args) invocation so the seam's chflags
+    /// behavior is assertable. Fails for programs listed in `fail_programs`.
+    struct RecordingRunner {
+        calls: std::sync::Mutex<Vec<(String, Vec<String>)>>,
+        fail_programs: Vec<String>,
+    }
+
+    impl RecordingRunner {
+        fn new() -> Self {
+            Self {
+                calls: std::sync::Mutex::new(Vec::new()),
+                fail_programs: Vec::new(),
+            }
+        }
+
+        fn that_fails(mut self, program: &str) -> Self {
+            self.fail_programs.push(program.to_string());
+            self
+        }
+
+        fn ran(&self, program: &str) -> bool {
+            self.calls.lock().unwrap().iter().any(|(p, _)| p == program)
+        }
+    }
+
+    impl crate::command::CommandRunner for RecordingRunner {
+        fn run(&self, program: &str, args: &[&str]) -> anyhow::Result<std::process::Output> {
+            self.calls.lock().unwrap().push((
+                program.to_string(),
+                args.iter().map(|a| a.to_string()).collect(),
+            ));
+            if self.fail_programs.iter().any(|p| p == program) {
+                anyhow::bail!("failed to spawn `{program}`: command failed");
+            }
+            Ok(std::process::Output {
+                status: std::os::unix::process::ExitStatusExt::from_raw(0),
+                stdout: vec![],
+                stderr: vec![],
+            })
+        }
+
+        fn exists(&self, _program: &str) -> bool {
+            true
+        }
+    }
+
+    #[test]
+    fn safe_delete_permanent_mode_clears_uchg_then_removes() {
+        let tmp = TempDir::new().unwrap();
+        let d = tmp.path().join("uchg_dir");
+        fs::create_dir_all(&d).unwrap();
+        let runner = RecordingRunner::new();
+        let outcome = safe_delete(&runner, &d, TrashMode::Permanent).unwrap();
+        assert!(
+            runner.ran("chflags"),
+            "permanent mode must clear uchg flags before removing"
+        );
+        assert!(!d.exists(), "directory must be removed");
+        assert!(!outcome.uses_trash, "permanent delete must not claim trash");
+        assert!(outcome.skip_reason.is_none());
+    }
+
+    #[test]
+    fn safe_delete_permanent_mode_removes_file() {
+        let tmp = TempDir::new().unwrap();
+        let f = tmp.path().join("file.txt");
+        fs::write(&f, b"hi").unwrap();
+        let runner = RecordingRunner::new();
+        let outcome = safe_delete(&runner, &f, TrashMode::Permanent).unwrap();
+        assert!(runner.ran("chflags"));
+        assert!(!f.exists());
+        assert!(!outcome.uses_trash);
+    }
+
+    #[test]
+    fn safe_delete_chflags_failure_warns_and_still_deletes() {
+        let tmp = TempDir::new().unwrap();
+        let d = tmp.path().join("dir");
+        fs::create_dir_all(&d).unwrap();
+        let runner = RecordingRunner::new().that_fails("chflags");
+        let outcome = safe_delete(&runner, &d, TrashMode::Permanent).unwrap();
+        assert!(
+            runner.ran("chflags"),
+            "the clear attempt must still be made"
+        );
+        assert!(!d.exists(), "deletion proceeds after a failed flag clear");
+        assert!(outcome.skip_reason.is_none());
+    }
+
+    #[test]
+    fn safe_delete_skippable_error_returns_skip_reason() {
+        // A Trash-mode delete of a nonexistent path fails with a
+        // "trash failed: ..." error, which is_skippable_error classifies as
+        // skippable; a NotFound in permanent mode is fatal by design.
+        let runner = RecordingRunner::new();
+        let outcome = safe_delete(
+            &runner,
+            Path::new("/nonexistent/path/xyz"),
+            TrashMode::Trash,
+        )
+        .unwrap();
+        let reason = outcome.skip_reason.expect("trash failure is skippable");
+        assert!(
+            reason.contains("trash"),
+            "skip reason must mention the cause: {reason}"
+        );
+    }
+
+    #[test]
+    fn safe_delete_trash_mode_reports_trash_truth() {
+        let tmp = TempDir::new().unwrap();
+        let d = tmp.path().join("dir");
+        fs::create_dir_all(&d).unwrap();
+        let runner = RecordingRunner::new();
+        let outcome = safe_delete(&runner, &d, TrashMode::Trash).unwrap();
+        assert!(outcome.uses_trash, "trash mode must report trash");
+        // Whether the underlying `trash` crate succeeds and whether the dir
+        // actually moves are the documented TCC-environmental test's job.
+    }
+
+    #[test]
+    fn safe_delete_global_mode_resolves_global_pin() {
+        // Global defers to the process-global pin, so a locked test is needed.
+        let _lock = crate::context::TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let tmp = TempDir::new().unwrap();
+        let d = tmp.path().join("dir");
+        fs::create_dir_all(&d).unwrap();
+        let runner = RecordingRunner::new();
+        set_trash_mode(true);
+        let outcome = safe_delete(&runner, &d, TrashMode::Global).unwrap();
+        assert!(outcome.uses_trash);
+        // The trash move's success is TCC-environment-dependent; the seam's
+        // contract under test is only the resolved truth.
     }
 }

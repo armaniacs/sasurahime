@@ -81,6 +81,31 @@ impl CleanResult {
             0
         }
     }
+
+    /// A result reporting `bytes_freed` freed with the seam-resolved trash
+    /// truth. Prefer this over hand-rolled struct literals so the
+    /// `uses_trash` decision has one owner per call site.
+    pub fn freed(name: &'static str, bytes_freed: u64, uses_trash: bool) -> Self {
+        Self {
+            name,
+            bytes_freed,
+            uses_trash,
+            skipped: Vec::new(),
+            deleted_paths: Vec::new(),
+        }
+    }
+
+    /// A result for "nothing happened": a tool that is not installed, a
+    /// cancelled run, a no-op target. Zero freed, nothing deleted.
+    pub fn empty(name: &'static str) -> Self {
+        Self {
+            name,
+            bytes_freed: 0,
+            uses_trash: false,
+            skipped: Vec::new(),
+            deleted_paths: Vec::new(),
+        }
+    }
 }
 
 /// Options for fine-grained control over clean operations.
