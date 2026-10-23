@@ -435,6 +435,37 @@ impl Cleaner for CliCleaner {
     }
 
     fn clean(&self, dry_run: bool, _reporter: &dyn ProgressReporter) -> Result<CleanResult> {
+        // Plain clean keeps the process-global trash mode (compat path).
+        self.clean_with_mode(dry_run, _reporter, crate::trash::TrashMode::Global)
+    }
+
+    /// Cleans with `opts`, pinning `opts.trash_mode` when set so `uses_trash`
+    /// and the actual deletion can never disagree (the `CleanOptions`
+    /// contract). `None` keeps the process-global mode (compat).
+    fn clean_with_opts(
+        &self,
+        dry_run: bool,
+        reporter: &dyn ProgressReporter,
+        opts: &CleanOptions,
+    ) -> Result<CleanResult> {
+        self.clean_with_mode(
+            dry_run,
+            reporter,
+            opts.trash_mode.unwrap_or(crate::trash::TrashMode::Global),
+        )
+    }
+}
+
+impl CliCleaner {
+    /// The shared clean body. `mode` is the deletion mode for the fallback
+    /// delete: `Global` reads the process-global mode; `Trash` / `Permanent`
+    /// pin it so the seam outcome and the deletion agree.
+    fn clean_with_mode(
+        &self,
+        dry_run: bool,
+        _reporter: &dyn ProgressReporter,
+        mode: crate::trash::TrashMode,
+    ) -> Result<CleanResult> {
         let program = self.program;
         let args = self.args;
         match &self.detect_dir {
@@ -530,11 +561,8 @@ impl Cleaner for CliCleaner {
                                 deleted_paths: vec![],
                             });
                         }
-                        let outcome = crate::trash::safe_delete(
-                            self.runner.as_ref(),
-                            detect_dir,
-                            crate::trash::TrashMode::Global,
-                        )?;
+                        let outcome =
+                            crate::trash::safe_delete(self.runner.as_ref(), detect_dir, mode)?;
                         if let Some(reason) = outcome.skip_reason {
                             return Ok(CleanResult {
                                 name: self.name(),
@@ -1052,6 +1080,121 @@ mod tests {
         );
         crate::trash::set_trash_mode(false);
         drop(_lock);
+    }
+
+    // ── CliCleaner trash_mode pin contract ──
+
+    /// A CliCleaner whose CLI tool is missing: the fallback delete is the
+    /// only deletion seam this cleaner owns, and it runs against `dir`.
+    fn fallback_cli_cleaner(dir: &Path) -> CliCleaner {
+        CliCleaner {
+            display_name: "test-cli-pin",
+            program: "definitely-not-installed-cli",
+            args: &[],
+            detect_dir: Some(dir.to_path_buf()),
+            runner: Box::new(crate::command::SystemCommandRunner),
+            confirm_message: None,
+            fallback_delete: true,
+            notice: None,
+            risk: Risk::Moderate,
+        }
+    }
+
+    #[test]
+    fn cli_clean_with_opts_pinned_permanent_overrides_the_global() {
+        // The CleanOptions.trash_mode pin contract: a pinned Some(Permanent)
+        // must delete for real and claim no Trash, even when the
+        // process-global mode is trash.
+        let _lock = crate::context::TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let _mode = crate::test_helpers::TrashModeGuard::set(true);
+        let tmp = tempfile::TempDir::new().unwrap();
+        let dir = tmp.path().join("cache");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("data.bin"), vec![0u8; 1024]).unwrap();
+        let cleaner = fallback_cli_cleaner(&dir);
+        let opts = crate::cleaner::CleanOptions {
+            all: true,
+            include_manual: true,
+            older_than_days: None,
+            larger_than_mb: None,
+            trash_mode: Some(crate::trash::TrashMode::Permanent),
+        };
+        let reporter = crate::progress::DeepSuppressReporter;
+        let result = cleaner.clean_with_opts(false, &reporter, &opts).unwrap();
+        assert!(
+            !dir.exists(),
+            "the pinned permanent mode must delete for real"
+        );
+        assert!(
+            !result.uses_trash,
+            "uses_trash must come from the pinned mode, not the global"
+        );
+    }
+
+    #[test]
+    fn cli_clean_with_opts_pinned_trash_claims_trash() {
+        // A pinned Some(Trash) must resolve the fallback seam to trash. The
+        // global is pinned to permanent so only the pin can claim Trash.
+        // The fallback's skip branch returns the seam outcome's mode claim,
+        // so uses_trash must be true whether the Trash move lands or comes
+        // back TCC-skipped (as it does in this sandbox for tempdir paths).
+        let _lock = crate::context::TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let _mode = crate::test_helpers::TrashModeGuard::set(false);
+        let tmp = tempfile::TempDir::new().unwrap();
+        let dir = tmp.path().join("cache");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("data.bin"), vec![0u8; 1024]).unwrap();
+        let cleaner = fallback_cli_cleaner(&dir);
+        let opts = crate::cleaner::CleanOptions {
+            all: true,
+            include_manual: true,
+            older_than_days: None,
+            larger_than_mb: None,
+            trash_mode: Some(crate::trash::TrashMode::Trash),
+        };
+        let reporter = crate::progress::DeepSuppressReporter;
+        let result = cleaner.clean_with_opts(false, &reporter, &opts).unwrap();
+        assert!(
+            result.uses_trash,
+            "uses_trash must match the pinned Trash mode, not the global"
+        );
+    }
+
+    #[test]
+    fn cli_clean_with_opts_none_keeps_the_global_mode() {
+        // trash_mode: None is the compat path: the fallback delete reads the
+        // process-global mode. Global permanent deletes for real and claims
+        // no Trash.
+        let _lock = crate::context::TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let _mode = crate::test_helpers::TrashModeGuard::set(false);
+        let tmp = tempfile::TempDir::new().unwrap();
+        let dir = tmp.path().join("cache");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("data.bin"), vec![0u8; 1024]).unwrap();
+        let cleaner = fallback_cli_cleaner(&dir);
+        let opts = crate::cleaner::CleanOptions {
+            all: true,
+            include_manual: true,
+            older_than_days: None,
+            larger_than_mb: None,
+            trash_mode: None,
+        };
+        let reporter = crate::progress::DeepSuppressReporter;
+        let result = cleaner.clean_with_opts(false, &reporter, &opts).unwrap();
+        assert!(
+            !dir.exists(),
+            "the global permanent mode must delete for real"
+        );
+        assert!(
+            !result.uses_trash,
+            "uses_trash must come from the global mode"
+        );
     }
 
     #[test]
