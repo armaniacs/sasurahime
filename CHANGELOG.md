@@ -8,6 +8,25 @@ All notable changes to sasurahime will be documented in this file. The format is
 
 ### Changed
 
+- `colima` is now classified `Risky` (its clean destroys all stopped VM disk
+  data, irreversibly), so `--yes` and `auto` no longer run it unattended; the
+  TUI still offers it behind a confirmation.
+- `[custom]` targets are now reachable with `clean <name>`: previously the
+  external plugin catch-all shadowed them, so a configured custom target
+  could never be cleaned from the CLI. Name collisions with registered
+  targets are warned at startup, and paths on the deletion blocklist
+  (`/Volumes`, `/net`, `/Users/Shared`, `/Library`, `/opt`,
+  `/private/var/vm`) refuse with exit 1.
+- `auto` now treats a config as policy-driven only when the `[policy]`
+  section actually exists, instead of counting `[custom]` sections.
+- Per-entry skips from PathCleaner/CliCleaner paths are reported as skipped
+  entries instead of being silently dropped, and `uses_trash` is only
+  claimed when something was actually deleted.
+- TUI sub-target cleans now report the real freed bytes; previously a
+  self-re-exec fabricated `0 B`, under-counting `Total freed`.
+- `ollama` model rows whose size cannot be parsed default to `0 B`
+  explicitly (the listing stays best-effort) instead of silently.
+
 - **BREAKING (`--yes`):** every target now carries a risk classification
   (`Safe` / `Moderate` / `Risky` / `Manual`) and `--yes` cleans only `Safe`
   targets. Previously a central 13-name list decided this; `docker`, `cargo`,
@@ -56,6 +75,19 @@ All notable changes to sasurahime will be documented in this file. The format is
 
 - `delete_path` takes the trash mode as an argument (`DeleteCtx`) instead of
   reading a global; the global-based call sites keep working unchanged.
+
+### Fixed
+
+- TUI selecting `Archives` silently cleaned `DerivedData`: the old sub-target
+  re-exec passed the display name where the parser expected the internal
+  spelling. Both spellings now resolve to the same subcategory.
+- Global `--dry-run` now reaches `External` plugin targets, and
+  `clean <custom> --help` no longer runs the plugin clean.
+- An empty `HOME` environment variable no longer breaks home resolution:
+  it falls back to `dirs::home_dir()` everywhere instead of pointing at
+  the filesystem root.
+- `scan --json` flushes the scan cache before its early return, so the
+  cache is not stale for the next run.
 
 ---
 
@@ -106,7 +138,7 @@ All notable changes to sasurahime will be documented in this file. The format is
 
 ---
 
-## [0.2.1] — 2026-06-24
+## [0.2.1] ― 2026-06-24
 
 ### Added
 
@@ -123,7 +155,7 @@ All notable changes to sasurahime will be documented in this file. The format is
 
 ---
 
-## [0.2.0] — 2026-05-29
+## [0.2.0] ― 2026-05-29
 
 ### Added
 
@@ -182,11 +214,11 @@ All notable changes to sasurahime will be documented in this file. The format is
 
 ---
 
-## [0.1.28] — 2026-05-28
+## [0.1.28] ― 2026-05-28
 
 ### Added
 
-- **Test coverage gaps — 6 new unit test suites.** Added targeted unit tests
+- **Test coverage gaps ― 6 new unit test suites.** Added targeted unit tests
   for `is_skippable_error()` (C01), `GradleCleaner`/`JetBrainsCleaner`
   `find_old_caches` (H01, M02), `CargoCleaner::find_target_dirs` (H03),
   `MiseCleaner` parse/scan (M01), and `run_clean_target` dispatch (M03).
@@ -209,7 +241,7 @@ All notable changes to sasurahime will be documented in this file. The format is
 ### Internal
 
 - **488 tests total** (329 unit + 159 integration/E2E across 25 test files),
-  0 failures — 46 new tests (+10.4%) since v0.1.27.
+  0 failures ― 46 new tests (+10.4%) since v0.1.27.
 - **`src/test_helpers.rs`** introduced as a shared test infrastructure module,
   housing the `EnvGuard` Drop-based environment variable guard extracted from
   `pre_commit.rs`.
@@ -221,7 +253,7 @@ All notable changes to sasurahime will be documented in this file. The format is
 
 ---
 
-## [0.1.27] — 2026-05-27
+## [0.1.27] ― 2026-05-27
 
 ### Added
 
@@ -243,7 +275,7 @@ All notable changes to sasurahime will be documented in this file. The format is
   `interactive.rs` as pure functions, enabling unit testing of TUI selection
   logic without a TTY. 6 new unit tests covering sub-target rendering,
   mixed cleaners, and selected-size computation.
-- **`tests/apfs_snapshot.rs`** — new E2E test file for the APFS snapshot
+- **`tests/apfs_snapshot.rs`** ― new E2E test file for the APFS snapshot
   cleaner CLI entry point (dry-run and tool-not-found paths).
 - **`--config <path>` documentation** added to `docs/HOWTO-USE.md` (EN + JA).
 
@@ -263,7 +295,7 @@ All notable changes to sasurahime will be documented in this file. The format is
   Score: 8.5/10. No HIGH gaps found. Report in `plans/ln-634-coverage-audit.md`.
 - **442 tests total** (288 unit + 154 integration/E2E across 24 test files),
   0 failures.
-- **All PBI A–G completed** (22 SP total). Sprint 5 ships PBI-D Phase 2,
+- **All PBI A-G completed** (22 SP total). Sprint 5 ships PBI-D Phase 2,
   PBI-E (config.toml), PBI-F (--yes), and PBI-G (stats).
 - **Docs DoD finalized.** All PBI-E/G documentation items marked complete
   (exclude, custom, per-cleaner, stats, --config documented in EN + JA).
@@ -282,7 +314,7 @@ All notable changes to sasurahime will be documented in this file. The format is
 
 ---
 
-## [0.1.26] — 2026-05-26
+## [0.1.26] ― 2026-05-26
 
 ### Added
 
@@ -341,11 +373,11 @@ All notable changes to sasurahime will be documented in this file. The format is
 
 ---
 
-## [0.1.25] — 2026-05-25
+## [0.1.25] ― 2026-05-25
 
 ### Added
 
-- **Xcode subcategory selection — CLI core (PBI-D Phase 1).** `XcodeCleaner` now
+- **Xcode subcategory selection ― CLI core (PBI-D Phase 1).** `XcodeCleaner` now
   supports partial cleanup of Xcode caches via the `--sub` flag, letting users
   target only DerivedData, Archives, or both instead of cleaning everything.
 - **`XcodeSubcategory` enum** with `DerivedData` and `Archives` variants, plus
@@ -361,9 +393,9 @@ All notable changes to sasurahime will be documented in this file. The format is
 - **`XcodeCleaner::detect_subcategories()`** returns `Vec<SubcategoryInfo>`
   with per-subcategory path and size, used by the CLI and available for the
   future `sub_targets()` override.
-- **`XcodeCleaner::with_subcategories()` builder** — constructs an
+- **`XcodeCleaner::with_subcategories()` builder** ― constructs an
   `XcodeCleaner` scoped to specific subcategories for targeted cleaning.
-- **`XcodeCleaner::is_xcode_running()`** — checks via `pgrep -x Xcode` for
+- **`XcodeCleaner::is_xcode_running()`** ― checks via `pgrep -x Xcode` for
   safe DerivedData deletion with a confirmation prompt when Xcode is active.
 - **PBI-D document updated** to reflect current implementation status (Phase 1
   complete, Phase 2 TUI pending) and scope decision (Simulators handled by the
@@ -382,14 +414,14 @@ All notable changes to sasurahime will be documented in this file. The format is
 
 ---
 
-## [0.1.24] — 2026-05-25
+## [0.1.24] ― 2026-05-25
 
 ### Added
 
 - **Trash warning UI (PBI-C).** After cleaning files via macOS Trash, `sasurahime`
   now shows `"Note: Moved X to Trash. Run 'Empty Trash' to reclaim disk space."`
   to inform users that Trash must be emptied to actually free disk space.
-- **Large file pre-warning.** When ≥1 GB of files will be moved to Trash, a
+- **Large file pre-warning.** When ≧1 GB of files will be moved to Trash, a
   prominent `"Note: Files will be moved to Trash (not immediately freed)."`
   warning is shown before the clean operation begins.
 - **`CleanResult.uses_trash` field.** Each cleaner reports whether it used the
@@ -415,7 +447,7 @@ All notable changes to sasurahime will be documented in this file. The format is
 
 ---
 
-## [0.1.23] — 2026-05-25
+## [0.1.23] ― 2026-05-25
 
 ### Added
 
@@ -462,7 +494,7 @@ All notable changes to sasurahime will be documented in this file. The format is
 
 ---
 
-## [0.1.22] — 2026-05-25
+## [0.1.22] ― 2026-05-25
 
 ### Added
 
@@ -474,7 +506,7 @@ All notable changes to sasurahime will be documented in this file. The format is
   brew, mise, rustup, apfs-snapshot, ollama, and all GenericCleaner command
   variants) now expose availability via `self.runner.exists("tool")`. The scan
   phase pre-filters unavailable cleaners, skipping `detect()` entirely for
-  tools not installed — eliminating I/O overhead for 40+ unused targets.
+  tools not installed ― eliminating I/O overhead for 40+ unused targets.
 - **Parallel scan in interactive/auto modes.** Both `sasurahime --yes` and the
   interactive TUI scan phases use the same parallel `with_parallel_scan()`
   progress bar.
@@ -491,7 +523,7 @@ All notable changes to sasurahime will be documented in this file. The format is
 
 - **New dependency:** `rayon = "1"` added to `Cargo.toml`.
 - **New progress helper:** `with_parallel_scan(total, |pb| …)` in
-  `src/progress.rs` — accepts `&ProgressBar` for rayon-thread-safe progress
+  `src/progress.rs` ― accepts `&ProgressBar` for rayon-thread-safe progress
   updates.
 - **3 unit tests** in `scanner.rs`: empty cleaners, mixed availability,
   default `is_available()` returns true.
@@ -502,7 +534,7 @@ All notable changes to sasurahime will be documented in this file. The format is
 
 ---
 
-## [0.1.21] — 2026-05-25
+## [0.1.21] ― 2026-05-25
 
 ### Added
 
@@ -532,23 +564,23 @@ All notable changes to sasurahime will be documented in this file. The format is
 
 ---
 
-## [0.1.20] — 2026-05-24
+## [0.1.20] ― 2026-05-24
 
 ### Added
 
-- **`sasurahime explore` — OmniDiskSweeper-style disk explorer.** Scans
+- **`sasurahime explore` ― OmniDiskSweeper-style disk explorer.** Scans
   `~/Library/Application Support/`, `~/Library/Caches/`, `~/.cache/`, and
   `~/.local/share/` at first-level depth, groups by app name, and sorts by
-  size descending. Unlike `scan`, `explore` covers every app folder —
-  not just registered cleaners — answering "who is eating my disk?" without
+  size descending. Unlike `scan`, `explore` covers every app folder ―
+  not just registered cleaners ― answering "who is eating my disk?" without
   prior knowledge of the culprit.
 
   The interactive output has two sections:
 
-  - **Managed** — paths owned by a registered sasurahime cleaner. Select
+  - **Managed** ― paths owned by a registered sasurahime cleaner. Select
     entries to run `sasurahime clean <target>` in-session. After cleaning,
     the managed table is re-scanned and reprinted with updated sizes.
-  - **Not managed** — everything else. Select entries to display the full
+  - **Not managed** ― everything else. Select entries to display the full
     path (for copy-paste) and optionally open the folder in Finder.
 
   Options: `--top N` (default 20, per section), `--all` (show everything),
@@ -557,14 +589,14 @@ All notable changes to sasurahime will be documented in this file. The format is
   with code 1 in non-TTY environments.
 
 - **`src/explorer.rs`** new module implementing:
-  - `MANAGED_PATTERNS` — 18 hardcoded path patterns mapping cache directories
+  - `MANAGED_PATTERNS` ― 18 hardcoded path patterns mapping cache directories
     to their `sasurahime clean <target>` names, including glob-prefix support
     (`ms-playwright*`).
-  - `collect_entries` — first-level directory scan; skips missing roots,
+  - `collect_entries` ― first-level directory scan; skips missing roots,
     permission errors, and size-0 entries silently.
-  - `apply_top` — `sort_unstable_by_key(Reverse(size))` + truncate.
-  - `explore_results` — `pub(crate)` testable core (no dialoguer dependency).
-  - `run_explore` — full interactive flow with TTY guard, `dialoguer::MultiSelect`
+  - `apply_top` ― `sort_unstable_by_key(Reverse(size))` + truncate.
+  - `explore_results` ― `pub(crate)` testable core (no dialoguer dependency).
+  - `run_explore` ― full interactive flow with TTY guard, `dialoguer::MultiSelect`
     for both sections, subprocess spawn via `std::env::current_exe()`.
 
 ### Documentation
@@ -582,7 +614,7 @@ All notable changes to sasurahime will be documented in this file. The format is
 
 ---
 
-## [0.1.19] — 2026-05-23
+## [0.1.19] ― 2026-05-23
 
 ### Added
 
@@ -603,7 +635,7 @@ All notable changes to sasurahime will be documented in this file. The format is
   present in the table but shows `"-"` when `--verbose` is not active. Each
   cleaner reports its primary monitored path when verbose mode is on.
 
-## [0.1.18] — 2026-05-22
+## [0.1.18] ― 2026-05-22
 
 ### Internal
 
@@ -611,7 +643,7 @@ All notable changes to sasurahime will be documented in this file. The format is
   `src/cleaners/generic.rs` and `tests/interactive.rs` after the v0.1.16
   colima review changes.
 
-## [0.1.17] — 2026-05-22
+## [0.1.17] ― 2026-05-22
 
 ### Internal
 
@@ -620,7 +652,7 @@ All notable changes to sasurahime will be documented in this file. The format is
   `running-process-hint-design`) from `docs/superpowers/specs/` to
   `.plan/archived/`.
 
-## [0.1.16] — 2026-05-22
+## [0.1.16] ― 2026-05-22
 
 ### Added
 
@@ -651,7 +683,7 @@ All notable changes to sasurahime will be documented in this file. The format is
 ### Documentation
 
 - **SUPPORTED.md note on estimate accuracy:** Added a note to the colima entry
-  (EN + JA) that the scan report is an estimated maximum — actual freed space
+  (EN + JA) that the scan report is an estimated maximum ― actual freed space
   depends on which VM disk images are pruned.
 - **Colima target description updated:** Changed from `"Colima VM disk cache
   prune"` to `"Colima VM disk images (inactive) prune"` to more accurately
@@ -671,7 +703,7 @@ All notable changes to sasurahime will be documented in this file. The format is
   `calls.contains("prune --all")` to `calls.contains("prune --all --force")`.
   Unit test args updated from `&["prune", "--all"]` to `&["prune", "--all", "--force"]`.
 
-## [0.1.15] — 2026-05-22
+## [0.1.15] ― 2026-05-22
 
 ### Fixed
 
@@ -679,7 +711,7 @@ All notable changes to sasurahime will be documented in this file. The format is
   without the `--force` flag, causing it to wait for `y/N` input indefinitely.
   Added `--force` to skip the interactive prompt and proceed non-interactively.
 
-## [0.1.14] — 2026-05-22
+## [0.1.14] ― 2026-05-22
 
 ### Added
 
@@ -697,7 +729,7 @@ All notable changes to sasurahime will be documented in this file. The format is
   printed even when the command timed out and was killed. Now shows
   `[FAILED]` with the error details.
 
-## [0.1.13] — 2026-05-21
+## [0.1.13] ― 2026-05-21
 
 ### Fixed
 
@@ -708,27 +740,27 @@ All notable changes to sasurahime will be documented in this file. The format is
 - **Test version strings:** Updated version assertions in
   `tests/interactive.rs` from `0.1.12` to `0.1.13` to match the new version.
 
-## [0.1.12] — 2026-05-21
+## [0.1.12] ― 2026-05-21
 
 ### Added
 
 - **IosCleaner (PBI-012):** Scan and remove iOS device backups from
   `~/Library/Application Support/MobileSync/Backup/`. Interactive only (never
-  runs in `--yes` mode) — backups are sent to Trash with `chflags nouchg`
+  runs in `--yes` mode) ― backups are sent to Trash with `chflags nouchg`
   handling. Reachable via `sasurahime clean ios-backup`.
 - **ApfsSnapshotCleaner (PBI-013):** List and delete APFS local Time Machine
-  snapshots via `tmutil deletelocalsnapshot`. Interactive only — warns about
+  snapshots via `tmutil deletelocalsnapshot`. Interactive only ― warns about
   losing local Time Machine protection. Reachable via
   `sasurahime clean apfs-snapshot`.
 
-## [0.1.11] — 2026-05-21
+## [0.1.11] ― 2026-05-21
 
 ### Fixed
 
 - **Sparse file size over-reporting (colima):** `dir_size()` now uses physical
   disk blocks (`st_blocks × 512`) instead of logical file size (`st_size`).
   This fixes `sasurahime scan` showing wildly inflated sizes for sparse VM disk
-  images — e.g. colima dropped from 100.3 GB to the correct 9.3 GB, matching
+  images ― e.g. colima dropped from 100.3 GB to the correct 9.3 GB, matching
   `du`.
 - **LogCleaner logical-size bug:** `detect()` and `clean()` were using
   `m.len()` (logical size) instead of `m.blocks() × 512` (physical blocks),
@@ -753,12 +785,12 @@ All notable changes to sasurahime will be documented in this file. The format is
   credits full dir size) are documented as inherent design trade-offs rather
   than bugs.
 
-## [0.1.10] — 2026-05-21
+## [0.1.10] ― 2026-05-21
 
 ### Changed
 
 - **Dependency version bumps:** Updated four crate dependencies to latest
-  compatible versions — dialoguer 0.11→0.12, dirs 5→6, indicatif 0.17→0.18,
+  compatible versions ― dialoguer 0.11→0.12, dirs 5→6, indicatif 0.17→0.18,
   toml 0.8→1.1. No source code changes were required; all APIs remain
   compatible.
 
@@ -770,7 +802,7 @@ All notable changes to sasurahime will be documented in this file. The format is
 
 ---
 
-## [0.1.8] — 2026-05-21
+## [0.1.8] ― 2026-05-21
 
 ### Added
 
@@ -786,7 +818,7 @@ All notable changes to sasurahime will be documented in this file. The format is
 
 ---
 
-## [0.1.7] — 2026-05-21
+## [0.1.7] ― 2026-05-21
 
 ### Added
 
@@ -830,7 +862,7 @@ All notable changes to sasurahime will be documented in this file. The format is
 
 ---
 
-## [0.1.6] — 2026-05-20
+## [0.1.6] ― 2026-05-20
 
 ### Added
 
@@ -845,7 +877,7 @@ All notable changes to sasurahime will be documented in this file. The format is
 
 ---
 
-## [0.1.5] — 2026-05-20
+## [0.1.5] ― 2026-05-20
 
 ### Added
 
@@ -879,7 +911,7 @@ All notable changes to sasurahime will be documented in this file. The format is
 
 ---
 
-## [0.1.4] — 2026-05-20
+## [0.1.4] ― 2026-05-20
 
 ### Added
 
@@ -901,20 +933,20 @@ All notable changes to sasurahime will be documented in this file. The format is
 ---
 
 
-## [0.1.2] — 2026-05-18
+## [0.1.2] ― 2026-05-18
 
 ### Added
 
-- `sasurahime --version` / `sasurahime -V` — prints version number.
-- `sasurahime targets` — lists all 14 supported clean targets with descriptions.
+- `sasurahime --version` / `sasurahime -V` ― prints version number.
+- `sasurahime targets` ― lists all 14 supported clean targets with descriptions.
 - Version banner displayed on interactive (`sasurahime`) and auto (`sasurahime --yes`) startup.
 - Test coverage gap audit plan (`docs/coverage-gap-plan.md`, `docs/coverage-gap-summary.json`).
-- **MiseCleaner (GAP-001):** `.mise.toml` pinning cross-check — versions pinned in
+- **MiseCleaner (GAP-001):** `.mise.toml` pinning cross-check ― versions pinned in
   `~/.config/mise/config.toml` or any `.mise.toml` under HOME (max depth 5) are
   protected from deletion. Added `MiseCleaner::scan_pinned_versions` with TOML
   parser (`parse_tools_section`, `parse_toml_kv`). (`MiseCleaner` now stores a
   `home` field for robust path resolution.)
-- **E2E test:** `clean_mise_pinned_version_not_deleted` — validates that a
+- **E2E test:** `clean_mise_pinned_version_not_deleted` ― validates that a
   `.mise.toml`-pinned version is preserved and an unpinned version is removed.
 - **Unit tests:** `unused_versions_pinned_is_protected` for the `pinned` set
   intersection. `expand_tilde_tilde_alone` for `Config::expand_tilde("~")`.
@@ -945,13 +977,13 @@ All notable changes to sasurahime will be documented in this file. The format is
 
 ---
 
-## [0.1.0] — 2026-05-18
+## [0.1.0] ― 2026-05-18
 
 ### Added
 
-- `sasurahime scan` — scans all known cache locations and prints a summary table with reclaimable sizes.
-- `sasurahime clean <target>` — cleans individual cache targets by name.
-- `sasurahime clean <target> --dry-run` — previews what would be removed without deleting anything.
+- `sasurahime scan` ― scans all known cache locations and prints a summary table with reclaimable sizes.
+- `sasurahime clean <target>` ― cleans individual cache targets by name.
+- `sasurahime clean <target> --dry-run` ― previews what would be removed without deleting anything.
 - **uv (PBI-002):** Removes stale `simple-vN` index directories (keeps only the latest) and runs `uv cache prune --force`.
 - **Homebrew (PBI-003):** Runs `brew cleanup -s --prune=all` and reports freed disk space.
 - **mise (PBI-004):** Calls `mise ls --current` to determine active versions, then removes unused versions from `~/.local/share/mise/installs/` with macOS `uchg` flag handling.
@@ -962,6 +994,6 @@ All notable changes to sasurahime will be documented in this file. The format is
 - Introduced the `Cleaner` trait (`name`, `detect`, `clean`) as the core abstraction for all cleaners.
 - Introduced the `CommandRunner` trait to allow test-time mocking of external command execution (uv, brew, mise, chflags).
 - Added `sasurahime --yes` entry point for non-interactive full-cleaning (placeholder for Sprint 4 TUI integration).
-- Interactive TUI via `dialoguer::MultiSelect` — UI placeholder (PBI-008, Sprint 4).
+- Interactive TUI via `dialoguer::MultiSelect` ― UI placeholder (PBI-008, Sprint 4).
 - Full E2E test suite (assert\_cmd + tempfile fixtures) for every cleaner.
 - Unit tests for pure helper functions (e.g. `parse_active_versions`, `version_key`, `find_old_versions`).
