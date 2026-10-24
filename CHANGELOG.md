@@ -6,6 +6,8 @@ All notable changes to sasurahime will be documented in this file. The format is
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-24
+
 ### Changed
 
 - `colima` is now classified `Risky` (its clean destroys all stopped VM disk
