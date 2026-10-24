@@ -26,10 +26,10 @@ Scenario: プラグインターゲットの後ろの --help は削除を実行�
 
 ## 受け入れ基準
 
-- [ ] main.rs:1266 の External arm が `cli.dry_run` を OR する（グローバルフラグの到達）
-- [ ] `--help`/`-h` が external 引数に含まれる場合、プラグインの clean を実行しない（ヘルプ扱いにする）
-- [ ] tests/dry_run.rs に External のグローバル/ローカル --dry-run テストを追加（--permanent コントロール付きの非空虚な主張）
-- [ ] lib/integration/clippy/fmt の全ゲート green
+- [x] main.rs:1266 の External arm が `cli.dry_run` を OR する（グローバルフラグの到達）
+- [x] `--help`/`-h` が external 引数に含まれる場合、プラグインの clean を実行しない（ヘルプ扱いにする）
+- [x] tests/dry_run.rs に External のグローバル/ローカル --dry-run テストを追加（--permanent コントロール付きの非空虚な主張）
+- [x] lib/integration/clippy/fmt の全ゲート green
 
 ## テスト戦略（t_wadaスタイル）
 
@@ -38,3 +38,9 @@ Scenario: プラグインターゲットの後ろの --help は削除を実行�
 ## 実装者向け注記
 
 --dry-run のローカル位置（`clean <plugin> --dry-run`）は現行動作で機能している。グローバル位置の到達が修正対象。--help の捕捉は external_subcommand の catch-all との兼ね合いに注意（PBI 39 と同じ領域だがファイルは main.rs の External arm 内で完結）。
+
+## 検証記録 (2026-10-24)
+
+- 実装コミット: faf4183 (wt-ext、1023a にマージ済み)
+- 内容: External arm が `cli.dry_run || args contain --dry-run` を OR、`--help`/`-h` が external 引数に含まれる場合はアドバイザリ表示 + exit 0 でプラグインを一切実行しない。tests/dry_run.rs にグローバル/ローカル --dry-run テストと --permanent コントロールを追加。
+- 検証: 1023a HEAD 64c44a1 で lib 失敗 ⊆ 既知 TCC セット / bin 30/30 / 統合 38 ターゲット green / clippy 0 warnings / fmt clean。

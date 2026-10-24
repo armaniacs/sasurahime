@@ -25,10 +25,10 @@ Scenario: [policy] セクションありの config で auto は実行される
 
 ## 受け入れ基準
 
-- [ ] parse_config_file が `policy.present` を「設定ファイルに [policy] セクションが実在するときのみ true」にする（serde デフォルト由来の true をやめる。serde_json の Value レベルでセクション実在を判定する）
-- [ ] config.rs:245-249 のテストに「ファイル実在・セクションなし → present == false」のケースを追加
-- [ ] main.rs:864-868 のガードは現状維持（present を見るだけ）で、挙動が doc と一致することをテストで pin
-- [ ] lib/integration/clippy/fmt の全ゲート green
+- [x] parse_config_file が `policy.present` を「設定ファイルに [policy] セクションが実在するときのみ true」にする（serde デフォルト由来の true をやめる。serde_json の Value レベルでセクション実在を判定する）
+- [x] config.rs:245-249 のテストに「ファイル実在・セクションなし → present == false」のケースを追加
+- [x] main.rs:864-868 のガードは現状維持（present を見るだけ）で、挙動が doc と一致することをテストで pin
+- [x] lib/integration/clippy/fmt の全ゲート green
 
 ## テスト戦略（t_wadaスタイル）
 
@@ -38,3 +38,10 @@ Scenario: [policy] セクションありの config で auto は実行される
 ## 実装者向け注記
 
 RawConfig.policy は `#[serde(default)]` のため、セクションなしでもデシリアライズに成功する。present の判定は serde_json::Value として ["policy"] を見るか、RawConfig に Option<PolicySection> を導入する。parse 側だけ変え、main.rs 側のガードは触らない。
+
+## 検証記録 (2026-10-24)
+
+- 実装コミット: 89d37ba (wt-auto、1023a にマージ済み)
+- 内容: `RawConfig.policy` を `Option<PolicySection>` に変更し、`policy.present = raw.policy.is_some()`。serde デフォルト由来の true を廃止。config.rs に「ファイル実在・セクションなし → present == false」「セクション実在 → present == true」のテストを追加。
+- 備考: main.rs のガードは現状維持 (present を見るだけ)。tests/auto_policy.rs で挙動を pin。
+- 検証: 1023a HEAD 64c44a1 で lib 失敗 ⊆ 既知 TCC セット / bin 30/30 / 統合 38 ターゲット green / clippy 0 warnings / fmt clean。
