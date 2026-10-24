@@ -216,10 +216,7 @@ fn clean_caches_reports_skipped_files() {
         stderr.contains("1 file(s) skipped due to errors (permission/lock):"),
         "the batch must report skipped files in the single-target shape:\n{stderr}"
     );
-    assert!(
-        node_gyp.exists(),
-        "the skipped entry must survive the run"
-    );
+    assert!(node_gyp.exists(), "the skipped entry must survive the run");
 }
 
 #[test]
