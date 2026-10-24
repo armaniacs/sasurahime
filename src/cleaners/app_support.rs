@@ -274,7 +274,7 @@ impl AppSupportCleaner {
     }
 
     fn leftovers(&self) -> Vec<Leftover> {
-        let installed = collect_installed_apps(&self.app_roots, self.runner.as_ref());
+        let installed = collect_installed_apps(&self.identity_roots(), self.runner.as_ref());
         find_leftovers(
             &self.base(),
             &installed,
@@ -282,6 +282,18 @@ impl AppSupportCleaner {
             MIN_LEFTOVER_BYTES,
             RECENT_DAYS,
         )
+    }
+
+    /// On CI the real system roots (`/Applications`, `/System/Applications`,
+    /// ...) cost minutes of cold metadata I/O on a fresh runner, so the
+    /// installed-apps collection limits itself to the HOME-derived root,
+    /// where fixtures put their apps.
+    fn identity_roots(&self) -> Vec<PathBuf> {
+        if crate::config::is_ci() {
+            vec![self.home.join("Applications")]
+        } else {
+            self.app_roots.clone()
+        }
     }
 
     /// Display only. Selected entries are opened in Finder; nothing is deleted.

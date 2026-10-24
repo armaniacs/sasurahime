@@ -1,4 +1,5 @@
 use assert_cmd::Command;
+use sasurahime::config;
 use std::fs;
 use tempfile::TempDir;
 
@@ -649,13 +650,24 @@ fn empty_home_never_writes_cwd_relative() {
     // fall back to dirs::home_dir(), so the scan cache never lands
     // CWD-relative. Without the filter the cache path was
     // ".local/share/sasurahime/scan-cache.json" under the process CWD.
+    //
+    // On CI the fallback resolves to the runner's real HOME, whose full scan
+    // costs minutes of cold metadata I/O (Xcode device support, simulators,
+    // caches). There the resolved-home cache path is verified against a
+    // tempdir HOME instead; the empty-HOME filter itself stays unit-covered
+    // by config::resolved_home_dir_filters_an_empty_home_var.
     let tmp = TempDir::new().unwrap();
     let cwd = tmp.path().join("cwd");
     fs::create_dir_all(&cwd).unwrap();
 
-    let output = Command::cargo_bin("sasurahime")
-        .unwrap()
-        .env("HOME", "")
+    let on_ci = config::is_ci();
+    let mut cmd = Command::cargo_bin("sasurahime").unwrap();
+    if on_ci {
+        cmd.env("HOME", tmp.path().join("fakehome"));
+    } else {
+        cmd.env("HOME", "");
+    }
+    let output = cmd
         .current_dir(&cwd)
         .args(["scan", "--json"])
         .output()
