@@ -179,9 +179,9 @@ selection and the scan display (`scan`, `scan --json`). New targets default to
 
 | Risk | Meaning | Behavior under `--yes` | Examples |
 |------|---------|------------------------|----------|
-| `Safe` | Regenerable developer caches | cleaned | `uv`, `brew`, `mise`, `browsers`, `xcode`, `logs`, `act`, `huggingface`, `pre-commit`, `library-logs`, `colima`, `ollama`, `device-support` |
+| `Safe` | Regenerable developer caches | cleaned | `uv`, `brew`, `mise`, `browsers`, `xcode`, `logs`, `act`, `huggingface`, `pre-commit`, `library-logs`, `ollama`, `device-support` |
 | `Moderate` | Large or partially user-visible data | skipped (explicit choice) | `docker`, `cargo`, `npm`, `bun`, `go`, `pip`, `rustup`, `simulator`, ... |
-| `Risky` | Destructive or irreversible | never | `ios-backup`, `apfs-snapshot` |
+| `Risky` | Destructive or irreversible | never | `ios-backup`, `apfs-snapshot`, `colima` |
 | `Manual` | User data | never | `downloads`, `app-support`, `library-caches`, `orphan-containers`, `project-artifacts` |
 
 ## Name
@@ -416,9 +416,9 @@ launchd で定期実行するには、以下を
 
 | 分類 | 意味 | `--yes` での挙動 | 例 |
 |------|------|------------------|-----|
-| `Safe` | 再生成される開発キャッシュ | 削除する | `uv`, `brew`, `mise`, `browsers`, `xcode`, `logs`, `act`, `huggingface`, `pre-commit`, `library-logs`, `colima`, `ollama`, `device-support` |
+| `Safe` | 再生成される開発キャッシュ | 削除する | `uv`, `brew`, `mise`, `browsers`, `xcode`, `logs`, `act`, `huggingface`, `pre-commit`, `library-logs`, `ollama`, `device-support` |
 | `Moderate` | 大きい、または一部ユーザーデータを含む | スキップ（明示的な選択） | `docker`, `cargo`, `npm`, `bun`, `go`, `pip`, `rustup`, `simulator` など |
-| `Risky` | 破壊的・不可逆 | 動かない | `ios-backup`, `apfs-snapshot` |
+| `Risky` | 破壊的・不可逆 | 動かない | `ios-backup`, `apfs-snapshot`, `colima` |
 | `Manual` | ユーザーデータ | 動かない | `downloads`, `app-support`, `library-caches`, `orphan-containers`, `project-artifacts` |
 
 ## 名前の由来
