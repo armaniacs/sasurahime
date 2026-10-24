@@ -1,4 +1,4 @@
-use crate::cleaner::{CleanResult, Cleaner, ScanResult, ScanStatus};
+use crate::cleaner::{CleanOptions, CleanResult, Cleaner, ScanResult, ScanStatus};
 use crate::command::CommandRunner;
 use crate::format::dir_size;
 use crate::progress::ProgressReporter;
@@ -189,12 +189,89 @@ impl MiseCleaner {
     /// Deletes the directory through the [`crate::trash::safe_delete`] seam:
     /// the seam clears macOS `uchg` immutable flags before a permanent remove
     /// (warning and continuing when the clear fails, the PBI-20 decided
-    /// semantic), then deletes and classifies failures into skippable vs fatal.
+    /// semantic), then deletes according to `mode` and classifies failures
+    /// into skippable vs fatal.
     fn remove_with_uchg(
         path: &Path,
         runner: &dyn CommandRunner,
+        mode: crate::trash::TrashMode,
     ) -> Result<crate::trash::DeleteOutcome> {
-        crate::trash::safe_delete(runner, path, crate::trash::TrashMode::Global)
+        crate::trash::safe_delete(runner, path, mode)
+    }
+
+    /// The shared clean body. `mode` is the deletion mode for every
+    /// `remove_with_uchg` call (one per unused tool version): `Global` reads
+    /// the process-global mode; `Trash` / `Permanent` pin it so the seam
+    /// outcome and the deletion agree.
+    fn clean_with_mode(
+        &self,
+        dry_run: bool,
+        reporter: &dyn ProgressReporter,
+        mode: crate::trash::TrashMode,
+    ) -> Result<CleanResult> {
+        if !self.runner.exists("mise") {
+            println!("mise: not found, skipping");
+            return Ok(CleanResult::empty(self.name()));
+        }
+        let stdout = match self.get_mise_output() {
+            Some(ref s) => s.clone(),
+            None => {
+                println!("mise: ls --current failed, nothing to clean");
+                return Ok(CleanResult::empty(self.name()));
+            }
+        };
+        let active = Self::parse_active_versions(&stdout);
+        let pinned = self.get_pinned().clone();
+        let unused = self.unused_versions(&active, &pinned);
+
+        if !unused.is_empty() && !pinned.is_empty() {
+            eprintln!(
+                "Note: {} version(s) protected by .mise.toml pinning",
+                pinned.len()
+            );
+        }
+
+        if !dry_run && !unused.is_empty() {
+            reporter.progress_init(self.name(), unused.len());
+        }
+
+        let mut freed: u64 = 0;
+        let mut uses_trash = false;
+        for (i, (tool, version, path)) in unused.iter().enumerate() {
+            let size = dir_size(path);
+            if dry_run {
+                println!(
+                    "[dry-run] would remove: {tool} {version} ({})",
+                    crate::format::format_bytes(size)
+                );
+            } else {
+                reporter.progress_tick(path, i + 1, size);
+                let outcome = match Self::remove_with_uchg(path, self.runner.as_ref(), mode) {
+                    Ok(outcome) => outcome,
+                    // A fatal per-entry error (e.g. the runtime vanished
+                    // between scan and delete) must not abort the run:
+                    // report it and continue with the remaining items.
+                    Err(err) => {
+                        eprintln!("Error removing {tool} {version}: {err:#}");
+                        // Continue with remaining items on error
+                        continue;
+                    }
+                };
+                if let Some(reason) = outcome.skip_reason {
+                    eprintln!("Error removing {tool} {version}: {reason}");
+                    // Continue with remaining items on error
+                    continue;
+                }
+                uses_trash |= outcome.uses_trash;
+                freed += size;
+                println!("Removed: {tool} {version}");
+            }
+        }
+
+        if !dry_run && !unused.is_empty() {
+            reporter.progress_finish();
+        }
+        Ok(CleanResult::freed(self.name(), freed, uses_trash))
     }
 }
 
@@ -240,69 +317,24 @@ impl Cleaner for MiseCleaner {
     }
 
     fn clean(&self, dry_run: bool, reporter: &dyn ProgressReporter) -> Result<CleanResult> {
-        if !self.runner.exists("mise") {
-            println!("mise: not found, skipping");
-            return Ok(CleanResult::empty(self.name()));
-        }
-        let stdout = match self.get_mise_output() {
-            Some(ref s) => s.clone(),
-            None => {
-                println!("mise: ls --current failed, nothing to clean");
-                return Ok(CleanResult::empty(self.name()));
-            }
-        };
-        let active = Self::parse_active_versions(&stdout);
-        let pinned = self.get_pinned().clone();
-        let unused = self.unused_versions(&active, &pinned);
+        // Plain clean keeps the process-global trash mode (compat path).
+        self.clean_with_mode(dry_run, reporter, crate::trash::TrashMode::Global)
+    }
 
-        if !unused.is_empty() && !pinned.is_empty() {
-            eprintln!(
-                "Note: {} version(s) protected by .mise.toml pinning",
-                pinned.len()
-            );
-        }
-
-        if !dry_run && !unused.is_empty() {
-            reporter.progress_init(self.name(), unused.len());
-        }
-
-        let mut freed: u64 = 0;
-        let mut uses_trash = false;
-        for (i, (tool, version, path)) in unused.iter().enumerate() {
-            let size = dir_size(path);
-            if dry_run {
-                println!(
-                    "[dry-run] would remove: {tool} {version} ({})",
-                    crate::format::format_bytes(size)
-                );
-            } else {
-                reporter.progress_tick(path, i + 1, size);
-                let outcome = match Self::remove_with_uchg(path, self.runner.as_ref()) {
-                    Ok(outcome) => outcome,
-                    // A fatal per-entry error (e.g. the runtime vanished
-                    // between scan and delete) must not abort the run:
-                    // report it and continue with the remaining items.
-                    Err(err) => {
-                        eprintln!("Error removing {tool} {version}: {err:#}");
-                        // Continue with remaining items on error
-                        continue;
-                    }
-                };
-                if let Some(reason) = outcome.skip_reason {
-                    eprintln!("Error removing {tool} {version}: {reason}");
-                    // Continue with remaining items on error
-                    continue;
-                }
-                uses_trash |= outcome.uses_trash;
-                freed += size;
-                println!("Removed: {tool} {version}");
-            }
-        }
-
-        if !dry_run && !unused.is_empty() {
-            reporter.progress_finish();
-        }
-        Ok(CleanResult::freed(self.name(), freed, uses_trash))
+    /// Cleans with `opts`, pinning `opts.trash_mode` when set so `uses_trash`
+    /// and the actual deletion can never disagree (the `CleanOptions`
+    /// contract). `None` keeps the process-global mode (compat).
+    fn clean_with_opts(
+        &self,
+        dry_run: bool,
+        reporter: &dyn ProgressReporter,
+        opts: &CleanOptions,
+    ) -> Result<CleanResult> {
+        self.clean_with_mode(
+            dry_run,
+            reporter,
+            opts.trash_mode.unwrap_or(crate::trash::TrashMode::Global),
+        )
     }
 }
 
@@ -619,6 +651,115 @@ mod tests {
             matches!(detect_result.status, ScanStatus::Unavailable),
             "expected Unavailable, got {:?}",
             detect_result.status
+        );
+    }
+
+    // ── trash_mode pin contract ──
+
+    /// One installed node version plus its cleaner: `mise ls --current`
+    /// returns empty stdout, so the version is unused and deletable.
+    fn unused_version_cleaner(tmp: &TempDir) -> (MiseCleaner, PathBuf) {
+        let version = tmp.path().join(".local/share/mise/installs/node/20.11.0");
+        fs::create_dir_all(&version).unwrap();
+        fs::write(version.join("cache.bin"), vec![0u8; 1024]).unwrap();
+        let cleaner = MiseCleaner::new(
+            tmp.path(),
+            Box::new(
+                MockRunner::new()
+                    .with_success("mise")
+                    .with_success("chflags"),
+            ),
+        );
+        (cleaner, version)
+    }
+
+    fn pin_opts(trash_mode: Option<crate::trash::TrashMode>) -> crate::cleaner::CleanOptions {
+        crate::cleaner::CleanOptions {
+            all: true,
+            include_manual: true,
+            older_than_days: None,
+            larger_than_mb: None,
+            trash_mode,
+        }
+    }
+
+    #[test]
+    fn clean_with_opts_pinned_permanent_overrides_the_global() {
+        // The CleanOptions.trash_mode pin contract: a pinned Some(Permanent)
+        // must delete for real and claim no Trash, even when the
+        // process-global mode is trash.
+        let _lock = crate::context::TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let _mode = crate::test_helpers::TrashModeGuard::set(true);
+        let tmp = TempDir::new().unwrap();
+        let (cleaner, version) = unused_version_cleaner(&tmp);
+        let opts = pin_opts(Some(crate::trash::TrashMode::Permanent));
+        let result = cleaner
+            .clean_with_opts(false, &crate::progress::DeepSuppressReporter, &opts)
+            .unwrap();
+        assert!(
+            !version.exists(),
+            "the pinned permanent mode must delete for real"
+        );
+        assert!(
+            !result.uses_trash,
+            "uses_trash must come from the pinned mode, not the global"
+        );
+        assert!(
+            result.bytes_freed > 0,
+            "the pinned deletion must count bytes"
+        );
+    }
+
+    #[test]
+    fn clean_with_opts_pinned_trash_claims_trash() {
+        // A pinned Some(Trash) must resolve the deletion seam to trash. The
+        // global is pinned to permanent so only the pin can claim Trash.
+        // mise drops the seam outcome's claim on a skip (uses_trash only
+        // accumulates for successful deletions and `skipped` stays empty),
+        // so the assertion follows the seam truth: a landed Trash move
+        // claims Trash and counts bytes, a TCC-skipped one (this sandbox)
+        // claims neither.
+        let _lock = crate::context::TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let _mode = crate::test_helpers::TrashModeGuard::set(false);
+        let tmp = TempDir::new().unwrap();
+        let (cleaner, _version) = unused_version_cleaner(&tmp);
+        let opts = pin_opts(Some(crate::trash::TrashMode::Trash));
+        let result = cleaner
+            .clean_with_opts(false, &crate::progress::DeepSuppressReporter, &opts)
+            .unwrap();
+        let deletions_happened = result.bytes_freed > 0;
+        assert_eq!(
+            result.uses_trash, deletions_happened,
+            "uses_trash must come from the deletion outcomes' seam truth"
+        );
+    }
+
+    #[test]
+    fn clean_with_opts_none_keeps_the_global_mode() {
+        // trash_mode: None is the compat path: the deletion reads the
+        // process-global mode. Global permanent deletes for real and claims
+        // no Trash.
+        let _lock = crate::context::TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let _mode = crate::test_helpers::TrashModeGuard::set(false);
+        let tmp = TempDir::new().unwrap();
+        let (cleaner, version) = unused_version_cleaner(&tmp);
+        let opts = pin_opts(None);
+        let result = cleaner
+            .clean_with_opts(false, &crate::progress::DeepSuppressReporter, &opts)
+            .unwrap();
+        assert!(
+            !version.exists(),
+            "the global permanent mode must delete for real"
+        );
+        assert!(
+            !result.uses_trash,
+            "uses_trash must come from the global mode"
         );
     }
 }
