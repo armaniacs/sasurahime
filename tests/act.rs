@@ -67,7 +67,15 @@ fn clean_act_rejects_unsafe_env_var_path() {
         .output()
         .unwrap();
 
-    assert!(output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "stderr: {stderr}");
+    // Real observation of the rejection: the resolver names the rejected
+    // override on stderr and falls back to the default. A tripwire-less
+    // build would target / instead and never print this.
+    assert!(
+        stderr.contains("[act] WARNING: ACT_CACHE_DIR=/ points to an unsafe path, using default"),
+        "the rejected override must be named on stderr:\n{stderr}"
+    );
 }
 
 #[test]
@@ -78,7 +86,21 @@ fn clean_act_rejects_usr_path() {
         .args(["--permanent", "clean", "act"])
         .output()
         .unwrap();
-    assert!(output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "stderr: {stderr}");
+    // Real observations of the rejection: the override is named on stderr
+    // and /usr/local survives the run — a tripwire-less build would delete
+    // it as the resolved cache dir.
+    assert!(
+        stderr.contains(
+            "[act] WARNING: ACT_CACHE_DIR=/usr/local points to an unsafe path, using default"
+        ),
+        "the rejected override must be named on stderr:\n{stderr}"
+    );
+    assert!(
+        std::path::Path::new("/usr/local").exists(),
+        "/usr/local must survive the rejected override"
+    );
 }
 
 #[test]
@@ -95,7 +117,26 @@ fn clean_act_rejects_symlink_to_system_path() {
         .output()
         .unwrap();
 
-    assert!(output.status.success(), "must not fail on unsafe symlink");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success(),
+        "must not fail on unsafe symlink: {stderr}"
+    );
+    // Real observations of the rejection: the symlinked override is named on
+    // stderr and the symlink itself survives — a tripwire-less build would
+    // resolve it as the cache dir and remove it.
+    assert!(
+        stderr.contains("WARNING: ACT_CACHE_DIR="),
+        "the rejected symlink override must be named on stderr:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("points to an unsafe path, using default"),
+        "the rejection must say the path is unsafe:\n{stderr}"
+    );
+    assert!(
+        symlink.exists(),
+        "the rejected symlink must survive the run"
+    );
 }
 
 #[test]
@@ -108,5 +149,19 @@ fn clean_act_rejects_system_path_env_var() {
         .output()
         .unwrap();
 
-    assert!(output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "stderr: {stderr}");
+    // Real observations of the rejection: the override is named on stderr
+    // and the SIP-protected system path survives the run — a tripwire-less
+    // build would target it as the resolved cache dir.
+    assert!(
+        stderr.contains(
+            "[act] WARNING: ACT_CACHE_DIR=/System/Library points to an unsafe path, using default"
+        ),
+        "the rejected override must be named on stderr:\n{stderr}"
+    );
+    assert!(
+        std::path::Path::new("/System/Library").exists(),
+        "/System/Library must survive the rejected override"
+    );
 }

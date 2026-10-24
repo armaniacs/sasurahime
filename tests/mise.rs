@@ -125,7 +125,6 @@ fn clean_mise_active_version_is_never_deleted() {
         .output()
         .unwrap();
 
-    assert!(output.status.success());
     assert!(
         output.status.success(),
         "sasurahime exit={:?} stderr=[{}] stdout=[{}]",
@@ -133,9 +132,12 @@ fn clean_mise_active_version_is_never_deleted() {
         String::from_utf8_lossy(&output.stderr),
         String::from_utf8_lossy(&output.stdout)
     );
-    eprintln!(
-        "[TEST] post-clean dirs: {:?}",
-        std::fs::read_dir(installs)
+    // The named safety gate: the active version dir reported by
+    // `mise ls --current` must survive the clean.
+    assert!(
+        installs.join("24.15.0").exists(),
+        "the active version 24.15.0 must never be deleted, remaining: {:?}",
+        std::fs::read_dir(&installs)
             .ok()
             .map(|d| d
                 .filter_map(|e| e.ok())

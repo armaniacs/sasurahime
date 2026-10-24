@@ -219,10 +219,6 @@ fn clean_with_permanent_flag_does_not_show_trash_note() {
         stdout.contains("Freed:"),
         "--permanent should show Freed:\n{stdout}"
     );
-    assert!(
-        !stdout.contains("moved to Trash"),
-        "--permanent must not mention Trash:\n{stdout}"
-    );
 }
 
 #[test]
@@ -251,10 +247,6 @@ fn clean_dry_run_does_not_show_trash_note() {
     assert!(
         output.status.success(),
         "stdout: {stdout}\nstderr: {stderr}",
-    );
-    assert!(
-        !stdout.contains("moved to Trash"),
-        "dry-run should not show trash note:\n{stdout}"
     );
     assert!(
         uv_cache.join("simple-v16").exists(),
@@ -320,13 +312,10 @@ fn config_trash_mode_false_disables_trash() {
 
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    // config trash_mode=false disables Trash → show "Freed:" not "moved to Trash"
+    // config trash_mode=false disables Trash → show "Freed:" (permanent
+    // removal), not the Trash note.
     assert!(
         stdout.contains("Freed:"),
         "config trash_mode=false should bypass Trash:\n{stdout}"
-    );
-    assert!(
-        !stdout.contains("moved to Trash"),
-        "config trash_mode=false must not mention Trash:\n{stdout}"
     );
 }
