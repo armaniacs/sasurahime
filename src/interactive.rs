@@ -1,7 +1,7 @@
 use crate::cleaner::{Cleaner, ScanResult, ScanStatus};
 use crate::format::format_bytes;
 use anyhow::Result;
-use std::io::IsTerminal;
+use std::io::{BufRead, IsTerminal, Write};
 
 /// Build display items and their mapping to (cleaner_index, optional_sub_target).
 /// Pure function — no I/O, fully testable.
@@ -83,6 +83,107 @@ pub(crate) fn auto_clean_indices(
         .collect()
 }
 
+/// Ask a y/N question: write `prompt` verbatim to `out`, flush it, then read
+/// one line from `input`. Returns true only for a bare y/Y answer — n, any
+/// other word, an empty line and EOF all decline. The decline branch (print
+/// "Aborted.", return early) stays at the call sites because each entry
+/// point aborts differently. Reader and writer are parameters so the y/N
+/// skeleton is unit-testable and the xcode mid-clean check can prompt on
+/// stderr instead of stdout.
+pub(crate) fn ask_yn(
+    prompt: &str,
+    out: &mut dyn Write,
+    input: &mut dyn BufRead,
+) -> std::io::Result<bool> {
+    write!(out, "{prompt}")?;
+    out.flush()?;
+    let mut line = String::new();
+    input.read_line(&mut line)?;
+    Ok(line.trim().eq_ignore_ascii_case("y"))
+}
+
+/// stdin-backed `ask_yn` used by the interactive entries.
+pub(crate) fn confirm(prompt: &str, out: &mut dyn Write) -> std::io::Result<bool> {
+    let stdin = std::io::stdin();
+    let mut input = stdin.lock();
+    ask_yn(prompt, out, &mut input)
+}
+
+/// RAII bracket for the secondary-confirmation suppression inside cleaners:
+/// sets `generic::set_skip_confirm(true)` on creation and restores `false`
+/// on drop, so both interactive entry points share one bracket semantics.
+/// Bind it to a named local (`let _skip_confirm = ...`); `let _ = ...`
+/// would drop it at once.
+pub(crate) struct SkipConfirmGuard;
+
+impl SkipConfirmGuard {
+    pub(crate) fn new() -> Self {
+        crate::cleaners::generic::set_skip_confirm(true);
+        Self
+    }
+}
+
+impl Default for SkipConfirmGuard {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Drop for SkipConfirmGuard {
+    fn drop(&mut self) {
+        crate::cleaners::generic::set_skip_confirm(false);
+    }
+}
+
+/// Line shapes for the post-batch report. Both interactive entry points
+/// print the same failure and skip facts; run_auto's multi-target batch
+/// names the cleaner in every line, while the TUI whole-target branch runs
+/// one batch call per target and omits the name (the selection context
+/// already named it).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum ReportShape {
+    /// `Error cleaning {name}: {e}` and `  - {name}: {detail}`.
+    Named,
+    /// `Error: {e}` and `  - {detail}`.
+    Bare,
+}
+
+/// Print one batch run's per-target failures and skipped files to `out`.
+/// Failure output is deliberately not a run_batch callback (PBI-33 recorded
+/// decision, option b): run_batch only collects, and every caller reports
+/// after the batch — one shared path wins over per-failure immediacy.
+pub(crate) fn report_batch_failures(
+    out: &mut dyn Write,
+    summary: &crate::batch::BatchSummary,
+    shape: ReportShape,
+) -> std::io::Result<()> {
+    for (name, e) in &summary.failures {
+        match shape {
+            ReportShape::Named => writeln!(out, "Error cleaning {name}: {e}")?,
+            ReportShape::Bare => writeln!(out, "Error: {e}")?,
+        }
+    }
+    if !summary.skipped.is_empty() {
+        writeln!(
+            out,
+            "{} file(s) skipped due to errors (permission/lock):",
+            summary.skipped.len()
+        )?;
+        for (name, detail) in &summary.skipped {
+            match shape {
+                ReportShape::Named => writeln!(out, "  - {name}: {detail}")?,
+                ReportShape::Bare => writeln!(out, "  - {detail}")?,
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Print the closing "Total freed" line after a clean run.
+pub(crate) fn report_total_freed(out: &mut dyn Write, total_freed: u64) -> std::io::Result<()> {
+    writeln!(out, "\nTotal freed: {}", format_bytes(total_freed))
+}
+
 /// Non-interactive: clean every pruneable cleaner without prompting.
 /// Used by `--yes` flag.
 pub fn run_auto(cleaners: &[Box<dyn Cleaner>]) -> Result<()> {
@@ -130,21 +231,14 @@ pub fn run_auto(cleaners: &[Box<dyn Cleaner>]) -> Result<()> {
             pruneable_indices.len(),
             format_bytes(total_reclaimable),
         );
-        print!("Are you sure? [y/N] ");
-        {
-            use std::io::Write;
-            std::io::stdout().flush()?;
-        }
-        let mut input = String::new();
-        std::io::stdin().read_line(&mut input)?;
-        if !input.trim().eq_ignore_ascii_case("y") {
+        if !confirm("Are you sure? [y/N] ", &mut std::io::stdout())? {
             println!("Aborted.");
             return Ok(());
         }
     }
 
     // Suppress secondary confirmation prompts (TUI already asked above).
-    crate::cleaners::generic::set_skip_confirm(true);
+    let _skip_confirm = SkipConfirmGuard::new();
 
     // The one batch path: animated spinner per cleaner, accumulation, the
     // history guard and per-target error collection all live in
@@ -171,22 +265,13 @@ pub fn run_auto(cleaners: &[Box<dyn Cleaner>]) -> Result<()> {
     // run_batch's signature for one entry point while clean all, `auto`,
     // `caches` and the TUI whole-target branch already print collected
     // failures after the batch — one shared path wins over immediacy.
-    for (name, e) in &summary.failures {
-        eprintln!("Error cleaning {name}: {e}");
-    }
-    if !summary.skipped.is_empty() {
-        eprintln!(
-            "{} file(s) skipped due to errors (permission/lock):",
-            summary.skipped.len()
-        );
-        for (name, detail) in &summary.skipped {
-            eprintln!("  - {name}: {detail}");
-        }
-    }
+    report_batch_failures(&mut std::io::stderr(), &summary, ReportShape::Named)?;
 
-    crate::cleaners::generic::set_skip_confirm(false);
+    // Restore the secondary confirmation prompts before the total line —
+    // the same effect order as the old explicit pair of calls.
+    drop(_skip_confirm);
 
-    println!("\nTotal freed: {}", format_bytes(summary.total_freed));
+    report_total_freed(&mut std::io::stdout(), summary.total_freed)?;
     Ok(())
 }
 
@@ -229,21 +314,14 @@ pub fn run_interactive(cleaners: &[Box<dyn Cleaner>]) -> Result<()> {
     let total = compute_selected_total(&selected, &selection_mapping, &results, cleaners);
 
     println!("\nWill free approximately {}.", format_bytes(total));
-    print!("Proceed? [y/N] ");
-    {
-        use std::io::Write;
-        std::io::stdout().flush()?;
-    }
-    let mut input = String::new();
-    std::io::stdin().read_line(&mut input)?;
-    if !input.trim().eq_ignore_ascii_case("y") {
+    if !confirm("Proceed? [y/N] ", &mut std::io::stdout())? {
         println!("Aborted.");
         return Ok(());
     }
 
     // Suppress secondary confirmation prompts inside cleaners (TUI already
     // asked "Proceed?" above; re-confirming would be confusing).
-    crate::cleaners::generic::set_skip_confirm(true);
+    let _skip_confirm = SkipConfirmGuard::new();
 
     let mut freed: u64 = 0;
     for &si in &selected {
@@ -290,24 +368,15 @@ pub fn run_interactive(cleaners: &[Box<dyn Cleaner>]) -> Result<()> {
             freed += summary.total_freed;
             // This flow's error line names no cleaner; the skip report keeps
             // the single-target "path: reason" shape for the same reason.
-            for (_, e) in &summary.failures {
-                eprintln!("Error: {e}");
-            }
-            if !summary.skipped.is_empty() {
-                eprintln!(
-                    "{} file(s) skipped due to errors (permission/lock):",
-                    summary.skipped.len()
-                );
-                for (_, detail) in &summary.skipped {
-                    eprintln!("  - {detail}");
-                }
-            }
+            report_batch_failures(&mut std::io::stderr(), &summary, ReportShape::Bare)?;
         }
     }
 
-    crate::cleaners::generic::set_skip_confirm(false);
+    // Restore the secondary confirmation prompts before the total line —
+    // the same effect order as the old explicit pair of calls.
+    drop(_skip_confirm);
 
-    println!("\nTotal freed: {}", format_bytes(freed));
+    report_total_freed(&mut std::io::stdout(), freed)?;
     Ok(())
 }
 
@@ -530,5 +599,86 @@ mod tests {
         run_auto(&cleaners).unwrap();
 
         assert_eq!(calls.load(Ordering::SeqCst), 0);
+    }
+
+    // --- PBI-49: shared confirm / skip-confirm bracket / batch report ---
+
+    #[test]
+    fn ask_yn_y_confirms_and_writes_the_prompt_verbatim() {
+        let mut out: Vec<u8> = Vec::new();
+        let mut input = std::io::Cursor::new(b"y\n".as_slice());
+        let confirmed = ask_yn("Are you sure? [y/N] ", &mut out, &mut input).unwrap();
+        assert!(confirmed);
+        assert_eq!(out, b"Are you sure? [y/N] ");
+    }
+
+    #[test]
+    fn ask_yn_n_declines_so_the_call_site_aborts() {
+        let mut out: Vec<u8> = Vec::new();
+        let mut input = std::io::Cursor::new(b"n\n".as_slice());
+        let confirmed = ask_yn("Proceed? [y/N] ", &mut out, &mut input).unwrap();
+        assert!(!confirmed, "n must decline: both entry points abort on it");
+        assert_eq!(out, b"Proceed? [y/N] ");
+    }
+
+    #[test]
+    fn ask_yn_other_answers_and_eof_decline() {
+        for answer in ["\n", "no\n", "N\n", "yes\n", ""] {
+            let mut out: Vec<u8> = Vec::new();
+            let mut input = std::io::Cursor::new(answer.as_bytes());
+            assert!(
+                !ask_yn("?", &mut out, &mut input).unwrap(),
+                "{answer:?} must decline"
+            );
+        }
+    }
+
+    #[test]
+    fn report_batch_failures_named_shape_names_the_cleaner() {
+        let summary = crate::batch::BatchSummary {
+            total_freed: 0,
+            failures: vec![("brew".to_string(), "boom".to_string())],
+            skipped: vec![("a.log".to_string(), "locked".to_string())],
+        };
+        let mut out: Vec<u8> = Vec::new();
+        report_batch_failures(&mut out, &summary, ReportShape::Named).unwrap();
+        assert_eq!(
+            String::from_utf8(out).unwrap(),
+            "Error cleaning brew: boom\n1 file(s) skipped due to errors (permission/lock):\n  - a.log: locked\n"
+        );
+    }
+
+    #[test]
+    fn report_batch_failures_bare_shape_omits_the_name() {
+        let summary = crate::batch::BatchSummary {
+            total_freed: 0,
+            failures: vec![("brew".to_string(), "boom".to_string())],
+            skipped: vec![("a.log".to_string(), "locked".to_string())],
+        };
+        let mut out: Vec<u8> = Vec::new();
+        report_batch_failures(&mut out, &summary, ReportShape::Bare).unwrap();
+        assert_eq!(
+            String::from_utf8(out).unwrap(),
+            "Error: boom\n1 file(s) skipped due to errors (permission/lock):\n  - locked\n"
+        );
+    }
+
+    #[test]
+    fn report_batch_failures_silent_when_nothing_failed() {
+        let summary = crate::batch::BatchSummary {
+            total_freed: 0,
+            failures: vec![],
+            skipped: vec![],
+        };
+        let mut out: Vec<u8> = Vec::new();
+        report_batch_failures(&mut out, &summary, ReportShape::Named).unwrap();
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn report_total_freed_prints_the_closing_line() {
+        let mut out: Vec<u8> = Vec::new();
+        report_total_freed(&mut out, 2048).unwrap();
+        assert_eq!(String::from_utf8(out).unwrap(), "\nTotal freed: 2.0 KB\n");
     }
 }
