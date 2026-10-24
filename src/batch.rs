@@ -17,6 +17,14 @@ pub struct BatchSummary {
 /// post-clean notes, the single history-write guard, and per-target error
 /// collection. Skip policies stay at the call sites — they are genuinely
 /// different per entry point.
+///
+/// Reporter use per branch: the ANIMATED branch binds the cleaner's progress
+/// to the shared spinner (`with_spinner_result_progress`); the NON-animated
+/// branch passes `reporter` straight to the cleaner, so the caller's reporter
+/// carries the progress output while the plain spinner here is only a label —
+/// and enables no steady tick (no-tick-while-prompting: a cleaner on this
+/// path may still prompt). `reporter` is therefore only dead as a spinner
+/// source, never as the cleaner's progress sink.
 pub fn run_batch(
     cleaners: &[&dyn crate::cleaner::Cleaner],
     opts: &crate::cleaner::CleanOptions,
