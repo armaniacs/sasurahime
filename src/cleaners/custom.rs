@@ -173,6 +173,12 @@ mod tests {
 
     #[test]
     fn clean_deletes_contents_not_root() {
+        // Pin permanent deletion: the Global compat delegator resolves to the
+        // default trash mode otherwise, whose backend is TCC-blocked in this
+        // sandbox (bytes_freed 0). The test must pin the mode it needs instead
+        // of depending on ambient global state (PBI 46 guard scoping removed
+        // the accidental leaks this test used to rely on).
+        let _mode = crate::test_helpers::TrashModeGuard::set(false);
         let tmp = TempDir::new().unwrap();
         let cache_dir = tmp.path().join("my-cache");
         fs::create_dir_all(&cache_dir).unwrap();
