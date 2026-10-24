@@ -1,86 +1,75 @@
-use crate::cleaner::{CleanResult, Cleaner, ScanResult, ScanStatus};
+use crate::cleaner::{CleanResult, Cleaner, ScanResult};
 use crate::command::CommandRunner;
-use crate::format::dir_size;
 use crate::progress::ProgressReporter;
 use anyhow::Result;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-pub struct PreCommitCleaner {
-    home: PathBuf,
-    runner: Box<dyn CommandRunner>,
-}
+/// Thin wrapper over [`generic::CliFallbackCleaner`]: this cleaner differs
+/// from the shared adapter only in its cache-dir resolution (PRE_COMMIT_HOME /
+/// XDG_CACHE_HOME) and its CLI tool configuration, so the detect/clean
+/// skeleton lives in the adapter.
+pub struct PreCommitCleaner(super::generic::CliFallbackCleaner);
 
 impl PreCommitCleaner {
     pub fn new(home: &Path, runner: Box<dyn CommandRunner>) -> Self {
-        Self {
-            home: home.to_path_buf(),
+        Self(super::generic::CliFallbackCleaner::with_parts(
+            "pre-commit",
+            super::generic::CliFallbackConfig {
+                tool: "pre-commit",
+                args: &["clean"],
+                recreate: false,
+            },
+            home.to_path_buf(),
+            Box::new(|h: &Path| {
+                // Priority: $PRE_COMMIT_HOME > $XDG_CACHE_HOME/pre-commit > ~/.cache/pre-commit
+                // Each override value is validated BEFORE any subpath is joined.
+                if std::env::var("PRE_COMMIT_HOME").is_ok() {
+                    return super::generic::resolve_env_dir(
+                        "PRE_COMMIT_HOME",
+                        "",
+                        h.join(".cache/pre-commit"),
+                        "pre-commit",
+                    );
+                }
+                super::generic::resolve_env_dir(
+                    "XDG_CACHE_HOME",
+                    "pre-commit",
+                    h.join(".cache/pre-commit"),
+                    "pre-commit",
+                )
+            }),
             runner,
-        }
+        ))
     }
 
-    fn cache_dir(&self) -> PathBuf {
-        // Priority: $PRE_COMMIT_HOME > $XDG_CACHE_HOME/pre-commit > ~/.cache/pre-commit
-        // Each override value is validated BEFORE any subpath is joined.
-        if std::env::var("PRE_COMMIT_HOME").is_ok() {
-            return super::generic::resolve_env_dir(
-                "PRE_COMMIT_HOME",
-                "",
-                self.home.join(".cache/pre-commit"),
-                "pre-commit",
-            );
-        }
-        super::generic::resolve_env_dir(
-            "XDG_CACHE_HOME",
-            "pre-commit",
-            self.home.join(".cache/pre-commit"),
-            "pre-commit",
-        )
+    #[cfg(test)]
+    pub(crate) fn cache_dir(&self) -> std::path::PathBuf {
+        self.0.cache_dir()
     }
 }
 
 impl Cleaner for PreCommitCleaner {
     fn risk(&self) -> crate::cleaner::Risk {
-        crate::cleaner::Risk::Safe
+        self.0.risk()
     }
 
     fn name(&self) -> &'static str {
-        "pre-commit"
+        self.0.name()
     }
 
     fn detect(&self) -> ScanResult {
-        let dir = self.cache_dir();
-        if !dir.exists() {
-            return ScanResult::new(self.name(), ScanStatus::NotFound);
-        }
-        let bytes = dir_size(&dir);
-        let mut r = ScanResult::new(
-            self.name(),
-            if bytes > 0 {
-                ScanStatus::Pruneable(bytes)
-            } else {
-                ScanStatus::Clean
-            },
-        );
-        if crate::context::is_verbose() {
-            r = r.with_target(self.cache_dir().to_string_lossy().to_string());
-        }
-        r
+        self.0.detect()
     }
 
-    fn clean(&self, dry_run: bool, _reporter: &dyn ProgressReporter) -> Result<CleanResult> {
-        let dir = self.cache_dir();
-        let config = super::generic::CliFallbackConfig {
-            tool: "pre-commit",
-            args: &["clean"],
-            recreate: false,
-        };
-        super::generic::clean_cli_or_fallback(self.name(), &dir, &*self.runner, &config, dry_run)
+    fn clean(&self, dry_run: bool, reporter: &dyn ProgressReporter) -> Result<CleanResult> {
+        self.0.clean(dry_run, reporter)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cleaner::ScanStatus;
     use crate::cleaners::generic::resolve_env_dir;
     use crate::command::{CommandRunner, SystemCommandRunner};
     use crate::test_helpers::EnvGuard;

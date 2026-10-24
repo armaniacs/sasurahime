@@ -991,6 +991,82 @@ pub struct CliFallbackConfig<'a> {
     pub recreate: bool,
 }
 
+/// Shared adapter for cleaners that run a CLI tool with a fallback delete.
+///
+/// huggingface and pre-commit differ only in their cache-dir resolution and
+/// their [`CliFallbackConfig`] values; the detect/clean skeleton used to be
+/// duplicated per module. The wrappers own their constructors and delegate
+/// here, so the skeleton lives once.
+pub struct CliFallbackCleaner {
+    name: &'static str,
+    config: CliFallbackConfig<'static>,
+    home: PathBuf,
+    resolve_cache_dir: Box<dyn Fn(&Path) -> PathBuf + Send + Sync>,
+    runner: Box<dyn CommandRunner>,
+}
+
+impl CliFallbackCleaner {
+    pub(crate) fn with_parts(
+        name: &'static str,
+        config: CliFallbackConfig<'static>,
+        home: PathBuf,
+        resolve_cache_dir: Box<dyn Fn(&Path) -> PathBuf + Send + Sync>,
+        runner: Box<dyn CommandRunner>,
+    ) -> Self {
+        Self {
+            name,
+            config,
+            home,
+            resolve_cache_dir,
+            runner,
+        }
+    }
+
+    pub(crate) fn cache_dir(&self) -> PathBuf {
+        (self.resolve_cache_dir)(&self.home)
+    }
+}
+
+impl Cleaner for CliFallbackCleaner {
+    fn risk(&self) -> crate::cleaner::Risk {
+        crate::cleaner::Risk::Safe
+    }
+
+    fn name(&self) -> &'static str {
+        self.name
+    }
+
+    fn detect(&self) -> ScanResult {
+        let dir = self.cache_dir();
+        if !dir.exists() {
+            return ScanResult::new(self.name(), ScanStatus::NotFound);
+        }
+        let bytes = dir_size(&dir);
+        let mut r = ScanResult::new(
+            self.name(),
+            if bytes > 0 {
+                ScanStatus::Pruneable(bytes)
+            } else {
+                ScanStatus::Clean
+            },
+        );
+        if crate::context::is_verbose() {
+            r = r.with_target(dir.to_string_lossy().to_string());
+        }
+        r
+    }
+
+    fn clean(&self, dry_run: bool, _reporter: &dyn ProgressReporter) -> Result<CleanResult> {
+        clean_cli_or_fallback(
+            self.name(),
+            &self.cache_dir(),
+            &*self.runner,
+            &self.config,
+            dry_run,
+        )
+    }
+}
+
 /// Run a CLI tool to clean a cache directory, falling back to direct deletion
 /// when the tool is not installed.
 ///

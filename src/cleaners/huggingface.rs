@@ -1,83 +1,72 @@
-use crate::cleaner::{CleanResult, Cleaner, ScanResult, ScanStatus};
+use crate::cleaner::{CleanResult, Cleaner, ScanResult};
 use crate::command::CommandRunner;
-use crate::format::dir_size;
 use crate::progress::ProgressReporter;
 use anyhow::Result;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-pub struct HuggingFaceCleaner {
-    home: PathBuf,
-    runner: Box<dyn CommandRunner>,
-}
+/// Thin wrapper over [`generic::CliFallbackCleaner`]: this cleaner differs
+/// from the shared adapter only in its cache-dir resolution (HF_HOME) and its
+/// CLI tool configuration, so the detect/clean skeleton lives in the adapter.
+pub struct HuggingFaceCleaner(super::generic::CliFallbackCleaner);
 
 impl HuggingFaceCleaner {
     pub fn new(home: &Path, runner: Box<dyn CommandRunner>) -> Self {
-        Self {
-            home: home.to_path_buf(),
+        Self(super::generic::CliFallbackCleaner::with_parts(
+            "huggingface",
+            super::generic::CliFallbackConfig {
+                tool: "huggingface-cli",
+                args: &["delete-cache", "--yes"],
+                recreate: true,
+            },
+            home.to_path_buf(),
+            Box::new(|h: &Path| {
+                // The HF_HOME value itself is validated BEFORE "hub" is joined, so a
+                // root-adjacent value (e.g. HF_HOME=/) falls back to the default
+                // instead of producing a joined path that passes the safety check.
+                super::generic::resolve_env_dir(
+                    "HF_HOME",
+                    "hub",
+                    h.join(".cache/huggingface/hub"),
+                    "huggingface",
+                )
+            }),
             runner,
-        }
+        ))
     }
 
-    fn cache_dir(&self) -> PathBuf {
-        // The HF_HOME value itself is validated BEFORE "hub" is joined, so a
-        // root-adjacent value (e.g. HF_HOME=/) falls back to the default
-        // instead of producing a joined path that passes the safety check.
-        super::generic::resolve_env_dir(
-            "HF_HOME",
-            "hub",
-            self.home.join(".cache/huggingface/hub"),
-            "huggingface",
-        )
+    #[cfg(test)]
+    pub(crate) fn cache_dir(&self) -> std::path::PathBuf {
+        self.0.cache_dir()
     }
 }
 
 impl Cleaner for HuggingFaceCleaner {
     fn risk(&self) -> crate::cleaner::Risk {
-        crate::cleaner::Risk::Safe
+        self.0.risk()
     }
 
     fn name(&self) -> &'static str {
-        "huggingface"
+        self.0.name()
     }
 
     fn detect(&self) -> ScanResult {
-        let dir = self.cache_dir();
-        if !dir.exists() {
-            return ScanResult::new(self.name(), ScanStatus::NotFound);
-        }
-        let bytes = dir_size(&dir);
-        let mut r = ScanResult::new(
-            self.name(),
-            if bytes > 0 {
-                ScanStatus::Pruneable(bytes)
-            } else {
-                ScanStatus::Clean
-            },
-        );
-        if crate::context::is_verbose() {
-            r = r.with_target(self.cache_dir().to_string_lossy().to_string());
-        }
-        r
+        self.0.detect()
     }
 
-    fn clean(&self, dry_run: bool, _reporter: &dyn ProgressReporter) -> Result<CleanResult> {
-        let dir = self.cache_dir();
-        let config = super::generic::CliFallbackConfig {
-            tool: "huggingface-cli",
-            args: &["delete-cache", "--yes"],
-            recreate: true,
-        };
-        super::generic::clean_cli_or_fallback(self.name(), &dir, &*self.runner, &config, dry_run)
+    fn clean(&self, dry_run: bool, reporter: &dyn ProgressReporter) -> Result<CleanResult> {
+        self.0.clean(dry_run, reporter)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cleaner::ScanStatus;
     use crate::cleaners::generic::resolve_env_dir;
     use crate::command::{CommandRunner, SystemCommandRunner};
     use crate::test_helpers::EnvGuard;
     use std::fs;
+    use std::path::PathBuf;
     use std::process::Output;
     use tempfile::TempDir;
 
