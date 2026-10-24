@@ -46,6 +46,12 @@ impl DeleteCtx {
     /// is on, otherwise a permanent remove.
     pub fn delete_path(&self, path: &Path) -> Result<()> {
         if self.trash_mode.resolve() {
+            #[cfg(test)]
+            if trash_backend_override_enabled() {
+                return Err(anyhow::anyhow!(
+                    "trash failed: simulated refusing backend (test override)"
+                ));
+            }
             trash::delete(path).map_err(|e| anyhow::anyhow!("trash failed: {e}"))
         } else if path.is_dir() {
             fs::remove_dir_all(path)
@@ -62,6 +68,46 @@ pub fn set_trash_mode(enabled: bool) {
 
 pub fn is_trash_mode() -> bool {
     TRASH_MODE.load(Ordering::Relaxed)
+}
+
+// ── test-only backend override ──
+
+#[cfg(test)]
+static TRASH_BACKEND_OVERRIDE: AtomicBool = AtomicBool::new(false);
+
+/// Simulates a refusing trash backend so the seam's skip classification and
+/// claims can be exercised deterministically. The platform backends (Finder
+/// via osascript, `trashItemAtURL` via trashd) move entries out of read-only
+/// parent directories on modern macOS, so a chmod alone no longer forces the
+/// refusal the tests need. Install under TEST_LOCK; the guard restores the
+/// default backend on drop.
+#[cfg(test)]
+pub fn set_trash_backend_override(enabled: bool) {
+    TRASH_BACKEND_OVERRIDE.store(enabled, Ordering::Relaxed);
+}
+
+#[cfg(test)]
+fn trash_backend_override_enabled() -> bool {
+    TRASH_BACKEND_OVERRIDE.load(Ordering::Relaxed)
+}
+
+/// Installs the test-only override and restores the default backend on drop.
+#[cfg(test)]
+pub struct TrashBackendOverrideGuard;
+
+#[cfg(test)]
+impl TrashBackendOverrideGuard {
+    pub fn set() -> Self {
+        set_trash_backend_override(true);
+        Self
+    }
+}
+
+#[cfg(test)]
+impl Drop for TrashBackendOverrideGuard {
+    fn drop(&mut self) {
+        set_trash_backend_override(false);
+    }
 }
 
 /// Test/compat-only bypass of the [`safe_delete`] seam over [`DeleteCtx`]:
