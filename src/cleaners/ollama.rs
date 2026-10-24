@@ -1,6 +1,6 @@
 use crate::cleaner::{CleanResult, Cleaner, ScanResult, ScanStatus};
 use crate::command::CommandRunner;
-use crate::format::dir_size;
+use crate::format::{dir_size, parse_size_str, SizeUnits};
 use crate::progress::ProgressReporter;
 use anyhow::Result;
 use std::path::{Path, PathBuf};
@@ -35,7 +35,15 @@ impl OllamaCleaner {
             let parts: Vec<&str> = line.split_whitespace().collect();
             if parts.len() >= 3 {
                 let name = parts[0].to_string();
-                let size = parse_model_size(parts.get(2).unwrap_or(&"0B"));
+                // PBI-51: `parse_model_size` returns `None` for unparseable
+                // sizes (e.g. an "unknown" SIZE column from a future or
+                // localized `ollama list`). Defaulting to 0 bytes here is
+                // deliberate, not a silent fallback: `ollama list` output is
+                // best-effort and must not fail the whole listing, and a 0
+                // keeps `total_size()` sums and freed-bytes reports sane — a
+                // zero-size row simply contributes nothing and is never
+                // preferred over a parseable size.
+                let size = parse_model_size(parts.get(2).unwrap_or(&"0B")).unwrap_or(0);
                 models.push(OllamaModel { name, size });
             }
         }
@@ -57,20 +65,15 @@ impl OllamaCleaner {
     }
 }
 
-fn parse_model_size(s: &str) -> u64 {
-    let s = s.trim();
-    if let Some(n) = s.strip_suffix("GB") {
-        let v: f64 = n.trim().parse().unwrap_or(0.0);
-        (v * 1_073_741_824.0) as u64
-    } else if let Some(n) = s.strip_suffix("MB") {
-        let v: f64 = n.trim().parse().unwrap_or(0.0);
-        (v * 1_048_576.0) as u64
-    } else if let Some(n) = s.strip_suffix("KB") {
-        let v: f64 = n.trim().parse().unwrap_or(0.0);
-        (v * 1_024.0) as u64
-    } else {
-        0
-    }
+/// Parses a model size string from `ollama list` output (e.g. "4.7GB") into
+/// bytes using binary units. Returns `None` for unparseable input.
+///
+/// PBI-51: this used to be a weak local copy of brew's parser that silently
+/// returned 0 for garbage via `unwrap_or(0.0)`; it now delegates to the shared
+/// [`crate::format::parse_size_str`] and surfaces the failure as `None` so the
+/// caller can decide the default explicitly.
+fn parse_model_size(s: &str) -> Option<u64> {
+    parse_size_str(s, SizeUnits::Binary)
 }
 
 impl Cleaner for OllamaCleaner {
@@ -284,16 +287,47 @@ mod tests {
         assert_eq!(models[0].size, (2.0_f64 * 1_073_741_824.0) as u64);
     }
 
+    // PBI-51: `parse_model_size` now returns `Option<u64>` (explicit `None`
+    // handling instead of a silent 0), so the assertions wrap the value in
+    // `Some`; the parsed bytes are unchanged.
     #[test]
     fn parse_model_size_gb() {
         assert_eq!(
             parse_model_size("4.7GB"),
-            (4.7_f64 * 1_073_741_824.0) as u64
+            Some((4.7_f64 * 1_073_741_824.0) as u64)
         );
     }
 
     #[test]
     fn parse_model_size_mb() {
-        assert_eq!(parse_model_size("234MB"), (234.0_f64 * 1_048_576.0) as u64);
+        assert_eq!(
+            parse_model_size("234MB"),
+            Some((234.0_f64 * 1_048_576.0) as u64)
+        );
+    }
+
+    // PBI-51: garbage input must surface as `None` (handled explicitly at the
+    // `list_models` call site), not a silent 0 from `unwrap_or(0.0)`.
+    #[test]
+    fn parse_model_size_garbage_returns_none() {
+        assert_eq!(parse_model_size("unknown"), None);
+        assert_eq!(parse_model_size(""), None);
+        assert_eq!(parse_model_size("12.3.4GB"), None);
+    }
+
+    #[test]
+    fn list_models_garbage_size_defaults_to_zero_explicitly() {
+        let output = "NAME\tID\tSIZE\tMODIFIED\nllama3.2:3b\tabc123\tunknown\t2 days ago\n";
+        let runner = MockOllamaRunner {
+            list_output: output.to_string(),
+        };
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cleaner = OllamaCleaner::new(tmp.path(), Box::new(runner));
+        let models = cleaner.list_models().unwrap();
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0].name, "llama3.2:3b");
+        // Explicit call-site default (see comment in `list_models`): an
+        // unparseable SIZE column contributes 0 bytes, never a mis-parse.
+        assert_eq!(models[0].size, 0);
     }
 }

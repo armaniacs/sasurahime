@@ -1,6 +1,6 @@
 use crate::cleaner::{CleanResult, Cleaner, ScanResult, ScanStatus};
 use crate::command::CommandRunner;
-use crate::format::{dir_size, format_bytes};
+use crate::format::{dir_size, format_bytes, parse_size_str, SizeUnits};
 use crate::progress::ProgressReporter;
 use anyhow::Result;
 use std::path::{Path, PathBuf};
@@ -20,33 +20,12 @@ impl BrewCleaner {
 
     /// Parses a size string like "16.6GB", "194.3MB", "1 GB", or "512kb"
     /// (case-insensitive, space-separated or joined) into bytes.
+    ///
+    /// Kept as a wrapper (PBI-51): the implementation now lives in the shared
+    /// [`crate::format::parse_size_str`] with binary units, matching
+    /// [`crate::format::format_bytes`]; behavior and tests are unchanged.
     pub fn parse_size_str(s: &str) -> Option<u64> {
-        // Space-separated form: "194.3 MB" → ("194.3", "MB")
-        if let Some((num, unit)) = s.split_once(' ') {
-            let v: f64 = num.trim().parse().ok()?;
-            let u = unit.trim().to_ascii_uppercase();
-            return Some(match u.as_str() {
-                "GB" => (v * 1_073_741_824.0) as u64,
-                "MB" => (v * 1_048_576.0) as u64,
-                "KB" => (v * 1_024.0) as u64,
-                _ => return None,
-            });
-        }
-
-        // Joined form: "16.6GB" / "512kb" / "1.0Gb"
-        let upper = s.to_ascii_uppercase();
-        if let Some(n) = upper.strip_suffix("GB") {
-            let v: f64 = n.parse().ok()?;
-            Some((v * 1_073_741_824.0) as u64)
-        } else if let Some(n) = upper.strip_suffix("MB") {
-            let v: f64 = n.parse().ok()?;
-            Some((v * 1_048_576.0) as u64)
-        } else if let Some(n) = upper.strip_suffix("KB") {
-            let v: f64 = n.parse().ok()?;
-            Some((v * 1_024.0) as u64)
-        } else {
-            None
-        }
+        parse_size_str(s, SizeUnits::Binary)
     }
 
     /// Extracts freed bytes from brew's output line:
