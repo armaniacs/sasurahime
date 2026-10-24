@@ -64,9 +64,12 @@ pub fn is_trash_mode() -> bool {
     TRASH_MODE.load(Ordering::Relaxed)
 }
 
-/// Compat wrapper over [`DeleteCtx`]: reads the process-global mode that
-/// `main` sets once per run. Cleaner-level call sites keep using this until
-/// the trait carries a `DeleteCtx`.
+/// Test/compat-only bypass of the [`safe_delete`] seam over [`DeleteCtx`]:
+/// reads the process-global mode that `main` pins once per run. The
+/// `Cleaner` trait now carries a [`DeleteCtx`], so cleaner-level call sites
+/// go through the seam (`safe_delete`) instead; unlike the seam, this
+/// wrapper runs no scope tripwire and no chflags pre-step, and it exists for
+/// tests and legacy callers only.
 pub fn delete_path(path: &Path) -> Result<()> {
     DeleteCtx::new(TrashMode::Global).delete_path(path)
 }
@@ -93,12 +96,15 @@ pub struct DeleteOutcome {
 /// permanent remove (warning and continuing when the clear fails), deletes
 /// according to `mode`, and classifies failures into skippable vs fatal.
 ///
-/// Every deletion in the codebase goes through here so the CLAUDE.md safety
-/// rules concentrate in one module instead of living as copy-pasted
-/// incantations at each call site: uchg handling, mode resolution and skip
-/// classification are the seam's job, and the enforced scope check keeps the
-/// deletion safety rules (which paths may be deleted at all) in that same
-/// single module.
+/// Every PathCleaner-based deletion in the codebase goes through here so the
+/// CLAUDE.md safety rules concentrate in one module instead of living as
+/// copy-pasted incantations at each call site. External tools delete
+/// themselves outside this seam (`uv cache prune`, `brew cleanup`,
+/// `ollama rm` and friends run their own removals via
+/// [`crate::command::CommandRunner`]), so uchg handling, mode resolution and
+/// skip classification are the seam's job for the deletions it mediates, and
+/// the enforced scope check keeps the deletion safety rules (which paths may
+/// be deleted at all) in that same single module.
 pub fn safe_delete(
     runner: &dyn crate::command::CommandRunner,
     path: &Path,
@@ -112,8 +118,16 @@ pub fn safe_delete(
         log::warn!("refusing to delete unsafe path: {}", path.display());
         anyhow::bail!("refusing to delete unsafe path: {}", path.display());
     }
-    // The uchg rule guards permanent removal (`rm -rf`); a Trash move is
-    // reversible and Finder handles flags itself.
+    // The uchg rule guards permanent removal (`rm -rf`). Under trash mode no
+    // chflags is run: the vendored `trash` crate (5.2.6) performs no flag
+    // handling itself — its default Finder backend spawns `osascript -e 'tell
+    // application "Finder" to delete { POSIX file "..." }'` and its
+    // NsFileManager backend calls `NSFileManager::trashItemAtURL`, both
+    // delegating the move (and any flag behavior) outside the crate, so
+    // whether Finder clears or refuses a uchg-locked item is not decidable
+    // from the crate source. If the backend refuses, the error reaches this
+    // crate as "trash failed: ..." and is_skippable_error classifies it as
+    // skippable: the locked entry is skipped and the clean run continues.
     if !mode.resolve() {
         let path_str = path.to_string_lossy();
         if let Err(e) = runner.run("chflags", &["-R", "nouchg", &path_str]) {
