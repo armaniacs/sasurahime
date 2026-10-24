@@ -47,6 +47,63 @@ pub fn format_bytes(bytes: u64) -> String {
     }
 }
 
+/// Unit system for [`parse_size_str`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SizeUnits {
+    /// Binary units: 1 KB = 1024 B, 1 MB = 1024*1024 B, 1 GB = 1024^3 bytes
+    /// (matches [`format_bytes`] and `du`-style disk usage reporting).
+    Binary,
+    /// Decimal units: 1 KB = 1000 B, 1 MB = 1000*1000 B, 1 GB = 10^9 bytes
+    /// (matches the `tmutil` reporting convention, 10 GB = 10,000,000,000).
+    Decimal,
+}
+
+impl SizeUnits {
+    /// Byte multiplier for a unit suffix already normalized to uppercase,
+    /// or `None` when the suffix is not a supported size unit.
+    fn multiplier(self, unit: &str) -> Option<f64> {
+        let (kb, mb, gb) = match self {
+            SizeUnits::Binary => (1_024.0, 1_048_576.0, 1_073_741_824.0),
+            SizeUnits::Decimal => (1_000.0, 1_000_000.0, 1_000_000_000.0),
+        };
+        match unit {
+            "KB" => Some(kb),
+            "MB" => Some(mb),
+            "GB" => Some(gb),
+            _ => None,
+        }
+    }
+}
+
+/// Parses a human-readable size string like `"16.6GB"`, `"194.3 MB"`, or
+/// `"512kb"` (case-insensitive, space-separated or joined) into bytes using
+/// the unit system in `units`. Returns `None` for unparseable input (empty
+/// strings, garbage, or unsupported units) so callers can handle the failure
+/// explicitly instead of silently reading a 0 (PBI-51).
+///
+/// Binary units pair with [`format_bytes`]. Decimal units follow the `tmutil`
+/// convention; the `src/cleaners/apfs_snapshot.rs` decimal parser intentionally
+/// stays a separate stricter implementation (it also rejects GiB/zero/negative/
+/// non-finite input and caps at 1 PB).
+pub fn parse_size_str(s: &str, units: SizeUnits) -> Option<u64> {
+    // Space-separated form: "194.3 MB" → ("194.3", "MB")
+    if let Some((num, unit)) = s.split_once(' ') {
+        let v: f64 = num.trim().parse().ok()?;
+        let u = unit.trim().to_ascii_uppercase();
+        return Some((v * units.multiplier(&u)?) as u64);
+    }
+
+    // Joined form: "16.6GB" / "512kb" / "1.0Gb"
+    let upper = s.to_ascii_uppercase();
+    for suffix in ["GB", "MB", "KB"] {
+        if let Some(n) = upper.strip_suffix(suffix) {
+            let v: f64 = n.parse().ok()?;
+            return Some((v * units.multiplier(suffix)?) as u64);
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -131,5 +188,81 @@ mod tests {
     #[test]
     fn format_bytes_b() {
         assert_eq!(format_bytes(512), "512 B");
+    }
+
+    // ── parse_size_str (PBI-51: shared binary/decimal size parser) ─────────
+
+    #[test]
+    fn parse_size_str_binary_joined_forms() {
+        assert_eq!(
+            parse_size_str("16.6GB", SizeUnits::Binary),
+            Some((16.6_f64 * 1_073_741_824.0) as u64)
+        );
+        assert_eq!(
+            parse_size_str("194.3MB", SizeUnits::Binary),
+            Some((194.3_f64 * 1_048_576.0) as u64)
+        );
+        assert_eq!(
+            parse_size_str("512kb", SizeUnits::Binary),
+            Some(512 * 1_024)
+        );
+    }
+
+    #[test]
+    fn parse_size_str_binary_space_separated_form() {
+        // brew's space-separated form must survive the unification (PBI-51).
+        assert_eq!(
+            parse_size_str("194.3 MB", SizeUnits::Binary),
+            Some((194.3_f64 * 1_048_576.0) as u64)
+        );
+        assert_eq!(
+            parse_size_str("1.0 GB", SizeUnits::Binary),
+            Some(1_073_741_824)
+        );
+    }
+
+    #[test]
+    fn parse_size_str_binary_is_case_insensitive() {
+        assert_eq!(
+            parse_size_str("1.0Gb", SizeUnits::Binary),
+            Some(1_073_741_824)
+        );
+        assert_eq!(
+            parse_size_str("2.0mB", SizeUnits::Binary),
+            Some(2 * 1_048_576)
+        );
+        assert_eq!(parse_size_str("0GB", SizeUnits::Binary), Some(0));
+    }
+
+    #[test]
+    fn parse_size_str_garbage_returns_none() {
+        // PBI-51: garbage must surface as `None`, never a silent 0.
+        assert_eq!(parse_size_str("unknown", SizeUnits::Binary), None);
+        assert_eq!(parse_size_str("abc", SizeUnits::Binary), None);
+        assert_eq!(parse_size_str("", SizeUnits::Binary), None);
+        assert_eq!(parse_size_str("12.3.4GB", SizeUnits::Binary), None);
+        assert_eq!(parse_size_str("12.3 TB", SizeUnits::Binary), None);
+        assert_eq!(parse_size_str("12.3GiB", SizeUnits::Binary), None);
+    }
+
+    #[test]
+    fn parse_size_str_decimal_matches_tmutil_convention() {
+        // Decimal units: 10 GB = 10,000,000,000 bytes (tmutil convention),
+        // NOT 10 * 1024^3.
+        assert_eq!(
+            parse_size_str("10 GB", SizeUnits::Decimal),
+            Some(10_000_000_000)
+        );
+        assert_eq!(
+            parse_size_str("1.5GB", SizeUnits::Decimal),
+            Some(1_500_000_000)
+        );
+        assert_eq!(parse_size_str("512kb", SizeUnits::Decimal), Some(512_000));
+    }
+
+    #[test]
+    fn parse_size_str_decimal_garbage_returns_none() {
+        assert_eq!(parse_size_str("GiB", SizeUnits::Decimal), None);
+        assert_eq!(parse_size_str("unknown", SizeUnits::Decimal), None);
     }
 }
