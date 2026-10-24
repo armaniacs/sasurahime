@@ -30,8 +30,28 @@ improve-codebase-architecture による探索（コアフロー + cleaners/ 全 
 
 ## 後日候補（PBI 化せず、再評価待ち）
 
-- uv/brew/huggingface/pre_commit の CleanerSpec テーブル化（候補 8）— PBI 20 落地後に再評価
+- uv/brew/huggingface/pre_commit の CleanerSpec テーブル化（候補 8）― PBI 20 落地後に再評価
 - filter_support() の trait データ化、TUI/explorer の自己再実行の in-process 化、HOME 3 系統解決の統一、サイズパーサ 3 実装の統一、共有 interactive スケルトン
+
+## 再評価 (2026-10-24)
+
+file:line 実測の再評価（読み取り専用エージェント）で、後日候補 6 件を判定した:
+
+| 項目 | 判定 | 根拠 |
+|---|---|---|
+| 候補 8: uv/brew/hf/pre_commit テーブル化 | RESOLVED | 4 つとも define_cleaners! 表の単一行（main.rs:100-104, 181-185）。表外の特殊 dispatch は 0 件。hf/pre_commit は CliFallbackConfig データアダプタ済み。残存は約 55 行のアダプタ boilerplate のみ（スコア約 4、PBI 不値） |
+| filter_support() の trait データ化 | RESOLVED | main.rs:634-647 が trait メソッド per_cleaner_filters()（cleaner.rs:239-240、override generic.rs:386/646, log.rs:132）を照会済み |
+| TUI/explorer 自己再実行の in-process 化 | STILL REAL | interactive.rs:256-258（bytes_freed: 0 捏造で Total freed 過小表示）+ explorer.rs:245+278-290。サブターゲット掃除の in-process シームなし。スコア約 11 |
+| HOME 3 系統解決の統一 | PARTIAL | 4 サイト 2 セマンティクス + generic.rs:851-855 の stale コメント（PBI 47 の修正で main.rs:482 は空 HOME をフィルタするようになり、コメントの主張が偽になった）。スコア 64 |
+| サイズパーサ 3 実装の統一 | STILL REAL | brew.rs:23-50（堅牢）と ollama.rs:60-74（弱いコピー、ゴミ入力で黙って 0）を統一。apfs_snapshot.rs:64-95 は tmutil 規約の 10 進版として別実装に保つ。スコア約 5 |
+| 共有 interactive スケルトン | PARTIAL | batch シームと純粋ヘルパー抽出は済み。残りは y/N 確認・set_skip_confirm ブラケット・バッチ報告印刷の 2 重複（約 40-50 行）。スコア 32 |
+
+### 採用とバッチ計画（2026-10-24）
+
+- PBI 化（RICE 順）: [48](<2026-10-24-48-fix-home-resolution-unify.md>)(64) > [49](<2026-10-24-49-fix-interactive-skeleton-shared-helpers.md>)(32) > [50](<2026-10-24-50-fix-tui-explorer-in-process-clean.md>)(約 11) > [51](<2026-10-24-51-fix-size-parser-unify.md>)(約 5)
+- バッチ A（並列・ファイル非重複）: PBI 48（main.rs / generic.rs / config.rs / history.rs）と PBI 49（interactive.rs）と PBI 51（brew / ollama / apfs_snapshot / format）
+- バッチ B（直列・A の main.rs / interactive.rs マージ後）: PBI 50（interactive.rs / explorer.rs / main.rs）
+- 候補 8 と filter_support は PBI 化せず RESOLVED として閉じる（残存 boilerplate は将来の cleanup に繰り入れ）
 
 ## 報告書
 
