@@ -51,7 +51,7 @@ file:line 実測の再評価（読み取り専用エージェント）で、後�
 - PBI 化（RICE 順）: [48](<2026-10-24-48-fix-home-resolution-unify.md>)(64) > [49](<2026-10-24-49-fix-interactive-skeleton-shared-helpers.md>)(32) > [50](<2026-10-24-50-fix-tui-explorer-in-process-clean.md>)(約 11) > [51](<2026-10-24-51-fix-size-parser-unify.md>)(約 5)
 - バッチ A（並列・ファイル非重複）: PBI 48（main.rs / generic.rs / config.rs / history.rs）と PBI 49（interactive.rs）と PBI 51（brew / ollama / apfs_snapshot / format）
 - バッチ B（直列・A の main.rs / interactive.rs マージ後）: PBI 50（interactive.rs / explorer.rs / main.rs）
-- 候補 8 と filter_support は PBI 化せず RESOLVED として閉じる（残存 boilerplate は将来の cleanup に繰り入れ）
+- 候補 8 と filter_support は PBI 化せず RESOLVED として閉じる（残存 boilerplate は 2026-10-24 に commit 7488c06 で共有化して閉じた）
 
 ## 報告書
 
