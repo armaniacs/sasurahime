@@ -146,6 +146,12 @@ pub fn with_spinner_result_progress<T, E: std::fmt::Display>(
     result
 }
 
+/// Plain (non-animated) spinner for flows whose cleaner may still prompt:
+/// run_batch's non-animated branch and the TUI sub-target subprocess. No
+/// steady tick (no-tick-while-prompting): a background tick would redraw the
+/// line under an in-cleaner prompt; message changes still redraw it. The
+/// animated counterpart is [`with_spinner_result_progress`], which passes the
+/// caller's animated choice to [`SharedSpinner`].
 pub fn with_spinner_result<T, E: std::fmt::Display>(
     msg: &str,
     f: impl FnOnce() -> Result<T, E>,
@@ -153,7 +159,6 @@ pub fn with_spinner_result<T, E: std::fmt::Display>(
     let pb = ProgressBar::new_spinner();
     pb.set_style(spinner_style().clone());
     pb.set_message(msg.to_string());
-    pb.enable_steady_tick(Duration::from_millis(100));
     let result = f();
     pb.finish_and_clear();
     if result.is_ok() {
@@ -491,5 +496,48 @@ mod tests {
         let result: Result<i32, &str> = with_spinner_result("test", || Err("boom"));
         assert!(result.is_err());
         assert_eq!(result.unwrap_err(), "boom");
+    }
+
+    #[test]
+    fn with_spinner_result_does_not_enable_a_steady_tick() {
+        // No-tick-while-prompting: the non-animated branch is the plain path
+        // of run_batch and the TUI sub-target subprocess, whose cleaner may
+        // still prompt. A steady tick would redraw the spinner under the
+        // prompt; ticks that redraw on message changes are enough. The
+        // animated path is with_spinner_result_progress, which passes the
+        // caller's choice to SharedSpinner. indicatif exposes no steady-tick
+        // accessor, so this pins the source instead.
+        let src = include_str!("progress.rs");
+        let start = src
+            .find("pub fn with_spinner_result<")
+            .expect("with_spinner_result source present");
+        let end = src[start..]
+            .find("/// Show a consolidated progress bar")
+            .map(|i| start + i)
+            .unwrap_or(src.len());
+        let body = &src[start..end];
+        assert!(
+            !body.contains("enable_steady_tick"),
+            "the non-animated with_spinner_result must not enable a steady tick (no-tick-while-prompting)"
+        );
+    }
+
+    #[test]
+    fn with_spinner_result_progress_keeps_the_animated_choice() {
+        // The animated branch must keep passing the caller's animated flag
+        // through to SharedSpinner: that is the only steady-tick path.
+        let src = include_str!("progress.rs");
+        let start = src
+            .find("pub fn with_spinner_result_progress<")
+            .expect("with_spinner_result_progress source present");
+        let end = src[start..]
+            .find("pub fn with_spinner_result<")
+            .map(|i| start + i)
+            .unwrap_or(src.len());
+        let body = &src[start..end];
+        assert!(
+            body.contains("animated"),
+            "the animated branch must carry the caller's animated flag"
+        );
     }
 }

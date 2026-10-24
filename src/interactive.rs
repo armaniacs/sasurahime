@@ -174,6 +174,15 @@ pub fn run_auto(cleaners: &[Box<dyn Cleaner>]) -> Result<()> {
     for (name, e) in &summary.failures {
         eprintln!("Error cleaning {name}: {e}");
     }
+    if !summary.skipped.is_empty() {
+        eprintln!(
+            "{} file(s) skipped due to errors (permission/lock):",
+            summary.skipped.len()
+        );
+        for (name, detail) in &summary.skipped {
+            eprintln!("  - {name}: {detail}");
+        }
+    }
 
     crate::cleaners::generic::set_skip_confirm(false);
 
@@ -279,9 +288,19 @@ pub fn run_interactive(cleaners: &[Box<dyn Cleaner>]) -> Result<()> {
                 false, // with_notes
             );
             freed += summary.total_freed;
-            // This flow's error line names no cleaner.
+            // This flow's error line names no cleaner; the skip report keeps
+            // the single-target "path: reason" shape for the same reason.
             for (_, e) in &summary.failures {
                 eprintln!("Error: {e}");
+            }
+            if !summary.skipped.is_empty() {
+                eprintln!(
+                    "{} file(s) skipped due to errors (permission/lock):",
+                    summary.skipped.len()
+                );
+                for (_, detail) in &summary.skipped {
+                    eprintln!("  - {detail}");
+                }
             }
         }
     }

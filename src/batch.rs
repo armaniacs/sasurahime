@@ -8,12 +8,23 @@ pub struct BatchSummary {
     pub total_freed: u64,
     /// Per-target failures (cleaner name + error), reported by the caller.
     pub failures: Vec<(String, String)>,
+    /// Per-entry skips (cleaner name + "path: reason"), reported by the
+    /// caller in the single-target "N file(s) skipped" shape.
+    pub skipped: Vec<(String, String)>,
 }
 
 /// The ONE batch execution path: spinner per cleaner, result accumulation,
 /// post-clean notes, the single history-write guard, and per-target error
 /// collection. Skip policies stay at the call sites — they are genuinely
 /// different per entry point.
+///
+/// Reporter use per branch: the ANIMATED branch binds the cleaner's progress
+/// to the shared spinner (`with_spinner_result_progress`); the NON-animated
+/// branch passes `reporter` straight to the cleaner, so the caller's reporter
+/// carries the progress output while the plain spinner here is only a label —
+/// and enables no steady tick (no-tick-while-prompting: a cleaner on this
+/// path may still prompt). `reporter` is therefore only dead as a spinner
+/// source, never as the cleaner's progress sink.
 pub fn run_batch(
     cleaners: &[&dyn crate::cleaner::Cleaner],
     opts: &crate::cleaner::CleanOptions,
@@ -25,6 +36,7 @@ pub fn run_batch(
     let mut summary = BatchSummary {
         total_freed: 0,
         failures: Vec::new(),
+        skipped: Vec::new(),
     };
     for c in cleaners {
         let msg = format!("Cleaning {}...", c.name());
@@ -42,6 +54,12 @@ pub fn run_batch(
         match result {
             Ok(r) => {
                 summary.total_freed += r.bytes_freed;
+                for s in &r.skipped {
+                    summary.skipped.push((
+                        c.name().to_string(),
+                        format!("{}: {}", s.path.display(), s.reason),
+                    ));
+                }
                 if with_notes {
                     let trash_mode = opts
                         .trash_mode
@@ -141,6 +159,71 @@ mod tests {
         fn clean(&self, _dry_run: bool, _rep: &dyn ProgressReporter) -> Result<CleanResult> {
             Err(anyhow::anyhow!("boom"))
         }
+    }
+
+    /// Stub cleaner that succeeds with one per-entry skip recorded
+    /// (seam-classified skippable failure, PBI-43 shape).
+    struct SkippingCleaner(&'static str);
+
+    impl crate::cleaner::Cleaner for SkippingCleaner {
+        fn name(&self) -> &'static str {
+            self.0
+        }
+        fn detect(&self) -> ScanResult {
+            ScanResult::new(self.0, ScanStatus::Clean)
+        }
+        fn clean(&self, _dry_run: bool, _rep: &dyn ProgressReporter) -> Result<CleanResult> {
+            Ok(CleanResult {
+                name: self.0,
+                bytes_freed: 0,
+                uses_trash: false,
+                skipped: vec![crate::cleaner::SkippedEntry {
+                    path: std::path::PathBuf::from("/tmp/locked-cache"),
+                    reason: "trash failed: boom".to_string(),
+                }],
+                deleted_paths: vec![],
+            })
+        }
+    }
+
+    #[test]
+    fn run_batch_carries_skipped_entries() {
+        // A per-entry skippable failure must be carried by the summary so
+        // every batch entry point can report it in the single-target
+        // "N file(s) skipped" shape.
+        let boxed: Vec<Box<dyn crate::cleaner::Cleaner>> = vec![
+            Box::new(SkippingCleaner("skip-a")),
+            Box::new(OkCleaner("ok-a")),
+        ];
+        let cleaners: Vec<&dyn crate::cleaner::Cleaner> =
+            boxed.iter().map(|b| b.as_ref()).collect();
+        let summary = run_batch(
+            &cleaners,
+            &CleanOptions::default(),
+            &crate::progress::SuppressReporter,
+            true,  // dry_run: never deletes and never writes history
+            false, // animated
+            false, // with_notes
+        );
+        assert_eq!(
+            summary.skipped.len(),
+            1,
+            "the one skipped entry must be carried by the summary"
+        );
+        assert_eq!(
+            summary.skipped[0].0, "skip-a",
+            "the skip must name the cleaner"
+        );
+        assert!(
+            summary.skipped[0].1.contains("locked-cache"),
+            "the skip must carry the path, got: {}",
+            summary.skipped[0].1
+        );
+        assert!(
+            summary.skipped[0].1.contains("trash failed"),
+            "the skip must carry the reason, got: {}",
+            summary.skipped[0].1
+        );
     }
 
     #[test]

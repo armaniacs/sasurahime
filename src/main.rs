@@ -7,7 +7,6 @@ use clap::{Parser, Subcommand};
 use cleaner::{CleanCancelled, CleanResult, Cleaner};
 use command::SystemCommandRunner;
 use config::Config;
-use dirs::home_dir;
 use progress::{build_reporter_from_flags, merge_suppress_flags, ProgressReporter};
 use std::path::PathBuf;
 
@@ -437,6 +436,10 @@ impl CleanTarget {
             CleanTarget::VmSwap { .. } => "vm-swap",
             CleanTarget::All { .. } => "all",
             CleanTarget::ProjectArtifacts { .. } => "project-artifacts",
+            // The external catch-all has no single CLI name: it carries raw
+            // args and is dispatched specially in run. A static marker keeps
+            // this call panic-free for every variant.
+            CleanTarget::External(_) => "external",
             _ => self.dispatch_command_name(),
         }
     }
@@ -455,6 +458,10 @@ impl CleanTarget {
             CleanTarget::VmSwap { dry_run } => *dry_run,
             CleanTarget::All { dry_run, .. } => *dry_run,
             CleanTarget::ProjectArtifacts { dry_run } => *dry_run,
+            // The external arm resolves its own dry-run two-position
+            // (global --dry-run OR a local one in the raw args); the enum
+            // level has no field, so the panic-free answer is false.
+            CleanTarget::External(_) => false,
             _ => self.dispatch_dry_run(),
         }
     }
@@ -467,9 +474,15 @@ fn extra_targets() -> &'static [(&'static str, &'static str)] {
 }
 
 fn home() -> PathBuf {
+    // An EMPTY HOME is filtered exactly like the tripwire's empty filter
+    // (is_safe_delete_target): PathBuf::from("") would silently resolve
+    // every cache/history path against the process CWD.
     std::env::var("HOME")
+        .ok()
+        .filter(|h| !h.is_empty())
         .map(PathBuf::from)
-        .unwrap_or_else(|_| home_dir().expect("cannot determine HOME directory"))
+        .or_else(dirs::home_dir)
+        .expect("cannot determine HOME directory")
 }
 
 /// Every cleaner whose `risk()` is not `Safe` is wrapped in `ManualOnly` so it
@@ -940,6 +953,15 @@ fn main() -> anyhow::Result<()> {
             for (name, e) in &summary.failures {
                 eprintln!("Error cleaning {name}: {e}");
             }
+            if !summary.skipped.is_empty() {
+                eprintln!(
+                    "{} file(s) skipped due to errors (permission/lock):",
+                    summary.skipped.len()
+                );
+                for (name, detail) in &summary.skipped {
+                    eprintln!("  - {name}: {detail}");
+                }
+            }
             if !skipped.is_empty() {
                 eprintln!("Skipped {} target(s):", skipped.len());
                 for s in &skipped {
@@ -954,6 +976,12 @@ fn main() -> anyhow::Result<()> {
             if json {
                 // Machine-readable output: no hints, no interactive prompt.
                 scanner::run_scan_json(&cleaners, &home);
+                // The early return below skips the trailing flush: warm the
+                // cache here too, or scripts that only ever run --json would
+                // never save detect results.
+                if !cli.no_cache {
+                    scan_cache::flush(&scan_cache_path);
+                }
                 return Ok(());
             }
             scanner::run_scan(&cleaners, &home);
@@ -1067,6 +1095,15 @@ fn main() -> anyhow::Result<()> {
                         );
                         for (name, e) in &summary.failures {
                             eprintln!("Error cleaning {name}: {e}");
+                        }
+                        if !summary.skipped.is_empty() {
+                            eprintln!(
+                                "{} file(s) skipped due to errors (permission/lock):",
+                                summary.skipped.len()
+                            );
+                            for (name, detail) in &summary.skipped {
+                                eprintln!("  - {name}: {detail}");
+                            }
                         }
                         println!("Total freed: {}", format::format_bytes(summary.total_freed));
                     }
@@ -1255,6 +1292,15 @@ fn main() -> anyhow::Result<()> {
                         for (name, e) in &summary.failures {
                             eprintln!("Error cleaning {name}: {e}");
                         }
+                        if !summary.skipped.is_empty() {
+                            eprintln!(
+                                "{} file(s) skipped due to errors (permission/lock):",
+                                summary.skipped.len()
+                            );
+                            for (name, detail) in &summary.skipped {
+                                eprintln!("  - {name}: {detail}");
+                            }
+                        }
                         if skipped_targets > 0 {
                             eprintln!(
                                 "Skipped {skipped_targets} target(s) that need --include-manual."
@@ -1387,6 +1433,32 @@ mod tests {
     use sasurahime::cleaner::CleanCancelled;
 
     #[test]
+    fn home_filters_an_empty_home_var() {
+        // HOME="" must be filtered exactly like the tripwire's empty filter:
+        // fall back to dirs::home_dir(), never a CWD-relative empty path
+        // (cache and history would silently land in the process CWD).
+        // sasurahime::test_helpers is lib-test-only, so the bin test swaps
+        // and restores HOME by hand, serialized with a local lock: no other
+        // bin test reads HOME, and lib tests run in a separate process.
+        static HOME_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _lock = HOME_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let expected = dirs::home_dir().expect("test host must have a home dir");
+        let previous = std::env::var("HOME").ok();
+        std::env::set_var("HOME", "");
+        let got = home();
+        // Restored while the lock is still held, then the lock is released.
+        match previous {
+            Some(v) => std::env::set_var("HOME", v),
+            None => std::env::remove_var("HOME"),
+        }
+        assert_eq!(
+            got, expected,
+            "an empty HOME must fall back to dirs::home_dir(), got {:?}",
+            got
+        );
+    }
+
+    #[test]
     fn run_clean_target_cancelled_returns_ok_zero() {
         let reporter = sasurahime::progress::VerboseProgress::new();
         let result = run_clean_target(
@@ -1425,6 +1497,117 @@ mod tests {
         let clean_result = result.unwrap();
         assert_eq!(clean_result.bytes_freed, 100);
         assert_eq!(clean_result.skipped.len(), 1);
+    }
+
+    #[test]
+    fn every_clean_target_variant_resolves_command_name_and_dry_run() {
+        // Correspondence pin for the three manually-maintained variant lists
+        // (command_name, dry_run, and the special-target matches! in run):
+        // every variant must resolve without panicking, so adding a new one
+        // can never fall into the unreachable! catch-alls of the macro
+        // dispatch helpers. External is the historical trap: it fell into
+        // the `_` arms and panicked through dispatch_command_name and
+        // dispatch_dry_run.
+        let variants: Vec<CleanTarget> = vec![
+            // Special variants (manual dispatch logic).
+            CleanTarget::Caches { dry_run: true },
+            CleanTarget::Logs {
+                dry_run: true,
+                keep_days: None,
+            },
+            CleanTarget::Xcode {
+                dry_run: true,
+                sub: None,
+            },
+            CleanTarget::Trash { dry_run: true },
+            CleanTarget::Ollama { dry_run: true },
+            CleanTarget::LibraryLogs {
+                dry_run: true,
+                all: false,
+            },
+            CleanTarget::DeviceSupport {
+                dry_run: true,
+                keep: 2,
+            },
+            CleanTarget::IosBackup { dry_run: true },
+            CleanTarget::ApfsSnapshot {
+                dry_run: true,
+                all: false,
+                thin: None,
+                urgency: None,
+            },
+            CleanTarget::VmSwap { dry_run: true },
+            CleanTarget::All {
+                dry_run: true,
+                include_manual: false,
+            },
+            CleanTarget::ProjectArtifacts { dry_run: true },
+            CleanTarget::External(vec![]),
+            // Standard variants (macro table).
+            CleanTarget::Act { dry_run: true },
+            CleanTarget::Uv { dry_run: true },
+            CleanTarget::Brew { dry_run: true },
+            CleanTarget::Mise { dry_run: true },
+            CleanTarget::Browsers { dry_run: true },
+            CleanTarget::Bun { dry_run: true },
+            CleanTarget::Go { dry_run: true },
+            CleanTarget::Pip { dry_run: true },
+            CleanTarget::NodeGyp { dry_run: true },
+            CleanTarget::Npm { dry_run: true },
+            CleanTarget::Yarn { dry_run: true },
+            CleanTarget::Pnpm { dry_run: true },
+            CleanTarget::Cargo { dry_run: true },
+            CleanTarget::Docker { dry_run: true },
+            CleanTarget::Orbstack { dry_run: true },
+            CleanTarget::CocoaPods { dry_run: true },
+            CleanTarget::Colima { dry_run: true },
+            CleanTarget::SwiftPM { dry_run: true },
+            CleanTarget::Conda { dry_run: true },
+            CleanTarget::Poetry { dry_run: true },
+            CleanTarget::Pipx { dry_run: true },
+            CleanTarget::Deno { dry_run: true },
+            CleanTarget::Dotnet { dry_run: true },
+            CleanTarget::Gem { dry_run: true },
+            CleanTarget::Bundle { dry_run: true },
+            CleanTarget::Rustup { dry_run: true },
+            CleanTarget::Simulator { dry_run: true },
+            CleanTarget::Gradle { dry_run: true },
+            CleanTarget::Huggingface { dry_run: true },
+            CleanTarget::PreCommit { dry_run: true },
+            CleanTarget::JetBrains { dry_run: true },
+            CleanTarget::Downloads { dry_run: true },
+            CleanTarget::VscodeExtensions { dry_run: true },
+            CleanTarget::Maven { dry_run: true },
+            CleanTarget::Terraform { dry_run: true },
+            CleanTarget::Flutter { dry_run: true },
+            CleanTarget::Volta { dry_run: true },
+            CleanTarget::Sbt { dry_run: true },
+            CleanTarget::TreeSitter { dry_run: true },
+            CleanTarget::OrphanContainers { dry_run: true },
+            CleanTarget::LibraryCaches { dry_run: true },
+            CleanTarget::AppSupport { dry_run: true },
+        ];
+        let resolved: std::collections::HashSet<&str> = variants
+            .iter()
+            .map(|v| {
+                // Both calls must never panic for any variant.
+                let name = v.command_name();
+                let _dry = v.dry_run();
+                assert!(
+                    !name.is_empty(),
+                    "command_name must be non-empty for {name:?}"
+                );
+                name
+            })
+            .collect();
+        // The enumerated variants must cover every registered CLI name, so a
+        // future table addition cannot silently skip this pin.
+        for (cli, _) in SUPPORTED_TARGETS.iter().chain(extra_targets()) {
+            assert!(
+                resolved.contains(cli),
+                "clean target {cli} is missing from the variant pin list"
+            );
+        }
     }
 
     const LEGACY_SCAN_TARGETS: &[&str] = &[
