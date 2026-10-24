@@ -567,10 +567,14 @@ impl CliCleaner {
                         let outcome =
                             crate::trash::safe_delete(self.runner.as_ref(), detect_dir, mode)?;
                         if let Some(reason) = outcome.skip_reason {
+                            // The seam classified the failure as skippable: the
+                            // entry was NOT deleted, so no Trash claim may be
+                            // made even though the seam resolved the mode (same
+                            // as the unsafe-path return above).
                             return Ok(CleanResult {
                                 name: self.name(),
                                 bytes_freed: 0,
-                                uses_trash: outcome.uses_trash,
+                                uses_trash: false,
                                 skipped: vec![SkippedEntry {
                                     path: detect_dir.to_path_buf(),
                                     reason,
@@ -738,6 +742,12 @@ impl PathCleaner {
         mode: crate::trash::TrashMode,
     ) -> Result<CleanResult> {
         let mut freed: u64 = 0;
+        // OR-in the deletion outcomes' seam-resolved trash truth instead of
+        // claiming the configured mode unconditionally (PBI 43): a run where
+        // nothing was deleted — nonexistent dirs, age/size-filtered entries,
+        // unsafe paths, seam-skips, dry-runs — must report false.
+        let mut uses_trash = false;
+        let mut skipped: Vec<SkippedEntry> = Vec::new();
         for d in &self.dirs {
             if !d.exists() {
                 continue;
@@ -763,13 +773,18 @@ impl PathCleaner {
                 }
                 continue;
             }
-            freed += self.clean_one(d, size, dry_run, reporter, mode)?;
+            let (one_freed, one_trash, skip) = self.clean_one(d, size, dry_run, reporter, mode)?;
+            freed += one_freed;
+            uses_trash |= one_trash;
+            if let Some(entry) = skip {
+                skipped.push(entry);
+            }
         }
         Ok(CleanResult {
             name: self.name(),
             bytes_freed: freed,
-            uses_trash: mode.resolve(),
-            skipped: vec![],
+            uses_trash,
+            skipped,
             deleted_paths: vec![],
         })
     }
@@ -781,10 +796,10 @@ impl PathCleaner {
         dry_run: bool,
         reporter: &dyn ProgressReporter,
         mode: crate::trash::TrashMode,
-    ) -> Result<u64> {
+    ) -> Result<(u64, bool, Option<SkippedEntry>)> {
         if dry_run {
             println!("[dry-run] would remove: {}", dir.display());
-            return Ok(0);
+            return Ok((0, false, None));
         }
         // Verify path safety at clean-time (TOCTOU mitigation for
         // env-var-derived paths: terraform, flutter, act).
@@ -794,7 +809,7 @@ impl PathCleaner {
                 self.display_name,
                 dir.display()
             );
-            return Ok(0);
+            return Ok((0, false, None));
         }
         reporter.progress_tick(dir, 1, size);
         let outcome = crate::trash::safe_delete(self.runner.as_ref(), dir, mode)?;
@@ -804,10 +819,21 @@ impl PathCleaner {
                 self.display_name,
                 dir.display()
             );
-            return Ok(0);
+            // The seam classified the failure as skippable: the entry was
+            // NOT deleted, so the skip is recorded for visibility (PBI 43)
+            // and no Trash claim may be made — same as the CliCleaner
+            // seam-skip return.
+            return Ok((
+                0,
+                false,
+                Some(SkippedEntry {
+                    path: dir.to_path_buf(),
+                    reason,
+                }),
+            ));
         }
         println!("Removed: {}", dir.display());
-        Ok(size)
+        Ok((size, outcome.uses_trash, None))
     }
 }
 
@@ -1147,12 +1173,14 @@ mod tests {
     }
 
     #[test]
-    fn cli_clean_with_opts_pinned_trash_claims_trash() {
+    fn cli_clean_with_opts_pinned_trash_claims_trash_only_when_deleted() {
         // A pinned Some(Trash) must resolve the fallback seam to trash. The
         // global is pinned to permanent so only the pin can claim Trash.
-        // The fallback's skip branch returns the seam outcome's mode claim,
-        // so uses_trash must be true whether the Trash move lands or comes
-        // back TCC-skipped (as it does in this sandbox for tempdir paths).
+        // PBI 43: a Trash claim may only accompany a real deletion — when the
+        // Trash move lands, the freed result claims Trash; when it comes back
+        // TCC-skipped (as in this sandbox for tempdir paths), the seam
+        // classifies the failure as skippable, the skip is recorded, and the
+        // not-deleted entry claims no Trash.
         let _lock = crate::context::TEST_LOCK
             .lock()
             .unwrap_or_else(|p| p.into_inner());
@@ -1171,10 +1199,22 @@ mod tests {
         };
         let reporter = crate::progress::DeepSuppressReporter;
         let result = cleaner.clean_with_opts(false, &reporter, &opts).unwrap();
-        assert!(
-            result.uses_trash,
-            "uses_trash must match the pinned Trash mode, not the global"
-        );
+        if result.bytes_freed > 0 {
+            assert!(
+                result.uses_trash,
+                "a real deletion under the pinned Trash mode must claim Trash"
+            );
+        } else {
+            assert!(
+                !result.uses_trash,
+                "a seam-skipped (not deleted) entry must never claim Trash"
+            );
+            assert_eq!(
+                result.skipped.len(),
+                1,
+                "the seam-skip must be recorded as a SkippedEntry"
+            );
+        }
     }
 
     #[test]
@@ -2142,5 +2182,107 @@ mod tests {
     fn non_vm_cleaner_has_no_advisory() {
         let cleaner = CliCleaner::npm(Box::new(MissingToolRunner));
         assert!(cleaner.advisory().is_none());
+    }
+
+    // ── PBI 43: PathCleaner skip visibility (SkippedEntry + uses_trash truth) ──
+
+    /// Makes `path` read-only (0o555) and restores 0o755 on drop, even during
+    /// a panic, so a failed test cannot leave an undeletable directory behind
+    /// for the TempDir cleanup.
+    struct ReadOnlyGuard {
+        path: PathBuf,
+    }
+
+    impl ReadOnlyGuard {
+        fn restrict(path: &Path) -> Self {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = fs::metadata(path).unwrap().permissions();
+            perms.set_mode(0o555);
+            fs::set_permissions(path, perms).unwrap();
+            Self {
+                path: path.to_path_buf(),
+            }
+        }
+    }
+
+    impl Drop for ReadOnlyGuard {
+        fn drop(&mut self) {
+            use std::os::unix::fs::PermissionsExt;
+            if let Ok(meta) = fs::metadata(&self.path) {
+                let mut perms = meta.permissions();
+                perms.set_mode(0o755);
+                let _ = fs::set_permissions(&self.path, perms);
+            }
+        }
+    }
+
+    #[test]
+    fn clean_filtered_records_seam_skips_and_claims_no_trash_for_them() {
+        // PBI 43: a permission-denied deletion is seam-classified skippable
+        // and must surface as a SkippedEntry instead of a silent Ok(0). The
+        // target's parent is made read-only, so the removal fails with a
+        // deterministic EACCES in any non-root environment (moving an entry
+        // out of the parent needs write permission on it; TCC-blocked
+        // backends fail even earlier — both reach the seam as a
+        // "trash failed: ..." skippable error). The pinned Trash mode keeps
+        // the global pin out of the assertion.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let parent = tmp.path().join("locked");
+        let dir = parent.join("cache");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("data.bin"), vec![0u8; 1024]).unwrap();
+        let _read_only = ReadOnlyGuard::restrict(&parent);
+        let cleaner = PathCleaner::delete_dirs("test-eacces", dir.clone());
+        let opts = crate::cleaner::CleanOptions {
+            all: true,
+            include_manual: true,
+            older_than_days: None,
+            larger_than_mb: None,
+            trash_mode: Some(crate::trash::TrashMode::Trash),
+        };
+        let reporter = crate::progress::DeepSuppressReporter;
+        let result = cleaner.clean_with_opts(false, &reporter, &opts).unwrap();
+        assert!(dir.exists(), "a permission-denied dir must survive");
+        assert_eq!(
+            result.skipped.len(),
+            1,
+            "the seam-classified failure must be recorded as a SkippedEntry"
+        );
+        assert_eq!(result.skipped[0].path, dir, "the skip must carry the path");
+        let reason = &result.skipped[0].reason;
+        assert!(
+            reason.starts_with("trash failed") && !reason.trim().is_empty(),
+            "the skip reason must name the underlying deletion failure: {reason}"
+        );
+        assert!(
+            !result.uses_trash,
+            "a run where nothing was deleted must not claim Trash"
+        );
+        assert_eq!(result.bytes_freed, 0, "nothing was deleted");
+    }
+
+    #[test]
+    fn clean_filtered_all_nonexistent_targets_claim_no_trash() {
+        // PBI 43: a zero-deletion run (all targets nonexistent) must report
+        // uses_trash == false instead of the unconditionally resolved mode.
+        // The global is pinned to trash so the old `mode.resolve()` reporting
+        // would claim Trash for a run that deleted nothing.
+        let _lock = crate::context::TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let _mode = crate::test_helpers::TrashModeGuard::set(true);
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cleaner = PathCleaner::node_gyp(tmp.path(), Box::new(MissingToolRunner));
+        let reporter = crate::progress::DeepSuppressReporter;
+        let result = cleaner.clean(false, &reporter).unwrap();
+        assert!(
+            !result.uses_trash,
+            "a run where nothing was deleted must not claim Trash"
+        );
+        assert_eq!(result.bytes_freed, 0, "nothing exists to delete");
+        assert!(
+            result.skipped.is_empty(),
+            "nonexistent targets record no skip"
+        );
     }
 }
