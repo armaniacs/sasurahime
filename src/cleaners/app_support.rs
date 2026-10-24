@@ -1,4 +1,4 @@
-use crate::cleaner::{CleanResult, Cleaner, ScanResult, ScanStatus, SkippedEntry};
+use crate::cleaner::{CleanOptions, CleanResult, Cleaner, ScanResult, ScanStatus, SkippedEntry};
 use crate::command::CommandRunner;
 use crate::format::{dir_size, format_bytes};
 use crate::hint::apps::KNOWN_ENTRIES;
@@ -458,12 +458,15 @@ impl AppSupportCleaner {
 
     /// Deletes the selected candidates. The paths come from `resolve_allowed`,
     /// never from `Candidate::path`, so a forged or stale candidate cannot
-    /// reach outside the allowlist.
+    /// reach outside the allowlist. `mode` is the deletion mode for the seam:
+    /// `Global` reads the process-global mode; `Trash` / `Permanent` pin it
+    /// so the seam outcome and the deletion agree.
     pub(crate) fn apply_selection(
         &self,
         selected: &[Candidate],
         quit_approved: &HashSet<&'static str>,
         reporter: &dyn ProgressReporter,
+        mode: crate::trash::TrashMode,
     ) -> Result<CleanResult> {
         let base = self.base();
         let mut states: Vec<(&'static str, AppState)> = Vec::new();
@@ -501,11 +504,7 @@ impl AppSupportCleaner {
                     continue;
                 }
             };
-            let outcome = match crate::trash::safe_delete(
-                self.runner.as_ref(),
-                &path,
-                crate::trash::TrashMode::Global,
-            ) {
+            let outcome = match crate::trash::safe_delete(self.runner.as_ref(), &path, mode) {
                 Ok(outcome) => outcome,
                 // A fatal per-entry error (e.g. the path vanished between
                 // scan and delete) must not abort the whole run: report it
@@ -562,10 +561,25 @@ impl AppSupportCleaner {
         })
     }
 
+    /// The shared clean body. `mode` is the deletion mode threaded into
+    /// `clean_cache_dirs`: `Global` reads the process-global mode; `Trash` /
+    /// `Permanent` pin it so the seam outcome and the deletion agree.
+    fn clean_with_mode(
+        &self,
+        dry_run: bool,
+        reporter: &dyn ProgressReporter,
+        mode: crate::trash::TrashMode,
+    ) -> Result<CleanResult> {
+        let result = self.clean_cache_dirs(dry_run, reporter, mode)?;
+        self.show_leftovers(dry_run)?;
+        Ok(result)
+    }
+
     fn clean_cache_dirs(
         &self,
         dry_run: bool,
         reporter: &dyn ProgressReporter,
+        mode: crate::trash::TrashMode,
     ) -> Result<CleanResult> {
         let base = self.base();
         if !base.exists() {
@@ -594,7 +608,7 @@ impl AppSupportCleaner {
             return Ok(Self::empty_result());
         }
         let approved = self.confirm_quits(&selected, &running)?;
-        let result = self.apply_selection(&selected, &approved, reporter)?;
+        let result = self.apply_selection(&selected, &approved, reporter, mode)?;
         println!("[{NAME}] total freed: {}", format_bytes(result.bytes_freed));
         Ok(result)
     }
@@ -633,9 +647,24 @@ impl Cleaner for AppSupportCleaner {
     }
 
     fn clean(&self, dry_run: bool, reporter: &dyn ProgressReporter) -> Result<CleanResult> {
-        let result = self.clean_cache_dirs(dry_run, reporter)?;
-        self.show_leftovers(dry_run)?;
-        Ok(result)
+        // Plain clean keeps the process-global trash mode (compat path).
+        self.clean_with_mode(dry_run, reporter, crate::trash::TrashMode::Global)
+    }
+
+    /// Cleans with `opts`, pinning `opts.trash_mode` when set so `uses_trash`
+    /// and the actual deletion can never disagree (the `CleanOptions`
+    /// contract). `None` keeps the process-global mode (compat).
+    fn clean_with_opts(
+        &self,
+        dry_run: bool,
+        reporter: &dyn ProgressReporter,
+        opts: &CleanOptions,
+    ) -> Result<CleanResult> {
+        self.clean_with_mode(
+            dry_run,
+            reporter,
+            opts.trash_mode.unwrap_or(crate::trash::TrashMode::Global),
+        )
     }
 
     // Deleting app caches may require quitting running apps, so it is never
@@ -1387,7 +1416,12 @@ mod tests {
         let all = scan_candidates(&base, Some(0));
         let sel: Vec<Candidate> = all.into_iter().filter(|x| x.sub == "Cache").collect();
         let r = c
-            .apply_selection(&sel, &HashSet::new(), &DeepSuppressReporter)
+            .apply_selection(
+                &sel,
+                &HashSet::new(),
+                &DeepSuppressReporter,
+                crate::trash::TrashMode::Global,
+            )
             .unwrap();
         assert!(!base.join("Slack/Cache").exists());
         assert!(base.join("Slack/logs/l.log").exists());
@@ -1411,7 +1445,12 @@ mod tests {
         let c = cleaner_for(&tmp, &fake);
         let sel = scan_candidates(&base, Some(0));
         let r = c
-            .apply_selection(&sel, &HashSet::new(), &DeepSuppressReporter)
+            .apply_selection(
+                &sel,
+                &HashSet::new(),
+                &DeepSuppressReporter,
+                crate::trash::TrashMode::Global,
+            )
             .unwrap();
         assert!(base.join("Slack/Cache/a.bin").exists());
         assert_eq!(r.bytes_freed, 0);
@@ -1436,7 +1475,12 @@ mod tests {
         let sel = scan_candidates(&base, Some(0));
         let approved: HashSet<&'static str> = HashSet::from(["Obsidian"]);
         let r = c
-            .apply_selection(&sel, &approved, &DeepSuppressReporter)
+            .apply_selection(
+                &sel,
+                &approved,
+                &DeepSuppressReporter,
+                crate::trash::TrashMode::Global,
+            )
             .unwrap();
         assert!(!base.join("obsidian/Cache").exists());
         assert!(r.bytes_freed > 0);
@@ -1465,8 +1509,13 @@ mod tests {
         let fake = Fake::default();
         let c = cleaner_for(&tmp, &fake);
         let sel = scan_candidates(&base, Some(0));
-        c.apply_selection(&sel, &HashSet::new(), &DeepSuppressReporter)
-            .unwrap();
+        c.apply_selection(
+            &sel,
+            &HashSet::new(),
+            &DeepSuppressReporter,
+            crate::trash::TrashMode::Global,
+        )
+        .unwrap();
         assert!(!fake.calls().iter().any(|c| c.starts_with("open")));
     }
 
@@ -1488,7 +1537,12 @@ mod tests {
             size: 1,
         };
         let r = c
-            .apply_selection(&[forged], &HashSet::new(), &DeepSuppressReporter)
+            .apply_selection(
+                &[forged],
+                &HashSet::new(),
+                &DeepSuppressReporter,
+                crate::trash::TrashMode::Global,
+            )
             .unwrap();
         assert!(base.join("Slack/Local Storage/u.bin").exists());
         assert_eq!(r.bytes_freed, 0);
@@ -1514,8 +1568,13 @@ mod tests {
             path: base.join("Slack/Local Storage"),
             size: 5,
         };
-        c.apply_selection(&[forged], &HashSet::new(), &DeepSuppressReporter)
-            .unwrap();
+        c.apply_selection(
+            &[forged],
+            &HashSet::new(),
+            &DeepSuppressReporter,
+            crate::trash::TrashMode::Global,
+        )
+        .unwrap();
         assert!(!base.join("Slack/Cache").exists());
         assert!(base.join("Slack/Local Storage/u.bin").exists());
     }
@@ -1537,8 +1596,13 @@ mod tests {
         std::os::unix::fs::symlink(outside.join("dir"), base.join("Slack/Cache/d")).unwrap();
         let c = cleaner_for(&tmp, &Fake::default());
         let sel = scan_candidates(&base, Some(0));
-        c.apply_selection(&sel, &HashSet::new(), &DeepSuppressReporter)
-            .unwrap();
+        c.apply_selection(
+            &sel,
+            &HashSet::new(),
+            &DeepSuppressReporter,
+            crate::trash::TrashMode::Global,
+        )
+        .unwrap();
         assert!(!base.join("Slack/Cache").exists());
         assert!(outside.join("keep.txt").exists());
         assert!(outside.join("dir/keep2.txt").exists());
@@ -1561,7 +1625,12 @@ mod tests {
         fs::remove_dir_all(base.join("Slack/Cache")).unwrap();
         std::os::unix::fs::symlink(&outside, base.join("Slack/Cache")).unwrap();
         let r = c
-            .apply_selection(&sel, &HashSet::new(), &DeepSuppressReporter)
+            .apply_selection(
+                &sel,
+                &HashSet::new(),
+                &DeepSuppressReporter,
+                crate::trash::TrashMode::Global,
+            )
             .unwrap();
         assert!(outside.join("keep.txt").exists());
         assert_eq!(r.bytes_freed, 0);
@@ -1997,5 +2066,117 @@ mod tests {
         let c = cleaner_for(&tmp, &fake);
         c.reveal_paths(&[]);
         assert!(fake.calls().is_empty(), "calls: {:?}", fake.calls());
+    }
+
+    // ── trash_mode pin contract ──
+
+    /// One selected allowlisted candidate plus its cleaner. The interactive
+    /// select is gated on a real terminal, so the pin tests drive the
+    /// deletion body `clean_with_opts` threads its resolved mode into
+    /// (`clean_with_opts` resolves `opts.trash_mode.unwrap_or(Global)` and
+    /// passes the result to `apply_selection` via `clean_with_mode` and
+    /// `clean_cache_dirs`).
+    fn selected_candidate_cleaner(tmp: &TempDir) -> (AppSupportCleaner, Vec<Candidate>, PathBuf) {
+        let base = base_of(tmp);
+        put(&base, "Slack/Cache/a.bin", 10_000);
+        let c = cleaner_for(tmp, &Fake::default());
+        let sel = scan_candidates(&base, Some(0));
+        (c, sel, base.join("Slack/Cache"))
+    }
+
+    #[test]
+    fn clean_with_opts_pinned_permanent_overrides_the_global() {
+        // The CleanOptions.trash_mode pin contract: a pinned Some(Permanent)
+        // must delete for real and claim no Trash, even when the
+        // process-global mode is trash.
+        let _lock = crate::context::TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let _mode = TrashModeGuard::set(true);
+        let tmp = TempDir::new().unwrap();
+        let (c, sel, dir) = selected_candidate_cleaner(&tmp);
+        let opts = crate::cleaner::CleanOptions {
+            all: true,
+            include_manual: true,
+            older_than_days: None,
+            larger_than_mb: None,
+            trash_mode: Some(crate::trash::TrashMode::Permanent),
+        };
+        // The mode clean_with_opts resolves for this pin.
+        let mode = opts.trash_mode.unwrap_or(crate::trash::TrashMode::Global);
+        let r = c
+            .apply_selection(&sel, &HashSet::new(), &DeepSuppressReporter, mode)
+            .unwrap();
+        assert!(
+            !dir.exists(),
+            "the pinned permanent mode must delete for real"
+        );
+        assert!(
+            !r.uses_trash,
+            "uses_trash must come from the pinned mode, not the global"
+        );
+    }
+
+    #[test]
+    fn clean_with_opts_pinned_trash_claims_trash() {
+        // A pinned Some(Trash) must resolve the deletion seam to trash. The
+        // global is pinned to permanent so only the pin can claim Trash.
+        // The skip branch drops the seam outcome's claim (uses_trash only
+        // accumulates for successful deletions), so the assertion follows
+        // the seam truth: a landed Trash move claims Trash, a TCC-skipped
+        // one (this sandbox) does not.
+        let _lock = crate::context::TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let _mode = TrashModeGuard::set(false);
+        let tmp = TempDir::new().unwrap();
+        let (c, sel, _dir) = selected_candidate_cleaner(&tmp);
+        let opts = crate::cleaner::CleanOptions {
+            all: true,
+            include_manual: true,
+            older_than_days: None,
+            larger_than_mb: None,
+            trash_mode: Some(crate::trash::TrashMode::Trash),
+        };
+        // The mode clean_with_opts resolves for this pin.
+        let mode = opts.trash_mode.unwrap_or(crate::trash::TrashMode::Global);
+        let r = c
+            .apply_selection(&sel, &HashSet::new(), &DeepSuppressReporter, mode)
+            .unwrap();
+        let deletions_happened = r.skipped.is_empty();
+        assert_eq!(
+            r.uses_trash, deletions_happened,
+            "uses_trash must come from the deletion outcomes' seam truth"
+        );
+    }
+
+    #[test]
+    fn clean_with_opts_none_keeps_the_global_mode() {
+        // trash_mode: None is the compat path: the deletion reads the
+        // process-global mode. Global permanent deletes for real and claims
+        // no Trash.
+        let _lock = crate::context::TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let _mode = TrashModeGuard::set(false);
+        let tmp = TempDir::new().unwrap();
+        let (c, sel, dir) = selected_candidate_cleaner(&tmp);
+        let opts = crate::cleaner::CleanOptions {
+            all: true,
+            include_manual: true,
+            older_than_days: None,
+            larger_than_mb: None,
+            trash_mode: None,
+        };
+        // The mode clean_with_opts resolves for this pin.
+        let mode = opts.trash_mode.unwrap_or(crate::trash::TrashMode::Global);
+        let r = c
+            .apply_selection(&sel, &HashSet::new(), &DeepSuppressReporter, mode)
+            .unwrap();
+        assert!(
+            !dir.exists(),
+            "the global permanent mode must delete for real"
+        );
+        assert!(!r.uses_trash, "uses_trash must come from the global mode");
     }
 }

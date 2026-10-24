@@ -1,4 +1,4 @@
-use crate::cleaner::{CleanResult, Cleaner, ScanResult, ScanStatus, SkippedEntry};
+use crate::cleaner::{CleanOptions, CleanResult, Cleaner, ScanResult, ScanStatus, SkippedEntry};
 use crate::command::CommandRunner;
 use crate::format::{dir_size, format_bytes};
 use crate::progress::ProgressReporter;
@@ -401,10 +401,75 @@ impl OrphanContainersCleaner {
             .collect())
     }
 
+    /// The shared clean body. `mode` is the deletion mode threaded into
+    /// `delete_selected`: `Global` reads the process-global mode; `Trash` /
+    /// `Permanent` pin it so the seam outcome and the deletion agree.
+    fn clean_with_mode(
+        &self,
+        dry_run: bool,
+        reporter: &dyn ProgressReporter,
+        mode: crate::trash::TrashMode,
+    ) -> Result<CleanResult> {
+        if !self.any_root_exists() {
+            println!("[orphan-containers] nothing to clean");
+            return Ok(empty_result(self.name()));
+        }
+
+        let scan = self.scan();
+        if scan.candidates.is_empty() {
+            println!("[orphan-containers] nothing to clean");
+            print_unreadable_hint(scan.unreadable);
+            return Ok(empty_result(self.name()));
+        }
+
+        if dry_run {
+            println!(
+                "[orphan-containers] dry-run: {} orphan candidate(s)",
+                scan.candidates.len()
+            );
+            for c in &scan.candidates {
+                println!(
+                    "  would remove: {}  ({}, {})",
+                    c.path.display(),
+                    format_bytes(c.size),
+                    c.kind.label()
+                );
+            }
+            print_unreadable_hint(scan.unreadable);
+            return Ok(empty_result(self.name()));
+        }
+
+        // Which folders are safe to remove is a judgement call that only the
+        // user can make, so there is no non-interactive path (no `--all`).
+        if !std::io::stdin().is_terminal() {
+            eprintln!(
+                "[orphan-containers] not a terminal - skipping. Run \
+                 `sasurahime clean orphan-containers` to choose folders interactively."
+            );
+            return Ok(empty_result(self.name()));
+        }
+
+        let selected = Self::interactive_select(&scan.candidates)?;
+        if selected.is_empty() {
+            println!("[orphan-containers] nothing selected");
+            print_unreadable_hint(scan.unreadable);
+            return Ok(empty_result(self.name()));
+        }
+
+        let result = self.delete_selected(&selected, reporter, mode)?;
+        print_unreadable_hint(scan.unreadable);
+        Ok(result)
+    }
+
+    /// The one delete loop shared by `clean_with_mode` and the pin seam. ORs
+    /// the seam-resolved trash truth across every deletion and records every
+    /// failure (skippable or fatal) into the skipped channel instead of
+    /// aborting the run.
     fn delete_selected(
         &self,
         selected: &[OrphanCandidate],
         reporter: &dyn ProgressReporter,
+        mode: crate::trash::TrashMode,
     ) -> Result<CleanResult> {
         let mut freed: u64 = 0;
         let mut uses_trash = false;
@@ -413,11 +478,7 @@ impl OrphanContainersCleaner {
         reporter.progress_init(self.name(), selected.len());
         for (i, c) in selected.iter().enumerate() {
             reporter.progress_tick(&c.path, i + 1, c.size);
-            let outcome = match crate::trash::safe_delete(
-                self.runner.as_ref(),
-                &c.path,
-                crate::trash::TrashMode::Global,
-            ) {
+            let outcome = match crate::trash::safe_delete(self.runner.as_ref(), &c.path, mode) {
                 Ok(outcome) => outcome,
                 // A fatal per-entry error (e.g. the path vanished between
                 // scan and delete) must not abort the whole run: report it
@@ -487,55 +548,24 @@ impl Cleaner for OrphanContainersCleaner {
     }
 
     fn clean(&self, dry_run: bool, reporter: &dyn ProgressReporter) -> Result<CleanResult> {
-        if !self.any_root_exists() {
-            println!("[orphan-containers] nothing to clean");
-            return Ok(empty_result(self.name()));
-        }
+        // Plain clean keeps the process-global trash mode (compat path).
+        self.clean_with_mode(dry_run, reporter, crate::trash::TrashMode::Global)
+    }
 
-        let scan = self.scan();
-        if scan.candidates.is_empty() {
-            println!("[orphan-containers] nothing to clean");
-            print_unreadable_hint(scan.unreadable);
-            return Ok(empty_result(self.name()));
-        }
-
-        if dry_run {
-            println!(
-                "[orphan-containers] dry-run: {} orphan candidate(s)",
-                scan.candidates.len()
-            );
-            for c in &scan.candidates {
-                println!(
-                    "  would remove: {}  ({}, {})",
-                    c.path.display(),
-                    format_bytes(c.size),
-                    c.kind.label()
-                );
-            }
-            print_unreadable_hint(scan.unreadable);
-            return Ok(empty_result(self.name()));
-        }
-
-        // Which folders are safe to remove is a judgement call that only the
-        // user can make, so there is no non-interactive path (no `--all`).
-        if !std::io::stdin().is_terminal() {
-            eprintln!(
-                "[orphan-containers] not a terminal - skipping. Run \
-                 `sasurahime clean orphan-containers` to choose folders interactively."
-            );
-            return Ok(empty_result(self.name()));
-        }
-
-        let selected = Self::interactive_select(&scan.candidates)?;
-        if selected.is_empty() {
-            println!("[orphan-containers] nothing selected");
-            print_unreadable_hint(scan.unreadable);
-            return Ok(empty_result(self.name()));
-        }
-
-        let result = self.delete_selected(&selected, reporter)?;
-        print_unreadable_hint(scan.unreadable);
-        Ok(result)
+    /// Cleans with `opts`, pinning `opts.trash_mode` when set so `uses_trash`
+    /// and the actual deletion can never disagree (the `CleanOptions`
+    /// contract). `None` keeps the process-global mode (compat).
+    fn clean_with_opts(
+        &self,
+        dry_run: bool,
+        reporter: &dyn ProgressReporter,
+        opts: &CleanOptions,
+    ) -> Result<CleanResult> {
+        self.clean_with_mode(
+            dry_run,
+            reporter,
+            opts.trash_mode.unwrap_or(crate::trash::TrashMode::Global),
+        )
     }
 
     // Which folders are leftovers is a human judgement, so `--yes` must skip this
@@ -1246,7 +1276,11 @@ mod tests {
             size: 4096,
         };
         let result = cleaner_for(&tmp)
-            .delete_selected(&[missing], &SuppressReporter)
+            .delete_selected(
+                &[missing],
+                &SuppressReporter,
+                crate::trash::TrashMode::Global,
+            )
             .unwrap();
         assert_eq!(result.bytes_freed, 0);
         assert_eq!(result.skipped.len(), 1);
@@ -1257,5 +1291,121 @@ mod tests {
     fn orphan_containers_is_never_auto_cleaned() {
         let tmp = TempDir::new().unwrap();
         assert!(!cleaner_for(&tmp).auto_clean_allowed());
+    }
+
+    // ── trash_mode pin contract ──
+
+    /// One orphan candidate folder plus its cleaner. The interactive select
+    /// is gated on a real terminal, so the pin tests drive the deletion body
+    /// `clean_with_opts` threads its resolved mode into (`clean_with_opts`
+    /// resolves `opts.trash_mode.unwrap_or(Global)` and passes the result to
+    /// `delete_selected` via `clean_with_mode`).
+    fn orphan_candidate_cleaner(
+        tmp: &TempDir,
+    ) -> (OrphanContainersCleaner, Vec<OrphanCandidate>, PathBuf) {
+        let gone = write_container(tmp.path(), "Containers", "com.example.gone");
+        let cand = OrphanCandidate {
+            path: gone.clone(),
+            name: "com.example.gone".into(),
+            kind: ContainerKind::Containers,
+            size: 8192,
+        };
+        (cleaner_for(tmp), vec![cand], gone)
+    }
+
+    #[test]
+    fn clean_with_opts_pinned_permanent_overrides_the_global() {
+        // The CleanOptions.trash_mode pin contract: a pinned Some(Permanent)
+        // must delete for real and claim no Trash, even when the
+        // process-global mode is trash.
+        let _lock = crate::context::TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let _mode = crate::test_helpers::TrashModeGuard::set(true);
+        let tmp = TempDir::new().unwrap();
+        let (cl, selected, dir) = orphan_candidate_cleaner(&tmp);
+        let opts = crate::cleaner::CleanOptions {
+            all: true,
+            include_manual: true,
+            older_than_days: None,
+            larger_than_mb: None,
+            trash_mode: Some(crate::trash::TrashMode::Permanent),
+        };
+        // The mode clean_with_opts resolves for this pin.
+        let mode = opts.trash_mode.unwrap_or(crate::trash::TrashMode::Global);
+        let r = cl
+            .delete_selected(&selected, &SuppressReporter, mode)
+            .unwrap();
+        assert!(
+            !dir.exists(),
+            "the pinned permanent mode must delete for real"
+        );
+        assert!(
+            !r.uses_trash,
+            "uses_trash must come from the pinned mode, not the global"
+        );
+    }
+
+    #[test]
+    fn clean_with_opts_pinned_trash_claims_trash() {
+        // A pinned Some(Trash) must resolve the deletion seam to trash. The
+        // global is pinned to permanent so only the pin can claim Trash.
+        // The skip branch drops the seam outcome's claim (uses_trash only
+        // accumulates for successful deletions), so the assertion follows
+        // the seam truth: a landed Trash move claims Trash, a TCC-skipped
+        // one (this sandbox) does not.
+        let _lock = crate::context::TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let _mode = crate::test_helpers::TrashModeGuard::set(false);
+        let tmp = TempDir::new().unwrap();
+        let (cl, selected, _dir) = orphan_candidate_cleaner(&tmp);
+        let opts = crate::cleaner::CleanOptions {
+            all: true,
+            include_manual: true,
+            older_than_days: None,
+            larger_than_mb: None,
+            trash_mode: Some(crate::trash::TrashMode::Trash),
+        };
+        // The mode clean_with_opts resolves for this pin.
+        let mode = opts.trash_mode.unwrap_or(crate::trash::TrashMode::Global);
+        let r = cl
+            .delete_selected(&selected, &SuppressReporter, mode)
+            .unwrap();
+        let deletions_happened = r.skipped.is_empty();
+        assert_eq!(
+            r.uses_trash, deletions_happened,
+            "uses_trash must come from the deletion outcomes' seam truth"
+        );
+    }
+
+    #[test]
+    fn clean_with_opts_none_keeps_the_global_mode() {
+        // trash_mode: None is the compat path: the deletion reads the
+        // process-global mode. Global permanent deletes for real and claims
+        // no Trash.
+        let _lock = crate::context::TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let _mode = crate::test_helpers::TrashModeGuard::set(false);
+        let tmp = TempDir::new().unwrap();
+        let (cl, selected, dir) = orphan_candidate_cleaner(&tmp);
+        let opts = crate::cleaner::CleanOptions {
+            all: true,
+            include_manual: true,
+            older_than_days: None,
+            larger_than_mb: None,
+            trash_mode: None,
+        };
+        // The mode clean_with_opts resolves for this pin.
+        let mode = opts.trash_mode.unwrap_or(crate::trash::TrashMode::Global);
+        let r = cl
+            .delete_selected(&selected, &SuppressReporter, mode)
+            .unwrap();
+        assert!(
+            !dir.exists(),
+            "the global permanent mode must delete for real"
+        );
+        assert!(!r.uses_trash, "uses_trash must come from the global mode");
     }
 }
