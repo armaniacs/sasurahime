@@ -168,12 +168,10 @@ impl Cleaner for XcodeCleaner {
             && self.is_xcode_running()
         {
             log::warn!("Xcode is running. DerivedData deletion may cause issues.");
-            eprint!("Continue? [y/N] ");
-            use std::io::Write;
-            std::io::stderr().flush()?;
-            let mut input = String::new();
-            std::io::stdin().read_line(&mut input)?;
-            if !input.trim().eq_ignore_ascii_case("y") {
+            // The mid-clean check prompts on stderr (warnings above), sharing
+            // the interactive y/N skeleton; aborting mid-clean yields an
+            // empty result instead of returning early.
+            if !crate::interactive::confirm("Continue? [y/N] ", &mut std::io::stderr())? {
                 println!("Aborted.");
                 return Ok(CleanResult {
                     name: self.name(),
