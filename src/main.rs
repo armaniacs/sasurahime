@@ -954,6 +954,12 @@ fn main() -> anyhow::Result<()> {
             if json {
                 // Machine-readable output: no hints, no interactive prompt.
                 scanner::run_scan_json(&cleaners, &home);
+                // The early return below skips the trailing flush: warm the
+                // cache here too, or scripts that only ever run --json would
+                // never save detect results.
+                if !cli.no_cache {
+                    scan_cache::flush(&scan_cache_path);
+                }
                 return Ok(());
             }
             scanner::run_scan(&cleaners, &home);

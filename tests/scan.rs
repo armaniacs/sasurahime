@@ -595,3 +595,50 @@ fn no_cache_flag_skips_the_persistent_cache() {
         "--no-cache must not write the cache file"
     );
 }
+
+#[test]
+fn scan_json_warms_the_persistent_cache() {
+    // The --json branch is a full exit path: detect results must be saved
+    // to scan_cache like the table scan, then the process returns. A bypass
+    // would leave the cache cold for scripts that only ever run --json.
+    let tmp = TempDir::new().unwrap();
+    let act_cache = tmp.path().join(".cache/act");
+    fs::create_dir_all(&act_cache).unwrap();
+    fs::write(act_cache.join("dummy"), b"x".repeat(100)).unwrap();
+
+    let output = sasurahime(tmp.path())
+        .args(["scan", "--json"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let cache_path = tmp.path().join(".local/share/sasurahime/scan-cache.json");
+    assert!(
+        cache_path.exists(),
+        "scan --json must flush the persistent cache"
+    );
+    let cache = fs::read_to_string(&cache_path).unwrap();
+    assert!(
+        cache.contains(".cache/act"),
+        "the flushed cache must record the detect result:\n{cache}"
+    );
+}
+
+#[test]
+fn scan_json_with_no_cache_writes_nothing() {
+    // The flush added to the --json branch must still honor --no-cache.
+    let tmp = TempDir::new().unwrap();
+    let act_cache = tmp.path().join(".cache/act");
+    fs::create_dir_all(&act_cache).unwrap();
+    fs::write(act_cache.join("dummy"), b"x".repeat(100)).unwrap();
+
+    let output = sasurahime(tmp.path())
+        .args(["--no-cache", "scan", "--json"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let cache_path = tmp.path().join(".local/share/sasurahime/scan-cache.json");
+    assert!(
+        !cache_path.exists(),
+        "--no-cache must not write the cache file via the --json branch either"
+    );
+}
