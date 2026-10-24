@@ -827,6 +827,81 @@ where
     Ok(result)
 }
 
+/// Maps a sub-target name to the Xcode subcategory: the CLI's `--sub`
+/// spellings (`derived-data`, `deriveddata`, `archives`) and the TUI display
+/// names (`DerivedData`, `Archives`, from `Cleaner::sub_targets()`).
+fn xcode_subcategory(sub: &str) -> Option<cleaners::xcode::XcodeSubcategory> {
+    cleaners::xcode::XcodeSubcategory::parse(sub).or_else(|| {
+        cleaners::xcode::XcodeSubcategory::all()
+            .into_iter()
+            .find(|s| s.display_name() == sub)
+    })
+}
+
+/// PBI-50 in-process clean seam: resolves a clean target name (plus an
+/// optional sub-target) to the same dispatch the `clean <target>` CLI arm
+/// uses, and returns the REAL CleanResult instead of a fabricated zero.
+/// Wired into `run_interactive` and `run_explore` so the TUI and the explorer
+/// never re-exec this binary — the old self re-exec lost every sub-target
+/// byte in `Total freed`, resolved its own exe through PATH, and re-loaded
+/// config without the caller's flags.
+///
+/// Dispatch parity with the CLI:
+/// - standard targets resolve to the same macro-table factories
+///   `dispatch_clean` builds, and run through `run_clean_target` (the shared
+///   spinner, CleanCancelled handling, skip report and history guard), not
+///   around it — so `CleanOptions`/trash-mode resolution is untouched;
+/// - `xcode` + sub-target rebuilds the cleaner with the requested
+///   subcategory, exactly like the `CleanTarget::Xcode` arm, accepting both
+///   the CLI spellings (`derived-data`, `archives`) and the TUI display names
+///   (`DerivedData`, `Archives`; the old `--sub <display name>` re-exec
+///   silently failed the parse and cleaned DerivedData regardless);
+/// - custom/plugin targets are deliberately NOT resolvable here — they never
+///   reach this seam (the TUI cleans them whole via `run_batch`, and the
+///   explorer only lists built-in targets), so the `clean <name>` External
+///   arm keeps the PBI-39 unsafe-path refusal untouched.
+///
+/// Scan cache: the old explorer child flushed the scan cache on exit
+/// (main.rs's trailing flush); the per-clean flush is deliberately dropped —
+/// deletion paths never consult the cache and the parent process still
+/// flushes once at the end of main.
+fn clean_by_name(
+    home: &std::path::Path,
+    config: &config::Config,
+    name: &str,
+    sub: Option<&str>,
+    dry_run: bool,
+    reporter: &dyn ProgressReporter,
+) -> anyhow::Result<CleanResult> {
+    if name == "xcode" {
+        if let Some(sub) = sub {
+            let parsed = xcode_subcategory(sub).ok_or_else(|| {
+                anyhow::anyhow!(
+                    "unknown xcode sub-target: {sub} (expected derived-data or archives)"
+                )
+            })?;
+            let cleaner = cleaners::xcode::XcodeCleaner::new(home, Box::new(SystemCommandRunner))
+                .with_subcategories(vec![parsed]);
+            return run_clean_target(name, |dry, rep| cleaner.clean(dry, rep), dry_run, reporter);
+        }
+        // sub = None falls through to the registry resolution below, which
+        // builds the same `XcodeCleaner::new` the `CleanTarget::Xcode` arm
+        // builds for a no-`--sub` run (clean() then defaults to DerivedData).
+    }
+    let mut registry: Vec<Box<dyn Cleaner>> = standard_cleaners(home, config);
+    registry.extend(special_cleaners(home, config));
+    let cleaner = registry
+        .into_iter()
+        .find(|c| c.name() == name)
+        .ok_or_else(|| anyhow::anyhow!("unknown clean target: {name}"))?;
+    run_clean_target(
+        cleaner.name(),
+        |dry, rep| cleaner.clean(dry, rep),
+        dry_run,
+        reporter,
+    )
+}
+
 fn build_reporter(cli: &Cli, config: &Config) -> Box<dyn ProgressReporter> {
     let (suppress, deep_suppress) = merge_suppress_flags(
         cli.suppress,
@@ -1001,10 +1076,16 @@ fn main() -> anyhow::Result<()> {
         }
         None => {
             let cleaners = all_cleaners(&home, &config);
+            // PBI-50: the TUI's sub-target branch cleans in-process through
+            // this seam — the real CleanResult fixes the `Total freed`
+            // under-count of the old self re-exec, and the TUI process's own
+            // flags (trash mode, config path) now apply to the clean.
             if cli.yes {
                 interactive::run_auto(&cleaners)?;
             } else {
-                interactive::run_interactive(&cleaners)?;
+                interactive::run_interactive(&cleaners, &|name, sub, dry, rep| {
+                    clean_by_name(&home, &config, name, sub, dry, rep)
+                })?;
             }
             let runner = SystemCommandRunner;
             let hints = hint::collect_hints(&home, &runner);
@@ -1018,6 +1099,10 @@ fn main() -> anyhow::Result<()> {
                 dirs
             };
             let top_n = if all { None } else { Some(top) };
+            // PBI-50: managed-entry cleans run in-process through the seam
+            // (the CLI reporter keeps the "Cleaning ... [OK] / Freed:" output
+            // the old re-exec'd child printed) instead of spawning this
+            // binary resolved through current_exe / PATH.
             explorer::run_explore(
                 &home,
                 explorer::ExploreOptions {
@@ -1025,6 +1110,8 @@ fn main() -> anyhow::Result<()> {
                     top: top_n,
                     dry_run: cli.dry_run,
                 },
+                reporter.as_ref(),
+                &|name, sub, dry, rep| clean_by_name(&home, &config, name, sub, dry, rep),
             )?;
         }
         Some(Commands::Clean { target }) => {
@@ -2125,5 +2212,159 @@ mod tests {
     #[test]
     fn colliding_custom_names_empty_without_custom_config() {
         assert!(colliding_custom_names(&config::Config::default()).is_empty());
+    }
+
+    // ── PBI-50: the in-process clean seam ──────────────────────────────────
+
+    /// Serializes the tests that touch process-global state: HOME (history
+    /// writes resolve HOME inside `history::write_history_entry`) and the
+    /// trash mode flag. Same pattern as `home_filters_an_empty_home_var`.
+    static SEAM_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn seam_maps_the_tui_display_name_to_the_xcode_subcategory() {
+        // The TUI passes display names from `sub_targets()`; the old
+        // `--sub <display name>` re-exec silently failed
+        // `XcodeSubcategory::parse` and cleaned DerivedData regardless of the
+        // selection. The seam must accept both the CLI spellings and the
+        // display names.
+        assert_eq!(
+            xcode_subcategory("DerivedData"),
+            Some(cleaners::xcode::XcodeSubcategory::DerivedData)
+        );
+        assert_eq!(
+            xcode_subcategory("Archives"),
+            Some(cleaners::xcode::XcodeSubcategory::Archives)
+        );
+        assert_eq!(
+            xcode_subcategory("derived-data"),
+            Some(cleaners::xcode::XcodeSubcategory::DerivedData)
+        );
+        assert_eq!(
+            xcode_subcategory("archives"),
+            Some(cleaners::xcode::XcodeSubcategory::Archives)
+        );
+        assert_eq!(xcode_subcategory("no-such-sub"), None);
+    }
+
+    #[test]
+    fn seam_returns_the_real_clean_result_for_a_sub_target_clean() {
+        // The old TUI self re-exec fabricated `bytes_freed: 0` for sub-target
+        // cleans and under-counted `Total freed`. The seam must run the real
+        // clean in-process and return the cleaner's real result. Archives is
+        // used so the mid-clean Xcode-running prompt (DerivedData-only check)
+        // can never block on the test's stdin.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let archives = tmp.path().join("Library/Developer/Xcode/Archives");
+        std::fs::create_dir_all(archives.join("MyApp-2026")).unwrap();
+        std::fs::write(archives.join("MyApp-2026/f"), vec![0u8; 4096]).unwrap();
+
+        let _lock = SEAM_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        // The trash backend is TCC-blocked in this sandbox: pin permanent
+        // deletion so the seam's real clean actually deletes. History writes
+        // resolve HOME internally: point it at the tempdir so the row lands
+        // there instead of the developer HOME.
+        let previous_trash = sasurahime::trash::is_trash_mode();
+        sasurahime::trash::set_trash_mode(false);
+        let previous_home = std::env::var("HOME").ok();
+        std::env::set_var("HOME", tmp.path());
+        let result = clean_by_name(
+            tmp.path(),
+            &config::Config::default(),
+            "xcode",
+            Some("Archives"),
+            false,
+            &sasurahime::progress::DeepSuppressReporter,
+        );
+        // Restored while the lock is still held, then the lock is released.
+        sasurahime::trash::set_trash_mode(previous_trash);
+        match previous_home {
+            Some(v) => std::env::set_var("HOME", v),
+            None => std::env::remove_var("HOME"),
+        }
+        let result = result.expect("the seam must resolve xcode + Archives");
+        assert_eq!(result.name, "xcode");
+        assert!(
+            result.bytes_freed > 0,
+            "the seam must return the REAL bytes freed, got {}",
+            result.bytes_freed
+        );
+        assert!(
+            !archives.join("MyApp-2026").exists(),
+            "the in-process clean must have deleted the content"
+        );
+    }
+
+    #[test]
+    fn seam_honors_dry_run_and_never_deletes() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let archives = tmp.path().join("Library/Developer/Xcode/Archives");
+        std::fs::create_dir_all(archives.join("MyApp-2026")).unwrap();
+        std::fs::write(archives.join("MyApp-2026/f"), vec![0u8; 4096]).unwrap();
+
+        let result = clean_by_name(
+            tmp.path(),
+            &config::Config::default(),
+            "xcode",
+            Some("Archives"),
+            true,
+            &sasurahime::progress::DeepSuppressReporter,
+        )
+        .expect("dry-run through the seam must succeed");
+        assert_eq!(result.bytes_freed, 0, "dry run must not report freed bytes");
+        assert!(
+            archives.join("MyApp-2026").exists(),
+            "dry run must not delete anything"
+        );
+    }
+
+    #[test]
+    fn seam_resolves_whole_targets_through_the_registry() {
+        // sub = None goes through the same registry resolution the standard
+        // dispatch uses. An empty tempdir home makes `clean xcode` a no-op
+        // ("not found, skipping") that returns Ok with 0 freed.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let result = clean_by_name(
+            tmp.path(),
+            &config::Config::default(),
+            "xcode",
+            None,
+            true,
+            &sasurahime::progress::DeepSuppressReporter,
+        )
+        .expect("the seam must resolve the whole-target xcode entry");
+        assert_eq!(result.name, "xcode");
+        assert_eq!(result.bytes_freed, 0);
+    }
+
+    #[test]
+    fn seam_unknown_target_and_unknown_sub_are_errors() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let err = clean_by_name(
+            tmp.path(),
+            &config::Config::default(),
+            "no-such-target",
+            None,
+            false,
+            &sasurahime::progress::DeepSuppressReporter,
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("unknown clean target"),
+            "got: {err}"
+        );
+        let err = clean_by_name(
+            tmp.path(),
+            &config::Config::default(),
+            "xcode",
+            Some("no-such-sub"),
+            false,
+            &sasurahime::progress::DeepSuppressReporter,
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("unknown xcode sub-target"),
+            "got: {err}"
+        );
     }
 }

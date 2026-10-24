@@ -5,7 +5,9 @@ use comfy_table::presets::{ASCII_FULL, UTF8_FULL};
 use comfy_table::Table;
 use dialoguer::{Confirm, MultiSelect};
 
+use crate::cleaner::CleanByName;
 use crate::format::{dir_size, format_bytes};
+use crate::progress::ProgressReporter;
 
 pub struct ManagedPattern {
     pub path_pattern: &'static str,
@@ -234,15 +236,46 @@ fn open_in_finder(path: &Path) -> Result<()> {
     crate::command::open_path(&crate::command::SystemCommandRunner, path)
 }
 
+/// Clean one managed entry through the in-process clean seam
+/// ([`CleanByName`], PBI-50): prints the same `Running:` label and reports a
+/// failure without aborting the loop. Returns true when the clean succeeded.
+/// Failures come back as `Err` from the seam instead of exit-code inspection
+/// of a re-exec'd self; the old `(exit {:?})` / spawn-failure split collapses
+/// into the one error shape `Error: sasurahime clean {target} failed: {e}`.
+fn clean_managed_entry(
+    target: &str,
+    dry_run: bool,
+    reporter: &dyn ProgressReporter,
+    clean_fn: &CleanByName,
+) -> bool {
+    println!("\nRunning: sasurahime clean {target}");
+    match clean_fn(target, None, dry_run, reporter) {
+        Ok(_) => true,
+        Err(e) => {
+            eprintln!("Error: sasurahime clean {target} failed: {e}");
+            false
+        }
+    }
+}
+
 /// Full interactive flow: calls `explore_results`, prints tables, runs dialoguer.
-pub fn run_explore(home: &Path, opts: ExploreOptions) -> Result<()> {
+/// `reporter` is the binary's CLI reporter (the seam's cleans print the same
+/// "Cleaning ... [OK] / Freed:" lines the old re-exec'd child printed) and
+/// `clean_fn` is the in-process clean seam ([`CleanByName`], PBI-50): managed
+/// entries clean in-process (whole targets, `sub = None`) instead of
+/// re-exec'ing this binary through current_exe / PATH.
+pub fn run_explore(
+    home: &Path,
+    opts: ExploreOptions,
+    reporter: &dyn ProgressReporter,
+    clean_fn: &CleanByName,
+) -> Result<()> {
     use std::io::IsTerminal;
     if !std::io::stdin().is_terminal() {
         eprintln!("Error: sasurahime explore requires an interactive terminal");
         anyhow::bail!("not a TTY");
     }
 
-    let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("sasurahime"));
     let dry_run = opts.dry_run;
 
     // ── Managed section ────────────────────────────────────────────────────
@@ -272,22 +305,17 @@ pub fn run_explore(home: &Path, opts: ExploreOptions) -> Result<()> {
             .items(&labels)
             .interact()?;
 
+        // PBI-50: the managed-entry cleans run in-process through the seam
+        // instead of re-exec'ing this binary (`sasurahime clean <target>`
+        // resolved through current_exe / PATH). The old child re-entered
+        // main's top and flushed the scan cache on its way out; that
+        // per-clean flush is deliberately NOT replicated — deletion paths
+        // never consult the scan cache, and this explore process still
+        // flushes once at the end of main, so nothing observable is lost.
+        // A failed entry is reported and the loop keeps going, as before.
         for &idx in &selections {
             let target = managed[idx].managed.unwrap_or("");
-            println!("\nRunning: sasurahime clean {target}");
-            let mut cmd = std::process::Command::new(&exe);
-            cmd.args(["clean", target]);
-            if dry_run {
-                cmd.arg("--dry-run");
-            }
-            match cmd.status() {
-                Ok(s) if s.success() => {}
-                Ok(s) => eprintln!(
-                    "Error: sasurahime clean {target} failed (exit {:?})",
-                    s.code()
-                ),
-                Err(e) => eprintln!("Error: failed to spawn sasurahime clean {target}: {e}"),
-            }
+            clean_managed_entry(target, dry_run, reporter, clean_fn);
         }
 
         !selections.is_empty()
@@ -552,5 +580,54 @@ mod tests {
         let (managed, unmanaged) = explore_results(home.path(), &opts);
         assert!(managed.is_empty());
         assert!(unmanaged.is_empty());
+    }
+
+    // ── PBI-50: the in-process seam for managed entries ────────────────────
+
+    #[test]
+    fn clean_managed_entry_calls_the_seam_with_a_whole_target() {
+        // The explorer cleans whole targets: sub=None, and the caller's
+        // dry-run flag passes through to the seam.
+        let calls: std::sync::Mutex<Vec<(String, Option<String>, bool)>> =
+            std::sync::Mutex::new(Vec::new());
+        let clean_fn = |name: &str, sub: Option<&str>, dry: bool, _rep: &dyn ProgressReporter| {
+            calls
+                .lock()
+                .unwrap()
+                .push((name.to_string(), sub.map(str::to_string), dry));
+            Ok(crate::cleaner::CleanResult::freed("brew", 2048, false))
+        };
+        let cleaned = clean_managed_entry(
+            "brew",
+            true,
+            &crate::progress::DeepSuppressReporter,
+            &clean_fn,
+        );
+        assert!(cleaned, "a successful seam call must report success");
+        assert_eq!(
+            *calls.lock().unwrap(),
+            vec![("brew".to_string(), None, true)],
+            "the seam must be called with (target, None, dry_run)"
+        );
+    }
+
+    #[test]
+    fn clean_managed_entry_reports_a_seam_failure_without_aborting() {
+        // Old flow: exit-code inspection of the re-exec'd self. New flow: the
+        // failure comes back as Err from the seam, is reported, and the
+        // per-entry loop keeps going.
+        let clean_fn =
+            |_name: &str, _sub: Option<&str>, _dry: bool, _rep: &dyn ProgressReporter| {
+                Err(anyhow::anyhow!("unknown clean target: nope"))
+            };
+        assert!(
+            !clean_managed_entry(
+                "nope",
+                false,
+                &crate::progress::DeepSuppressReporter,
+                &clean_fn
+            ),
+            "a seam failure must report false, not panic or abort the loop"
+        );
     }
 }

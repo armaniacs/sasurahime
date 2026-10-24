@@ -138,6 +138,15 @@ impl std::fmt::Display for CleanCancelled {
 
 impl std::error::Error for CleanCancelled {}
 
+/// The in-process clean seam (PBI-50): the binary wires this callback to the
+/// same dispatch the `clean <target>` CLI uses —
+/// `(target name, optional sub-target, dry_run, reporter) -> CleanResult`.
+/// It must return the REAL CleanResult (never a fabricated zero) so the
+/// caller's `Total freed` reflects actual bytes. `sub = None` is a
+/// whole-target clean; `Some(sub)` is the sub-target dispatch (xcode only).
+pub type CleanByName<'a> =
+    dyn Fn(&str, Option<&str>, bool, &dyn ProgressReporter) -> Result<CleanResult> + 'a;
+
 pub fn is_skippable_error(e: &anyhow::Error) -> bool {
     if let Some(io_err) = e.downcast_ref::<std::io::Error>() {
         return matches!(

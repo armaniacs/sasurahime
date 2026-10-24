@@ -1,4 +1,4 @@
-use crate::cleaner::{Cleaner, ScanResult, ScanStatus};
+use crate::cleaner::{CleanByName, CleanResult, Cleaner, ScanResult, ScanStatus};
 use crate::format::format_bytes;
 use anyhow::Result;
 use std::io::{BufRead, IsTerminal, Write};
@@ -184,6 +184,30 @@ pub(crate) fn report_total_freed(out: &mut dyn Write, total_freed: u64) -> std::
     writeln!(out, "\nTotal freed: {}", format_bytes(total_freed))
 }
 
+/// Clean one sub-target selection through the in-process clean seam
+/// ([`CleanByName`], PBI-50): `clean_fn` resolves `name` + sub-target to the
+/// same dispatch the CLI uses and returns the REAL CleanResult, so
+/// `Total freed` reflects actual bytes — the old self re-exec
+/// (`sasurahime clean <name> --sub <sub>`) fabricated `bytes_freed: 0` and
+/// under-counted the total. dry_run is always false: the interactive TUI
+/// always deletes (it asked "Proceed?" above). The reporter is DeepSuppress:
+/// the TUI owns its output here (`with_spinner_result` draws the one line),
+/// so the seam must not start a second competing spinner.
+pub(crate) fn clean_sub_target(
+    name: &str,
+    sub_name: &str,
+    clean_fn: &CleanByName,
+) -> Result<CleanResult> {
+    crate::progress::with_spinner_result(&format!("Cleaning {name} {sub_name}..."), || {
+        clean_fn(
+            name,
+            Some(sub_name),
+            false, // dry_run: interactive always deletes
+            &crate::progress::DeepSuppressReporter,
+        )
+    })
+}
+
 /// Non-interactive: clean every pruneable cleaner without prompting.
 /// Used by `--yes` flag.
 pub fn run_auto(cleaners: &[Box<dyn Cleaner>]) -> Result<()> {
@@ -276,8 +300,11 @@ pub fn run_auto(cleaners: &[Box<dyn Cleaner>]) -> Result<()> {
 }
 
 /// Interactive TUI: scan, let user select with checkboxes, then clean.
-/// Exits with an error message if stdin is not a terminal.
-pub fn run_interactive(cleaners: &[Box<dyn Cleaner>]) -> Result<()> {
+/// Exits with an error message if stdin is not a terminal. `clean_fn` is the
+/// in-process clean seam ([`CleanByName`], PBI-50) wired by the binary:
+/// sub-target selections dispatch through it instead of re-exec'ing this
+/// binary, and its REAL CleanResult is what `Total freed` reports.
+pub fn run_interactive(cleaners: &[Box<dyn Cleaner>], clean_fn: &CleanByName) -> Result<()> {
     if !std::io::stdin().is_terminal() {
         eprintln!("sasurahime: not a terminal. Use --yes for non-interactive mode.");
         std::process::exit(1);
@@ -328,33 +355,20 @@ pub fn run_interactive(cleaners: &[Box<dyn Cleaner>]) -> Result<()> {
         let (cleaner_idx, sub_name) = &selection_mapping[si];
         if let Some(sub_name) = sub_name {
             let name = cleaners[*cleaner_idx].name();
-            let result = crate::progress::with_spinner_result(
-                &format!("Cleaning {} {}...", name, sub_name),
-                || {
-                    let status = std::process::Command::new(std::env::current_exe()?)
-                        .args(["clean", name, "--sub", sub_name])
-                        .status()?;
-                    if !status.success() {
-                        anyhow::bail!("`{} clean {} --sub {}` failed", name, name, sub_name);
-                    }
-                    Ok(crate::cleaner::CleanResult {
-                        name,
-                        bytes_freed: 0,
-                        uses_trash: false,
-                        skipped: vec![],
-                        deleted_paths: vec![],
-                    })
-                },
-            );
-            match result {
+            // PBI-50: the sub-target clean runs in-process through the seam
+            // (wired by the binary) instead of re-exec'ing this binary with
+            // `clean <name> --sub <sub>`. The seam returns the REAL
+            // CleanResult, so Total freed reflects actual bytes — the old
+            // self re-exec fabricated `bytes_freed: 0` and under-counted.
+            match clean_sub_target(name, sub_name, clean_fn) {
                 Ok(r) => freed += r.bytes_freed,
-                Err(e) => eprintln!("Error cleaning {} {}: {e}", name, sub_name),
+                Err(e) => eprintln!("Error cleaning {name} {sub_name}: {e}"),
             }
         } else {
             // Whole-target selection through the one batch path: the same
             // animated spinner, history guard and error collection as every
             // other batch loop. One target per call keeps the selection order
-            // interleaved with the sub-target subprocess branch above.
+            // interleaved with the sub-target seam branch above.
             // with_notes=false: this flow never printed notes.
             let batch_targets = [cleaners[*cleaner_idx].as_ref()];
             let summary = crate::batch::run_batch(
@@ -680,5 +694,48 @@ mod tests {
         let mut out: Vec<u8> = Vec::new();
         report_total_freed(&mut out, 2048).unwrap();
         assert_eq!(String::from_utf8(out).unwrap(), "\nTotal freed: 2.0 KB\n");
+    }
+
+    // --- PBI-50: the in-process clean seam ---
+
+    #[test]
+    fn clean_sub_target_calls_the_seam_and_propagates_the_real_result() {
+        // The sub-target clean must go through the seam callback and return
+        // its REAL CleanResult. The old self re-exec fabricated
+        // `bytes_freed: 0` for sub-target cleans, so the TUI's `Total freed`
+        // under-counted every sub-target selection.
+        let calls: std::sync::Mutex<Vec<(String, Option<String>, bool)>> =
+            std::sync::Mutex::new(Vec::new());
+        let clean_fn = |name: &str, sub: Option<&str>, dry: bool, _rep: &dyn ProgressReporter| {
+            calls
+                .lock()
+                .unwrap()
+                .push((name.to_string(), sub.map(str::to_string), dry));
+            Ok(CleanResult::freed("xcode", 4096, false))
+        };
+        let result = clean_sub_target("xcode", "DerivedData", &clean_fn).unwrap();
+        assert_eq!(result.name, "xcode");
+        assert_eq!(
+            result.bytes_freed, 4096,
+            "the REAL bytes freed must flow through the seam"
+        );
+        assert_eq!(
+            *calls.lock().unwrap(),
+            vec![("xcode".to_string(), Some("DerivedData".to_string()), false)],
+            "the seam must be called once with (name, Some(sub), dry_run=false)"
+        );
+    }
+
+    #[test]
+    fn clean_sub_target_propagates_a_seam_error() {
+        let clean_fn =
+            |_name: &str, _sub: Option<&str>, _dry: bool, _rep: &dyn ProgressReporter| {
+                Err(anyhow::anyhow!("unknown clean target: nope"))
+            };
+        let err = clean_sub_target("nope", "DerivedData", &clean_fn).unwrap_err();
+        assert!(
+            err.to_string().contains("unknown clean target"),
+            "the seam error must reach the caller, got: {err}"
+        );
     }
 }
