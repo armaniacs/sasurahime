@@ -414,6 +414,11 @@ mod tests {
 
     #[test]
     fn clean_selected_subcategory_only_deletes_that_one() {
+        // Pin permanent deletion: the Global compat delegator resolves to the
+        // default trash mode otherwise, whose backend is TCC-blocked in this
+        // sandbox (bytes_freed 0). The test must pin the mode it needs instead
+        // of depending on ambient global state.
+        let _mode = crate::test_helpers::TrashModeGuard::set(false);
         let tmp = TempDir::new().unwrap();
         let dd = tmp.path().join("Library/Developer/Xcode/DerivedData");
         let arch = tmp.path().join("Library/Developer/Xcode/Archives");
