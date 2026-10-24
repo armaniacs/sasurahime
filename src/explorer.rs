@@ -205,9 +205,9 @@ fn display_path(path: &Path, home: &Path) -> String {
 fn print_managed_table(entries: &[ExploreEntry], home: &Path) {
     let mut table = Table::new();
     if crate::format::use_unicode() {
-        table.load_preset(UTF8_FULL);
+        table.load_style(UTF8_FULL);
     } else {
-        table.load_preset(ASCII_FULL);
+        table.load_style(ASCII_FULL);
     }
     table.set_header(vec!["Path", "Size", "Clean with"]);
     for e in entries {
@@ -220,9 +220,9 @@ fn print_managed_table(entries: &[ExploreEntry], home: &Path) {
 fn print_unmanaged_table(entries: &[ExploreEntry], home: &Path) {
     let mut table = Table::new();
     if crate::format::use_unicode() {
-        table.load_preset(UTF8_FULL);
+        table.load_style(UTF8_FULL);
     } else {
-        table.load_preset(ASCII_FULL);
+        table.load_style(ASCII_FULL);
     }
     table.set_header(vec!["Path", "Size"]);
     for e in entries {
