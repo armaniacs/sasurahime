@@ -1256,6 +1256,18 @@ fn main() -> anyhow::Result<()> {
                             eprintln!("Error: missing target name.");
                             std::process::exit(1);
                         };
+                        // `--help`/`-h` after the target name is captured
+                        // verbatim into the external_subcommand's raw args,
+                        // so clap never intercepts it. Running the plugin's
+                        // clean for help output would be destructive:
+                        // short-circuit with an advisory naming the plugin
+                        // and exit 0, like clap does for its own subcommands.
+                        if args.iter().any(|a| a == "--help" || a == "-h") {
+                            println!(
+                                "'{name}' is an external plugin target. Run `sasurahime-{name} --help` for the plugin's own usage."
+                            );
+                            std::process::exit(0);
+                        }
                         let Some(plugin) = cleaners::plugin::PluginCleaner::discover_excluding(&[])
                             .into_iter()
                             .find(|p| p.name() == name)
@@ -1263,7 +1275,13 @@ fn main() -> anyhow::Result<()> {
                             eprintln!("Error: no plugin named '{name}' on PATH.");
                             std::process::exit(1);
                         };
-                        let dry_run = args.iter().any(|a| a == "--dry-run");
+                        // Honor the global --dry-run (declared `global = true`
+                        // on Cli) in addition to the local position carried by
+                        // the raw external args. The External arm re-parses
+                        // those args by hand, so clap's global-value flow-down
+                        // never reaches it: without the OR, `--dry-run clean
+                        // <plugin>` ran the plugin's real clean.
+                        let dry_run = cli.dry_run || args.iter().any(|a| a == "--dry-run");
                         run_and_exit(
                             plugin.name(),
                             move |dry, rep| plugin.clean(dry, rep),
