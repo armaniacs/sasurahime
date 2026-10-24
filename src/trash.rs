@@ -87,10 +87,11 @@ pub struct DeleteOutcome {
 
 /// The one deletion seam: first enforces the scope check
 /// ([`crate::cleaners::generic::is_safe_delete_target`]) so HOME, its
-/// ancestors and system roots are refused before anything is touched, then
-/// clears macOS `uchg` immutable flags before a permanent remove (warning and
-/// continuing when the clear fails), deletes according to `mode`, and
-/// classifies failures into skippable vs fatal.
+/// ancestors, system roots and the mounted/shared roots (/Volumes, /net,
+/// /Users/Shared, /Library, /opt, /private/var/vm) are refused before
+/// anything is touched, then clears macOS `uchg` immutable flags before a
+/// permanent remove (warning and continuing when the clear fails), deletes
+/// according to `mode`, and classifies failures into skippable vs fatal.
 ///
 /// Every deletion in the codebase goes through here so the CLAUDE.md safety
 /// rules concentrate in one module instead of living as copy-pasted

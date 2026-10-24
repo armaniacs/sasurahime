@@ -820,9 +820,10 @@ pub fn is_safe_delete_target(path: &Path) -> bool {
     // Block HOME itself and every ancestor of HOME: an env-var redirect
     // (ACT_CACHE_DIR=$HOME, TF_PLUGIN_CACHE_DIR=/Users) must never be
     // deletable, and subdirectories of HOME stay allowed. HOME is resolved
-    // with the same `std::env::var("HOME") -> dirs::home_dir()` fallback
-    // `main::home` uses, so an unset (or empty) HOME can no longer silently
-    // disable this check.
+    // with `std::env::var("HOME") -> dirs::home_dir()` like `main::home`,
+    // but this check is stricter than `main::home`: it filters out an empty
+    // HOME before the dirs fallback (`main::home` does not), so an empty
+    // HOME cannot silently disable the HOME/ancestor guard.
     let home = std::env::var("HOME")
         .ok()
         .filter(|h| !h.is_empty())
@@ -843,7 +844,10 @@ pub fn is_safe_delete_target(path: &Path) -> bool {
     }
     // Block exact sensitive roots and system paths.
     // Allow macOS tempdirs (/var/folders/...) while blocking /var itself
-    // and known system subdirectories.
+    // and known system subdirectories. Mounted and shared roots (/Volumes,
+    // /net, /Users/Shared, /Library, /opt) are blocked whole: nothing under
+    // them is this tool's business, and the component-wise prefix match
+    // keeps HOME-scoped ~/Library paths deletable.
     let is_exact = |p: &str| check == Path::new(p);
     let is_sys = |p: &str| check.starts_with(p);
     !is_exact("/")
@@ -862,11 +866,17 @@ pub fn is_safe_delete_target(path: &Path) -> bool {
         && !is_sys("/private/var/run")
         && !is_sys("/private/var/tmp")
         && !is_sys("/private/var/root")
+        && !is_sys("/private/var/vm")
         && !is_sys("/var/log")
         && !is_sys("/var/db")
         && !is_sys("/var/root")
         && !is_sys("/var/run")
         && !is_exact("/var")
+        && !is_sys("/Volumes")
+        && !is_sys("/net")
+        && !is_sys("/Users/Shared")
+        && !is_sys("/Library")
+        && !is_sys("/opt")
 }
 
 /// Resolves a cache directory that may be overridden by `var`. The
@@ -1560,6 +1570,104 @@ mod tests {
         assert!(
             !is_safe_delete_target(Path::new("/private/var/root")),
             "/private/var/root must be rejected"
+        );
+    }
+
+    #[test]
+    fn is_safe_delete_target_rejects_volumes() {
+        // /Volumes hosts mounted external and network volumes: a custom
+        // target on a removable disk must never be a delete target.
+        assert!(
+            !is_safe_delete_target(Path::new("/Volumes")),
+            "/Volumes itself must be rejected"
+        );
+        assert!(
+            !is_safe_delete_target(Path::new("/Volumes/USB")),
+            "/Volumes/* (a mounted volume) must be rejected"
+        );
+    }
+
+    #[test]
+    fn is_safe_delete_target_rejects_users_shared() {
+        // /Users/Shared is shared with all local users: its contents must
+        // never be auto-deleted. Per-user homes stay deletable.
+        assert!(
+            !is_safe_delete_target(Path::new("/Users/Shared")),
+            "/Users/Shared must be rejected"
+        );
+        assert!(
+            !is_safe_delete_target(Path::new("/Users/Shared/other-users-cache")),
+            "/Users/Shared/* must be rejected"
+        );
+    }
+
+    #[test]
+    fn is_safe_delete_target_rejects_system_library() {
+        // The system-wide /Library tree is refused, but HOME-scoped
+        // ~/Library paths pass the HOME check before the blocklist and stay
+        // deletable: the /Library entry matches whole path components only.
+        assert!(
+            !is_safe_delete_target(Path::new("/Library")),
+            "/Library must be rejected"
+        );
+        assert!(
+            !is_safe_delete_target(Path::new("/Library/Logs")),
+            "/Library/* must be rejected"
+        );
+        assert!(
+            is_safe_delete_target(Path::new("/Users/test/Library/Caches")),
+            "~/Library must stay deletable"
+        );
+    }
+
+    #[test]
+    fn is_safe_delete_target_rejects_opt() {
+        // /opt holds installed software (e.g. /opt/homebrew): never a delete
+        // target.
+        assert!(
+            !is_safe_delete_target(Path::new("/opt")),
+            "/opt must be rejected"
+        );
+        assert!(
+            !is_safe_delete_target(Path::new("/opt/homebrew")),
+            "/opt/* must be rejected"
+        );
+    }
+
+    #[test]
+    fn is_safe_delete_target_rejects_net() {
+        // /net is the autofs root for network mounts: never a delete target.
+        assert!(
+            !is_safe_delete_target(Path::new("/net")),
+            "/net must be rejected"
+        );
+        assert!(
+            !is_safe_delete_target(Path::new("/net/server/share")),
+            "/net/* (a network mount) must be rejected"
+        );
+    }
+
+    #[test]
+    fn is_safe_delete_target_rejects_private_var_vm() {
+        // /private/var/vm holds the kernel swapfiles: never a delete target.
+        // It sits under /private/var, which is not itself blocked, so
+        // /private/var/folders tempdirs stay allowed. /var/vm canonicalizes
+        // to /private/var/vm and is refused through the same entry.
+        assert!(
+            !is_safe_delete_target(Path::new("/private/var/vm")),
+            "/private/var/vm must be rejected"
+        );
+        assert!(
+            !is_safe_delete_target(Path::new("/private/var/vm/swapfile0")),
+            "/private/var/vm/* (swapfile) must be rejected"
+        );
+        assert!(
+            !is_safe_delete_target(Path::new("/var/vm")),
+            "/var/vm (canonical /private/var/vm) must be rejected"
+        );
+        assert!(
+            is_safe_delete_target(Path::new("/private/var/folders/xy/T/tmpdir")),
+            "/private/var/folders tempdirs must stay allowed"
         );
     }
 
