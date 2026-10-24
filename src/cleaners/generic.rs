@@ -911,7 +911,10 @@ pub fn is_safe_delete_target(path: &Path) -> bool {
 /// Resolves a cache directory that may be overridden by `var`. The
 /// OVERRIDE VALUE ITSELF is validated BEFORE any subpath is joined, so a
 /// root-adjacent value (e.g. `HF_HOME=/`) can never yield a joined path
-/// that passes the safety check. Unsafe values warn and fall back.
+/// that passes the safety check. The JOIN RESULT is validated too: a
+/// subpath carrying `..` — or an absolute one, which `PathBuf::join` uses
+/// to replace the base — fails closed to the default. Unsafe values warn
+/// and fall back.
 pub fn resolve_env_dir(
     var: &str,
     subpath: &str,
@@ -929,7 +932,15 @@ pub fn resolve_env_dir(
             } else if subpath.is_empty() {
                 base
             } else {
-                base.join(subpath)
+                let joined = base.join(subpath);
+                if joined.to_string_lossy().contains("..") || !is_safe_delete_target(&joined) {
+                    eprintln!(
+                        "[{label}] WARNING: {var}={subpath} escapes the cache dir, using default"
+                    );
+                    default
+                } else {
+                    joined
+                }
             }
         }
         Err(_) => default,
@@ -1844,6 +1855,71 @@ mod tests {
             ),
             default,
             "an unset var must yield the default"
+        );
+    }
+
+    #[test]
+    fn resolve_env_dir_fail_closed_when_the_joined_subpath_escapes() {
+        // The JOIN RESULT is validated after the join: a safe override with
+        // an escaping subpath (`..`) must fail closed to the default, never
+        // yield a delete target outside the cache dir.
+        let _lock = crate::context::TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let tmp = tempfile::TempDir::new().unwrap();
+        let default = tmp.path().join("default-cache");
+        let _guard =
+            crate::test_helpers::EnvGuard::set("SASURAHIME_TEST_RESOLVE_VAR", "/Users/u/hf");
+        assert_eq!(
+            resolve_env_dir(
+                "SASURAHIME_TEST_RESOLVE_VAR",
+                "../../etc",
+                default.clone(),
+                "test"
+            ),
+            default,
+            "an escaping subpath must fail closed to the default"
+        );
+    }
+
+    #[test]
+    fn resolve_env_dir_fail_closed_when_the_subpath_is_absolute() {
+        // PathBuf::join with an ABSOLUTE subpath replaces the base entirely:
+        // the join validation must catch that escape too.
+        let _lock = crate::context::TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let tmp = tempfile::TempDir::new().unwrap();
+        let default = tmp.path().join("default-cache");
+        let _guard =
+            crate::test_helpers::EnvGuard::set("SASURAHIME_TEST_RESOLVE_VAR", "/Users/u/hf");
+        assert_eq!(
+            resolve_env_dir(
+                "SASURAHIME_TEST_RESOLVE_VAR",
+                "/etc",
+                default.clone(),
+                "test"
+            ),
+            default,
+            "an absolute subpath must not replace the cache dir"
+        );
+    }
+
+    #[test]
+    fn resolve_env_dir_joined_safe_subpath_still_used() {
+        // The hardening must not regress the normal join: a safe subpath on
+        // a safe override is still used.
+        let _lock = crate::context::TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let tmp = tempfile::TempDir::new().unwrap();
+        let default = tmp.path().join("default-cache");
+        let _guard =
+            crate::test_helpers::EnvGuard::set("SASURAHIME_TEST_RESOLVE_VAR", "/Users/u/hf");
+        assert_eq!(
+            resolve_env_dir("SASURAHIME_TEST_RESOLVE_VAR", "hub", default, "test"),
+            PathBuf::from("/Users/u/hf/hub"),
+            "a safe subpath on a safe override must still be joined"
         );
     }
 
