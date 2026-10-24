@@ -945,6 +945,15 @@ fn main() -> anyhow::Result<()> {
             for (name, e) in &summary.failures {
                 eprintln!("Error cleaning {name}: {e}");
             }
+            if !summary.skipped.is_empty() {
+                eprintln!(
+                    "{} file(s) skipped due to errors (permission/lock):",
+                    summary.skipped.len()
+                );
+                for (name, detail) in &summary.skipped {
+                    eprintln!("  - {name}: {detail}");
+                }
+            }
             if !skipped.is_empty() {
                 eprintln!("Skipped {} target(s):", skipped.len());
                 for s in &skipped {
@@ -1078,6 +1087,15 @@ fn main() -> anyhow::Result<()> {
                         );
                         for (name, e) in &summary.failures {
                             eprintln!("Error cleaning {name}: {e}");
+                        }
+                        if !summary.skipped.is_empty() {
+                            eprintln!(
+                                "{} file(s) skipped due to errors (permission/lock):",
+                                summary.skipped.len()
+                            );
+                            for (name, detail) in &summary.skipped {
+                                eprintln!("  - {name}: {detail}");
+                            }
                         }
                         println!("Total freed: {}", format::format_bytes(summary.total_freed));
                     }
@@ -1265,6 +1283,15 @@ fn main() -> anyhow::Result<()> {
                         );
                         for (name, e) in &summary.failures {
                             eprintln!("Error cleaning {name}: {e}");
+                        }
+                        if !summary.skipped.is_empty() {
+                            eprintln!(
+                                "{} file(s) skipped due to errors (permission/lock):",
+                                summary.skipped.len()
+                            );
+                            for (name, detail) in &summary.skipped {
+                                eprintln!("  - {name}: {detail}");
+                            }
                         }
                         if skipped_targets > 0 {
                             eprintln!(

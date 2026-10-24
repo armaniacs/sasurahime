@@ -164,6 +164,65 @@ fn clean_caches_continues_past_missing_tools() {
 }
 
 #[test]
+fn clean_caches_reports_skipped_files() {
+    // A per-entry skippable failure inside the caches batch must surface in
+    // the single-target "N file(s) skipped" report. ~/.cache is made
+    // read-only, so moving ~/.cache/node-gyp out of it fails for any
+    // non-root backend (trash backends need write permission on the source
+    // parent; TCC-blocked backends fail even earlier) — both reach the seam
+    // as a skippable "trash failed: ..." error, recorded as a SkippedEntry.
+    let tmp = TempDir::new().unwrap();
+    let home = tmp.path().canonicalize().unwrap();
+    let cache = home.join(".cache");
+    let node_gyp = cache.join("node-gyp");
+    fs::create_dir_all(&node_gyp).unwrap();
+    fs::write(node_gyp.join("dummy"), b"x").unwrap();
+
+    struct ReadOnlyGuard(std::path::PathBuf);
+    impl Drop for ReadOnlyGuard {
+        fn drop(&mut self) {
+            use std::os::unix::fs::PermissionsExt;
+            if let Ok(meta) = fs::metadata(&self.0) {
+                let mut perms = meta.permissions();
+                perms.set_mode(0o755);
+                let _ = fs::set_permissions(&self.0, perms);
+            }
+        }
+    }
+    let _read_only = {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(&cache).unwrap().permissions();
+        perms.set_mode(0o555);
+        fs::set_permissions(&cache, perms).unwrap();
+        ReadOnlyGuard(cache.clone())
+    };
+
+    let output = Command::cargo_bin("sasurahime")
+        .unwrap()
+        .env("HOME", &home)
+        // No real external tools: the CLI cleaners report "not found" and
+        // the batch continues to the node-gyp path cleaner.
+        .env("PATH", "/nonexistent")
+        .args(["clean", "caches"])
+        .output()
+        .unwrap();
+
+    // Restore the mode before the assertions so TempDir cleanup always works.
+    drop(_read_only);
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "stderr: {stderr}");
+    assert!(
+        stderr.contains("1 file(s) skipped due to errors (permission/lock):"),
+        "the batch must report skipped files in the single-target shape:\n{stderr}"
+    );
+    assert!(
+        node_gyp.exists(),
+        "the skipped entry must survive the run"
+    );
+}
+
+#[test]
 fn clean_spm_cache_dry_run_deletes_nothing() {
     let tmp = TempDir::new().unwrap();
     let spm_dir = tmp.path().join("Library/Caches/org.swift.swiftpm");
