@@ -26,10 +26,10 @@ Scenario: dirs 失敗時のセマンティクスは呼び出し側が選べる
 
 ## 受け入れ基準
 
-- [ ] HOME 解決の env → dirs チェーンが 1 つの共有関数に統一される（main.rs home() / generic.rs is_safe_delete_target 内 / config.rs / history.rs の 4 サイトが通る）
-- [ ] generic.rs:851-855 の stale コメントが削除または訂正される（「main::home は空 HOME をフィルタしない」は PBI 47 の修正以降、偽）
-- [ ] main::home の expect セマンティクス（pin: main.rs:1436-1459）と is_safe_delete_target の fail-closed 空フィルタ（pin: generic.rs:1495-1503, 1760-1925）が維持される
-- [ ] lib 失敗 ⊆ 既知 TCC セット / bin / 統合 / clippy / fmt の全ゲート green
+- [x] HOME 解決の env → dirs チェーンが 1 つの共有関数に統一される（main.rs home() / generic.rs is_safe_delete_target 内 / config.rs / history.rs の 4 サイトが通る）
+- [x] generic.rs:851-855 の stale コメントが削除または訂正される（「main::home は空 HOME をフィルタしない」は PBI 47 の修正以降、偽）
+- [x] main::home の expect セマンティクス（pin: main.rs:1436-1459）と is_safe_delete_target の fail-closed 空フィルタ（pin: generic.rs:1495-1503, 1760-1925）が維持される
+- [x] lib 失敗 ⊆ 既知 TCC セット / bin / 統合 / clippy / fmt の全ゲート green
 
 ## テスト戦略（t_wadaスタイル）
 
@@ -53,3 +53,10 @@ Scenario: dirs 失敗時のセマンティクスは呼び出し側が選べる
 - is_safe_delete_target の空フィルタは fail-closed、config/history の unwrap_or_default は空文字列を返す ― この差は呼び出し側に残してよい（リゾルバは取得だけを共有）
 - main.rs / generic.rs は PBI 38-47 の変更直後のホットファイル。既存 pin テストを壊さないこと
 - history.rs:631 は dirs::home_dir().is_some() を assert する ― 影響なしを確認
+
+## 検証記録 (2026-10-24)
+
+- 実装コミット: 226c2c3 (wt-home、1023a にマージ済み)
+- 内容: resolved_home_dir (src/config.rs:152、Option<PathBuf>) に統一。4 呼び出しサイト (main.rs home() expect / generic.rs is_safe_delete_target fail-closed / config.rs unwrap_or_default / history.rs unwrap_or_default) が通過。generic.rs の stale コメント (「main::home は空 HOME をフィルタしない」) を訂正
+- 備考 (正直な逸脱): EnvGuard::unset を src/test_helpers.rs に追加 (PBI 許可範囲)。dirs 完全失敗 (passwd 不在) はプロセス内で強制不能のため、HOME-unset フォールバックでカバーし Option 返しを呼び出し側の契約として pin
+- 検証: RED 3 件 (E0425 compile) → GREEN。1023a HEAD d750c9c で lib 723/4 (失敗 ⊆ 既知 TCC セット) / bin 37/37 / 統合 40 ターゲット 0 failed / clippy 0 warnings / fmt clean

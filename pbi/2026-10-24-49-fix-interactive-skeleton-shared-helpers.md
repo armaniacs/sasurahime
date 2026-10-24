@@ -25,11 +25,11 @@ Scenario: ユーザーが n と答えると両フローとも中断する
 
 ## 受け入れ基準
 
-- [ ] y/N stdin 確認が 1 つのヘルパーに統一される（run_auto:133-143 / run_interactive:232-241、可能なら xcode.rs:171-177 の stderr 変体も）
-- [ ] set_skip_confirm(true)/(false) ブラケットが 1 つのヘルパーに統一される（147+187 / 246+308）
-- [ ] post-batch の failures + skipped + total 印刷が 1 つの報告ヘルパーに統一される（174-185 / 293-304、total 189/310）
-- [ ] interactive.rs:167-173 の PBI-33 決定（failures は run_batch コールバックでなく呼び出し側で印刷）を尊重する
-- [ ] 既存テスト（interactive.rs:364-505、run_auto test 494-533）green、全ゲート green
+- [x] y/N stdin 確認が 1 つのヘルパーに統一される（run_auto:133-143 / run_interactive:232-241、可能なら xcode.rs:171-177 の stderr 変体も）
+- [x] set_skip_confirm(true)/(false) ブラケットが 1 つのヘルパーに統一される（147+187 / 246+308）
+- [x] post-batch の failures + skipped + total 印刷が 1 つの報告ヘルパーに統一される（174-185 / 293-304、total 189/310）
+- [x] interactive.rs:167-173 の PBI-33 決定（failures は run_batch コールバックでなく呼び出し側で印刷）を尊重する
+- [x] 既存テスト（interactive.rs:364-505、run_auto test 494-533）green、全ゲート green
 
 ## テスト戦略（t_wadaスタイル）
 
@@ -52,3 +52,12 @@ Scenario: ユーザーが n と答えると両フローとも中断する
 ### 落とし穴
 - PBI-33 決定の記録（interactive.rs:167-173）に反して failures を run_batch 側へ移動しないこと
 - explorer.rs / library_logs.rs / app_support.rs の label → MultiSelect スケルトンは別物（項目と操作が違う）― 統一対象にしない
+
+## 検証記録 (2026-10-24)
+
+- 実装コミット: 7d17701 (wt-skel、1023a にマージ済み)
+- 内容: ask_yn/confirm (y/N スケルトン、出力先パラメータ化)、SkipConfirmGuard (RAII ブラケット)、report_batch_failures + report_total_freed に統一。xcode.rs の stderr 変体を吸収
+- 備考 (正直な逸脱): 報告は 1 関数でなく 2 ヘルパー (run_interactive が target ごとに batch を回し total を蓄積するため total は loop 後に 1 回印刷)。SkipConfirmGuard の直接 unit テストなし (getter が generic.rs 触れに必要で do-not-touch のため、既存スイートが委譲 2 行をカバー)。ヘルパーは println! の panic でなく io::Result + ? (stdout/stderr 破損時のみ差異)
+- バイト等価検証: 3 件の E2E before/after diff がすべて BYTE-IDENTICAL (abort / accept / failure-report 行)
+- 検証: RED 10 件 (E0425/E0433 compile) → GREEN。1023a HEAD d750c9c で lib 723/4 / bin 37/37 / 統合 40 ターゲット 0 failed / clippy 0 warnings / fmt clean。PBI-33 決定 (interactive.rs の記録コメント) は原文のまま維持
+- 移譲注記: 初回の実 HOME ベースライン実行で trash モード掃除が走った (Trash から復元可能)。以後は fake HOME + --permanent で比較

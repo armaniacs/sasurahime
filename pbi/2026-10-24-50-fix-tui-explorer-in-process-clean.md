@@ -26,12 +26,12 @@ Scenario: explorer で管理エントリを選ぶと in-process で掃除され�
 
 ## 受け入れ基準
 
-- [ ] interactive.rs:256-258 の `clean <name> --sub` 自己再実行が in-process 呼び出しに置き換わり、実際の CleanResult を返す（262-268 の捏造除去）
-- [ ] explorer.rs:245+278-290 の自己再実行が in-process 呼び出しに置き換わる（current_exe / PATH フォールバック依存の除去）
-- [ ] サブターゲット掃除の in-process シーム（cleaner 名 + sub 名で dispatch）が追加される
-- [ ] explorer 再実行が含んでいた scan_cache flush（main.rs:1423-1425 相当）の扱いが決定され記録される（複製または意図的な省略）
-- [ ] set_skip_confirm ブラケット意味論が維持される（interactive.rs:246/308）
-- [ ] 新シームのテスト追加、全ゲート green
+- [x] interactive.rs:256-258 の `clean <name> --sub` 自己再実行が in-process 呼び出しに置き換わり、実際の CleanResult を返す（262-268 の捏造除去）
+- [x] explorer.rs:245+278-290 の自己再実行が in-process 呼び出しに置き換わる（current_exe / PATH フォールバック依存の除去）
+- [x] サブターゲット掃除の in-process シーム（cleaner 名 + sub 名で dispatch）が追加される
+- [x] explorer 再実行が含んでいた scan_cache flush（main.rs:1423-1425 相当）の扱いが決定され記録される（複製または意図的な省略）
+- [x] set_skip_confirm ブラケット意味論が維持される（interactive.rs:246/308）
+- [x] 新シームのテスト追加、全ゲート green
 
 ## テスト戦略（t_wadaスタイル）
 
@@ -54,3 +54,11 @@ Scenario: explorer で管理エントリを選ぶと in-process で掃除され�
 - バッチ B（PBI-48/49 の main.rs / interactive.rs マージ後に着手。両方 interactive.rs と main.rs に触れるため直列）
 - 掃除済み項目の再スキャンが必要な挙動があれば explorer 側で維持すること
 - 既存 interactive.rs テスト（364-505）は純粋ヘルパーのみで、新シームのテストは追加でよい
+
+## 検証記録 (2026-10-24)
+
+- 実装コミット: d750c9c (wt-tui、1023a にマージ済み)
+- 内容: CleanByName シーム (src/cleaner.rs:147、resolver callback を main.rs から配線、Option A)。interactive.rs clean_sub_target と explorer.rs clean_managed_entry が自己再実行を置換。Total freed に実バイトが反映
+- 備考 (正直な逸脱): シームは clean_with_opts でなく bare .clean() (dispatch_clean と同一の CLI パリティ、既定 opts で挙動同一)。run_explore に reporter パラメータ追加 (子の出力形状と suppress フラグ維持のため)。scan_cache flush は意図的に廃止し explorer.rs と clean_by_name doc に記録
+- ボーナス修正: 旧再実行は TUI 表示名を --sub に渡し XcodeSubcategory::parse が黙って拒否 (Archives 選択で DerivedData を掃除)。シームは両表記を受理し pin テスト追加
+- 検証: RED 6 lib + 10 bin (E0425) → GREEN。1023a HEAD d750c9c で lib 723/4 / bin 37/37 / 統合 40 ターゲット 0 failed / clippy 0 warnings / fmt clean

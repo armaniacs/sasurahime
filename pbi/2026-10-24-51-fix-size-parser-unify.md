@@ -26,11 +26,11 @@ Scenario: apfs_snapshot の 10 進パーサは tmutil 規約のまま別実装�
 
 ## 受け入れ基準
 
-- [ ] format.rs に単位フラグ付きの共有 parse_size_str が置かれ、brew と ollama がそれを使う
-- [ ] ollama の黙って 0 を返す挙動が明示的な None 扱いに変わる（呼び出し側でデフォルト化するなら記録する）
-- [ ] apfs_snapshot.rs:64-95 の 10 進パーサ（tmutil 規約）はマージされず別実装のまま
-- [ ] 既存ユニットテストが green（brew 10 件: 141-197 / ollama 2 件: 288-297 / apfs 約 20 件: 1020-1128）、brew の空白区切り形式を保持
-- [ ] 全ゲート green
+- [x] format.rs に単位フラグ付きの共有 parse_size_str が置かれ、brew と ollama がそれを使う
+- [x] ollama の黙って 0 を返す挙動が明示的な None 扱いに変わる（呼び出し側でデフォルト化するなら記録する）
+- [x] apfs_snapshot.rs:64-95 の 10 進パーサ（tmutil 規約）はマージされず別実装のまま
+- [x] 既存ユニットテストが green（brew 10 件: 141-197 / ollama 2 件: 288-297 / apfs 約 20 件: 1020-1128）、brew の空白区切り形式を保持
+- [x] 全ゲート green
 
 ## テスト戦略（t_wadaスタイル）
 
@@ -53,3 +53,10 @@ Scenario: apfs_snapshot の 10 進パーサは tmutil 規約のまま別実装�
 ### 落とし穴
 - apfs の 10 進単位をバイナリ側にマージするとバグになる（tmutil は 10GB = 10,000,000,000）
 - PBI 38-47 のホットファイル（main.rs / generic.rs / batch.rs）に触れないこと。main.rs:1222 は名前維持で影響なし
+
+## 検証記録 (2026-10-24)
+
+- 実装コミット: 03a6de0 (wt-size、1023a にマージ済み)
+- 内容: parse_size_str(s, SizeUnits) (src/format.rs:88、SizeUnits {Binary, Decimal}) に統一。brew は委譲 (10 テスト green、空白区切り形式維持)、ollama は Option<u64> 化 + 呼び出し側で 0 既定を 9 行コメントで記録
+- 備考 (正直な逸脱): ollama の既存 2 テストは Some(...) 包みに更新 (戻り値型変更、値は不変)。SizeUnits::Decimal は本番未使用 (apfs は tmutil 規約のまま別実装、main.rs 無変更、10 進テストで pin)。ボーナス: ollama が空白区切り・小文字も受理
+- 検証: RED-1 6 件 (stub panic) → RED-2 ollama 旧 API は None 表現不能 (E0277 構造的証明) → GREEN。1023a HEAD d750c9c で lib 723/4 / bin 37/37 / 統合 40 ターゲット 0 failed / clippy 0 warnings / fmt clean。apfs_snapshot.rs と main.rs は 0 diff
