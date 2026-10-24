@@ -1053,10 +1053,14 @@ pub fn clean_cli_or_fallback(
 
     let outcome = crate::trash::safe_delete(runner, dir, crate::trash::TrashMode::Global)?;
     if let Some(reason) = outcome.skip_reason {
+        // The seam classified the failure as skippable: the entry was NOT
+        // deleted, so nothing is in the Trash and the run must not claim
+        // Trash. Only successful deletions contribute outcome.uses_trash
+        // (PBI 43 seam-truth convention).
         return Ok(CleanResult {
             name,
             bytes_freed: 0,
-            uses_trash: outcome.uses_trash,
+            uses_trash: false,
             skipped: vec![SkippedEntry {
                 path: dir.to_path_buf(),
                 reason,
@@ -2287,5 +2291,50 @@ mod tests {
             result.skipped.is_empty(),
             "nonexistent targets record no skip"
         );
+    }
+
+    #[test]
+    fn clean_cli_or_fallback_seam_skip_never_claims_trash() {
+        // PBI 43 follow-up: clean_cli_or_fallback's seam-skip return still
+        // propagated outcome.uses_trash, so a trash-mode failure (entry NOT
+        // deleted) claimed Trash for a zero-deletion run. The parent is made
+        // read-only so the trash move fails deterministically in any
+        // non-root environment ("trash failed: ..." — TCC-blocked backends
+        // fail even earlier; both reach the seam as a skippable error). The
+        // pinned Trash mode keeps the claim out of the global pin.
+        let _lock = crate::context::TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let _mode = crate::test_helpers::TrashModeGuard::set(true);
+        let tmp = tempfile::TempDir::new().unwrap();
+        let parent = tmp.path().join("locked");
+        let dir = parent.join("cache");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("data.bin"), vec![0u8; 1024]).unwrap();
+        let _read_only = ReadOnlyGuard::restrict(&parent);
+        let config = CliFallbackConfig {
+            tool: "definitely-not-installed-tool",
+            args: &[],
+            recreate: false,
+        };
+        let result =
+            clean_cli_or_fallback("test-fallback", &dir, &MissingToolRunner, &config, false)
+                .unwrap();
+        assert!(dir.exists(), "a seam-skipped entry must survive");
+        assert_eq!(
+            result.skipped.len(),
+            1,
+            "the seam-classified failure must be recorded as a SkippedEntry"
+        );
+        let reason = &result.skipped[0].reason;
+        assert!(
+            reason.starts_with("trash failed") && !reason.trim().is_empty(),
+            "the skip reason must name the underlying deletion failure: {reason}"
+        );
+        assert!(
+            !result.uses_trash,
+            "a run where nothing was deleted must not claim Trash"
+        );
+        assert_eq!(result.bytes_freed, 0, "nothing was deleted");
     }
 }
