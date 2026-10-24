@@ -409,7 +409,9 @@ mod tests {
         let _lock = crate::context::TEST_LOCK
             .lock()
             .unwrap_or_else(|p| p.into_inner());
-        crate::trash::set_trash_mode(false);
+        // The guard restores the previous mode on drop, even when an assert
+        // fails, so the global can never stay pinned to permanent.
+        let _mode = crate::test_helpers::TrashModeGuard::set(false);
 
         let runner = RecordingRunner::new(&["Code"], 1);
         let hint = ProcessHint {
@@ -441,7 +443,6 @@ mod tests {
                 .exists(),
             "Code/CachedData must be deleted"
         );
-        crate::trash::set_trash_mode(true);
     }
 
     #[test]

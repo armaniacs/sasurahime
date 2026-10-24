@@ -1096,8 +1096,9 @@ mod tests {
             .unwrap();
         assert!(status.success());
         // Simulate the global default: trash. A Trash op would be TCC-denied
-        // here, so the pinned permanent mode is observable.
-        crate::trash::set_trash_mode(true);
+        // here, so the pinned permanent mode is observable. The guard
+        // restores the previous mode on drop, even when an assert fails.
+        let _mode = crate::test_helpers::TrashModeGuard::set(true);
         let cleaner =
             PathCleaner::downloads(tmp.path(), Box::new(crate::command::SystemCommandRunner));
         let opts = crate::cleaner::CleanOptions {
@@ -1117,7 +1118,9 @@ mod tests {
             !result.uses_trash,
             "uses_trash must come from the pinned mode, not the global"
         );
-        crate::trash::set_trash_mode(false);
+        // Restore the mode while still holding the lock so a parallel test
+        // cannot pin its own mode between the restore and the unlock.
+        drop(_mode);
         drop(_lock);
     }
 

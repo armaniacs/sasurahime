@@ -197,9 +197,18 @@ mod tests {
     #[test]
     fn run_batch_writes_history_only_when_not_dry_run() {
         // HOME pointed at a tempdir makes write_history_entry observable:
-        // the history file lands under $HOME/.local/share/sasurahime.
+        // the history file lands under $HOME/.local/share/sasurahime. The
+        // swap is serialized under TEST_LOCK because the HOME variable is
+        // process-global: a concurrent history probe (the zero-byte test
+        // below) writes under the swapped HOME, so a racing swap sends its
+        // rows into the wrong directory.
         let tmp = TempDir::new().unwrap();
         let home = tmp.path().canonicalize().unwrap();
+        let _lock = crate::context::TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        // Declared after the lock so the guard restores HOME while the lock
+        // is still held, then the lock is released.
         let _guard = crate::test_helpers::EnvGuard::set("HOME", &home.to_string_lossy());
         let history_path = home.join(".local/share/sasurahime/history.json");
 

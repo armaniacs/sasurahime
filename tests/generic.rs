@@ -301,7 +301,17 @@ fn clean_terraform_rejects_unsafe_env_var() {
         .args(["--permanent", "clean", "terraform"])
         .output()
         .unwrap();
-    assert!(output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "stderr: {stderr}");
+    // Real observation of the rejection: the resolver names the rejected
+    // override on stderr and falls back to the default. A tripwire-less
+    // build would target / instead and never print this.
+    assert!(
+        stderr.contains(
+            "[terraform] WARNING: TF_PLUGIN_CACHE_DIR=/ points to an unsafe path, using default"
+        ),
+        "the rejected override must be named on stderr:\n{stderr}"
+    );
 }
 
 #[test]
@@ -312,7 +322,15 @@ fn clean_flutter_rejects_unsafe_env_var() {
         .args(["--permanent", "clean", "flutter"])
         .output()
         .unwrap();
-    assert!(output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "stderr: {stderr}");
+    // Real observation of the rejection: the resolver names the rejected
+    // override on stderr and falls back to the default. A tripwire-less
+    // build would target / instead and never print this.
+    assert!(
+        stderr.contains("[flutter] WARNING: PUB_CACHE=/ points to an unsafe path, using default"),
+        "the rejected override must be named on stderr:\n{stderr}"
+    );
 }
 
 #[test]

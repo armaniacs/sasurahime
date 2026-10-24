@@ -445,7 +445,7 @@ mod tests {
         let _lock = crate::context::TEST_LOCK
             .lock()
             .unwrap_or_else(|p| p.into_inner());
-        crate::trash::set_trash_mode(false);
+        let _mode = crate::test_helpers::TrashModeGuard::set(false);
         let result = cleaner.clean(false, &reporter).unwrap();
         assert!(
             !project.join("node_modules").exists(),
@@ -519,7 +519,7 @@ mod tests {
         let _lock = crate::context::TEST_LOCK
             .lock()
             .unwrap_or_else(|p| p.into_inner());
-        crate::trash::set_trash_mode(false);
+        let _mode = crate::test_helpers::TrashModeGuard::set(false);
         // Plain clean (recency_days=7): the project is deletable.
         cleaner.clean(false, &reporter).unwrap();
         assert!(
@@ -546,6 +546,9 @@ mod tests {
             trash_mode: None,
         };
         cleaner.clean_with_opts(false, &reporter, &opts).unwrap();
+        // Restore the mode while still holding the lock so a parallel test
+        // cannot pin its own mode between the restore and the unlock.
+        drop(_mode);
         drop(_lock);
         assert!(
             project.join("node_modules").exists(),
