@@ -59,8 +59,14 @@ pub struct PolicySection {
 
 #[derive(Debug, Clone, Deserialize, Default)]
 struct RawConfig {
+    // Option (not #[serde(default)] on a plain value): present must be true
+    // only when the file really contains a [policy] section. A
+    // `#[serde(default)]` PolicySection deserializes an absent section into
+    // default values indistinguishable from a written one, which silently
+    // unlocked the unattended `auto` gate for any pre-existing config
+    // (PBI-41).
     #[serde(default)]
-    policy: PolicySection,
+    policy: Option<PolicySection>,
     #[serde(default, rename = "project-artifacts", alias = "project_artifacts")]
     project_artifacts: ProjectArtifactsSection,
     #[serde(default)]
@@ -155,10 +161,13 @@ fn parse_config_file(path: &Path) -> Result<Config> {
         custom: raw.custom,
         per_cleaner: raw.per_cleaner,
         policy: Policy {
-            present: true,
-            older_than_days: raw.policy.older_than_days,
-            larger_than_mb: raw.policy.larger_than_mb,
-            include_manual: raw.policy.include_manual,
+            // True only when the file actually contains a [policy] section:
+            // the unattended `auto` gate refuses to run otherwise (no policy,
+            // no unattended deletes).
+            present: raw.policy.is_some(),
+            older_than_days: raw.policy.as_ref().and_then(|p| p.older_than_days),
+            larger_than_mb: raw.policy.as_ref().and_then(|p| p.larger_than_mb),
+            include_manual: raw.policy.is_some_and(|p| p.include_manual),
         },
         project_artifacts: ProjectArtifactsConfig {
             roots: if raw.project_artifacts.roots.is_empty() {
@@ -246,6 +255,36 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let cfg = Config::load(tmp.path()).unwrap();
         assert!(!cfg.policy.present, "no section: auto must refuse to run");
+    }
+
+    #[test]
+    fn existing_file_without_policy_section_marks_present_false() {
+        // A pre-existing config.toml with no [policy] section (e.g. only
+        // trash_mode) must NOT flip policy.present to true: the unattended
+        // auto gate refuses to run without the section.
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("config.toml");
+        std::fs::write(&path, "trash_mode = false\n").unwrap();
+        let cfg = Config::load_from_path(&path).unwrap();
+        assert!(
+            !cfg.policy.present,
+            "existing file without [policy]: auto must refuse to run"
+        );
+    }
+
+    #[test]
+    fn existing_file_with_policy_section_marks_present_true() {
+        // The counterpart: a parseable file that really contains [policy]
+        // keeps present == true, so auto may run.
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("config.toml");
+        std::fs::write(&path, "[policy]\nolder_than_days = 30\n").unwrap();
+        let cfg = Config::load_from_path(&path).unwrap();
+        assert!(
+            cfg.policy.present,
+            "existing file with [policy]: auto may run"
+        );
+        assert_eq!(cfg.policy.older_than_days, Some(30));
     }
 
     #[test]
