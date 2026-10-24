@@ -642,3 +642,34 @@ fn scan_json_with_no_cache_writes_nothing() {
         "--no-cache must not write the cache file via the --json branch either"
     );
 }
+
+#[test]
+fn empty_home_never_writes_cwd_relative() {
+    // HOME="" must be filtered by home() like the tripwire's empty filter:
+    // fall back to dirs::home_dir(), so the scan cache never lands
+    // CWD-relative. Without the filter the cache path was
+    // ".local/share/sasurahime/scan-cache.json" under the process CWD.
+    let tmp = TempDir::new().unwrap();
+    let cwd = tmp.path().join("cwd");
+    fs::create_dir_all(&cwd).unwrap();
+
+    let output = Command::cargo_bin("sasurahime")
+        .unwrap()
+        .env("HOME", "")
+        .current_dir(&cwd)
+        .args(["scan", "--json"])
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        output.status.success(),
+        "an empty HOME must not fail the scan, stdout:\n{stdout}"
+    );
+    let written = cwd.join(".local/share/sasurahime/scan-cache.json");
+    assert!(
+        !written.exists(),
+        "an empty HOME must never write the cache CWD-relative: {}",
+        written.display()
+    );
+}

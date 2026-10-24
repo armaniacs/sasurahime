@@ -7,7 +7,6 @@ use clap::{Parser, Subcommand};
 use cleaner::{CleanCancelled, CleanResult, Cleaner};
 use command::SystemCommandRunner;
 use config::Config;
-use dirs::home_dir;
 use progress::{build_reporter_from_flags, merge_suppress_flags, ProgressReporter};
 use std::path::PathBuf;
 
@@ -467,9 +466,15 @@ fn extra_targets() -> &'static [(&'static str, &'static str)] {
 }
 
 fn home() -> PathBuf {
+    // An EMPTY HOME is filtered exactly like the tripwire's empty filter
+    // (is_safe_delete_target): PathBuf::from("") would silently resolve
+    // every cache/history path against the process CWD.
     std::env::var("HOME")
+        .ok()
+        .filter(|h| !h.is_empty())
         .map(PathBuf::from)
-        .unwrap_or_else(|_| home_dir().expect("cannot determine HOME directory"))
+        .or_else(dirs::home_dir)
+        .expect("cannot determine HOME directory")
 }
 
 /// Every cleaner whose `risk()` is not `Safe` is wrapped in `ManualOnly` so it
@@ -1391,6 +1396,32 @@ fn main() -> anyhow::Result<()> {
 mod tests {
     use super::*;
     use sasurahime::cleaner::CleanCancelled;
+
+    #[test]
+    fn home_filters_an_empty_home_var() {
+        // HOME="" must be filtered exactly like the tripwire's empty filter:
+        // fall back to dirs::home_dir(), never a CWD-relative empty path
+        // (cache and history would silently land in the process CWD).
+        // sasurahime::test_helpers is lib-test-only, so the bin test swaps
+        // and restores HOME by hand, serialized with a local lock: no other
+        // bin test reads HOME, and lib tests run in a separate process.
+        static HOME_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _lock = HOME_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let expected = dirs::home_dir().expect("test host must have a home dir");
+        let previous = std::env::var("HOME").ok();
+        std::env::set_var("HOME", "");
+        let got = home();
+        // Restored while the lock is still held, then the lock is released.
+        match previous {
+            Some(v) => std::env::set_var("HOME", v),
+            None => std::env::remove_var("HOME"),
+        }
+        assert_eq!(
+            got, expected,
+            "an empty HOME must fall back to dirs::home_dir(), got {:?}",
+            got
+        );
+    }
 
     #[test]
     fn run_clean_target_cancelled_returns_ok_zero() {
