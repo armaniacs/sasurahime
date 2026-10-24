@@ -96,3 +96,41 @@ fn unknown_cleaner_name_gets_its_own_line() {
         "stderr:\n{stderr}"
     );
 }
+
+// --- PBI-39: [[custom]] names colliding with built-in targets ---
+
+#[test]
+fn custom_name_colliding_with_builtin_warns_at_startup() {
+    let tmp = TempDir::new().unwrap();
+    write_config(
+        tmp.path(),
+        "[[custom]]\nname = \"uv\"\npath = \"~/.cache/uv-custom\"\n",
+    );
+
+    let output = sasurahime(tmp.path()).arg("scan").output().unwrap();
+
+    assert!(output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("[uv] collides with built-in target"),
+        "the collision must be warned about, stderr:\n{stderr}"
+    );
+}
+
+#[test]
+fn non_colliding_custom_name_is_silent() {
+    let tmp = TempDir::new().unwrap();
+    write_config(
+        tmp.path(),
+        "[[custom]]\nname = \"my-workspace\"\npath = \"~/.cache/my-workspace\"\n",
+    );
+
+    let output = sasurahime(tmp.path()).arg("scan").output().unwrap();
+
+    assert!(output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stderr.contains("collides"),
+        "a non-colliding [[custom]] name must not warn, stderr:\n{stderr}"
+    );
+}

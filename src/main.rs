@@ -679,6 +679,29 @@ fn warn_ineffective_per_cleaner_settings(home: &std::path::Path, config: &config
     }
 }
 
+/// Lists [[custom]] names that collide with a built-in target name. Pure so
+/// the wording can be tested without capturing stderr.
+fn colliding_custom_names(config: &config::Config) -> Vec<String> {
+    let builtin = builtin_target_names();
+    config
+        .custom
+        .iter()
+        .filter(|ct| builtin.iter().any(|n| *n == ct.name))
+        .map(|ct| ct.name.clone())
+        .collect()
+}
+
+fn warn_custom_name_collisions(config: &config::Config) {
+    let names = colliding_custom_names(config);
+    if names.is_empty() {
+        return;
+    }
+    eprintln!("[config] [[custom]] names collide with built-in targets:");
+    for name in &names {
+        eprintln!("  - [{name}] collides with built-in target; `clean {name}` runs the built-in");
+    }
+}
+
 /// Runs a single-target clean and prints freed bytes.
 fn run_clean_target<F>(
     label: &str,
@@ -832,6 +855,7 @@ fn main() -> anyhow::Result<()> {
     if !config.per_cleaner.is_empty() {
         warn_ineffective_per_cleaner_settings(&home, &config);
     }
+    warn_custom_name_collisions(&config);
 
     let reporter = build_reporter(&cli, &config);
 
@@ -1268,26 +1292,59 @@ fn main() -> anyhow::Result<()> {
                             );
                             std::process::exit(0);
                         }
-                        let Some(plugin) = cleaners::plugin::PluginCleaner::discover_excluding(&[])
-                            .into_iter()
-                            .find(|p| p.name() == name)
-                        else {
-                            eprintln!("Error: no plugin named '{name}' on PATH.");
-                            std::process::exit(1);
-                        };
-                        // Honor the global --dry-run (declared `global = true`
-                        // on Cli) in addition to the local position carried by
-                        // the raw external args. The External arm re-parses
-                        // those args by hand, so clap's global-value flow-down
-                        // never reaches it: without the OR, `--dry-run clean
-                        // <plugin>` ran the plugin's real clean.
-                        let dry_run = cli.dry_run || args.iter().any(|a| a == "--dry-run");
-                        run_and_exit(
-                            plugin.name(),
-                            move |dry, rep| plugin.clean(dry, rep),
-                            dry_run,
-                            reporter.as_ref(),
-                        )?;
+                        // PBI-39: a [[custom]] config name resolves before the
+                        // plugin lookup, so a user-defined target is reachable
+                        // via `clean <name>` instead of falling into this
+                        // catch-all. Built-in names never reach this arm: clap
+                        // parses them into their own CleanTarget variants, so
+                        // their priority is unchanged.
+                        if let Some(ct) = config.custom.iter().find(|c| c.name == name) {
+                            let path = config::Config::expand_tilde(&ct.path, &home);
+                            // Refuse an unsafe target before any deletion
+                            // attempt: the cleaner-level check only skips
+                            // (exit 0), an explicit `clean <name>` must fail
+                            // loudly and leave the path alone.
+                            if !cleaners::generic::is_safe_delete_target(&path) {
+                                eprintln!(
+                                    "Error: refusing to clean '{name}': {} is not safe to delete.",
+                                    path.display()
+                                );
+                                std::process::exit(1);
+                            }
+                            let cleaner =
+                                cleaners::custom::CustomPathCleaner::new(ct.name.clone(), path);
+                            // Same two-position dry-run resolution as the
+                            // plugin arm below.
+                            let dry_run = cli.dry_run || args.iter().any(|a| a == "--dry-run");
+                            run_and_exit(
+                                cleaner.name(),
+                                move |dry, rep| cleaner.clean(dry, rep),
+                                dry_run,
+                                reporter.as_ref(),
+                            )?;
+                        } else {
+                            let Some(plugin) =
+                                cleaners::plugin::PluginCleaner::discover_excluding(&[])
+                                    .into_iter()
+                                    .find(|p| p.name() == name)
+                            else {
+                                eprintln!("Error: no plugin named '{name}' on PATH.");
+                                std::process::exit(1);
+                            };
+                            // Honor the global --dry-run (declared `global = true`
+                            // on Cli) in addition to the local position carried by
+                            // the raw external args. The External arm re-parses
+                            // those args by hand, so clap's global-value flow-down
+                            // never reaches it: without the OR, `--dry-run clean
+                            // <plugin>` ran the plugin's real clean.
+                            let dry_run = cli.dry_run || args.iter().any(|a| a == "--dry-run");
+                            run_and_exit(
+                                plugin.name(),
+                                move |dry, rep| plugin.clean(dry, rep),
+                                dry_run,
+                                reporter.as_ref(),
+                            )?;
+                        }
                     }
                     _ => unreachable!(),
                 }
@@ -1864,5 +1921,30 @@ mod tests {
             cleaners::library_caches::excluded_by("CocoaPods"),
             Some("cocoapods")
         );
+    }
+
+    #[test]
+    fn colliding_custom_names_pinned_to_builtin_targets() {
+        // PBI-39: a [[custom]] name equal to a built-in target name must be
+        // warned about; non-colliding names stay silent.
+        let cfg = config::Config {
+            custom: vec![
+                config::CustomTarget {
+                    name: "uv".to_string(),
+                    path: "~/.cache/uv-custom".to_string(),
+                },
+                config::CustomTarget {
+                    name: "my-workspace".to_string(),
+                    path: "~/.cache/my-workspace".to_string(),
+                },
+            ],
+            ..config::Config::default()
+        };
+        assert_eq!(colliding_custom_names(&cfg), vec!["uv".to_string()]);
+    }
+
+    #[test]
+    fn colliding_custom_names_empty_without_custom_config() {
+        assert!(colliding_custom_names(&config::Config::default()).is_empty());
     }
 }
