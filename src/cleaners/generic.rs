@@ -211,7 +211,10 @@ impl CliCleaner {
                 home.join(".colima"),
                 runner,
             )
-            .with_risk(Risk::Safe)
+            // colima clean removes ALL stopped VM disk data (containers,
+            // images, volumes) — destructive and irreversible, so it must
+            // never run unattended without explicit opt-in (see PBI 42).
+            .with_risk(Risk::Risky)
         }
         .with_notice(DiskImageNotice::new(
             "colima",

@@ -253,3 +253,46 @@ fn auto_runs_moderate_targets_when_include_manual() {
         "[policy] include_manual = true must let Moderate targets run in auto"
     );
 }
+
+#[test]
+fn auto_never_runs_colima_even_with_include_manual() {
+    // colima clean removes ALL stopped VM disk data (containers, images,
+    // volumes): destructive and irreversible. Even an old dir and
+    // [policy] include_manual = true must not let `auto` run it unattended.
+    // PATH drops colima so the unattended run hits the observable fallback
+    // deletion of the host dir instead of a machine-specific CLI outcome.
+    let tmp = TempDir::new().unwrap();
+    write_policy(
+        tmp.path(),
+        "[policy]\nolder_than_days = 30\ninclude_manual = true\n",
+    );
+    let colima_dir = tmp.path().join(".colima");
+    fs::create_dir_all(colima_dir.join("_lima/colima")).unwrap();
+    fs::write(colima_dir.join("_lima/colima/disk.img"), [0u8; 4096]).unwrap();
+    let status = Command::new("touch")
+        .args(["-t", "202001010000"])
+        .arg(&colima_dir)
+        .status()
+        .unwrap();
+    assert!(status.success());
+
+    let output = sasurahime(tmp.path())
+        .env("PATH", "/usr/bin:/bin")
+        .args(["--permanent", "auto"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        combined.contains("colima") && combined.contains("never runs unattended"),
+        "the skipped colima target must be reported with guidance, got:\n{combined}"
+    );
+    assert!(
+        colima_dir.join("_lima/colima/disk.img").exists(),
+        "colima must never be deleted by auto, even with include_manual, got:\n{combined}"
+    );
+}

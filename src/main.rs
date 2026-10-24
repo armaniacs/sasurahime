@@ -1413,7 +1413,6 @@ mod tests {
         ("huggingface", cleaner::Risk::Safe),
         ("pre-commit", cleaner::Risk::Safe),
         ("library-logs", cleaner::Risk::Safe),
-        ("colima", cleaner::Risk::Safe),
         ("ollama", cleaner::Risk::Safe),
         ("device-support", cleaner::Risk::Safe),
         // Manual: user data, only cleaned when explicitly selected.
@@ -1425,6 +1424,10 @@ mod tests {
         // Risky: destructive or irreversible.
         ("ios-backup", cleaner::Risk::Risky),
         ("apfs-snapshot", cleaner::Risk::Risky),
+        // colima clean removes ALL stopped VM disk data (containers, images,
+        // volumes) — destructive and irreversible, so it must never run
+        // unattended without explicit opt-in (see PBI 42).
+        ("colima", cleaner::Risk::Risky),
         // Manual: user data, only cleaned when explicitly selected.
         ("vm-swap", cleaner::Risk::Manual),
         // Moderate: large or partially user-visible data.
@@ -1595,6 +1598,9 @@ mod tests {
             "simulator",
             "maven",
             "sbt",
+            // colima destroys ALL stopped VM disk data (PBI-42): it must not
+            // be reachable from --yes either.
+            "colima",
         ] {
             let c = cleaners.iter().find(|c| c.name() == danger).expect(danger);
             assert!(!c.auto_clean_allowed(), "{danger} must not run under --yes");
