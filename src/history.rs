@@ -236,7 +236,7 @@ pub fn write_history_entry(
     skipped_count: usize,
     moved_to_trash: bool,
 ) {
-    let home = dirs::home_dir().unwrap_or_default();
+    let home = crate::config::resolved_home_dir().unwrap_or_default();
     let history_dir = default_history_dir(&home);
     let entry = HistoryEntry {
         timestamp: chrono::Local::now()

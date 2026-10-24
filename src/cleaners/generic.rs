@@ -848,16 +848,14 @@ pub fn is_safe_delete_target(path: &Path) -> bool {
     }
     // Block HOME itself and every ancestor of HOME: an env-var redirect
     // (ACT_CACHE_DIR=$HOME, TF_PLUGIN_CACHE_DIR=/Users) must never be
-    // deletable, and subdirectories of HOME stay allowed. HOME is resolved
-    // with `std::env::var("HOME") -> dirs::home_dir()` like `main::home`,
-    // but this check is stricter than `main::home`: it filters out an empty
-    // HOME before the dirs fallback (`main::home` does not), so an empty
-    // HOME cannot silently disable the HOME/ancestor guard.
-    let home = std::env::var("HOME")
-        .ok()
-        .filter(|h| !h.is_empty())
-        .map(PathBuf::from)
-        .or_else(dirs::home_dir);
+    // deletable, and subdirectories of HOME stay allowed. HOME comes from
+    // the crate-wide resolver (crate::config::resolved_home_dir: a non-empty
+    // HOME env var first, then dirs::home_dir()), the same chain
+    // `main::home` uses. This check stays stricter than `main::home`: the
+    // empty filter inside the resolver keeps an empty HOME from leaking
+    // PathBuf::from("") into the guard, and a `None` resolution skips the
+    // HOME/ancestor guard instead of disabling it silently.
+    let home = crate::config::resolved_home_dir();
     if let Some(home) = home {
         // HOME must be canonicalized with the target: a symlinked HOME would
         // otherwise defeat this check (canonical(HOME) != raw HOME).

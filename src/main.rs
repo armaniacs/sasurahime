@@ -474,15 +474,11 @@ fn extra_targets() -> &'static [(&'static str, &'static str)] {
 }
 
 fn home() -> PathBuf {
-    // An EMPTY HOME is filtered exactly like the tripwire's empty filter
+    // An EMPTY HOME is filtered inside the crate-wide resolver
+    // (config::resolved_home_dir) exactly like the tripwire's empty filter
     // (is_safe_delete_target): PathBuf::from("") would silently resolve
     // every cache/history path against the process CWD.
-    std::env::var("HOME")
-        .ok()
-        .filter(|h| !h.is_empty())
-        .map(PathBuf::from)
-        .or_else(dirs::home_dir)
-        .expect("cannot determine HOME directory")
+    config::resolved_home_dir().expect("cannot determine HOME directory")
 }
 
 /// Every cleaner whose `risk()` is not `Safe` is wrapped in `ManualOnly` so it

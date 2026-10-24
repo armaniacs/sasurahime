@@ -141,6 +141,22 @@ impl Default for Config {
     }
 }
 
+/// Resolves the current user's home directory with the crate-wide chain:
+/// a non-empty `HOME` environment variable first, then `dirs::home_dir()`
+/// (the passwd fallback on macOS). Returns `None` when both fail; each call
+/// site keeps its own failure semantics — `main::home` stops with `expect`,
+/// `is_safe_delete_target` stays fail-closed, config/history fall back to a
+/// default. One acquisition chain for the whole crate: an empty `HOME` never
+/// resolves to `PathBuf::from("")`, which would silently point every
+/// downstream cache/history/tilde path at the process CWD.
+pub fn resolved_home_dir() -> Option<PathBuf> {
+    std::env::var("HOME")
+        .ok()
+        .filter(|h| !h.is_empty())
+        .map(PathBuf::from)
+        .or_else(dirs::home_dir)
+}
+
 /// Reads and parses a config.toml file at the given path.
 /// Returns defaults if the file does not exist.
 fn parse_config_file(path: &Path) -> Result<Config> {
@@ -173,7 +189,7 @@ fn parse_config_file(path: &Path) -> Result<Config> {
             roots: if raw.project_artifacts.roots.is_empty() {
                 ProjectArtifactsConfig::default().roots
             } else {
-                let home = dirs::home_dir().unwrap_or_default();
+                let home = resolved_home_dir().unwrap_or_default();
                 raw.project_artifacts
                     .roots
                     .iter()
@@ -493,5 +509,61 @@ mod tests {
     fn per_cleaner_default_is_empty() {
         let cfg = Config::default();
         assert!(cfg.per_cleaner.is_empty());
+    }
+
+    // ── The crate-wide HOME resolver (PBI-48) ──
+
+    #[test]
+    fn resolved_home_dir_filters_an_empty_home_var() {
+        // An empty HOME env var must be rejected by the resolver itself, so
+        // PathBuf::from("") can never leak downstream and resolve cache,
+        // history and tilde paths against the process CWD. TEST_LOCK
+        // serializes the process-global HOME mutation against the other
+        // HOME-scoped tests.
+        let _lock = crate::context::TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let _guard = crate::test_helpers::EnvGuard::set("HOME", "");
+        let got = resolved_home_dir();
+        let expected = dirs::home_dir().expect("test host must have a home dir");
+        assert_eq!(
+            got,
+            Some(expected),
+            "an empty HOME must fall back to dirs::home_dir(), got {:?}",
+            got
+        );
+    }
+
+    #[test]
+    fn resolved_home_dir_falls_back_to_dirs_when_home_unset() {
+        // With HOME removed entirely the resolver must still find a home via
+        // dirs::home_dir() — the acquisition chain's second arm. A genuine
+        // dirs failure (no passwd entry) cannot be forced in-process; the
+        // Option return is what call sites match on to pick their failure
+        // semantics (expect / fail-closed / unwrap_or_default).
+        let _lock = crate::context::TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let _guard = crate::test_helpers::EnvGuard::unset("HOME");
+        let got = resolved_home_dir();
+        let expected = dirs::home_dir().expect("test host must have a home dir");
+        assert_eq!(
+            got,
+            Some(expected),
+            "with HOME unset the resolver must fall back to dirs::home_dir(), got {:?}",
+            got
+        );
+    }
+
+    #[test]
+    fn resolved_home_dir_prefers_a_nonempty_home_var() {
+        // The env arm wins over dirs: HOME set to a real directory resolves
+        // to exactly that directory.
+        let _lock = crate::context::TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let tmp = TempDir::new().unwrap();
+        let _guard = crate::test_helpers::EnvGuard::set("HOME", tmp.path().to_str().unwrap());
+        assert_eq!(resolved_home_dir(), Some(tmp.path().to_path_buf()));
     }
 }

@@ -148,6 +148,13 @@ impl EnvGuard {
         std::env::set_var(key, val);
         Self { key, previous }
     }
+
+    /// Remove `key`, saving the previous value. Restores on drop.
+    pub fn unset(key: &'static str) -> Self {
+        let previous = std::env::var(key).ok();
+        std::env::remove_var(key);
+        Self { key, previous }
+    }
 }
 
 impl Drop for EnvGuard {
