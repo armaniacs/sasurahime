@@ -1,4 +1,4 @@
-# PBI-process.md — sasurahime における PBI への取り組みパターン
+# PBI-process.md ― sasurahime における PBI への取り組みパターン
 
 対象: このプロジェクトを担当するすべての開発者・AIエージェント
 
@@ -111,6 +111,7 @@ cargo run -- targets
 
 - 外部コマンド（uv, brew, bun, go, pip 等）は `CommandRunner` トレイトをインジェクションしてモック
 - ファイルシステムは `tempdir` を使う（実ファイルシステムを直接操作しない）
+- 実バイナリの before/after 比較など手動検証でも fake `HOME`（tempdir）を既定にする。実 `HOME` での実行が必要な場合は trash モードを `--permanent` で pin する（実機の `~/.Trash` に触れない）
 
 ### テストファイルの場所
 
