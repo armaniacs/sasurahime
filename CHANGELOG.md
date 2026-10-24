@@ -23,6 +23,13 @@ All notable changes to sasurahime will be documented in this file. The format is
   rename to `load_style`, and table formatting time improves by up to ~70%
   on large tables.
 - `dirs` 6 -> 7: no code changes, `home_dir()` is signature-compatible.
+- The seam tests simulate a refusing trash backend deterministically instead
+  of relying on a read-only parent: the platform backends move entries out
+  of read-only parents on modern macOS, so on a machine where the backend is
+  not TCC-blocked the tests saw the entries deleted and their skip
+  assertions failed. A test-only backend override is installed under
+  TEST_LOCK, and the library-logs `clean all` test pins the global trash pin
+  it previously passed via state leakage.
 
 ## [0.4.0] - 2026-10-24
 
