@@ -157,6 +157,19 @@ pub fn resolved_home_dir() -> Option<PathBuf> {
         .or_else(dirs::home_dir)
 }
 
+/// True when the process runs on CI. GitHub Actions and most CI systems set
+/// the `CI` env var. The real system roots (`/Applications`,
+/// `/System/Applications`, ...) cost minutes of cold metadata I/O on a fresh
+/// CI runner, so the installed-apps collection limits itself to the
+/// HOME-derived root there; fixtures and sandboxed runs put their apps in
+/// the HOME tree, so test assertions keep passing.
+pub fn is_ci() -> bool {
+    match std::env::var_os("CI") {
+        Some(v) => !v.is_empty() && v != "0" && v != "false",
+        None => false,
+    }
+}
+
 /// Reads and parses a config.toml file at the given path.
 /// Returns defaults if the file does not exist.
 fn parse_config_file(path: &Path) -> Result<Config> {
@@ -565,5 +578,23 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let _guard = crate::test_helpers::EnvGuard::set("HOME", tmp.path().to_str().unwrap());
         assert_eq!(resolved_home_dir(), Some(tmp.path().to_path_buf()));
+    }
+
+    #[test]
+    fn is_ci_detects_the_ci_env_var() {
+        // The installed-apps collection gates its real system-root scan on
+        // this flag, so the recognized values must be exact: GitHub Actions
+        // sets CI=true; "false"/"0"/"" must not trip it.
+        let _lock = crate::context::TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let _guard = crate::test_helpers::EnvGuard::set("CI", "true");
+        assert!(is_ci(), "CI=true must be detected");
+        drop(_guard);
+        let _guard = crate::test_helpers::EnvGuard::set("CI", "false");
+        assert!(!is_ci(), "CI=false must not be detected");
+        drop(_guard);
+        let _guard = crate::test_helpers::EnvGuard::unset("CI");
+        assert!(!is_ci(), "an unset CI must not be detected");
     }
 }

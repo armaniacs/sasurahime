@@ -45,12 +45,18 @@ fn clean_vm_swap_is_a_no_op_with_reboot_guidance() {
         combined.contains("reboot"),
         "clean must explain that swap is re-initialized on reboot, got:\n{combined}"
     );
-    // Nothing is deleted: the real swap directory still holds its files.
-    let vm = std::path::Path::new("/private/var/vm");
-    if vm.exists() {
-        let entries = std::fs::read_dir(vm).unwrap().count();
-        assert!(entries > 0, "vm-swap clean must not delete swap files");
-    }
+    // Nothing is deleted: the clean is a no-op by design, so the output
+    // reports the no-op and never a removal. The run used a fake HOME, so
+    // the real swap directory is untouched and must not be probed here: on
+    // a CI runner /private/var/vm exists but holds no swapfiles.
+    assert!(
+        combined.contains("Nothing was deleted"),
+        "vm-swap clean must report the no-op, got:\n{combined}"
+    );
+    assert!(
+        !combined.contains("Removed"),
+        "vm-swap clean must not report deletions, got:\n{combined}"
+    );
 }
 
 #[test]

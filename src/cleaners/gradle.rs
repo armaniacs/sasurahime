@@ -386,15 +386,17 @@ mod tests {
 
     #[test]
     fn gradle_clean_all_deletions_skipped_reports_uses_trash_false() {
-        // Every deletion comes back skipped: the parent of the candidate is
-        // readable (the scan lists the candidate) but not writable, so the
-        // Trash move of the candidate can never succeed. A run where nothing
-        // was deleted must not claim Trash, even with the global pinned to
-        // trash.
+        // Every deletion comes back skipped: the refusal comes from the
+        // test-only backend override, because the platform backends (Finder
+        // via osascript, trashItemAtURL via trashd) move entries out of
+        // read-only parents on modern macOS, so a chmod alone no longer
+        // forces the deterministic failure. A run where nothing was deleted
+        // must not claim Trash, even with the global pinned to trash.
         let _lock = crate::context::TEST_LOCK
             .lock()
             .unwrap_or_else(|p| p.into_inner());
         let _mode = crate::test_helpers::TrashModeGuard::set(true);
+        let _backend = crate::trash::TrashBackendOverrideGuard::set();
         let tmp = TempDir::new().unwrap();
         let caches = tmp.path().join(".gradle/caches");
         // Two candidates: keep_highest retains 8.12.0 and selects 8.8.0 for
@@ -402,18 +404,11 @@ mod tests {
         fs::create_dir_all(caches.join("8.12.0")).unwrap();
         fs::create_dir_all(caches.join("8.8.0")).unwrap();
         fs::write(caches.join("8.8.0").join("cache.dat"), b"data").unwrap();
-        use std::os::unix::fs::PermissionsExt;
-        let original = fs::metadata(&caches).unwrap().permissions();
-        let mut perms = original.clone();
-        perms.set_mode(0o555);
-        fs::set_permissions(&caches, perms).unwrap();
         let runner = MockRunner::new().with_success("chflags");
         let cleaner = GradleCleaner::new(tmp.path(), Box::new(runner));
-        let result = cleaner.clean(false, &crate::progress::DeepSuppressReporter);
-        // Restore before TempDir cleanup: an unwritable parent would make the
-        // tempdir's own removal fail.
-        fs::set_permissions(&caches, original).unwrap();
-        let result = result.unwrap();
+        let result = cleaner
+            .clean(false, &crate::progress::DeepSuppressReporter)
+            .unwrap();
         assert_eq!(
             result.skipped.len(),
             1,

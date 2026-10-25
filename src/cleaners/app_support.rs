@@ -245,19 +245,31 @@ pub struct AppSupportCleaner {
     app_roots: Vec<PathBuf>,
 }
 
+/// The real system roots (`/Applications`, `/System/Applications`, ...) cost
+/// minutes of cold metadata I/O on a fresh CI runner, so there the default
+/// collection limits itself to the HOME-derived root, where fixtures put
+/// their apps. An injected root set (tests, config) is never trimmed.
+fn default_app_roots(home: &Path) -> Vec<PathBuf> {
+    if crate::config::is_ci() {
+        vec![home.join("Applications")]
+    } else {
+        vec![
+            PathBuf::from("/Applications"),
+            PathBuf::from("/Applications/Utilities"),
+            PathBuf::from("/System/Applications"),
+            PathBuf::from("/System/Applications/Utilities"),
+            home.join("Applications"),
+        ]
+    }
+}
+
 impl AppSupportCleaner {
     pub fn new(home: &Path, runner: Box<dyn CommandRunner>) -> Self {
         Self {
             home: home.to_path_buf(),
             runner,
             min_app_bytes: None,
-            app_roots: vec![
-                PathBuf::from("/Applications"),
-                PathBuf::from("/Applications/Utilities"),
-                PathBuf::from("/System/Applications"),
-                PathBuf::from("/System/Applications/Utilities"),
-                home.join("Applications"),
-            ],
+            app_roots: default_app_roots(home),
         }
     }
 

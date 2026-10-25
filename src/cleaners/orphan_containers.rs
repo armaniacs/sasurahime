@@ -223,11 +223,19 @@ pub fn collect_installed_ids(app_dirs: &[PathBuf], runner: &dyn CommandRunner) -
 }
 
 pub fn default_app_dirs(home: &Path) -> Vec<PathBuf> {
-    vec![
-        PathBuf::from("/Applications"),
-        home.join("Applications"),
-        PathBuf::from("/System/Applications"),
-    ]
+    if crate::config::is_ci() {
+        // On CI the real system roots cost minutes of cold metadata I/O on a
+        // fresh runner, so the default collection limits itself to the
+        // HOME-derived root, where fixtures put their apps. An injected set
+        // (tests, config) is never trimmed.
+        vec![home.join("Applications")]
+    } else {
+        vec![
+            PathBuf::from("/Applications"),
+            home.join("Applications"),
+            PathBuf::from("/System/Applications"),
+        ]
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -1000,6 +1008,12 @@ mod tests {
 
     #[test]
     fn default_app_dirs_lists_three_roots() {
+        // The production default. On CI the gate trims it to the
+        // HOME-derived root, so pin CI=false for this assertion.
+        let _lock = crate::context::TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let _guard = crate::test_helpers::EnvGuard::set("CI", "false");
         let dirs = default_app_dirs(Path::new("/Users/x"));
         assert_eq!(
             dirs,

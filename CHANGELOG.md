@@ -6,6 +6,31 @@ All notable changes to sasurahime will be documented in this file. The format is
 
 ## [Unreleased]
 
+## [0.4.1] - unreleased
+
+### Security
+
+- `cargo update` moves 92 packages to the latest semver-compatible versions
+  and remediates [RUSTSEC-2026-0204](https://rustsec.org/advisories/RUSTSEC-2026-0204)
+  (crossbeam-epoch 0.9.18 -> 0.9.21, reached via `rayon`), and moves off
+  anyhow 1.0.102 (RUSTSEC-2026-0190 unsoundness in `Error::downcast_mut()`,
+  now 1.0.104).
+
+### Changed
+
+- `comfy-table` 7 -> 8: stringified presets are replaced with `TableStyle`
+  constants, the six `load_preset` call sites in scanner.rs and explorer.rs
+  rename to `load_style`, and table formatting time improves by up to ~70%
+  on large tables.
+- `dirs` 6 -> 7: no code changes, `home_dir()` is signature-compatible.
+- The seam tests simulate a refusing trash backend deterministically instead
+  of relying on a read-only parent: the platform backends move entries out
+  of read-only parents on modern macOS, so on a machine where the backend is
+  not TCC-blocked the tests saw the entries deleted and their skip
+  assertions failed. A test-only backend override is installed under
+  TEST_LOCK, and the library-logs `clean all` test pins the global trash pin
+  it previously passed via state leakage.
+
 ## [0.4.0] - 2026-10-24
 
 ### Changed

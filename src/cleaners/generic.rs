@@ -2343,52 +2343,24 @@ mod tests {
 
     // ── PBI 43: PathCleaner skip visibility (SkippedEntry + uses_trash truth) ──
 
-    /// Makes `path` read-only (0o555) and restores 0o755 on drop, even during
-    /// a panic, so a failed test cannot leave an undeletable directory behind
-    /// for the TempDir cleanup.
-    struct ReadOnlyGuard {
-        path: PathBuf,
-    }
-
-    impl ReadOnlyGuard {
-        fn restrict(path: &Path) -> Self {
-            use std::os::unix::fs::PermissionsExt;
-            let mut perms = fs::metadata(path).unwrap().permissions();
-            perms.set_mode(0o555);
-            fs::set_permissions(path, perms).unwrap();
-            Self {
-                path: path.to_path_buf(),
-            }
-        }
-    }
-
-    impl Drop for ReadOnlyGuard {
-        fn drop(&mut self) {
-            use std::os::unix::fs::PermissionsExt;
-            if let Ok(meta) = fs::metadata(&self.path) {
-                let mut perms = meta.permissions();
-                perms.set_mode(0o755);
-                let _ = fs::set_permissions(&self.path, perms);
-            }
-        }
-    }
-
     #[test]
     fn clean_filtered_records_seam_skips_and_claims_no_trash_for_them() {
         // PBI 43: a permission-denied deletion is seam-classified skippable
         // and must surface as a SkippedEntry instead of a silent Ok(0). The
-        // target's parent is made read-only, so the removal fails with a
-        // deterministic EACCES in any non-root environment (moving an entry
-        // out of the parent needs write permission on it; TCC-blocked
-        // backends fail even earlier — both reach the seam as a
-        // "trash failed: ..." skippable error). The pinned Trash mode keeps
-        // the global pin out of the assertion.
+        // refusal comes from the test-only backend override: the platform
+        // backends (Finder via osascript, trashItemAtURL via trashd) move
+        // entries out of read-only parents on modern macOS, so a chmod alone
+        // no longer forces the deterministic failure. The pinned Trash mode
+        // keeps the global pin out of the assertion.
+        let _lock = crate::context::TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let _backend = crate::trash::TrashBackendOverrideGuard::set();
         let tmp = tempfile::TempDir::new().unwrap();
         let parent = tmp.path().join("locked");
         let dir = parent.join("cache");
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join("data.bin"), vec![0u8; 1024]).unwrap();
-        let _read_only = ReadOnlyGuard::restrict(&parent);
         let cleaner = PathCleaner::delete_dirs("test-eacces", dir.clone());
         let opts = crate::cleaner::CleanOptions {
             all: true,
@@ -2447,21 +2419,21 @@ mod tests {
     fn clean_cli_or_fallback_seam_skip_never_claims_trash() {
         // PBI 43 follow-up: clean_cli_or_fallback's seam-skip return still
         // propagated outcome.uses_trash, so a trash-mode failure (entry NOT
-        // deleted) claimed Trash for a zero-deletion run. The parent is made
-        // read-only so the trash move fails deterministically in any
-        // non-root environment ("trash failed: ..." — TCC-blocked backends
-        // fail even earlier; both reach the seam as a skippable error). The
-        // pinned Trash mode keeps the claim out of the global pin.
+        // deleted) claimed Trash for a zero-deletion run. The refusal comes
+        // from the test-only backend override: the platform backends move
+        // entries out of read-only parents on modern macOS, so a chmod alone
+        // no longer forces the deterministic failure. The pinned Trash mode
+        // keeps the claim out of the global pin.
         let _lock = crate::context::TEST_LOCK
             .lock()
             .unwrap_or_else(|p| p.into_inner());
         let _mode = crate::test_helpers::TrashModeGuard::set(true);
+        let _backend = crate::trash::TrashBackendOverrideGuard::set();
         let tmp = tempfile::TempDir::new().unwrap();
         let parent = tmp.path().join("locked");
         let dir = parent.join("cache");
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join("data.bin"), vec![0u8; 1024]).unwrap();
-        let _read_only = ReadOnlyGuard::restrict(&parent);
         let config = CliFallbackConfig {
             tool: "definitely-not-installed-tool",
             args: &[],

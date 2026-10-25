@@ -11,9 +11,17 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
+        run: |
+          # The runner image's pre-installed stable sometimes lacks
+          # rust-docs, and a full fresh install (uninstall first) hits a
+          # rustup state where the run finishes without installing the new
+          # components, leaving rustdoc missing at runtime. Add the missing
+          # components only, then gate on the shim actually working.
+          rustup toolchain install stable --profile minimal \
+            --component rustfmt,clippy,rust-docs --no-self-update
+          rustup component add rustfmt clippy rust-docs
+          rustup default stable
+          rustdoc --version
 
       - name: Cache
         uses: actions/cache@v4

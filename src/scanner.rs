@@ -168,9 +168,9 @@ pub fn run_scan(cleaners: &[Box<dyn Cleaner>], home: &std::path::Path) {
 
     let mut table = Table::new();
     if crate::format::use_unicode() {
-        table.load_preset(UTF8_FULL);
+        table.load_style(UTF8_FULL);
     } else {
-        table.load_preset(ASCII_FULL);
+        table.load_style(ASCII_FULL);
     }
     table.set_header(vec!["Category", "Size", "Status", "Risk", "Target"]);
 
