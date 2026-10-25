@@ -12,11 +12,18 @@ pub trait ProgressReporter: Send + Sync {
     fn progress_finish(&self);
 }
 
+/// Spinner line: `{msg}` is the contextual status the cleaner swaps per
+/// deletion, `({elapsed})` is the always-visible elapsed time counter.
+const SPINNER_TEMPLATE: &str = "{spinner:.green} {msg} ({elapsed})";
+
+/// Parallel-scan line: same elapsed counter as the spinner.
+const SCAN_TEMPLATE: &str = "{spinner:.green} [{bar:20}] {msg} ({elapsed})";
+
 fn spinner_style() -> &'static ProgressStyle {
     static STYLE: OnceLock<ProgressStyle> = OnceLock::new();
     STYLE.get_or_init(|| {
         ProgressStyle::default_spinner()
-            .template("{spinner:.green} {msg}")
+            .template(SPINNER_TEMPLATE)
             .expect("valid indicatif template")
     })
 }
@@ -177,7 +184,7 @@ pub fn with_parallel_scan<R>(total: usize, f: impl FnOnce(&ProgressBar) -> R) ->
     let pb = ProgressBar::new(total as u64);
     pb.set_style(
         ProgressStyle::default_bar()
-            .template("{spinner:.green} [{bar:20}] {msg}")
+            .template(SCAN_TEMPLATE)
             .expect("valid template")
             .progress_chars("=> "),
     );
@@ -538,6 +545,22 @@ mod tests {
         assert!(
             body.contains("animated"),
             "the animated branch must carry the caller's animated flag"
+        );
+    }
+
+    #[test]
+    fn templates_with_elapsed_time_are_valid() {
+        assert!(SPINNER_TEMPLATE.contains("{elapsed}"), "{SPINNER_TEMPLATE}");
+        assert!(SCAN_TEMPLATE.contains("{elapsed}"), "{SCAN_TEMPLATE}");
+        assert!(
+            ProgressStyle::default_spinner()
+                .template(SPINNER_TEMPLATE)
+                .is_ok(),
+            "spinner template must be a valid indicatif template"
+        );
+        assert!(
+            ProgressStyle::default_bar().template(SCAN_TEMPLATE).is_ok(),
+            "scan template must be a valid indicatif template"
         );
     }
 }
