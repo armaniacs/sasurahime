@@ -223,11 +223,19 @@ pub fn collect_installed_ids(app_dirs: &[PathBuf], runner: &dyn CommandRunner) -
 }
 
 pub fn default_app_dirs(home: &Path) -> Vec<PathBuf> {
-    vec![
-        PathBuf::from("/Applications"),
-        home.join("Applications"),
-        PathBuf::from("/System/Applications"),
-    ]
+    if crate::config::is_ci() {
+        // On CI the real system roots cost minutes of cold metadata I/O on a
+        // fresh runner, so the default collection limits itself to the
+        // HOME-derived root, where fixtures put their apps. An injected set
+        // (tests, config) is never trimmed.
+        vec![home.join("Applications")]
+    } else {
+        vec![
+            PathBuf::from("/Applications"),
+            home.join("Applications"),
+            PathBuf::from("/System/Applications"),
+        ]
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -349,20 +357,8 @@ impl OrphanContainersCleaner {
     }
 
     pub fn scan(&self) -> OrphanScan {
-        let installed = collect_installed_ids(&self.identity_dirs(), self.runner.as_ref());
+        let installed = collect_installed_ids(&self.app_dirs, self.runner.as_ref());
         scan_roots(&self.roots(), &installed)
-    }
-
-    /// On CI the real system roots (`/Applications`, `/System/Applications`,
-    /// ...) cost minutes of cold metadata I/O on a fresh runner, so the
-    /// installed-apps collection limits itself to the HOME-derived root,
-    /// where fixtures put their apps.
-    fn identity_dirs(&self) -> Vec<PathBuf> {
-        if crate::config::is_ci() {
-            vec![self.home.join("Applications")]
-        } else {
-            self.app_dirs.clone()
-        }
     }
 }
 
