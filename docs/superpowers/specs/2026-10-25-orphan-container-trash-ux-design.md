@@ -25,7 +25,13 @@ trash クレートの DeleteMethod 比較 (vendored クレートの src/macos/mo
 2. 削除中に副作用が生じると思われるときは、先に断る。生じないのなら現状のままでよい
 3. 何の情報更新もないまま 10 秒以上すぎないようにする
 
-## 設計 (採用: NsFileManager 切替 + パス表示 + 10 秒ウォッチドッグ)
+要件 3 は「経過時間タイマーを常時表示する」ことで構造的に満たす。Claude Code と同じ
+4 要素 (スピナー / コンテキスト連動ステータス / 経過時間タイマー / インプレース更新) を
+sasurahime でも揃える。indicatif がインプレース更新 (ANSI で同じ行を書き換え) と
+スピナーを担当し、`{msg}` がコンテキスト連動ステータス、`{elapsed}` が経過時間タイマー
+になる。
+
+## 設計 (採用: NsFileManager 切替 + パス表示 + 経過時間タイマー常時表示)
 
 ### Task 1: NsFileManager バックエンド切替 (根因除去) - src/trash.rs
 
@@ -65,29 +71,36 @@ Moved items may not show "Put Back" in Finder's context menu. Restore by draggin
 - dry-run の `would remove:` はすでにフルパスなので変更しない
 - app_support 側の `format_candidate_label` はすでに root/sub を出すので変更しない
 
-### Task 4: 10 秒ウォッチドッグ - src/progress.rs
+### Task 4: 経過時間タイマー常時表示 - src/progress.rs
 
-`SharedSpinner` にウォッチドッグを追加する:
+Claude Code と同じく、スピナーの行に経過時間タイマーを常に表示する:
 
-- 最終更新から 10 秒を超えたらメッセージ末尾に `(elapsed 1m20s)` を付けて更新する。
-  1 秒間隔でチェックし、ベースメッセージは保持する
-- `finish()` でウォッチドッグを停止する
-- しきい値は差し替え可能にする (テストでは短時間で確認する)
-- `with_parallel_scan` (スキャンフェーズ) にも同じ仕組みを適用する
-- 通常の削除中は tick ごとのパス表示が優先される (従来どおり。`set_message` が最終更新時刻を更新する)
+- `spinner_style()` のテンプレートを `"{spinner:.green} {msg} ({elapsed})"` に変更する。
+  indicatif の `{elapsed}` が開始からの経過時間を表示し、steady tick ごとに再描画される
+  (例: `(5s)`、`(1m20s)`。書式は indicatif の HumanDuration に従う)
+- steady tick は現状の 100ms のまま (スピナーの回転アニメーションに必要)。`{elapsed}` は
+  全秒で更新される
+- `with_parallel_scan` (スキャンフェーズ) のテンプレートにも `({elapsed})` を足す
+- コンテキスト連動ステータスは現状どおり: `progress_tick` が `{msg}` を
+  "orphan-containers: group.is.workflow.my.app (1/2, 8KB)" のように差し替える
+- インプレース更新は現状どおり: indicatif が TTY で同じ行を書き換える。非 TTY では
+  indicatif が描画しないので出力は従来どおり
+- ウォッチドッグのスレッドは不要 (テンプレートで常時表示になるため)。要件 3 は
+  1 秒ごとの行更新で満たされる
 
 ### Task 5: テスト
 
 - `format_item` のフルパス対応: 既存の単体テスト (`format_item_contains_name_size_and_kind`) を
   パス対応に更新する
-- ウォッチドッグ: しきい値 50ms で elapsed 表示を確認するテストと、整形関数 (純関数) の単体テスト
+- 経過時間タイマー: `spinner_style()` と `with_parallel_scan` のテンプレートが
+  `{elapsed}` を含むことを確認する単体テスト。`tick_message` (純関数) の既存テストはそのまま
 - trash: 既存テストがそのまま通ること (NsFileManager バックエンドでもテストは速い。ダイアログなし)
 - E2E: `clean orphan-containers --dry-run` でフルパス表示を確認する
 
 ## 対象外
 
 - クリーン時の再スキャン削除 (TUI の detect_all 結果の再利用): 別のパフォーマンス課題。
-  ウォッチドッグで可視性は確保される
+  経過時間タイマーで可視性は確保される
 - 他クリーナーのパス表示: app_support はすでにフルパス表示済み
 
 ## 検証コマンド (着手前に確認)
