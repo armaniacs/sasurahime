@@ -399,6 +399,10 @@ impl OrphanContainersCleaner {
 
         let items: Vec<String> = candidates.iter().map(format_item).collect();
         println!("\nContainers of apps that are not installed (nothing is selected by default):\n");
+        println!(
+            "Moved items may not show \"Put Back\" in Finder's context menu. \
+             Restore by dragging out of the Trash.\n"
+        );
         let selections = MultiSelect::new()
             .with_prompt("Select folders to move to Trash  [space to toggle, enter to confirm]")
             .items(&items)
