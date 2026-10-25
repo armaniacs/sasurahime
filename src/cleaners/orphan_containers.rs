@@ -414,7 +414,15 @@ fn print_unreadable_hint(count: usize) {
 }
 
 impl OrphanContainersCleaner {
-    fn interactive_select(candidates: &[OrphanCandidate]) -> Result<Vec<OrphanCandidate>> {
+    /// Runs the interactive selection WITHOUT a live spinner: the dialoguer
+    /// prompt is handed to [`ProgressReporter::suspend_live_output`], so no
+    /// progress line redraws under it and the frozen `Cleaning...` label
+    /// never labels the selection phase. The live per-second elapsed tick is
+    /// enabled later, in `delete_selected`, where no prompt can occur.
+    fn interactive_select(
+        reporter: &dyn ProgressReporter,
+        candidates: &[OrphanCandidate],
+    ) -> Result<Vec<OrphanCandidate>> {
         use dialoguer::MultiSelect;
 
         let items: Vec<String> = candidates.iter().map(format_item).collect();
@@ -423,14 +431,26 @@ impl OrphanContainersCleaner {
             "Moved items may not show \"Put Back\" in Finder's context menu. \
              Restore by dragging out of the Trash.\n"
         );
-        let selections = MultiSelect::new()
-            .with_prompt("Select folders to move to Trash  [space to toggle, enter to confirm]")
-            .items(&items)
-            .interact()?;
-        Ok(selections
-            .into_iter()
-            .map(|i| candidates[i].clone())
-            .collect())
+        // The prompt owns the screen: the live progress line (the TUI's
+        // animated wrapper, the CLI's frozen spinner) must not redraw under
+        // it. suspend hides the line for the prompt and redraws it after.
+        let mut picks = None;
+        let mut prompt = || {
+            picks = Some(
+                MultiSelect::new()
+                    .with_prompt(
+                        "Select folders to move to Trash  [space to toggle, enter to confirm]",
+                    )
+                    .items(&items)
+                    .interact(),
+            )
+        };
+        reporter.suspend_live_output(&mut prompt);
+        let picks = match picks {
+            Some(picks) => picks?,
+            None => anyhow::bail!("the selection prompt did not run"),
+        };
+        Ok(picks.into_iter().map(|i| candidates[i].clone()).collect())
     }
 
     /// The shared clean body. `mode` is the deletion mode threaded into
@@ -481,7 +501,7 @@ impl OrphanContainersCleaner {
             return Ok(empty_result(self.name()));
         }
 
-        let selected = Self::interactive_select(&scan.candidates)?;
+        let selected = Self::interactive_select(reporter, &scan.candidates)?;
         if selected.is_empty() {
             println!("[orphan-containers] nothing selected");
             print_unreadable_hint(scan.unreadable);
@@ -507,6 +527,10 @@ impl OrphanContainersCleaner {
         let mut uses_trash = false;
         let mut skipped = Vec::new();
         let mut deleted_paths = Vec::new();
+        // No prompt can occur while this delete loop runs, so the live line
+        // may tick on a steady 1s cadence: that is what makes `{elapsed}`
+        // update every second during the deletion.
+        reporter.enable_live_elapsed();
         reporter.progress_init(self.name(), selected.len());
         for (i, c) in selected.iter().enumerate() {
             reporter.progress_tick(&c.path, i + 1, c.size);
@@ -1240,6 +1264,14 @@ mod tests {
         assert!(s.contains("..."), "middle ellipsis missing: {s}");
         assert!(!s.contains(&long), "full path must be truncated: {s}");
         assert!(s.contains("[Containers]"), "{s}");
+        // The path column must stay within its 56-char width so the size and
+        // kind columns stay aligned.
+        let (path_col, _rest) = s.split_once("  ").expect("path and size columns separated");
+        assert!(
+            path_col.chars().count() <= 56,
+            "the path column must stay within its width, got {} chars: {s}",
+            path_col.chars().count()
+        );
     }
 
     #[test]
@@ -1344,6 +1376,46 @@ mod tests {
     fn orphan_containers_is_never_auto_cleaned() {
         let tmp = TempDir::new().unwrap();
         assert!(!cleaner_for(&tmp).auto_clean_allowed());
+    }
+
+    #[test]
+    fn selection_runs_without_a_live_spinner_and_deletion_ticks_per_second() {
+        // The selection prompt owns the screen: interactive_select hands the
+        // dialoguer prompt to suspend_live_output, so no live spinner redraws
+        // under it and the frozen `Cleaning...` label never labels the
+        // selection phase. The live per-second elapsed tick is enabled only
+        // in delete_selected, where no prompt can occur. dialoguer needs a
+        // real TTY, so this pins the source (the same style as progress.rs's
+        // steady-tick pins).
+        let src = include_str!("orphan_containers.rs");
+        let select_start = src
+            .find("fn interactive_select(")
+            .expect("interactive_select source present");
+        let select_end = src[select_start..]
+            .find("/// The shared clean body.")
+            .map(|i| select_start + i)
+            .unwrap_or(src.len());
+        let select_body = &src[select_start..select_end];
+        assert!(
+            select_body.contains("suspend_live_output"),
+            "the selection prompt must run under suspend_live_output (no live spinner during prompting)"
+        );
+        assert!(
+            !select_body.contains("enable_live_elapsed"),
+            "the prompting path must stay non-animated (the tick belongs to the delete phase)"
+        );
+        let delete_start = src
+            .find("fn delete_selected(")
+            .expect("delete_selected source present");
+        let delete_end = src[delete_start..]
+            .find("impl Cleaner for OrphanContainersCleaner")
+            .map(|i| delete_start + i)
+            .unwrap_or(src.len());
+        let delete_body = &src[delete_start..delete_end];
+        assert!(
+            delete_body.contains("enable_live_elapsed"),
+            "the delete phase must enable the live per-second elapsed tick"
+        );
     }
 
     // ── trash_mode pin contract ──
