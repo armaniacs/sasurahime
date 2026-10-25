@@ -12,16 +12,16 @@ jobs:
 
       - name: Install Rust toolchain
         run: |
-          # The runner image's pre-installed stable varies: some images ship
-          # it without rust-docs, and rustup's channel sync on top of it can
-          # remove the previous components and finish without installing the
-          # new ones ("using existing install", rustdoc missing at runtime).
-          # Uninstall first so the install below is a fresh extract with all
-          # required components, deterministically.
-          rustup toolchain uninstall stable 2>/dev/null || true
+          # The runner image's pre-installed stable sometimes lacks
+          # rust-docs, and a full fresh install (uninstall first) hits a
+          # rustup state where the run finishes without installing the new
+          # components, leaving rustdoc missing at runtime. Add the missing
+          # components only, then gate on the shim actually working.
           rustup toolchain install stable --profile minimal \
             --component rustfmt,clippy,rust-docs --no-self-update
+          rustup component add rustfmt clippy rust-docs
           rustup default stable
+          rustdoc --version
 
       - name: Cache
         uses: actions/cache@v4
