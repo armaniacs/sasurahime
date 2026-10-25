@@ -362,10 +362,30 @@ impl OrphanContainersCleaner {
     }
 }
 
+/// Selection-row width for the path column: paths wider than this ellipsize
+/// the middle so the size and kind columns stay aligned.
+const ITEM_PATH_WIDTH: usize = 56;
+
+/// Shortens a path to at most `width` chars by cutting the middle:
+/// `/Users/u/Library/Containers/xxxx...` becomes
+/// `/Users/u/Library/Conta...xxxx`.
+fn truncate_path_middle(path: &str, width: usize) -> String {
+    let chars: Vec<char> = path.chars().collect();
+    if chars.len() <= width {
+        return path.to_string();
+    }
+    let keep = width.saturating_sub(3).max(1);
+    let head = keep * 2 / 3;
+    let tail = keep - head;
+    let head_str: String = chars[..head].iter().collect();
+    let tail_str: String = chars[chars.len() - tail..].iter().collect();
+    format!("{head_str}...{tail_str}")
+}
+
 pub fn format_item(c: &OrphanCandidate) -> String {
     format!(
         "{:<56}  {:>10}  [{}]",
-        c.name,
+        truncate_path_middle(&c.path.display().to_string(), ITEM_PATH_WIDTH),
         format_bytes(c.size),
         c.kind.label()
     )
@@ -1194,7 +1214,7 @@ mod tests {
     use crate::progress::SuppressReporter;
 
     #[test]
-    fn format_item_contains_name_size_and_kind() {
+    fn format_item_contains_path_size_and_kind() {
         let c = OrphanCandidate {
             path: PathBuf::from("/x/com.example.gone"),
             name: "com.example.gone".into(),
@@ -1202,9 +1222,24 @@ mod tests {
             size: 2048,
         };
         let s = format_item(&c);
-        assert!(s.contains("com.example.gone"), "{s}");
+        assert!(s.contains("/x/com.example.gone"), "{s}");
         assert!(s.contains("2.0 KB"), "{s}");
         assert!(s.contains("[Group Containers]"), "{s}");
+    }
+
+    #[test]
+    fn format_item_truncates_a_long_path_in_the_middle() {
+        let long = format!("/Users/u/Library/Containers/{}", "x".repeat(80));
+        let c = OrphanCandidate {
+            path: PathBuf::from(&long),
+            name: "long".into(),
+            kind: ContainerKind::Containers,
+            size: 8,
+        };
+        let s = format_item(&c);
+        assert!(s.contains("..."), "middle ellipsis missing: {s}");
+        assert!(!s.contains(&long), "full path must be truncated: {s}");
+        assert!(s.contains("[Containers]"), "{s}");
     }
 
     #[test]
