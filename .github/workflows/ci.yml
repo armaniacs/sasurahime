@@ -19,6 +19,18 @@ jobs:
           # pre-installed stable without it.
           components: rustfmt, clippy, rust-docs
 
+      - name: Repair the toolchain when the channel sync leaves no rustdoc
+        run: |
+          # rustup's channel sync can remove the previous components and
+          # finish without installing the new ones, leaving a toolchain
+          # whose rustdoc shim fails at runtime. Reinstall cleanly then.
+          if ! rustdoc --version >/dev/null 2>&1; then
+            rustup toolchain uninstall stable
+            rustup toolchain install stable --profile minimal \
+              --component rustfmt,clippy,rust-docs --no-self-update
+            rustup default stable
+          fi
+
       - name: Cache
         uses: actions/cache@v4
         with:
