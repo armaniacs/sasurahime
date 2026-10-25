@@ -6,6 +6,22 @@ All notable changes to sasurahime will be documented in this file. The format is
 
 ## [Unreleased]
 
+### Changed
+
+- Trash deletion uses the `NsFileManager` backend (`trashItemAtURL`) instead
+  of the default Finder backend, which spawned `osascript` and could sit for
+  minutes on a hidden macOS TCC permission dialog with no output. Behavior
+  change: items moved to the Trash may not show "Put Back" in Finder's
+  context menu -- restore by dragging them out of the Trash.
+- `clean orphan-containers` shows the full path in the selection list (long
+  paths ellipsize the middle at column width 56) instead of the folder name
+  only, and notes the Put Back limitation before the selection.
+- Spinners carry an always-visible elapsed timer (`({elapsed})`) on the
+  cleaning spinner and the parallel scan bar. The delete phase enables a
+  per-second steady tick so the timer updates every second, and the
+  interactive selection runs with the live line hidden instead of a frozen
+  `Cleaning...` label above the prompt.
+
 ## [0.4.1] - 2026-10-25
 
 ### Security
