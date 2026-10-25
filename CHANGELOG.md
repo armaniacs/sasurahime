@@ -6,7 +6,7 @@ All notable changes to sasurahime will be documented in this file. The format is
 
 ## [Unreleased]
 
-## [0.4.1] - unreleased
+## [0.4.1] - 2026-10-25
 
 ### Security
 
