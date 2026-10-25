@@ -1008,6 +1008,12 @@ mod tests {
 
     #[test]
     fn default_app_dirs_lists_three_roots() {
+        // The production default. On CI the gate trims it to the
+        // HOME-derived root, so pin CI=false for this assertion.
+        let _lock = crate::context::TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let _guard = crate::test_helpers::EnvGuard::set("CI", "false");
         let dirs = default_app_dirs(Path::new("/Users/x"));
         assert_eq!(
             dirs,
