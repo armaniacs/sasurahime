@@ -59,11 +59,26 @@ fn exclude_removes_cleaner_from_scan() {
 #[test]
 fn exclude_maintains_independent_cleaner() {
     let tmp = TempDir::new().unwrap();
+    let bin_dir = tmp.path().join("bin");
+    fs::create_dir_all(&bin_dir).unwrap();
+    // The scan table only lists cleaners whose tool is on PATH. The hermetic
+    // PATH in the helper hides the host's brew, so a fake one keeps the row
+    // listed without reaching outside the tempdir.
+    fs::write(bin_dir.join("brew"), "#!/bin/sh\nexit 0\n").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(bin_dir.join("brew"), fs::Permissions::from_mode(0o755)).unwrap();
+    }
     let config_dir = tmp.path().join(".config/sasurahime");
     fs::create_dir_all(&config_dir).unwrap();
     fs::write(config_dir.join("config.toml"), "exclude = [\"uv\"]\n").unwrap();
 
-    let output = sasurahime(tmp.path()).arg("scan").output().unwrap();
+    let output = sasurahime(tmp.path())
+        .env("PATH", format!("{}:/usr/bin:/bin", bin_dir.display()))
+        .arg("scan")
+        .output()
+        .unwrap();
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
