@@ -44,8 +44,34 @@ jobs:
 
       - name: test
         run: |
-          # Re-gate rustdoc right before the suite: if the image prunes the
-          # docs files during the run, this fails here with a clear message
-          # instead of a mysterious doctest ENOENT three steps later.
-          "$(rustc --print sysroot)/bin/rustdoc" --version
+          SYSROOT="$(rustc --print sysroot)"
+          RUSTDOC_PATH="$SYSROOT/bin/rustdoc"
+          "$RUSTDOC_PATH" --version
+          # Diagnostic: the suite is itself a cache cleaner that provably
+          # escaped its env-scoped isolation once (CHANGELOG v0.1.8, the
+          # host-rustup cleanup flake). Name the moment rustdoc disappears,
+          # then capture the end state (toolchains, RUSTUP_HOME, Trash) so
+          # one run decides suite-vs-infrastructure and move-vs-delete.
+          (
+            while [ -e "$RUSTDOC_PATH" ]; do sleep 1; done
+            echo "RUSTDOC-GONE at $(date -u +%H:%M:%S)"
+          ) &
+          WATCHER_PID=$!
+          set +e
           cargo test
+          STATUS=$?
+          set -e
+          kill "$WATCHER_PID" 2>/dev/null || true
+          wait "$WATCHER_PID" 2>/dev/null || true
+          echo "=== diagnostics ==="
+          echo "--- rustup toolchain list ---"
+          rustup toolchain list || true
+          echo "--- toolchains dir ---"
+          ls "$HOME/.rustup/toolchains/" || true
+          echo "--- rustup env ---"
+          env | grep -i rustup || echo "(RUSTUP_HOME unset)"
+          echo "--- Trash ---"
+          ls "$HOME/.Trash" 2>/dev/null | head -10 || echo "(empty/unreadable)"
+          echo "--- rustdoc state ---"
+          [ -e "$RUSTDOC_PATH" ] && echo present || echo ABSENT
+          exit $STATUS
