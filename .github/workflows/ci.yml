@@ -12,18 +12,21 @@ jobs:
 
       - name: Install Rust toolchain
         run: |
-          # The runner image's pre-installed "stable" is sometimes broken:
-          # rustdoc is missing from it, and neither the --component flags on
-          # a re-install nor `rustup component add` repair it, because rustup
-          # takes the "existing install" path and skips the work. Install the
-          # pinned version under its own name instead: that toolchain
-          # directory is created by this run and cannot inherit whatever
-          # state the image's "stable" carries. Bump PINNED deliberately.
+          # The runner image's pre-installed toolchains sometimes ship
+          # without rust-docs, and rustup's "existing install" path skips
+          # component installation even when --component flags are given, so
+          # rustdoc ends up missing exactly where cargo's doctests invoke it:
+          # the toolchain's bin directory, not the rustup shim. Uninstall the
+          # pinned toolchain first so the existing-install path cannot
+          # happen, force-add the components, then gate on the direct
+          # binary. Bump PINNED deliberately.
           PINNED=1.99.1
+          rustup toolchain uninstall "$PINNED" 2>/dev/null || true
           rustup toolchain install "$PINNED" --profile minimal \
             --component rustfmt,clippy,rust-docs --no-self-update
           rustup default "$PINNED"
-          rustdoc --version
+          rustup component add rustfmt clippy rust-docs
+          "$(rustc --print sysroot)/bin/rustdoc" --version
 
       - name: Cache
         uses: actions/cache@v4
