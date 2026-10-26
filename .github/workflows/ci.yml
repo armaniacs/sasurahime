@@ -71,7 +71,12 @@ jobs:
           echo "--- rustup env ---"
           env | grep -i rustup || echo "(RUSTUP_HOME unset)"
           echo "--- Trash ---"
-          ls "$HOME/.Trash" 2>/dev/null | head -10 || echo "(empty/unreadable)"
+          ls -la "$HOME/.Trash" 2>/dev/null || echo "(empty/unreadable)"
           echo "--- rustdoc state ---"
           [ -e "$RUSTDOC_PATH" ] && echo present || echo ABSENT
+          # The watcher pinned the disappearance to the auto_policy tests.
+          # Print the binary's own output (cargo swallows passing-test
+          # stdout) so the cleaner that touched the host is named by name.
+          echo "=== auto_policy with nocapture ==="
+          RUSTDOC_PATH="$RUSTDOC_PATH" cargo test --test auto_policy -- --nocapture || true
           exit $STATUS
