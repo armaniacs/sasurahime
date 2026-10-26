@@ -12,19 +12,18 @@ jobs:
 
       - name: Install Rust toolchain
         run: |
-          # The runner image's pre-installed toolchains sometimes ship
-          # without rust-docs, and rustup's "existing install" path skips
-          # component installation even when --component flags are given, so
-          # rustdoc ends up missing exactly where cargo's doctests invoke it:
-          # the toolchain's bin directory, not the rustup shim. Uninstall the
-          # pinned toolchain first so the existing-install path cannot
-          # happen, force-add the components, then gate on the direct
+          # The runner image's toolchains say rust-docs is installed while
+          # the actual files are pruned: rustup trusts the manifest ("is up
+          # to date") and skips re-extraction, so rustdoc is missing exactly
+          # where cargo's doctests invoke it. Force a real re-extraction by
+          # removing and re-adding the component, then gate on the direct
           # binary. Bump PINNED deliberately.
           PINNED=1.99.1
           rustup toolchain uninstall "$PINNED" 2>/dev/null || true
           rustup toolchain install "$PINNED" --profile minimal \
             --component rustfmt,clippy,rust-docs --no-self-update
           rustup default "$PINNED"
+          rustup component remove rust-docs 2>/dev/null || true
           rustup component add rustfmt clippy rust-docs
           "$(rustc --print sysroot)/bin/rustdoc" --version
 
@@ -44,4 +43,9 @@ jobs:
         run: cargo clippy -- -D warnings
 
       - name: test
-        run: cargo test
+        run: |
+          # Re-gate rustdoc right before the suite: if the image prunes the
+          # docs files during the run, this fails here with a clear message
+          # instead of a mysterious doctest ENOENT three steps later.
+          "$(rustc --print sysroot)/bin/rustdoc" --version
+          cargo test
