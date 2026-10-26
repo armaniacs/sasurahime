@@ -16,6 +16,7 @@ const THREE_ENTRIES: &str = r#"[
 fn sasurahime(home: &std::path::Path) -> Command {
     let mut cmd = Command::cargo_bin("sasurahime").unwrap();
     cmd.env("HOME", home);
+    cmd.env("PATH", "/usr/bin:/bin");
     cmd
 }
 

@@ -6,6 +6,7 @@ fn sasurahime(home: &std::path::Path) -> Command {
     let bin = env!("CARGO_BIN_EXE_sasurahime");
     let mut cmd = Command::new(bin);
     cmd.env("HOME", home);
+    cmd.env("PATH", "/usr/bin:/bin");
     cmd
 }
 
