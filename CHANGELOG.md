@@ -21,6 +21,9 @@ All notable changes to sasurahime will be documented in this file. The format is
   `detect_dir` clean path: `Freed:` measures the cache directory, not the
   VM's sparse disk image, and fstrim only reclaims unused blocks, so the
   image often does not shrink -- the notice reports that with the remedy.
+- ollama: clean now skips the interactive selection when stdin is not a
+  terminal, so `--yes` can clean the Safe-classified ollama target instead of
+  failing with a dialoguer error.
 
 ## [0.4.2] - 2026-10-29
 
