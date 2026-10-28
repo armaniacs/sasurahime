@@ -6,6 +6,8 @@ All notable changes to sasurahime will be documented in this file. The format is
 
 ## [Unreleased]
 
+## [0.4.2] - unreleased
+
 ### Changed
 
 - Trash deletion uses the `NsFileManager` backend (`trashItemAtURL`) instead
@@ -32,6 +34,10 @@ All notable changes to sasurahime will be documented in this file. The format is
   with the VM stopped, the remedy is printed and the prune-only freed bytes
   are still reported. The confirmation prompt now describes this
   non-destructive action instead of `colima delete`.
+- The interactive confirm prompt prints the explanation as normal output and
+  asks with a one-line `Proceed?` prompt. dialoguer's `clear_line` erases
+  one terminal line, so a wrapped Confirm prompt left the first render's
+  lines behind and the message appeared twice.
 
 ## [0.4.1] - 2026-10-25
 
