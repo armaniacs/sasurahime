@@ -57,6 +57,32 @@ impl MockRunner {
         self
     }
 
+    /// A specific tool exists, exits 0, and prints `stdout`.
+    pub fn with_stdout(mut self, program: &str, stdout: &str) -> Self {
+        self.behaviors.push(MockBehavior::Output {
+            program: program.to_string(),
+            output: std::process::Output {
+                status: std::process::ExitStatus::from_raw(0),
+                stdout: stdout.as_bytes().to_vec(),
+                stderr: vec![],
+            },
+        });
+        self
+    }
+
+    /// A specific tool exists but exits non-zero with the given code.
+    pub fn with_exit_code(mut self, program: &str, code: i32) -> Self {
+        self.behaviors.push(MockBehavior::Output {
+            program: program.to_string(),
+            output: std::process::Output {
+                status: std::process::ExitStatus::from_raw(code),
+                stdout: vec![],
+                stderr: vec![],
+            },
+        });
+        self
+    }
+
     /// A specific tool exists (`exists()` returns true) but its command fails
     /// (spawn error). Models a tool whose detect command times out or crashes.
     pub fn with_failure(mut self, program: &str) -> Self {

@@ -30,6 +30,15 @@ All notable changes to sasurahime will be documented in this file. The format is
 - ollama: clean now skips the interactive selection when stdin is not a
   terminal, so `--yes` can clean the Safe-classified ollama target instead of
   failing with a dialoguer error.
+- Cleaners now verify the exit codes of the external tools they invoke
+  (mise, rustup, ollama, brew, uv, tmutil, osascript, open). A failed
+  removal no longer claims the target's bytes: the failure is recorded as
+  a skipped entry and the remaining items continue. `mise ls --current`
+  output that cannot be parsed is fail-closed: the cleaner refuses to
+  delete any runtime and scan reports the target as unavailable, so an
+  output-format change can no longer mark every installed runtime
+  deletable. brew warns when its freed-bytes line could not be parsed
+  even though the cache directory shrank.
 
 ## [0.4.2] - 2026-10-29
 

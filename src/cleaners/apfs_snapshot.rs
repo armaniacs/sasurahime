@@ -423,7 +423,7 @@ impl ApfsSnapshotCleaner {
         // Thinning is an explicit opt-in like --all, so it skips the plain
         // non-TTY guard; urgency 4 keeps its own confirmation above.
         let before = (self.free_space)();
-        self.runner.run(
+        let output = self.runner.run(
             "tmutil",
             &[
                 "thinlocalsnapshots",
@@ -432,6 +432,15 @@ impl ApfsSnapshotCleaner {
                 &urgency.to_string(),
             ],
         )?;
+        if !output.status.success() {
+            // PBI 53: a failed thinning must not be read as a successful run
+            // whose before/after delta happens to be 0.
+            eprintln!(
+                "[apfs-snapshot] tmutil thinlocalsnapshots exited with {} - no space was reclaimed",
+                output.status.code().unwrap_or(-1)
+            );
+            return Ok(zero);
+        }
         let after = (self.free_space)();
         // Both readings must exist: a missing before-reading would report the
         // entire free space as freed.

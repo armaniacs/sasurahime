@@ -94,12 +94,39 @@ impl Cleaner for BrewCleaner {
             println!("[dry-run] would run: brew {}", args.join(" "));
         }
 
+        // The cache-dir size before the run: the only independent evidence
+        // of whether the cleanup actually freed anything (PBI 53).
+        let before_size = dir_size(&self.cache_dir);
         let output = self.runner.run("brew", &args)?;
+        if !output.status.success() {
+            // PBI 53: a failed cleanup must not have its (partial) stdout
+            // parsed as a successful run's freed-bytes report.
+            eprintln!(
+                "[brew] cleanup exited with {} - skipping",
+                output.status.code().unwrap_or(-1)
+            );
+            return Ok(CleanResult {
+                name: self.name(),
+                bytes_freed: 0,
+                uses_trash: false,
+                skipped: vec![],
+                deleted_paths: vec![],
+            });
+        }
         let stdout = String::from_utf8_lossy(&output.stdout);
         let freed = Self::parse_brew_freed_bytes(&stdout);
+        let after = dir_size(&self.cache_dir);
 
         if freed > 0 {
             println!("Freed: {}", format_bytes(freed));
+        } else if !dry_run && after < before_size {
+            // Parse-miss evidence (PBI 53): brew exited 0 and the cache dir
+            // shrank, but the freed-bytes line did not parse (e.g. brew
+            // changed its wording). Never report 0 silently.
+            eprintln!(
+                "[brew] freed-bytes line could not be parsed, but the cache shrank by {}",
+                format_bytes(before_size - after)
+            );
         }
 
         Ok(CleanResult {
@@ -174,5 +201,44 @@ mod tests {
     fn parse_size_str_is_case_insensitive() {
         assert_eq!(BrewCleaner::parse_size_str("1.0Gb"), Some(1_073_741_824));
         assert_eq!(BrewCleaner::parse_size_str("2.0mB"), Some(2 * 1_048_576));
+    }
+
+    // ── PBI 53: exit-code verification ──
+
+    #[test]
+    fn clean_fails_closed_when_cleanup_exits_nonzero() {
+        // A failed `brew cleanup` must not have its stdout parsed as a
+        // freed-bytes report (PBI 53).
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cache = tmp.path().join("Library/Caches/Homebrew");
+        std::fs::create_dir_all(&cache).unwrap();
+        std::fs::write(cache.join("pkg.tar.gz"), vec![0u8; 512]).unwrap();
+        let runner = crate::test_helpers::MockRunner::new()
+            .with_success("brew")
+            .with_exit_code("brew", 1 << 8);
+        let cleaner = BrewCleaner::new(tmp.path(), Box::new(runner));
+        let result = cleaner
+            .clean(false, &crate::progress::DeepSuppressReporter)
+            .unwrap();
+        assert_eq!(result.bytes_freed, 0, "a failed cleanup must report 0");
+    }
+
+    #[test]
+    fn clean_parses_freed_bytes_from_successful_output() {
+        // A successful run with the freed line still reports the parsed
+        // amount (regression guard for the exit-code change).
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cache = tmp.path().join("Library/Caches/Homebrew");
+        std::fs::create_dir_all(&cache).unwrap();
+        std::fs::write(cache.join("pkg.tar.gz"), vec![0u8; 512]).unwrap();
+        let runner = crate::test_helpers::MockRunner::new().with_stdout(
+            "brew",
+            "This operation has freed approximately 1.0MB of disk space.\n",
+        );
+        let cleaner = BrewCleaner::new(tmp.path(), Box::new(runner));
+        let result = cleaner
+            .clean(false, &crate::progress::DeepSuppressReporter)
+            .unwrap();
+        assert_eq!(result.bytes_freed, 1_048_576);
     }
 }

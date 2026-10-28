@@ -126,7 +126,16 @@ impl Cleaner for UvCleaner {
         if dry_run {
             println!("[dry-run] would run: uv cache prune --force");
         } else {
-            self.runner.run("uv", &["cache", "prune", "--force"])?;
+            let output = self.runner.run("uv", &["cache", "prune", "--force"])?;
+            if !output.status.success() {
+                // PBI 53: a failed prune silently contributes 0 to `freed`
+                // (the per-item deletions above measured correctly). Warn so
+                // the prune failure is not invisible.
+                log::warn!(
+                    "uv cache prune --force exited with {} - the prune was not applied",
+                    output.status.code().unwrap_or(-1)
+                );
+            }
         }
 
         let after = if dry_run {

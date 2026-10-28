@@ -183,13 +183,24 @@ impl Cleaner for OllamaCleaner {
             }
 
             let mut total: u64 = 0;
+            let mut skipped: Vec<crate::cleaner::SkippedEntry> = vec![];
             if !selections.is_empty() {
                 reporter.progress_init(self.name(), selections.len());
             }
             for (j, &i) in selections.iter().enumerate() {
                 let m = &models[i];
                 reporter.progress_tick(Path::new(&m.name), j + 1, m.size);
-                self.runner.run("ollama", &["rm", &m.name])?;
+                // A failed `ollama rm` must not claim the model's bytes:
+                // record a SkippedEntry and continue with the remaining
+                // models (PBI 53).
+                if let Err(reason) = Self::remove_model(self.runner.as_ref(), &m.name) {
+                    eprintln!("[ollama] failed to remove {}: {reason}", m.name);
+                    skipped.push(crate::cleaner::SkippedEntry {
+                        path: self.models_dir.join(&m.name),
+                        reason,
+                    });
+                    continue;
+                }
                 total += m.size;
                 println!(
                     "[ollama] removed: {} (freed {})",
@@ -204,7 +215,7 @@ impl Cleaner for OllamaCleaner {
                 name: self.name(),
                 bytes_freed: total,
                 uses_trash: false,
-                skipped: vec![],
+                skipped,
                 deleted_paths: vec![],
             });
         }
@@ -214,6 +225,19 @@ impl Cleaner for OllamaCleaner {
 }
 
 impl OllamaCleaner {
+    /// Removes a model, checking the exit code (PBI 53): a non-zero exit
+    /// or a spawn error must not count as a successful removal.
+    fn remove_model(runner: &dyn CommandRunner, name: &str) -> std::result::Result<(), String> {
+        match runner.run("ollama", &["rm", name]) {
+            Ok(o) if o.status.success() => Ok(()),
+            Ok(o) => Err(format!(
+                "ollama rm exited with {}",
+                o.status.code().unwrap_or(-1)
+            )),
+            Err(err) => Err(format!("{err:#}")),
+        }
+    }
+
     fn clean_fallback(&self, dry_run: bool) -> Result<CleanResult> {
         let dir = &self.models_dir;
         if !dir.exists() {
@@ -352,5 +376,27 @@ mod tests {
         // Explicit call-site default (see comment in `list_models`): an
         // unparseable SIZE column contributes 0 bytes, never a mis-parse.
         assert_eq!(models[0].size, 0);
+    }
+
+    // ── PBI 53: exit-code verification for `ollama rm` ──
+
+    #[test]
+    fn remove_model_reports_nonzero_exit() {
+        let runner = crate::test_helpers::MockRunner::new().with_exit_code("ollama", 1 << 8);
+        let err = OllamaCleaner::remove_model(&runner, "llama3.2:3b").unwrap_err();
+        assert!(
+            err.contains("exited with 1"),
+            "the exit code must surface in the reason, got {err}"
+        );
+    }
+
+    #[test]
+    fn remove_model_reports_spawn_failure() {
+        let runner = crate::test_helpers::MockRunner::new().with_failure("ollama");
+        let err = OllamaCleaner::remove_model(&runner, "llama3.2:3b").unwrap_err();
+        assert!(
+            err.contains("failed to spawn"),
+            "the spawn failure must surface in the reason, got {err}"
+        );
     }
 }

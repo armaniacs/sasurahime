@@ -246,3 +246,39 @@ fn clean_mise_ignores_pins_inside_vendored_dirs() {
         "not pinned anywhere — must be removed"
     );
 }
+
+#[test]
+fn clean_mise_does_not_delete_when_ls_current_output_is_unparseable() {
+    // PBI 53 fail-closed: if `mise ls --current` changes its output format
+    // so that nothing parses, the semantic-empty active set must NOT mark
+    // every installed runtime deletable. The clean must refuse to delete.
+    let tmp = TempDir::new().unwrap();
+    let bin_dir = tmp.path().join("bin");
+    fs::create_dir_all(&bin_dir).unwrap();
+    install_fake_mise(&bin_dir, "node=20.11.0;active\n");
+
+    let installs = tmp.path().join(".local/share/mise/installs/node");
+    fs::create_dir_all(installs.join("20.11.0")).unwrap();
+
+    let original_path = std::env::var("PATH").unwrap_or_default();
+    let output = sasurahime(tmp.path())
+        .env("PATH", format!("{}:{original_path}", bin_dir.display()))
+        .args(["--permanent", "clean", "mise"])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("could not be parsed"),
+        "the fail-closed warning must be printed, stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        installs.join("20.11.0").exists(),
+        "an installed runtime must survive an unparseable ls --current output"
+    );
+}

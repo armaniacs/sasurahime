@@ -70,6 +70,32 @@ impl MiseCleaner {
             .collect()
     }
 
+    /// True when `mise ls --current` printed data whose format the parser
+    /// could not understand.
+    ///
+    /// Treating such output as "nothing active" would mark every installed
+    /// runtime deletable (an unparsable line is dropped by
+    /// [`Self::parse_active_versions`]), so the cleaner must fail closed
+    /// instead of deleting. An empty stdout is the legitimate "no active
+    /// versions" case and does NOT trip this guard. Residual risk: output
+    /// that still parses into bogus pairs (e.g. a header line with 3+
+    /// tokens) evades this check; current `mise ls --current` prints only
+    /// `tool version [source]` lines, so the check is false-positive free
+    /// for the formats mise emits today.
+    fn output_unparseable(stdout: &str, active: &HashSet<(String, String)>) -> bool {
+        if stdout.trim().is_empty() {
+            return false;
+        }
+        if active.is_empty() {
+            return true;
+        }
+        // A non-empty line with a single token cannot yield a (tool, version)
+        // pair and is silently dropped: treat it as a format change.
+        stdout
+            .lines()
+            .any(|line| !line.trim().is_empty() && line.split_whitespace().count() < 2)
+    }
+
     /// Returns (tool, version, path) triples for installed versions not in `active`.
     fn unused_versions(
         &self,
@@ -221,6 +247,15 @@ impl MiseCleaner {
             }
         };
         let active = Self::parse_active_versions(&stdout);
+        if Self::output_unparseable(&stdout, &active) {
+            // Fail closed (PBI 53): an unparseable `ls --current` output must
+            // not be read as "nothing active", which would mark every
+            // installed runtime deletable.
+            eprintln!(
+                "mise: ls --current output could not be parsed - refusing to delete anything"
+            );
+            return Ok(CleanResult::empty(self.name()));
+        }
         let pinned = self.get_pinned().clone();
         let unused = self.unused_versions(&active, &pinned);
 
@@ -299,6 +334,11 @@ impl Cleaner for MiseCleaner {
             None => return ScanResult::new(self.name(), ScanStatus::Unavailable),
         };
         let active = Self::parse_active_versions(&stdout);
+        if Self::output_unparseable(&stdout, &active) {
+            // Fail closed (PBI 53): report the target as unavailable rather
+            // than pruneable when the active-version parse cannot be trusted.
+            return ScanResult::new(self.name(), ScanStatus::Unavailable);
+        }
         let pinned = self.get_pinned().clone();
         let unused = self.unused_versions(&active, &pinned);
         let bytes: u64 = unused.iter().map(|(_, _, p)| dir_size(p)).sum();
@@ -652,6 +692,91 @@ mod tests {
             "expected Unavailable, got {:?}",
             detect_result.status
         );
+    }
+
+    // ── fail-closed on unparseable `ls --current` output (PBI 53) ──
+
+    #[test]
+    fn clean_does_not_delete_when_active_set_is_unparseable() {
+        // `mise ls --current` printed data the parser cannot understand: the
+        // semantic-empty active set must NOT mark every installed runtime
+        // deletable (PBI 53 fail-closed).
+        let tmp = TempDir::new().unwrap();
+        let version = tmp.path().join(".local/share/mise/installs/node/20.11.0");
+        fs::create_dir_all(&version).unwrap();
+        let runner = MockRunner::new()
+            .with_stdout("mise", "node=20.11.0;active\n")
+            .with_success("chflags");
+        let cleaner = MiseCleaner::new(tmp.path(), Box::new(runner));
+        let result = cleaner
+            .clean(false, &crate::progress::DeepSuppressReporter)
+            .unwrap();
+        assert_eq!(result.bytes_freed, 0, "nothing may be deleted");
+        assert!(version.exists(), "the installed runtime must survive");
+    }
+
+    #[test]
+    fn detect_returns_unavailable_when_active_set_is_unparseable() {
+        let tmp = TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join(".local/share/mise/installs/node/20.11.0")).unwrap();
+        let runner = MockRunner::new().with_stdout("mise", "node=20.11.0;active\n");
+        let cleaner = MiseCleaner::new(tmp.path(), Box::new(runner));
+        let detect_result = cleaner.detect();
+        assert!(
+            matches!(detect_result.status, ScanStatus::Unavailable),
+            "expected Unavailable, got {:?}",
+            detect_result.status
+        );
+    }
+
+    #[test]
+    fn clean_still_deletes_when_mise_ls_prints_nothing() {
+        // Empty stdout is the legitimate "no active versions" case: the
+        // fail-closed guard must not trip and installed versions stay
+        // deletable (the trash_mode pin tests rely on this). The global
+        // mode is pinned permanent so the sandboxed trashItemAtURL TCC
+        // limit cannot interfere with the deletion assertion.
+        let _mode = crate::test_helpers::TrashModeGuard::set(false);
+        let tmp = TempDir::new().unwrap();
+        let version = tmp.path().join(".local/share/mise/installs/node/20.11.0");
+        fs::create_dir_all(&version).unwrap();
+        fs::write(version.join("cache.bin"), vec![0u8; 1024]).unwrap();
+        let runner = MockRunner::new()
+            .with_success("mise")
+            .with_success("chflags");
+        let cleaner = MiseCleaner::new(tmp.path(), Box::new(runner));
+        let result = cleaner
+            .clean(false, &crate::progress::DeepSuppressReporter)
+            .unwrap();
+        assert!(!version.exists(), "an unused runtime stays deletable");
+        assert!(result.bytes_freed > 0);
+    }
+
+    #[test]
+    fn output_unparseable_empty_stdout_is_legitimate() {
+        assert!(!MiseCleaner::output_unparseable("", &HashSet::new()));
+    }
+
+    #[test]
+    fn output_unparseable_total_parse_failure_is_true() {
+        let stdout = "node=20.11.0;active\n";
+        let active = MiseCleaner::parse_active_versions(stdout);
+        assert!(MiseCleaner::output_unparseable(stdout, &active));
+    }
+
+    #[test]
+    fn output_unparseable_parseable_output_is_false() {
+        let stdout = "node\t24.15.0\t~/.config/mise/config.toml\n";
+        let active = MiseCleaner::parse_active_versions(stdout);
+        assert!(!MiseCleaner::output_unparseable(stdout, &active));
+    }
+
+    #[test]
+    fn output_unparseable_single_token_line_is_true() {
+        // A format change that breaks SOME lines must fail closed too.
+        let stdout = "node\t24.15.0\t~/.config/mise/config.toml\nbroken-line\n";
+        let active = MiseCleaner::parse_active_versions(stdout);
+        assert!(MiseCleaner::output_unparseable(stdout, &active));
     }
 
     // ── trash_mode pin contract ──

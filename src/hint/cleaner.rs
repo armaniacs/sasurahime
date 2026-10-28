@@ -18,7 +18,16 @@ pub(crate) fn quit_app_and_wait(
     };
 
     eprintln!("  Quitting {}...", entry.display_name);
-    runner.run("osascript", &["-e", &quit_app_script(quit_app)])?;
+    let output = runner.run("osascript", &["-e", &quit_app_script(quit_app)])?;
+    if !output.status.success() {
+        // PBI 53: a failed osascript is the real reason the app will not
+        // quit; bail with it instead of waiting for the 10s poll to time out.
+        anyhow::bail!(
+            "osascript failed to quit {} (exit {})",
+            entry.display_name,
+            output.status.code().unwrap_or(-1)
+        );
+    }
 
     let process_name = entry.process_name.unwrap_or(quit_app);
     for _ in 0..QUIT_TIMEOUT_SECS {
@@ -61,8 +70,17 @@ fn quit_app_script(quit_app: &str) -> String {
 pub(crate) fn relaunch_app(entry: &HintEntry, runner: &dyn CommandRunner) -> anyhow::Result<()> {
     if let Some(app) = entry.relaunch_app {
         eprintln!("  Restarting {}...", entry.display_name);
-        runner.run("open", &["-a", app])?;
-        eprintln!("  [OK]");
+        let output = runner.run("open", &["-a", app])?;
+        // PBI 53: a failed relaunch must not print "[OK]".
+        if output.status.success() {
+            eprintln!("  [OK]");
+        } else {
+            log::warn!(
+                "failed to relaunch {} (exit {})",
+                app,
+                output.status.code().unwrap_or(-1)
+            );
+        }
     } else {
         eprintln!(
             "  ({} will not be restarted — relaunch manually if needed)",

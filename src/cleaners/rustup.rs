@@ -19,6 +19,22 @@ impl RustupCleaner {
         }
     }
 
+    /// Removes a toolchain, checking the exit code (PBI 53): a non-zero
+    /// exit or a spawn error must not count as a successful removal.
+    fn remove_toolchain(
+        runner: &dyn CommandRunner,
+        toolchain: &str,
+    ) -> std::result::Result<(), String> {
+        match runner.run("rustup", &["toolchain", "remove", toolchain]) {
+            Ok(o) if o.status.success() => Ok(()),
+            Ok(o) => Err(format!(
+                "rustup toolchain remove exited with {}",
+                o.status.code().unwrap_or(-1)
+            )),
+            Err(err) => Err(format!("{err:#}")),
+        }
+    }
+
     /// Parses `rustup toolchain list` output.
     /// Active toolchains are marked with "(default)" or "(override)".
     fn parse_toolchains(stdout: &str) -> (Vec<String>, HashSet<String>) {
@@ -112,9 +128,26 @@ impl Cleaner for RustupCleaner {
             });
         }
         let output = self.runner.run("rustup", &["toolchain", "list"])?;
+        if !output.status.success() {
+            // PBI 53: detect() reports Unavailable when this command fails;
+            // clean must fail closed the same way instead of parsing output
+            // from a failed run.
+            eprintln!(
+                "[rustup] toolchain list exited with {} - skipping",
+                output.status.code().unwrap_or(-1)
+            );
+            return Ok(CleanResult {
+                name: self.name(),
+                bytes_freed: 0,
+                uses_trash: false,
+                skipped: vec![],
+                deleted_paths: vec![],
+            });
+        }
         let stdout = String::from_utf8_lossy(&output.stdout);
         let (all, active) = Self::parse_toolchains(&stdout);
         let mut freed: u64 = 0;
+        let mut skipped: Vec<crate::cleaner::SkippedEntry> = vec![];
 
         for toolchain in &all {
             if active.contains(toolchain) {
@@ -131,8 +164,17 @@ impl Cleaner for RustupCleaner {
             if dry_run {
                 println!("[dry-run] [rustup] would remove toolchain: {toolchain}");
             } else {
-                self.runner
-                    .run("rustup", &["toolchain", "remove", toolchain])?;
+                // A failed removal must not claim the toolchain's bytes:
+                // record a SkippedEntry and continue with the remaining
+                // toolchains (PBI 53).
+                if let Err(reason) = Self::remove_toolchain(self.runner.as_ref(), toolchain) {
+                    eprintln!("[rustup] failed to remove toolchain {toolchain}: {reason}");
+                    skipped.push(crate::cleaner::SkippedEntry {
+                        path: self.home.join(".rustup/toolchains").join(toolchain),
+                        reason,
+                    });
+                    continue;
+                }
                 freed += size;
                 println!("[rustup] removed toolchain: {toolchain}");
             }
@@ -144,7 +186,7 @@ impl Cleaner for RustupCleaner {
             name: self.name(),
             bytes_freed: freed,
             uses_trash: false,
-            skipped: vec![],
+            skipped,
             deleted_paths: vec![],
         })
     }
@@ -155,6 +197,7 @@ mod tests {
     use super::*;
     use crate::command::CommandRunner;
     use std::fs;
+    use std::os::unix::process::ExitStatusExt;
     use std::process::Output;
     use tempfile::TempDir;
 
@@ -278,5 +321,119 @@ mod tests {
         assert_eq!(all.len(), 2);
         assert!(active.contains("stable-aarch64-apple-darwin"));
         assert!(!active.contains("nightly-2026-05-01-aarch64-apple-darwin"));
+    }
+
+    // ── PBI 53: exit-code verification ──
+
+    /// rustup's `toolchain list` succeeds but `toolchain remove` exits
+    /// non-zero. Args-aware so the two calls can differ.
+    struct RemoveFailingRunner;
+    impl CommandRunner for RemoveFailingRunner {
+        fn run(&self, _program: &str, args: &[&str]) -> anyhow::Result<Output> {
+            let status = if args.contains(&"list") {
+                std::process::ExitStatus::from_raw(0)
+            } else {
+                // Unix wait-status encoding: the exit code lives in bits
+                // 8-15, so `from_raw(1 << 8)` is exit code 1.
+                std::process::ExitStatus::from_raw(1 << 8)
+            };
+            Ok(Output {
+                status,
+                stdout: b"nightly-2026-05-01-aarch64-apple-darwin\n".to_vec(),
+                stderr: vec![],
+            })
+        }
+        fn exists(&self, _program: &str) -> bool {
+            true
+        }
+    }
+
+    #[test]
+    fn clean_records_skipped_entry_when_toolchain_remove_fails() {
+        // A non-zero `rustup toolchain remove` exit must not count as a
+        // successful removal (PBI 53): no freed bytes, a SkippedEntry, and
+        // no "[rustup] removed" claim.
+        let tmp = TempDir::new().unwrap();
+        let toolchain_dir = tmp
+            .path()
+            .join(".rustup/toolchains/nightly-2026-05-01-aarch64-apple-darwin");
+        fs::create_dir_all(&toolchain_dir).unwrap();
+        fs::write(toolchain_dir.join("rustc"), [0u8; 512]).unwrap();
+        let cleaner = RustupCleaner {
+            home: tmp.path().to_path_buf(),
+            runner: Box::new(RemoveFailingRunner),
+        };
+        let result = cleaner
+            .clean(false, &crate::progress::DeepSuppressReporter)
+            .unwrap();
+        assert_eq!(result.bytes_freed, 0, "a failed removal must not count");
+        assert_eq!(
+            result.skipped.len(),
+            1,
+            "the failure must be a SkippedEntry"
+        );
+        assert_eq!(result.skipped[0].path, toolchain_dir);
+        assert!(
+            toolchain_dir.exists(),
+            "the failed toolchain must be left in place"
+        );
+    }
+
+    /// rustup's `toolchain list` exits non-zero in clean.
+    struct ListFailingRunner;
+    impl CommandRunner for ListFailingRunner {
+        fn run(&self, _program: &str, _args: &[&str]) -> anyhow::Result<Output> {
+            Ok(Output {
+                status: std::process::ExitStatus::from_raw(1 << 8),
+                stdout: vec![],
+                stderr: vec![],
+            })
+        }
+        fn exists(&self, _program: &str) -> bool {
+            true
+        }
+    }
+
+    #[test]
+    fn clean_fails_closed_when_toolchain_list_exits_nonzero() {
+        // detect() reports Unavailable for a failed `toolchain list`; clean
+        // must fail closed the same way instead of parsing a failed run.
+        let tmp = TempDir::new().unwrap();
+        let toolchain_dir = tmp
+            .path()
+            .join(".rustup/toolchains/nightly-2026-05-01-aarch64-apple-darwin");
+        fs::create_dir_all(&toolchain_dir).unwrap();
+        let cleaner = RustupCleaner {
+            home: tmp.path().to_path_buf(),
+            runner: Box::new(ListFailingRunner),
+        };
+        let result = cleaner
+            .clean(false, &crate::progress::DeepSuppressReporter)
+            .unwrap();
+        assert_eq!(result.bytes_freed, 0, "nothing may be deleted");
+        assert!(
+            toolchain_dir.exists(),
+            "nothing may be deleted when the list command fails"
+        );
+    }
+
+    #[test]
+    fn remove_toolchain_reports_nonzero_exit() {
+        let runner = crate::test_helpers::MockRunner::new().with_exit_code("rustup", 1 << 8);
+        let err = RustupCleaner::remove_toolchain(&runner, "nightly").unwrap_err();
+        assert!(
+            err.contains("exited with 1"),
+            "the exit code must surface in the reason, got {err}"
+        );
+    }
+
+    #[test]
+    fn remove_toolchain_reports_spawn_failure() {
+        let runner = crate::test_helpers::MockRunner::new().with_failure("rustup");
+        let err = RustupCleaner::remove_toolchain(&runner, "nightly").unwrap_err();
+        assert!(
+            err.contains("failed to spawn"),
+            "the spawn failure must surface in the reason, got {err}"
+        );
     }
 }
