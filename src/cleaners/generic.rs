@@ -37,6 +37,10 @@ pub struct CliCleaner {
     display_name: &'static str,
     program: &'static str,
     args: &'static [&'static str],
+    /// Commands run after the main one. Each entry is (program, args,
+    /// failure remedy). A failure is non-fatal: it prints a warning and
+    /// the remedy, then the clean continues.
+    extra_commands: Vec<(&'static str, &'static [&'static str], Option<&'static str>)>,
     detect_dir: Option<PathBuf>,
     runner: Box<dyn CommandRunner>,
     /// Optional confirmation prompt shown before cleaning on an interactive TTY.
@@ -75,6 +79,7 @@ impl CliCleaner {
             display_name,
             program,
             args,
+            extra_commands: Vec::new(),
             detect_dir: None,
             runner,
             confirm_message: None,
@@ -105,6 +110,16 @@ impl CliCleaner {
     /// Override the risk classification (default Moderate).
     pub fn with_risk(mut self, risk: Risk) -> Self {
         self.risk = risk;
+        self
+    }
+
+    /// Add commands run after the main one. Each entry is (program, args,
+    /// failure remedy); the remedy prints when the command fails.
+    pub fn with_extra_commands(
+        mut self,
+        cmds: Vec<(&'static str, &'static [&'static str], Option<&'static str>)>,
+    ) -> Self {
+        self.extra_commands.extend(cmds);
         self
     }
 }
@@ -619,6 +634,39 @@ impl CliCleaner {
                     let stderr = String::from_utf8_lossy(&output.stderr);
                     if !stderr.is_empty() {
                         eprintln!("[{}] stderr: {stderr}", self.display_name);
+                    }
+                }
+                for (extra_program, extra_args, remedy) in &self.extra_commands {
+                    println!("$ {extra_program} {}", extra_args.join(" "));
+                    match self.runner.run(extra_program, extra_args) {
+                        Ok(output) if !output.status.success() => {
+                            eprintln!(
+                                "[{}] warning: `{} {}` exited with code {:?}",
+                                self.display_name,
+                                extra_program,
+                                extra_args.join(" "),
+                                output.status.code()
+                            );
+                            let stderr = String::from_utf8_lossy(&output.stderr);
+                            if !stderr.is_empty() {
+                                eprintln!("[{}] stderr: {stderr}", self.display_name);
+                            }
+                            if let Some(remedy) = remedy {
+                                eprintln!("[{}] {remedy}", self.display_name);
+                            }
+                        }
+                        Ok(_) => {}
+                        Err(e) => {
+                            eprintln!(
+                                "[{}] warning: `{} {}` failed: {e}",
+                                self.display_name,
+                                extra_program,
+                                extra_args.join(" ")
+                            );
+                            if let Some(remedy) = remedy {
+                                eprintln!("[{}] {remedy}", self.display_name);
+                            }
+                        }
                     }
                 }
                 let size_after = if detect_dir.exists() {
@@ -1222,6 +1270,7 @@ mod tests {
             display_name: "test-cli-pin",
             program: "definitely-not-installed-cli",
             args: &[],
+            extra_commands: Vec::new(),
             detect_dir: Some(dir.to_path_buf()),
             runner: Box::new(crate::command::SystemCommandRunner),
             confirm_message: None,
@@ -1386,6 +1435,103 @@ mod tests {
         fn exists(&self, _: &str) -> bool {
             false
         }
+    }
+
+    // ── PBI 44: CliCleaner extra commands (colima prune + fstrim) ──
+
+    /// Succeeds on the first call, fails on the second (VM stopped).
+    struct OkThenErr(std::sync::atomic::AtomicUsize);
+    impl CommandRunner for OkThenErr {
+        fn run(&self, _: &str, _: &[&str]) -> anyhow::Result<std::process::Output> {
+            use std::os::unix::process::ExitStatusExt;
+            if self.0.fetch_add(1, Ordering::SeqCst) == 0 {
+                Ok(std::process::Output {
+                    status: std::process::ExitStatus::from_raw(0),
+                    stdout: vec![],
+                    stderr: vec![],
+                })
+            } else {
+                anyhow::bail!("failed to spawn `colima`: VM is not running")
+            }
+        }
+        fn exists(&self, _: &str) -> bool {
+            true
+        }
+    }
+
+    /// Succeeds and removes a canary file inside the detect dir from the
+    /// second call onward (the extra command's run), so the physical-size
+    /// diff reports the effect of the follow-up command only.
+    struct ShrinkOnRun(PathBuf, std::sync::atomic::AtomicUsize);
+    impl CommandRunner for ShrinkOnRun {
+        fn run(&self, _: &str, _: &[&str]) -> anyhow::Result<std::process::Output> {
+            use std::os::unix::process::ExitStatusExt;
+            if self.1.fetch_add(1, Ordering::SeqCst) >= 1 {
+                let _ = fs::remove_file(self.0.join("keep.txt"));
+            }
+            Ok(std::process::Output {
+                status: std::process::ExitStatus::from_raw(0),
+                stdout: vec![],
+                stderr: vec![],
+            })
+        }
+        fn exists(&self, _: &str) -> bool {
+            true
+        }
+    }
+
+    #[test]
+    fn clean_runs_extra_command_and_its_effect_counts_in_freed_bytes() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let dir = tmp.path().join("cache");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("keep.txt"), b"x").unwrap();
+        let cleaner = CliCleaner::with_detect_dir(
+            "test",
+            "colima",
+            &["prune", "--all", "--force"],
+            dir.clone(),
+            Box::new(ShrinkOnRun(
+                dir.clone(),
+                std::sync::atomic::AtomicUsize::new(0),
+            )),
+        )
+        .with_extra_commands(vec![(
+            "colima",
+            &["ssh", "--", "sudo", "fstrim", "-av"],
+            Some("start the VM to trim"),
+        )]);
+        let reporter = crate::progress::DeepSuppressReporter;
+        let result = cleaner.clean(false, &reporter).unwrap();
+        assert!(
+            result.bytes_freed > 0,
+            "the extra command's effect must count in the freed bytes"
+        );
+    }
+
+    #[test]
+    fn clean_extra_command_failure_is_non_fatal() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let dir = tmp.path().join("cache");
+        fs::create_dir_all(&dir).unwrap();
+        let cleaner = CliCleaner::with_detect_dir(
+            "test",
+            "colima",
+            &["prune", "--all", "--force"],
+            dir,
+            Box::new(OkThenErr(std::sync::atomic::AtomicUsize::new(0))),
+        )
+        .with_extra_commands(vec![(
+            "colima",
+            &["ssh", "--", "sudo", "fstrim", "-av"],
+            Some("start the VM to trim"),
+        )]);
+        let reporter = crate::progress::DeepSuppressReporter;
+        let result = cleaner.clean(false, &reporter);
+        assert!(
+            result.is_ok(),
+            "a failed extra command must not fail the clean"
+        );
     }
 
     // ── type split: per_cleaner_filters / is_available live on each type ──
