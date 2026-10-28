@@ -1345,13 +1345,10 @@ mod tests {
     #[test]
     fn delete_selected_records_failures_as_skipped() {
         // The seam classifies a Trash-mode delete failure as skippable; pin
-        // the global mode to Trash under the lock so the classification is
-        // deterministic against parallel tests that flip the global pin.
-        let _lock = crate::context::TEST_LOCK
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
-        // Panic-safe pin: the guard restores the previous mode on drop, even
-        // when an assert fails mid-test.
+        // the global mode to Trash so the classification is deterministic
+        // against parallel tests that flip the global pin (the guard holds
+        // TEST_LOCK until Drop). Panic-safe pin: the guard restores the
+        // previous mode on drop, even when an assert fails mid-test.
         let _mode = crate::test_helpers::TrashModeGuard::set(true);
         let tmp = TempDir::new().unwrap();
         let missing = OrphanCandidate {
@@ -1443,9 +1440,6 @@ mod tests {
         // The CleanOptions.trash_mode pin contract: a pinned Some(Permanent)
         // must delete for real and claim no Trash, even when the
         // process-global mode is trash.
-        let _lock = crate::context::TEST_LOCK
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
         let _mode = crate::test_helpers::TrashModeGuard::set(true);
         let tmp = TempDir::new().unwrap();
         let (cl, selected, dir) = orphan_candidate_cleaner(&tmp);
@@ -1479,9 +1473,6 @@ mod tests {
         // accumulates for successful deletions), so the assertion follows
         // the seam truth: a landed Trash move claims Trash, a TCC-skipped
         // one (this sandbox) does not.
-        let _lock = crate::context::TEST_LOCK
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
         let _mode = crate::test_helpers::TrashModeGuard::set(false);
         let tmp = TempDir::new().unwrap();
         let (cl, selected, _dir) = orphan_candidate_cleaner(&tmp);
@@ -1509,9 +1500,6 @@ mod tests {
         // trash_mode: None is the compat path: the deletion reads the
         // process-global mode. Global permanent deletes for real and claims
         // no Trash.
-        let _lock = crate::context::TEST_LOCK
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
         let _mode = crate::test_helpers::TrashModeGuard::set(false);
         let tmp = TempDir::new().unwrap();
         let (cl, selected, dir) = orphan_candidate_cleaner(&tmp);

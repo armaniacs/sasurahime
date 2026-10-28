@@ -402,15 +402,12 @@ mod tests {
             &["Code/Cache", "Code/CachedExtensionVSIXs", "Code/CachedData"],
         );
 
-        // Hold the test lock so parallel trash-mode mutators serialize with
-        // this read, and pin the global mode to permanent: the seam's Trash
-        // move is TCC-environment-dependent, but the permanent path (uchg
-        // clear + fs removal) is deterministic here.
-        let _lock = crate::context::TEST_LOCK
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
-        // The guard restores the previous mode on drop, even when an assert
-        // fails, so the global can never stay pinned to permanent.
+        // Pin the global mode to permanent: the seam's Trash move is
+        // TCC-environment-dependent, but the permanent path (uchg clear + fs
+        // removal) is deterministic here. TrashModeGuard::set holds TEST_LOCK
+        // until Drop, so parallel trash-mode mutators serialize with this
+        // read, and the guard restores the previous mode on drop even when an
+        // assert fails, so the global can never stay pinned to permanent.
         let _mode = crate::test_helpers::TrashModeGuard::set(false);
 
         let runner = RecordingRunner::new(&["Code"], 1);

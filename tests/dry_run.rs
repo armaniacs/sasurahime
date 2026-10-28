@@ -131,6 +131,40 @@ fn local_dry_run_after_subcommand_reaches_clean_caches() {
 }
 
 #[test]
+fn clean_caches_dispatches_every_generic_cache_table_row() {
+    // Membership pin for the CleanTarget::Caches arm (src/main.rs): the arm
+    // hand-lists the 7 generic cache cleaners instead of deriving them from
+    // the define_cleaners! table, so a cache target added to the table does
+    // not join `clean caches`. Every expected cache-batch cleaner must be
+    // dispatched by `clean caches --dry-run`.
+    let tmp = TempDir::new().unwrap();
+    let (_dot_cache, _library_cache) = make_node_gyp_caches(tmp.path());
+
+    let output = sasurahime(tmp.path())
+        .args(["clean", "--dry-run", "caches"])
+        .output()
+        .unwrap();
+    let combined = combined_output(&output);
+    assert!(output.status.success(), "got:\n{combined}");
+    for name in ["bun", "go", "pip", "node-gyp", "npm", "yarn", "pnpm"] {
+        let dispatched = combined.lines().any(|line| {
+            // Cli cleaners print `{name}: not found, skipping` when the
+            // package manager is absent from PATH and
+            // `[dry-run] would run: {name} ...` when present; the node-gyp
+            // PathCleaner names its dir path in the would-remove line.
+            // Line-anchored forms keep npm from matching inside pnpm.
+            line.starts_with(&format!("{name}: not found"))
+                || line.contains(&format!("would run: {name} "))
+                || line.contains(&format!("/{name}"))
+        });
+        assert!(
+            dispatched,
+            "`clean caches` must dispatch {name}, got:\n{combined}"
+        );
+    }
+}
+
+#[test]
 fn global_dry_run_reaches_standard_clean_target() {
     let tmp = TempDir::new().unwrap();
     let (dot_cache, library_cache) = make_node_gyp_caches(tmp.path());

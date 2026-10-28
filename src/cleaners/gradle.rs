@@ -329,11 +329,9 @@ mod tests {
 
     #[test]
     fn gradle_clean_uses_trash_true() {
-        // Hold the test lock so parallel trash-mode mutators serialize with
-        // this read, and pin the mode so the seam resolution is deterministic.
-        let _lock = crate::context::TEST_LOCK
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
+        // TrashModeGuard::set holds TEST_LOCK until Drop, so parallel
+        // trash-mode mutators serialize with this read; the pin makes the
+        // seam resolution deterministic.
         let _mode = crate::test_helpers::TrashModeGuard::set(true);
         let tmp = TempDir::new().unwrap();
         let caches = tmp.path().join(".gradle/caches");
@@ -362,9 +360,6 @@ mod tests {
     fn gradle_clean_without_deletion_candidates_reports_uses_trash_false() {
         // Zero deletions: the seam is never invoked, so no Trash claim may be
         // made, even with the global pinned to trash.
-        let _lock = crate::context::TEST_LOCK
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
         let _mode = crate::test_helpers::TrashModeGuard::set(true);
         let tmp = TempDir::new().unwrap();
         let caches = tmp.path().join(".gradle/caches");
@@ -392,9 +387,6 @@ mod tests {
         // read-only parents on modern macOS, so a chmod alone no longer
         // forces the deterministic failure. A run where nothing was deleted
         // must not claim Trash, even with the global pinned to trash.
-        let _lock = crate::context::TEST_LOCK
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
         let _mode = crate::test_helpers::TrashModeGuard::set(true);
         let _backend = crate::trash::TrashBackendOverrideGuard::set();
         let tmp = TempDir::new().unwrap();
@@ -572,10 +564,8 @@ mod tests {
 
     #[test]
     fn jetbrains_clean_uses_trash_true() {
-        // Hold the test lock and pin the mode, same as the gradle test.
-        let _lock = crate::context::TEST_LOCK
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
+        // TrashModeGuard::set holds TEST_LOCK until Drop, same as the gradle
+        // test; the pin makes the seam resolution deterministic.
         let _mode = crate::test_helpers::TrashModeGuard::set(true);
         let tmp = TempDir::new().unwrap();
         let jb = tmp.path().join("Library/Caches/JetBrains");

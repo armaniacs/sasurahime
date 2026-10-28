@@ -442,9 +442,6 @@ mod tests {
         crate::scan_cache::init(&cache_path);
         let cleaner = ProjectArtifactsCleaner::new(vec![tmp.path().to_path_buf()]);
         let reporter = crate::progress::DeepSuppressReporter;
-        let _lock = crate::context::TEST_LOCK
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
         let _mode = crate::test_helpers::TrashModeGuard::set(false);
         let result = cleaner.clean(false, &reporter).unwrap();
         assert!(
@@ -516,9 +513,6 @@ mod tests {
 
         let cleaner = ProjectArtifactsCleaner::new(vec![tmp.path().to_path_buf()]);
         let reporter = crate::progress::DeepSuppressReporter;
-        let _lock = crate::context::TEST_LOCK
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
         let _mode = crate::test_helpers::TrashModeGuard::set(false);
         // Plain clean (recency_days=7): the project is deletable.
         cleaner.clean(false, &reporter).unwrap();
@@ -549,7 +543,6 @@ mod tests {
         // Restore the mode while still holding the lock so a parallel test
         // cannot pin its own mode between the restore and the unlock.
         drop(_mode);
-        drop(_lock);
         assert!(
             project.join("node_modules").exists(),
             "the global older_than_days=30 must keep a 10-day-old project"
@@ -575,9 +568,6 @@ mod tests {
         // The CleanOptions.trash_mode pin contract: a pinned Some(Permanent)
         // must delete for real and claim no Trash, even when the
         // process-global mode is trash.
-        let _lock = crate::context::TEST_LOCK
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
         let _mode = crate::test_helpers::TrashModeGuard::set(true);
         let tmp = tempfile::TempDir::new().unwrap();
         let cleaner = old_artifact_cleaner(&tmp);
@@ -607,9 +597,6 @@ mod tests {
         // The seam outcome is the one owner of the claim: a deleted outcome
         // claims Trash, a skipped one (the TCC-denied move in this sandbox)
         // does not — either way the assertion follows the seam truth.
-        let _lock = crate::context::TEST_LOCK
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
         let _mode = crate::test_helpers::TrashModeGuard::set(false);
         let tmp = tempfile::TempDir::new().unwrap();
         let cleaner = old_artifact_cleaner(&tmp);
@@ -634,9 +621,6 @@ mod tests {
         // trash_mode: None is the compat path: the deletion reads the
         // process-global mode. Global permanent deletes for real and claims
         // no Trash.
-        let _lock = crate::context::TEST_LOCK
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
         let _mode = crate::test_helpers::TrashModeGuard::set(false);
         let tmp = tempfile::TempDir::new().unwrap();
         let cleaner = old_artifact_cleaner(&tmp);

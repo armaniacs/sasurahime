@@ -106,9 +106,11 @@ That's it. The macro auto-generates:
 No manual edits to `CleanTarget`, `SUPPORTED_TARGETS`, `all_cleaners()`, or
 `main()` match are needed for standard cleaners.
 
-New standard targets appear in scan automatically but are excluded from --yes;
-add the cleaner's name() to AUTO_CLEAN_TARGETS in src/main.rs only if it is safe
-to run unattended.
+New standard targets appear in scan automatically. To make a target eligible
+for --yes (unattended clean), override `risk()` on the cleaner to return
+`Risk::Safe`: `--yes` eligibility is derived from `risk()` via
+`auto_clean_allowed()`, and non-Safe targets are wrapped in `ManualOnly`
+automatically. There is no name list to maintain.
 
 ### Path B: Special dispatch cleaner
 
@@ -223,7 +225,7 @@ MyNewTarget : "my-new-target" => "このクリーナーの説明";
 
 標準クリーナーでは `CleanTarget`、`SUPPORTED_TARGETS`、`all_cleaners()`、`main()` のマッチへの手動編集は不要です。
 
-新しい標準ターゲットは自動で scan に出ますが --yes の対象外です。無人実行しても安全な場合だけ、src/main.rs の AUTO_CLEAN_TARGETS に name() を追加してください。
+新しい標準ターゲットは自動で scan に出ます。--yes（無人実行）の対象にするには、cleaner の `risk()` を `Risk::Safe` にしてください。`--yes` の対象は `risk()` 経由の `auto_clean_allowed()` から導かれ、Safe 以外の cleaner は自動で `ManualOnly` に包まれます。名前リストの管理は不要です。
 
 ### パス B：特別ディスパッチクリーナー
 

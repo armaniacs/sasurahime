@@ -657,6 +657,10 @@ impl CliCleaner {
                     return Ok(CleanResult::empty(self.name()));
                 }
                 println!("$ {program} {}", args.join(" "));
+                // Measure the sparse disk image before any command runs: the
+                // after-clean message below must diff the pre-clean
+                // allocation, exactly like the no-detect_dir branch.
+                let image_before = self.notice.as_ref().map_or(0, |n| n.physical_total());
                 let output = self.runner.run(program, args)?;
                 if !output.status.success() {
                     eprintln!(
@@ -712,6 +716,23 @@ impl CliCleaner {
                 let freed = size_before.saturating_sub(size_after);
                 if freed > 0 {
                     println!("Freed: {}", crate::format::format_bytes(freed));
+                }
+                // The disk-image notice must stay live on the detect_dir
+                // clean path: `Freed:` above measures the cache directory,
+                // not the VM's sparse disk image, and fstrim only reclaims
+                // unused blocks — the image file itself often does not
+                // shrink, which is exactly what the message reports (with
+                // the remedy when it does not). Success-only, same as the
+                // no-detect_dir branch; colima is the only cleaner with
+                // both a detect_dir and a notice.
+                if output.status.success() {
+                    if let Some(msg) = self
+                        .notice
+                        .as_ref()
+                        .and_then(|n| n.after_clean_message(image_before, n.physical_total()))
+                    {
+                        println!("{msg}");
+                    }
                 }
                 Ok(CleanResult {
                     name: self.name(),
@@ -1252,9 +1273,6 @@ mod tests {
     fn clean_with_opts_trash_mode_overrides_the_global() {
         // CleanOptions.trash_mode must pin the deletion mode: uses_trash and
         // the actual deletion can never disagree with the global read.
-        let _lock = crate::context::TEST_LOCK
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
         let tmp = tempfile::TempDir::new().unwrap();
         // PathCleaner::downloads targets HOME/Downloads and carries a
         // 30-day age filter, so the dir mtime must be old.
@@ -1293,7 +1311,6 @@ mod tests {
         // Restore the mode while still holding the lock so a parallel test
         // cannot pin its own mode between the restore and the unlock.
         drop(_mode);
-        drop(_lock);
     }
 
     // ── CliCleaner trash_mode pin contract ──
@@ -1320,9 +1337,6 @@ mod tests {
         // The CleanOptions.trash_mode pin contract: a pinned Some(Permanent)
         // must delete for real and claim no Trash, even when the
         // process-global mode is trash.
-        let _lock = crate::context::TEST_LOCK
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
         let _mode = crate::test_helpers::TrashModeGuard::set(true);
         let tmp = tempfile::TempDir::new().unwrap();
         let dir = tmp.path().join("cache");
@@ -1357,9 +1371,6 @@ mod tests {
         // TCC-skipped (as in this sandbox for tempdir paths), the seam
         // classifies the failure as skippable, the skip is recorded, and the
         // not-deleted entry claims no Trash.
-        let _lock = crate::context::TEST_LOCK
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
         let _mode = crate::test_helpers::TrashModeGuard::set(false);
         let tmp = tempfile::TempDir::new().unwrap();
         let dir = tmp.path().join("cache");
@@ -1398,9 +1409,6 @@ mod tests {
         // trash_mode: None is the compat path: the fallback delete reads the
         // process-global mode. Global permanent deletes for real and claims
         // no Trash.
-        let _lock = crate::context::TEST_LOCK
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
         let _mode = crate::test_helpers::TrashModeGuard::set(false);
         let tmp = tempfile::TempDir::new().unwrap();
         let dir = tmp.path().join("cache");
@@ -2629,9 +2637,6 @@ mod tests {
         // uses_trash == false instead of the unconditionally resolved mode.
         // The global is pinned to trash so the old `mode.resolve()` reporting
         // would claim Trash for a run that deleted nothing.
-        let _lock = crate::context::TEST_LOCK
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
         let _mode = crate::test_helpers::TrashModeGuard::set(true);
         let tmp = tempfile::TempDir::new().unwrap();
         let cleaner = PathCleaner::node_gyp(tmp.path(), Box::new(MissingToolRunner));
@@ -2657,9 +2662,6 @@ mod tests {
         // entries out of read-only parents on modern macOS, so a chmod alone
         // no longer forces the deterministic failure. The pinned Trash mode
         // keeps the claim out of the global pin.
-        let _lock = crate::context::TEST_LOCK
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
         let _mode = crate::test_helpers::TrashModeGuard::set(true);
         let _backend = crate::trash::TrashBackendOverrideGuard::set();
         let tmp = tempfile::TempDir::new().unwrap();

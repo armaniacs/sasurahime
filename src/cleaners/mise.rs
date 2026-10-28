@@ -688,9 +688,6 @@ mod tests {
         // The CleanOptions.trash_mode pin contract: a pinned Some(Permanent)
         // must delete for real and claim no Trash, even when the
         // process-global mode is trash.
-        let _lock = crate::context::TEST_LOCK
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
         let _mode = crate::test_helpers::TrashModeGuard::set(true);
         let tmp = TempDir::new().unwrap();
         let (cleaner, version) = unused_version_cleaner(&tmp);
@@ -721,9 +718,6 @@ mod tests {
         // so the assertion follows the seam truth: a landed Trash move
         // claims Trash and counts bytes, a TCC-skipped one (this sandbox)
         // claims neither.
-        let _lock = crate::context::TEST_LOCK
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
         let _mode = crate::test_helpers::TrashModeGuard::set(false);
         let tmp = TempDir::new().unwrap();
         let (cleaner, _version) = unused_version_cleaner(&tmp);
@@ -743,9 +737,6 @@ mod tests {
         // trash_mode: None is the compat path: the deletion reads the
         // process-global mode. Global permanent deletes for real and claims
         // no Trash.
-        let _lock = crate::context::TEST_LOCK
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
         let _mode = crate::test_helpers::TrashModeGuard::set(false);
         let tmp = TempDir::new().unwrap();
         let (cleaner, version) = unused_version_cleaner(&tmp);

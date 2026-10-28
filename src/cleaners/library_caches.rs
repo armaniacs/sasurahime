@@ -712,9 +712,6 @@ mod tests {
 
     #[test]
     fn delete_entries_removes_and_sums_bytes() {
-        let _lock = crate::context::TEST_LOCK
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
         // Panic-safe pin: the guard restores the previous mode on drop.
         let _mode = TrashModeGuard::set(false);
         let tmp = TempDir::new().unwrap();
@@ -746,9 +743,6 @@ mod tests {
     fn delete_entries_records_failures_as_skipped() {
         // A Trash-mode delete failure is skippable and must be recorded as a
         // skipped entry; pin the global mode to Trash for determinism.
-        let _lock = crate::context::TEST_LOCK
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
         // Panic-safe pin: the guard restores the previous mode on drop.
         let _mode = TrashModeGuard::set(true);
         let tmp = TempDir::new().unwrap();
@@ -774,9 +768,6 @@ mod tests {
         // between scan and delete fails at the seam with a fatal NotFound
         // (by design). The per-entry loop must catch it, report it and still
         // process the remaining entries instead of aborting the whole run.
-        let _lock = crate::context::TEST_LOCK
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
         // Panic-safe pin: the guard restores the previous mode on drop.
         let _mode = TrashModeGuard::set(false);
         let tmp = TempDir::new().unwrap();
@@ -869,9 +860,6 @@ mod tests {
         // The CleanOptions.trash_mode pin contract: a pinned Some(Permanent)
         // must delete for real and claim no Trash, even when the
         // process-global mode is trash.
-        let _lock = crate::context::TEST_LOCK
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
         let _mode = TrashModeGuard::set(true);
         let tmp = TempDir::new().unwrap();
         let (cl, dir) = deletable_entry_cleaner(&tmp);
@@ -907,9 +895,6 @@ mod tests {
         // accumulates for successful deletions), so the assertion follows
         // the seam truth: a landed Trash move claims Trash, a TCC-skipped
         // one (this sandbox) does not.
-        let _lock = crate::context::TEST_LOCK
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
         let _mode = TrashModeGuard::set(false);
         let tmp = TempDir::new().unwrap();
         let (cl, _dir) = deletable_entry_cleaner(&tmp);
@@ -938,9 +923,6 @@ mod tests {
         // trash_mode: None is the compat path: the deletion reads the
         // process-global mode. Global permanent deletes for real and claims
         // no Trash.
-        let _lock = crate::context::TEST_LOCK
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
         let _mode = TrashModeGuard::set(false);
         let tmp = TempDir::new().unwrap();
         let (cl, dir) = deletable_entry_cleaner(&tmp);

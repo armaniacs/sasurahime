@@ -1413,9 +1413,6 @@ mod tests {
 
     #[test]
     fn apply_deletes_only_selected_candidates() {
-        let _lock = crate::context::TEST_LOCK
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
         // Panic-safe pin: the guard restores the previous mode on drop.
         let _mode = TrashModeGuard::set(false);
         let tmp = TempDir::new().unwrap();
@@ -1445,9 +1442,6 @@ mod tests {
 
     #[test]
     fn apply_blocks_running_app_without_approval() {
-        let _lock = crate::context::TEST_LOCK
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
         // Panic-safe pin: the guard restores the previous mode on drop.
         let _mode = TrashModeGuard::set(false);
         let tmp = TempDir::new().unwrap();
@@ -1474,9 +1468,6 @@ mod tests {
 
     #[test]
     fn apply_quits_approved_running_app_then_deletes_and_relaunches() {
-        let _lock = crate::context::TEST_LOCK
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
         // Panic-safe pin: the guard restores the previous mode on drop.
         let _mode = TrashModeGuard::set(false);
         let tmp = TempDir::new().unwrap();
@@ -1510,9 +1501,6 @@ mod tests {
 
     #[test]
     fn apply_does_not_relaunch_app_that_was_not_running() {
-        let _lock = crate::context::TEST_LOCK
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
         // Panic-safe pin: the guard restores the previous mode on drop.
         let _mode = TrashModeGuard::set(false);
         let tmp = TempDir::new().unwrap();
@@ -1533,9 +1521,6 @@ mod tests {
 
     #[test]
     fn apply_never_deletes_forged_unlisted_sub() {
-        let _lock = crate::context::TEST_LOCK
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
         // Panic-safe pin: the guard restores the previous mode on drop.
         let _mode = TrashModeGuard::set(false);
         let tmp = TempDir::new().unwrap();
@@ -1564,9 +1549,6 @@ mod tests {
 
     #[test]
     fn apply_ignores_forged_path_field() {
-        let _lock = crate::context::TEST_LOCK
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
         // Panic-safe pin: the guard restores the previous mode on drop.
         let _mode = TrashModeGuard::set(false);
         let tmp = TempDir::new().unwrap();
@@ -1593,9 +1575,6 @@ mod tests {
 
     #[test]
     fn apply_does_not_follow_symlinks_inside_cache() {
-        let _lock = crate::context::TEST_LOCK
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
         // Panic-safe pin: the guard restores the previous mode on drop.
         let _mode = TrashModeGuard::set(false);
         let tmp = TempDir::new().unwrap();
@@ -1622,9 +1601,6 @@ mod tests {
 
     #[test]
     fn apply_rejects_dir_replaced_by_symlink_after_scan() {
-        let _lock = crate::context::TEST_LOCK
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
         // Panic-safe pin: the guard restores the previous mode on drop.
         let _mode = TrashModeGuard::set(false);
         let tmp = TempDir::new().unwrap();
@@ -2101,9 +2077,6 @@ mod tests {
         // The CleanOptions.trash_mode pin contract: a pinned Some(Permanent)
         // must delete for real and claim no Trash, even when the
         // process-global mode is trash.
-        let _lock = crate::context::TEST_LOCK
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
         let _mode = TrashModeGuard::set(true);
         let tmp = TempDir::new().unwrap();
         let (c, sel, dir) = selected_candidate_cleaner(&tmp);
@@ -2137,9 +2110,6 @@ mod tests {
         // accumulates for successful deletions), so the assertion follows
         // the seam truth: a landed Trash move claims Trash, a TCC-skipped
         // one (this sandbox) does not.
-        let _lock = crate::context::TEST_LOCK
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
         let _mode = TrashModeGuard::set(false);
         let tmp = TempDir::new().unwrap();
         let (c, sel, _dir) = selected_candidate_cleaner(&tmp);
@@ -2167,9 +2137,6 @@ mod tests {
         // trash_mode: None is the compat path: the deletion reads the
         // process-global mode. Global permanent deletes for real and claims
         // no Trash.
-        let _lock = crate::context::TEST_LOCK
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
         let _mode = TrashModeGuard::set(false);
         let tmp = TempDir::new().unwrap();
         let (c, sel, dir) = selected_candidate_cleaner(&tmp);

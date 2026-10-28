@@ -483,9 +483,6 @@ mod tests {
         // Pin the global trash pin: the cleaner's Global mode resolves the
         // process-global pin, so the claim is only deterministic when the
         // run is actually in trash mode.
-        let _lock = crate::context::TEST_LOCK
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
         let _mode = crate::test_helpers::TrashModeGuard::set(true);
         let tmp = TempDir::new().unwrap();
         let logs = logs_dir(&tmp);
