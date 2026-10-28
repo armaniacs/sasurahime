@@ -452,3 +452,56 @@ fn clean_dotnet_calls_nuget_locals_clear() {
         "expected 'nuget locals all --clear', got: {calls}"
     );
 }
+
+#[test]
+fn clean_colima_runs_prune_then_fstrim() {
+    let tmp = TempDir::new().unwrap();
+    let bin_dir = tmp.path().join("bin");
+    fs::create_dir_all(&bin_dir).unwrap();
+    install_fake_tool(&bin_dir, "colima");
+
+    let original_path = std::env::var("PATH").unwrap_or_default();
+    let output = sasurahime(tmp.path())
+        .env("PATH", format!("{}:{original_path}", bin_dir.display()))
+        .args(["--permanent", "clean", "colima"])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let calls = recorded_calls(&bin_dir, "colima");
+    assert!(calls.contains("prune --all --force"), "{calls}");
+    assert!(calls.contains("ssh -- sudo fstrim -av"), "{calls}");
+}
+
+#[test]
+fn clean_colima_succeeds_when_fstrim_fails() {
+    let tmp = TempDir::new().unwrap();
+    let bin_dir = tmp.path().join("bin");
+    fs::create_dir_all(&bin_dir).unwrap();
+    // A colima that succeeds for prune but fails for ssh (VM stopped).
+    let script = format!(
+        "#!/bin/sh\nif [ \"$1\" = \"ssh\" ]; then\n  echo \"FATA[0000] colima is not running\" >&2\n  exit 1\nfi\necho \"$@\" >> \"{}\"\nexit 0\n",
+        bin_dir.join("calls_colima.txt").display()
+    );
+    fs::write(bin_dir.join("colima"), &script).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(bin_dir.join("colima"), fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    let original_path = std::env::var("PATH").unwrap_or_default();
+    let output = sasurahime(tmp.path())
+        .env("PATH", format!("{}:{original_path}", bin_dir.display()))
+        .args(["--permanent", "clean", "colima"])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "a failed fstrim must not fail the clean: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("fstrim -av"), "{stderr}");
+}

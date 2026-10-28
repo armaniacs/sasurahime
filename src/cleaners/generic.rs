@@ -217,7 +217,9 @@ impl CliCleaner {
 
     pub fn colima_prune(home: &Path, runner: Box<dyn CommandRunner>) -> Self {
         Self {
-            confirm_message: Some("This will delete ALL stopped Colima VM disk data (containers, images, volumes). Continue?"),
+            confirm_message: Some(
+                "Prunes cached Colima assets and asks the running VM to discard unused disk blocks (fstrim). No containers, images or volumes are deleted. Continue?",
+            ),
             fallback_delete: true,
             ..Self::with_detect_dir(
                 "colima",
@@ -226,9 +228,16 @@ impl CliCleaner {
                 home.join(".colima"),
                 runner,
             )
-            // colima clean removes ALL stopped VM disk data (containers,
-            // images, volumes) — destructive and irreversible, so it must
-            // never run unattended without explicit opt-in (see PBI 42).
+            // Prune only clears colima's downloaded-asset cache; the space
+            // the detection measures lives in the VM's sparse disk images,
+            // which shrink only when the VM discards unused blocks.
+            // Non-fatal: with the VM stopped the remedy prints and the
+            // prune-only freed bytes are still reported.
+            .with_extra_commands(vec![(
+                "colima",
+                &["ssh", "--", "sudo", "fstrim", "-av"],
+                Some(COLIMA_REMEDY),
+            )])
             .with_risk(Risk::Risky)
         }
         .with_notice(DiskImageNotice::new(
@@ -2479,6 +2488,20 @@ mod tests {
             .expect("advisory when colima disk exists");
         assert!(text.contains("[colima]"), "{text}");
         assert!(text.contains("fstrim"), "{text}");
+    }
+
+    #[test]
+    fn colima_confirm_message_describes_the_actual_action() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cleaner = CliCleaner::colima_prune(tmp.path(), Box::new(MissingToolRunner));
+        let msg = cleaner
+            .confirm_message
+            .expect("colima has a confirmation prompt");
+        assert!(msg.contains("fstrim"), "{msg}");
+        assert!(
+            !msg.contains("delete ALL stopped"),
+            "the prompt must not describe colima delete: {msg}"
+        );
     }
 
     #[test]
