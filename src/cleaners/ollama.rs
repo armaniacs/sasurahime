@@ -3,6 +3,7 @@ use crate::command::CommandRunner;
 use crate::format::{dir_size, parse_size_str, SizeUnits};
 use crate::progress::ProgressReporter;
 use anyhow::Result;
+use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 
 pub struct OllamaCleaner {
@@ -127,6 +128,28 @@ impl Cleaner for OllamaCleaner {
                         crate::format::format_bytes(m.size)
                     );
                 }
+                return Ok(CleanResult {
+                    name: self.name(),
+                    bytes_freed: 0,
+                    uses_trash: false,
+                    skipped: vec![],
+                    deleted_paths: vec![],
+                });
+            }
+
+            // PBI-52: ollama is classified `Risk::Safe`, so `--yes` selects it
+            // for unattended cleaning, but the `MultiSelect::interact()` below
+            // fails on a non-TTY stdin with an obscure dialoguer error - a
+            // Safe-classified target could never be cleaned by `--yes`. This
+            // is the same "not a terminal" gate the other interactive cleaners
+            // carry (library-caches, app-support, ...): in a non-TTY, ask for
+            // no selection and skip. Prompt ownership stays per-cleaner until
+            // the unified prompt port (PBI 55) replaces this gate.
+            if !std::io::stdin().is_terminal() {
+                eprintln!(
+                    "[ollama] not a terminal - skipping. \
+                     Run `sasurahime clean ollama` interactively."
+                );
                 return Ok(CleanResult {
                     name: self.name(),
                     bytes_freed: 0,
