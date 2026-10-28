@@ -44,6 +44,9 @@ pub struct CliCleaner {
     detect_dir: Option<PathBuf>,
     runner: Box<dyn CommandRunner>,
     /// Optional confirmation prompt shown before cleaning on an interactive TTY.
+    /// Explanation printed above the confirm prompt. The Confirm prompt
+    /// itself is a short "Proceed?" line — a long Confirm prompt wraps, and
+    /// dialoguer only clears one terminal line, doubling the message.
     confirm_message: Option<&'static str>,
     /// If true and the CLI tool is not found, fall back to deleting detect_dir directly.
     fallback_delete: bool,
@@ -220,7 +223,7 @@ impl CliCleaner {
     pub fn colima_prune(home: &Path, runner: Box<dyn CommandRunner>) -> Self {
         Self {
             confirm_message: Some(
-                "Prunes cached Colima assets and asks the running VM to discard unused disk blocks (fstrim); no containers, images or volumes are deleted. If colima is not found, the ~/.colima directory (including its VM disk) is deleted instead. Continue?",
+                "Prunes cached Colima assets and asks the running VM to discard unused disk blocks (fstrim); no containers, images or volumes are deleted. If colima is not found, the ~/.colima directory (including its VM disk) is deleted instead.",
             ),
             fallback_delete: true,
             ..Self::with_detect_dir(
@@ -488,11 +491,13 @@ impl Cleaner for CliCleaner {
 impl CliCleaner {
     /// The shared clean body. `mode` is the deletion mode for the fallback
     /// delete: `Global` reads the process-global mode; `Trash` / `Permanent`
-    /// pin it so the seam outcome and the deletion agree.
+    /// pin it so the seam outcome and the deletion agree. The reporter
+    /// suspends the live progress line while the confirm prompt owns the
+    /// screen.
     fn clean_with_mode(
         &self,
         dry_run: bool,
-        _reporter: &dyn ProgressReporter,
+        reporter: &dyn ProgressReporter,
         mode: crate::trash::TrashMode,
     ) -> Result<CleanResult> {
         let program = self.program;
@@ -548,16 +553,35 @@ impl CliCleaner {
                 // Skipped when running under the interactive TUI (which already
                 // asked for confirmation) or when stdin is not a terminal.
                 if let Some(msg) = &self.confirm_message {
-                    if !SKIP_CONFIRM.load(Ordering::Relaxed)
-                        && stdin().is_terminal()
-                        && !dialoguer::Confirm::new()
-                            .with_prompt(*msg)
-                            .default(false)
-                            .interact()?
-                    {
-                        println!("{}: cancelled", self.display_name);
-                        eprintln!("  $ {program} {}", args.join(" "));
-                        return Err(anyhow::Error::from(CleanCancelled));
+                    if !SKIP_CONFIRM.load(Ordering::Relaxed) && stdin().is_terminal() {
+                        // The prompt owns the screen: the live progress line
+                        // must not redraw under it (same as the
+                        // orphan-containers selection prompt). The long
+                        // explanation prints as normal output — a Confirm
+                        // prompt that wraps is only cleared one line deep by
+                        // dialoguer, so the first render's lines would stay
+                        // behind and the message would appear twice. The
+                        // Confirm prompt itself stays one short line.
+                        let mut answer = None;
+                        let mut prompt = || {
+                            println!("\n{msg}");
+                            answer = Some(
+                                dialoguer::Confirm::new()
+                                    .with_prompt("Proceed?")
+                                    .default(false)
+                                    .interact(),
+                            )
+                        };
+                        reporter.suspend_live_output(&mut prompt);
+                        let confirmed = match answer {
+                            Some(confirmed) => confirmed?,
+                            None => anyhow::bail!("the confirmation prompt did not run"),
+                        };
+                        if !confirmed {
+                            println!("{}: cancelled", self.display_name);
+                            eprintln!("  $ {program} {}", args.join(" "));
+                            return Err(anyhow::Error::from(CleanCancelled));
+                        }
                     }
                 }
 
@@ -2511,6 +2535,37 @@ mod tests {
         );
         assert!(msg.contains("~/.colima"), "{msg}");
         assert!(msg.contains("deleted instead"), "{msg}");
+        assert!(
+            !msg.contains("Continue?"),
+            "the explanation must not carry the prompt text: dialoguer clears one line, so a wrapped Confirm prompt doubles the message: {msg}"
+        );
+    }
+
+    #[test]
+    fn confirm_prompt_runs_without_a_live_spinner() {
+        // The confirm prompt owns the screen: the confirm branch hands the
+        // dialoguer prompt to suspend_live_output, so the live progress line
+        // never redraws under it — dialoguer's re-render leaves wrapped-line
+        // debris on a long prompt otherwise. dialoguer needs a real TTY, so
+        // this pins the source (the same style as the orphan-containers
+        // selection prompt pin).
+        let src = include_str!("generic.rs");
+        let start = src
+            .find("fn clean_with_mode(")
+            .expect("clean_with_mode source present");
+        let end = src[start..]
+            .find("impl Cleaner for PathCleaner")
+            .map(|i| start + i)
+            .unwrap_or(src.len());
+        let body = &src[start..end];
+        assert!(
+            body.contains("suspend_live_output"),
+            "the confirm prompt must run under suspend_live_output (no live spinner during prompting)"
+        );
+        assert!(
+            !body.contains("with_prompt(*msg)"),
+            "the Confirm prompt must stay one short line — the long explanation prints as normal output above it, because dialoguer clears one line and a wrapped prompt doubles the message"
+        );
     }
 
     #[test]
