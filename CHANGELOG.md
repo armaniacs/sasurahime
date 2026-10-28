@@ -6,6 +6,12 @@ All notable changes to sasurahime will be documented in this file. The format is
 
 ## [Unreleased]
 
+### Fixed
+
+- ollama: clean now skips the interactive selection when stdin is not a
+  terminal, so `--yes` can clean the Safe-classified ollama target instead of
+  failing with a dialoguer error.
+
 ## [0.4.2] - 2026-10-29
 
 ### Changed
