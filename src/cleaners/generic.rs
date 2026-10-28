@@ -114,7 +114,9 @@ impl CliCleaner {
     }
 
     /// Add commands run after the main one. Each entry is (program, args,
-    /// failure remedy); the remedy prints when the command fails.
+    /// failure remedy); the remedy prints when the command fails. Extras
+    /// run only for cleaners constructed with a detect_dir — the
+    /// no-detect-dir clean branch never executes them.
     pub fn with_extra_commands(
         mut self,
         cmds: Vec<(&'static str, &'static [&'static str], Option<&'static str>)>,
@@ -218,7 +220,7 @@ impl CliCleaner {
     pub fn colima_prune(home: &Path, runner: Box<dyn CommandRunner>) -> Self {
         Self {
             confirm_message: Some(
-                "Prunes cached Colima assets and asks the running VM to discard unused disk blocks (fstrim). No containers, images or volumes are deleted. Continue?",
+                "Prunes cached Colima assets and asks the running VM to discard unused disk blocks (fstrim); no containers, images or volumes are deleted. If colima is not found, the ~/.colima directory (including its VM disk) is deleted instead. Continue?",
             ),
             fallback_delete: true,
             ..Self::with_detect_dir(
@@ -1468,14 +1470,19 @@ mod tests {
         }
     }
 
-    /// Succeeds and removes a canary file inside the detect dir from the
-    /// second call onward (the extra command's run), so the physical-size
-    /// diff reports the effect of the follow-up command only.
-    struct ShrinkOnRun(PathBuf, std::sync::atomic::AtomicUsize);
+    /// Succeeds and removes a canary file inside the detect dir during the
+    /// fstrim run only, and only after the prune run has been seen, so the
+    /// physical-size diff reports the follow-up's effect and the test fails
+    /// if the extras never ran, ran before the main command, or were
+    /// measured before the extras.
+    struct ShrinkOnRun(PathBuf, std::sync::atomic::AtomicBool);
     impl CommandRunner for ShrinkOnRun {
-        fn run(&self, _: &str, _: &[&str]) -> anyhow::Result<std::process::Output> {
+        fn run(&self, _: &str, args: &[&str]) -> anyhow::Result<std::process::Output> {
             use std::os::unix::process::ExitStatusExt;
-            if self.1.fetch_add(1, Ordering::SeqCst) >= 1 {
+            if args.first() == Some(&"prune") {
+                self.1.store(true, Ordering::Relaxed);
+            }
+            if args.first() == Some(&"ssh") && self.1.load(Ordering::Relaxed) {
                 let _ = fs::remove_file(self.0.join("keep.txt"));
             }
             Ok(std::process::Output {
@@ -1502,7 +1509,7 @@ mod tests {
             dir.clone(),
             Box::new(ShrinkOnRun(
                 dir.clone(),
-                std::sync::atomic::AtomicUsize::new(0),
+                std::sync::atomic::AtomicBool::new(false),
             )),
         )
         .with_extra_commands(vec![(
@@ -2502,6 +2509,8 @@ mod tests {
             !msg.contains("delete ALL stopped"),
             "the prompt must not describe colima delete: {msg}"
         );
+        assert!(msg.contains("~/.colima"), "{msg}");
+        assert!(msg.contains("deleted instead"), "{msg}");
     }
 
     #[test]
