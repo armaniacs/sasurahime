@@ -22,6 +22,17 @@ All notable changes to sasurahime will be documented in this file. The format is
   interactive selection runs with the live line hidden instead of a frozen
   `Cleaning...` label above the prompt.
 
+### Fixed
+
+- colima: `clean` now reclaims what the scan measures. `colima prune --all
+  --force` only clears downloaded-asset caches, so the run freed 0 B while
+  the scan reported the VM disk. The clean now follows up with `colima ssh
+  -- sudo fstrim -av`, which asks the running VM to discard unused blocks so
+  the sparse disk image's physical size shrinks. The follow-up is non-fatal:
+  with the VM stopped, the remedy is printed and the prune-only freed bytes
+  are still reported. The confirmation prompt now describes this
+  non-destructive action instead of `colima delete`.
+
 ## [0.4.1] - 2026-10-25
 
 ### Security
