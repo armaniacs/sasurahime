@@ -6,6 +6,12 @@ All notable changes to sasurahime will be documented in this file. The format is
 
 ## [Unreleased]
 
+### Changed
+
+- Plugins can report what they removed by printing a JSON object
+  (`{"freed": N, "uses_trash": B}`) as the last line of stdout. Plugins that
+  do not print JSON keep working through the exit-code-only protocol.
+
 ### Fixed
 
 - Review quick-win bundle. `TrashModeGuard::set` acquires the test lock

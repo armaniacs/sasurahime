@@ -241,3 +241,115 @@ fn clean_forwards_dry_run_to_the_plugin() {
         "clean --dry-run must forward --dry-run to the plugin, got: {args}"
     );
 }
+
+fn history_path(home: &std::path::Path) -> std::path::PathBuf {
+    home.join(".local/share/sasurahime/history.json")
+}
+
+#[test]
+fn plugin_clean_reports_freed_bytes_from_trailing_json() {
+    // A plugin reporting {"freed": N} as the last JSON object on stdout has
+    // that count recorded in history instead of a hardcoded 0.
+    let tmp = TempDir::new().unwrap();
+    let bin_dir = tmp.path().join("bin");
+    fs::create_dir_all(&bin_dir).unwrap();
+    install_plugin(
+        &bin_dir,
+        "sasurahime-foo",
+        "#!/bin/sh\nif [ \"$1\" = \"scan\" ]; then echo '{\"status\":\"pruneable\",\"bytes\":512}'; exit 0; fi\necho '[plugin] removing...'\necho '{\"freed\": 1234, \"uses_trash\": false}'\nexit 0\n",
+    );
+    let path = format!("{}:/usr/bin:/bin", bin_dir.display());
+
+    let output = sasurahime(tmp.path(), &path)
+        .args(["clean", "foo"])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "the plugin clean must run");
+
+    let history = fs::read_to_string(history_path(tmp.path()))
+        .expect("a clean that freed bytes must be recorded in history");
+    assert!(
+        history.contains("\"cleaner\": \"foo\"") && history.contains("\"freed_bytes\": 1234"),
+        "the plugin's reported freed bytes must reach history: {history}"
+    );
+}
+
+#[test]
+fn plugin_clean_without_json_stays_backward_compatible() {
+    // A plugin reporting by exit code only (the current protocol) keeps
+    // working: success, 0 freed, no history row.
+    let tmp = TempDir::new().unwrap();
+    let bin_dir = tmp.path().join("bin");
+    fs::create_dir_all(&bin_dir).unwrap();
+    install_plugin(&bin_dir, "sasurahime-foo", good_plugin_body());
+    let path = format!("{}:/usr/bin:/bin", bin_dir.display());
+
+    let output = sasurahime(tmp.path(), &path)
+        .args(["clean", "foo"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "a plugin without JSON must still succeed"
+    );
+    assert!(
+        !history_path(tmp.path()).exists(),
+        "a 0-freed plugin clean must not be recorded in history"
+    );
+}
+
+#[test]
+fn plugin_clean_with_malformed_json_falls_back_without_error() {
+    // Malformed JSON is ignored: the exit code alone decides success, and the
+    // clean falls back to 0 freed instead of erroring.
+    let tmp = TempDir::new().unwrap();
+    let bin_dir = tmp.path().join("bin");
+    fs::create_dir_all(&bin_dir).unwrap();
+    install_plugin(
+        &bin_dir,
+        "sasurahime-foo",
+        "#!/bin/sh\nif [ \"$1\" = \"scan\" ]; then echo '{\"status\":\"pruneable\",\"bytes\":512}'; exit 0; fi\necho '{\"freed\": '\nexit 0\n",
+    );
+    let path = format!("{}:/usr/bin:/bin", bin_dir.display());
+
+    let output = sasurahime(tmp.path(), &path)
+        .args(["clean", "foo"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "malformed JSON must not fail the clean"
+    );
+    assert!(
+        !history_path(tmp.path()).exists(),
+        "malformed JSON falls back to 0 freed: no history row"
+    );
+}
+
+#[test]
+fn plugin_clean_does_not_pass_a_json_flag() {
+    // WHY: --json is deliberately not passed. A plugin that inspects its
+    // arguments could break on an unknown flag, so the trailing-JSON protocol
+    // stays opt-in from the plugin's side.
+    let tmp = TempDir::new().unwrap();
+    let bin_dir = tmp.path().join("bin");
+    fs::create_dir_all(&bin_dir).unwrap();
+    install_plugin(
+        &bin_dir,
+        "sasurahime-foo",
+        "#!/bin/sh\nif [ \"$1\" = \"scan\" ]; then echo '{\"status\":\"pruneable\",\"bytes\":512}'; exit 0; fi\nprintf '%s\\n' \"$@\" > \"$HOME/args.txt\"\necho '{\"freed\": 5, \"uses_trash\": false}'\nexit 0\n",
+    );
+    let path = format!("{}:/usr/bin:/bin", bin_dir.display());
+
+    let output = sasurahime(tmp.path(), &path)
+        .args(["clean", "foo"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let args = fs::read_to_string(tmp.path().join("args.txt")).unwrap();
+    assert_eq!(
+        args.trim(),
+        "clean",
+        "the plugin must receive exactly `clean`, got: {args}"
+    );
+}
