@@ -10,13 +10,31 @@ pub trait ProgressReporter: Send + Sync {
     fn progress_init(&self, label: &str, total: usize);
     fn progress_tick(&self, path: &Path, current: usize, size_bytes: u64);
     fn progress_finish(&self);
+    /// Hides any live progress line while `f` runs, so an interactive prompt
+    /// owns the screen: a steady tick would redraw the line under the prompt,
+    /// and the frozen `Cleaning...` label would mislabel the phase as
+    /// deletion. Reporters without live rendering just run `f`.
+    fn suspend_live_output(&self, f: &mut dyn FnMut()) {
+        f();
+    }
+    /// Turns a steady 1s tick on for the live progress line, so `{elapsed}`
+    /// updates every second. Safe only after the flow's last prompt: a
+    /// background tick must not redraw the line under a prompt.
+    fn enable_live_elapsed(&self) {}
 }
+
+/// Spinner line: `{msg}` is the contextual status the cleaner swaps per
+/// deletion, `({elapsed})` is the always-visible elapsed time counter.
+const SPINNER_TEMPLATE: &str = "{spinner:.green} {msg} ({elapsed})";
+
+/// Parallel-scan line: same elapsed counter as the spinner.
+const SCAN_TEMPLATE: &str = "{spinner:.green} [{bar:20}] {msg} ({elapsed})";
 
 fn spinner_style() -> &'static ProgressStyle {
     static STYLE: OnceLock<ProgressStyle> = OnceLock::new();
     STYLE.get_or_init(|| {
         ProgressStyle::default_spinner()
-            .template("{spinner:.green} {msg}")
+            .template(SPINNER_TEMPLATE)
             .expect("valid indicatif template")
     })
 }
@@ -56,7 +74,10 @@ pub fn tick_message(
 /// A single shared spinner whose message updates as the cleaner deletes each
 /// path: `progress_tick` names the folder being removed, so the user sees
 /// what is happening instead of a bare rotating character. `animated` enables
-/// the steady tick; keep it off while the cleaner may still prompt.
+/// the steady tick; keep it off while the cleaner may still prompt. The
+/// delete-phase per-second tick is [`ProgressReporter::enable_live_elapsed`],
+/// which a reporter bound to this spinner turns on only after the last
+/// prompt.
 pub struct SharedSpinner {
     pb: ProgressBar,
     prefix: String,
@@ -126,6 +147,20 @@ impl ProgressReporter for CleaningProgress {
     fn progress_finish(&self) {
         // The caller clears the bar right after; nothing to render here.
     }
+
+    fn suspend_live_output(&self, f: &mut dyn FnMut()) {
+        // indicatif's suspend hides the bar while `f` (a prompt) runs and
+        // redraws it after; the steady ticker blocks on the state lock for
+        // the duration, so nothing redraws under the prompt.
+        self.pb.suspend(f);
+    }
+
+    fn enable_live_elapsed(&self) {
+        // The delete loop never prompts, so a steady tick is safe here: it
+        // is what makes `{elapsed}` update every second. Re-enabling with a
+        // new interval replaces the previous ticker (no duplicate threads).
+        self.pb.enable_steady_tick(Duration::from_secs(1));
+    }
 }
 
 /// Spinner whose message updates with the path being deleted. `animated`
@@ -177,8 +212,8 @@ pub fn with_parallel_scan<R>(total: usize, f: impl FnOnce(&ProgressBar) -> R) ->
     let pb = ProgressBar::new(total as u64);
     pb.set_style(
         ProgressStyle::default_bar()
-            .template("{spinner:.green} [{bar:20}] {msg}")
-            .expect("valid template")
+            .template(SCAN_TEMPLATE)
+            .expect("valid indicatif template")
             .progress_chars("=> "),
     );
     pb.set_message(format!("Scanning {total} cleaners..."));
@@ -259,6 +294,24 @@ impl ProgressReporter for VerboseProgress {
         if let Some(pb) = self.pb.lock().unwrap().take() {
             pb.finish_and_clear();
         }
+    }
+
+    fn suspend_live_output(&self, f: &mut dyn FnMut()) {
+        // The verbose bar is created in `progress_init`; when one is live
+        // (a mid-clean prompt), hide it around `f` the same way the shared
+        // spinner does. Without a live bar there is nothing to hide.
+        let live = self.pb.lock().unwrap().clone();
+        if let Some(pb) = live {
+            pb.suspend(f);
+        } else {
+            f();
+        }
+    }
+
+    fn enable_live_elapsed(&self) {
+        // No override: the verbose bar enables its own steady tick in
+        // `progress_init` (100 ms), so `{elapsed_precise}` already updates
+        // live there.
     }
 }
 
@@ -538,6 +591,74 @@ mod tests {
         assert!(
             body.contains("animated"),
             "the animated branch must carry the caller's animated flag"
+        );
+    }
+
+    #[test]
+    fn live_elapsed_ticks_the_delete_phase_line_per_second() {
+        // The delete-phase tick is what makes `{elapsed}` update every
+        // second: the reporter bound to the live spinner turns on a steady
+        // 1s tick, and it must only be turned on where no prompt can occur
+        // (delete_selected). The hide-around-prompt half is indicatif's
+        // suspend. indicatif exposes no steady-tick accessor, so this pins
+        // the source (the same style as the with_spinner_result pins).
+        let src = include_str!("progress.rs");
+        let start = src
+            .find("impl ProgressReporter for CleaningProgress")
+            .expect("CleaningProgress impl present");
+        let end = src[start..]
+            .find("/// Spinner whose message updates with the path being deleted")
+            .map(|i| start + i)
+            .unwrap_or(src.len());
+        let body = &src[start..end];
+        assert!(
+            body.contains("fn suspend_live_output") && body.contains("pb.suspend"),
+            "the live spinner must be hidden around a prompt (indicatif suspend)"
+        );
+        assert!(
+            body.contains("fn enable_live_elapsed") && body.contains("enable_steady_tick"),
+            "the delete-phase reporter must enable a steady tick"
+        );
+        assert!(
+            body.contains("from_secs(1)"),
+            "the delete-phase tick must be per-second, got the impl body"
+        );
+    }
+
+    #[test]
+    fn suspend_live_output_runs_the_prompt_closure() {
+        // The prompt must actually run under suspend, for every reporter:
+        // the default just runs it (no live line to hide), the shared
+        // spinner binding runs it inside indicatif's suspend (which is a
+        // no-op draw-wise on a hidden non-TTY target).
+        let spinner = SharedSpinner::start("Cleaning app-support...", false);
+        let rep = spinner.reporter();
+        let mut ran = false;
+        let mut prompt = || ran = true;
+        rep.suspend_live_output(&mut prompt);
+        assert!(ran, "the prompt closure must run under suspend_live_output");
+        spinner.finish();
+        // Default impls (suppressors) have no live line: the closure runs.
+        let mut ran = false;
+        let mut prompt = || ran = true;
+        SuppressReporter.suspend_live_output(&mut prompt);
+        DeepSuppressReporter.suspend_live_output(&mut prompt);
+        assert!(ran, "the default impl must run the prompt closure");
+    }
+
+    #[test]
+    fn templates_with_elapsed_time_are_valid() {
+        assert!(SPINNER_TEMPLATE.contains("{elapsed}"), "{SPINNER_TEMPLATE}");
+        assert!(SCAN_TEMPLATE.contains("{elapsed}"), "{SCAN_TEMPLATE}");
+        assert!(
+            ProgressStyle::default_spinner()
+                .template(SPINNER_TEMPLATE)
+                .is_ok(),
+            "spinner template must be a valid indicatif template"
+        );
+        assert!(
+            ProgressStyle::default_bar().template(SCAN_TEMPLATE).is_ok(),
+            "scan template must be a valid indicatif template"
         );
     }
 }

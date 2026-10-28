@@ -12,16 +12,20 @@ jobs:
 
       - name: Install Rust toolchain
         run: |
-          # The runner image's pre-installed stable sometimes lacks
-          # rust-docs, and a full fresh install (uninstall first) hits a
-          # rustup state where the run finishes without installing the new
-          # components, leaving rustdoc missing at runtime. Add the missing
-          # components only, then gate on the shim actually working.
-          rustup toolchain install stable --profile minimal \
+          # The runner image's toolchains say rust-docs is installed while
+          # the actual files are pruned: rustup trusts the manifest ("is up
+          # to date") and skips re-extraction, so rustdoc is missing exactly
+          # where cargo's doctests invoke it. Force a real re-extraction by
+          # removing and re-adding the component, then gate on the direct
+          # binary. Bump PINNED deliberately.
+          PINNED=1.99.1
+          rustup toolchain uninstall "$PINNED" 2>/dev/null || true
+          rustup toolchain install "$PINNED" --profile minimal \
             --component rustfmt,clippy,rust-docs --no-self-update
+          rustup default "$PINNED"
+          rustup component remove rust-docs 2>/dev/null || true
           rustup component add rustfmt clippy rust-docs
-          rustup default stable
-          rustdoc --version
+          "$(rustc --print sysroot)/bin/rustdoc" --version
 
       - name: Cache
         uses: actions/cache@v4
@@ -39,4 +43,40 @@ jobs:
         run: cargo clippy -- -D warnings
 
       - name: test
-        run: cargo test
+        run: |
+          SYSROOT="$(rustc --print sysroot)"
+          RUSTDOC_PATH="$SYSROOT/bin/rustdoc"
+          "$RUSTDOC_PATH" --version
+          # Diagnostic: the suite is itself a cache cleaner that provably
+          # escaped its env-scoped isolation once (CHANGELOG v0.1.8, the
+          # host-rustup cleanup flake). Name the moment rustdoc disappears,
+          # then capture the end state (toolchains, RUSTUP_HOME, Trash) so
+          # one run decides suite-vs-infrastructure and move-vs-delete.
+          (
+            while [ -e "$RUSTDOC_PATH" ]; do sleep 1; done
+            echo "RUSTDOC-GONE at $(date -u +%H:%M:%S)"
+          ) &
+          WATCHER_PID=$!
+          set +e
+          cargo test
+          STATUS=$?
+          set -e
+          kill "$WATCHER_PID" 2>/dev/null || true
+          wait "$WATCHER_PID" 2>/dev/null || true
+          echo "=== diagnostics ==="
+          echo "--- rustup toolchain list ---"
+          rustup toolchain list || true
+          echo "--- toolchains dir ---"
+          ls "$HOME/.rustup/toolchains/" || true
+          echo "--- rustup env ---"
+          env | grep -i rustup || echo "(RUSTUP_HOME unset)"
+          echo "--- Trash ---"
+          ls -la "$HOME/.Trash" 2>/dev/null || echo "(empty/unreadable)"
+          echo "--- rustdoc state ---"
+          [ -e "$RUSTDOC_PATH" ] && echo present || echo ABSENT
+          # The watcher pinned the disappearance to the auto_policy tests.
+          # Print the binary's own output (cargo swallows passing-test
+          # stdout) so the cleaner that touched the host is named by name.
+          echo "=== auto_policy with nocapture ==="
+          RUSTDOC_PATH="$RUSTDOC_PATH" cargo test --test auto_policy -- --nocapture || true
+          exit $STATUS

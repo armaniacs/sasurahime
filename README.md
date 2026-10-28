@@ -5,7 +5,7 @@
 
 Scan, select, and remove stale caches from 50+ developer tools including uv, Homebrew, mise, Docker, Cargo, Go, and pip, all from a single command on macOS.
 
-sasurahime only removes caches and unused old versions. It never touches runtimes or packages that are currently in use. Every deletion goes to macOS Trash by default, so you can restore anything with a single click.
+sasurahime only removes caches and unused old versions. It never touches runtimes or packages that are currently in use. Every deletion goes to macOS Trash by default; Finder may not offer Put Back for items sasurahime moved there, so restore by dragging them out of the Trash.
 
 **What 44 GB looks like:**
 
@@ -129,8 +129,9 @@ installed with cargo); no resident daemon is required.
 ## Safety first
 
 - Every cleaner supports `--dry-run` ― nothing is deleted until you confirm.
-- **Trash mode is on by default** ― removed files go to macOS Trash, so you can
-  restore them from Finder. Use `--permanent` to permanently delete.
+- **Trash mode is on by default** ― removed files go to macOS Trash, but
+  Finder's context menu may not offer Put Back for them -- restore by
+  dragging them out of the Trash. Use `--permanent` to permanently delete.
 - Trash runs show two axes: `Logical freed: X / Physical freed: 0 B (in Trash)`,
   plus a restore pointer (`open ~/.Trash`). `--permanent` runs keep a minimal
   audit trail (`Permanently deleted: no Trash copy was kept.`) without
@@ -369,7 +370,7 @@ launchd で定期実行するには、以下を
 ## 安全性について
 
 - すべてのクリーナーは `--dry-run` に対応しています。確認するまで何も削除しません。
-- **Trash モードがデフォルトで有効**です。削除したファイルは macOS のゴミ箱に移動されるため、Finder から復元できます。完全に消去したい場合は `--permanent` フラグを使用してください。
+- **Trash モードがデフォルトで有効**です。削除したファイルは macOS のゴミ箱に移動されますが、Finder の右クリックメニューに「元に戻る」(Put Back) が出ないことがあります。その場合はゴミ箱からドラッグして戻してください。完全に消去したい場合は `--permanent` フラグを使用してください。
 - mise のランタイム削除は、グローバル設定とプロジェクト固有の `.mise.toml` を両方チェックしてから実行します。
 - macOS の immutable フラグ（`uchg`）は自動的に解除してから削除します。
 - Trash モードの実行は2軸で表示されます: `Logical freed: X / Physical freed: 0 B (in Trash)`

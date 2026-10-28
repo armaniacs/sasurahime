@@ -2,6 +2,7 @@ use anyhow::Result;
 use std::fs;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
+use trash::macos::{DeleteMethod, TrashContextExtMacos};
 
 static TRASH_MODE: AtomicBool = AtomicBool::new(true);
 
@@ -52,7 +53,15 @@ impl DeleteCtx {
                     "trash failed: simulated refusing backend (test override)"
                 ));
             }
-            trash::delete(path).map_err(|e| anyhow::anyhow!("trash failed: {e}"))
+            // NsFileManager (trashItemAtURL) instead of the default Finder
+            // backend: the Finder backend spawns `osascript`, which can sit
+            // for minutes on a hidden TCC permission dialog with no output.
+            // The NSFileManager call needs no extra permissions, is faster
+            // and is silent.
+            let mut ctx = trash::TrashContext::new();
+            ctx.set_delete_method(DeleteMethod::NsFileManager);
+            ctx.delete(path)
+                .map_err(|e| anyhow::anyhow!("trash failed: {e}"))
         } else if path.is_dir() {
             fs::remove_dir_all(path)
                 .map_err(|e| anyhow::anyhow!("remove_dir_all {:?}: {}", path, e))
@@ -478,6 +487,34 @@ mod tests {
         assert!(
             !runner.ran("chflags"),
             "no chflags may run on a refused path"
+        );
+    }
+
+    // ── NsFileManager backend source pin ──
+
+    #[test]
+    fn delete_ctx_delete_path_selects_the_nsfilemanager_backend() {
+        // Source pin (the same style as progress.rs's steady-tick pins): the
+        // trash branch must keep selecting DeleteMethod::NsFileManager. The
+        // default Finder backend spawns `osascript`, which can sit for
+        // minutes on a hidden TCC permission dialog -- the 36-minute hang
+        // this choice removed.
+        let src = include_str!("trash.rs");
+        let start = src
+            .find("pub fn delete_path(&self, path: &Path)")
+            .expect("DeleteCtx::delete_path source present");
+        let end = src[start..]
+            .find("pub fn set_trash_mode")
+            .map(|i| start + i)
+            .unwrap_or(src.len());
+        let body = &src[start..end];
+        assert!(
+            body.contains("set_delete_method(DeleteMethod::NsFileManager)"),
+            "DeleteCtx::delete_path must keep selecting the NsFileManager backend (no osascript, no TCC dialog)"
+        );
+        assert!(
+            !body.contains("DeleteMethod::Finder"),
+            "the default Finder backend must not come back"
         );
     }
 }

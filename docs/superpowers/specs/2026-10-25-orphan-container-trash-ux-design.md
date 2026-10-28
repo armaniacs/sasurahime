@@ -78,8 +78,14 @@ Claude Code と同じく、スピナーの行に経過時間タイマーを常�
 - `spinner_style()` のテンプレートを `"{spinner:.green} {msg} ({elapsed})"` に変更する。
   indicatif の `{elapsed}` が開始からの経過時間を表示し、steady tick ごとに再描画される
   (例: `(5s)`、`(1m20s)`。書式は indicatif の HumanDuration に従う)
-- steady tick は現状の 100ms のまま (スピナーの回転アニメーションに必要)。`{elapsed}` は
-  全秒で更新される
+- steady tick は削除フェーズ (`delete_selected`) で 1 秒ごとのものを有効にする
+  (削除ループの実行中にプロンプトは出ないため)。`{elapsed}` は全秒で更新される。
+  再有効化は前の ticker を差し替える (スレッドは増えない)
+- プロンプトが出る可能性があるパス (orphan-containers の対話選択) は
+  非アニメーションのまま。選択プロンプトの間は
+  `ProgressReporter::suspend_live_output` がスピナー行を非表示にする
+  (indicatif の suspend) ので、凍った "Cleaning..." ラベルが選択フェーズに
+  残らない
 - `with_parallel_scan` (スキャンフェーズ) のテンプレートにも `({elapsed})` を足す
 - コンテキスト連動ステータスは現状どおり: `progress_tick` が `{msg}` を
   "orphan-containers: group.is.workflow.my.app (1/2, 8KB)" のように差し替える

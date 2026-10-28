@@ -37,6 +37,10 @@ pub struct CliCleaner {
     display_name: &'static str,
     program: &'static str,
     args: &'static [&'static str],
+    /// Commands run after the main one. Each entry is (program, args,
+    /// failure remedy). A failure is non-fatal: it prints a warning and
+    /// the remedy, then the clean continues.
+    extra_commands: Vec<(&'static str, &'static [&'static str], Option<&'static str>)>,
     detect_dir: Option<PathBuf>,
     runner: Box<dyn CommandRunner>,
     /// Optional confirmation prompt shown before cleaning on an interactive TTY.
@@ -75,6 +79,7 @@ impl CliCleaner {
             display_name,
             program,
             args,
+            extra_commands: Vec::new(),
             detect_dir: None,
             runner,
             confirm_message: None,
@@ -105,6 +110,18 @@ impl CliCleaner {
     /// Override the risk classification (default Moderate).
     pub fn with_risk(mut self, risk: Risk) -> Self {
         self.risk = risk;
+        self
+    }
+
+    /// Add commands run after the main one. Each entry is (program, args,
+    /// failure remedy); the remedy prints when the command fails. Extras
+    /// run only for cleaners constructed with a detect_dir — the
+    /// no-detect-dir clean branch never executes them.
+    pub fn with_extra_commands(
+        mut self,
+        cmds: Vec<(&'static str, &'static [&'static str], Option<&'static str>)>,
+    ) -> Self {
+        self.extra_commands.extend(cmds);
         self
     }
 }
@@ -202,7 +219,9 @@ impl CliCleaner {
 
     pub fn colima_prune(home: &Path, runner: Box<dyn CommandRunner>) -> Self {
         Self {
-            confirm_message: Some("This will delete ALL stopped Colima VM disk data (containers, images, volumes). Continue?"),
+            confirm_message: Some(
+                "Prunes cached Colima assets and asks the running VM to discard unused disk blocks (fstrim); no containers, images or volumes are deleted. If colima is not found, the ~/.colima directory (including its VM disk) is deleted instead. Continue?",
+            ),
             fallback_delete: true,
             ..Self::with_detect_dir(
                 "colima",
@@ -211,9 +230,16 @@ impl CliCleaner {
                 home.join(".colima"),
                 runner,
             )
-            // colima clean removes ALL stopped VM disk data (containers,
-            // images, volumes) — destructive and irreversible, so it must
-            // never run unattended without explicit opt-in (see PBI 42).
+            // Prune only clears colima's downloaded-asset cache; the space
+            // the detection measures lives in the VM's sparse disk images,
+            // which shrink only when the VM discards unused blocks.
+            // Non-fatal: with the VM stopped the remedy prints and the
+            // prune-only freed bytes are still reported.
+            .with_extra_commands(vec![(
+                "colima",
+                &["ssh", "--", "sudo", "fstrim", "-av"],
+                Some(COLIMA_REMEDY),
+            )])
             .with_risk(Risk::Risky)
         }
         .with_notice(DiskImageNotice::new(
@@ -619,6 +645,39 @@ impl CliCleaner {
                     let stderr = String::from_utf8_lossy(&output.stderr);
                     if !stderr.is_empty() {
                         eprintln!("[{}] stderr: {stderr}", self.display_name);
+                    }
+                }
+                for (extra_program, extra_args, remedy) in &self.extra_commands {
+                    println!("$ {extra_program} {}", extra_args.join(" "));
+                    match self.runner.run(extra_program, extra_args) {
+                        Ok(output) if !output.status.success() => {
+                            eprintln!(
+                                "[{}] warning: `{} {}` exited with code {:?}",
+                                self.display_name,
+                                extra_program,
+                                extra_args.join(" "),
+                                output.status.code()
+                            );
+                            let stderr = String::from_utf8_lossy(&output.stderr);
+                            if !stderr.is_empty() {
+                                eprintln!("[{}] stderr: {stderr}", self.display_name);
+                            }
+                            if let Some(remedy) = remedy {
+                                eprintln!("[{}] {remedy}", self.display_name);
+                            }
+                        }
+                        Ok(_) => {}
+                        Err(e) => {
+                            eprintln!(
+                                "[{}] warning: `{} {}` failed: {e}",
+                                self.display_name,
+                                extra_program,
+                                extra_args.join(" ")
+                            );
+                            if let Some(remedy) = remedy {
+                                eprintln!("[{}] {remedy}", self.display_name);
+                            }
+                        }
                     }
                 }
                 let size_after = if detect_dir.exists() {
@@ -1222,6 +1281,7 @@ mod tests {
             display_name: "test-cli-pin",
             program: "definitely-not-installed-cli",
             args: &[],
+            extra_commands: Vec::new(),
             detect_dir: Some(dir.to_path_buf()),
             runner: Box::new(crate::command::SystemCommandRunner),
             confirm_message: None,
@@ -1386,6 +1446,108 @@ mod tests {
         fn exists(&self, _: &str) -> bool {
             false
         }
+    }
+
+    // ── PBI 44: CliCleaner extra commands (colima prune + fstrim) ──
+
+    /// Succeeds on the first call, fails on the second (VM stopped).
+    struct OkThenErr(std::sync::atomic::AtomicUsize);
+    impl CommandRunner for OkThenErr {
+        fn run(&self, _: &str, _: &[&str]) -> anyhow::Result<std::process::Output> {
+            use std::os::unix::process::ExitStatusExt;
+            if self.0.fetch_add(1, Ordering::SeqCst) == 0 {
+                Ok(std::process::Output {
+                    status: std::process::ExitStatus::from_raw(0),
+                    stdout: vec![],
+                    stderr: vec![],
+                })
+            } else {
+                anyhow::bail!("failed to spawn `colima`: VM is not running")
+            }
+        }
+        fn exists(&self, _: &str) -> bool {
+            true
+        }
+    }
+
+    /// Succeeds and removes a canary file inside the detect dir during the
+    /// fstrim run only, and only after the prune run has been seen, so the
+    /// physical-size diff reports the follow-up's effect and the test fails
+    /// if the extras never ran, ran before the main command, or were
+    /// measured before the extras.
+    struct ShrinkOnRun(PathBuf, std::sync::atomic::AtomicBool);
+    impl CommandRunner for ShrinkOnRun {
+        fn run(&self, _: &str, args: &[&str]) -> anyhow::Result<std::process::Output> {
+            use std::os::unix::process::ExitStatusExt;
+            if args.first() == Some(&"prune") {
+                self.1.store(true, Ordering::Relaxed);
+            }
+            if args.first() == Some(&"ssh") && self.1.load(Ordering::Relaxed) {
+                let _ = fs::remove_file(self.0.join("keep.txt"));
+            }
+            Ok(std::process::Output {
+                status: std::process::ExitStatus::from_raw(0),
+                stdout: vec![],
+                stderr: vec![],
+            })
+        }
+        fn exists(&self, _: &str) -> bool {
+            true
+        }
+    }
+
+    #[test]
+    fn clean_runs_extra_command_and_its_effect_counts_in_freed_bytes() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let dir = tmp.path().join("cache");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("keep.txt"), b"x").unwrap();
+        let cleaner = CliCleaner::with_detect_dir(
+            "test",
+            "colima",
+            &["prune", "--all", "--force"],
+            dir.clone(),
+            Box::new(ShrinkOnRun(
+                dir.clone(),
+                std::sync::atomic::AtomicBool::new(false),
+            )),
+        )
+        .with_extra_commands(vec![(
+            "colima",
+            &["ssh", "--", "sudo", "fstrim", "-av"],
+            Some("start the VM to trim"),
+        )]);
+        let reporter = crate::progress::DeepSuppressReporter;
+        let result = cleaner.clean(false, &reporter).unwrap();
+        assert!(
+            result.bytes_freed > 0,
+            "the extra command's effect must count in the freed bytes"
+        );
+    }
+
+    #[test]
+    fn clean_extra_command_failure_is_non_fatal() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let dir = tmp.path().join("cache");
+        fs::create_dir_all(&dir).unwrap();
+        let cleaner = CliCleaner::with_detect_dir(
+            "test",
+            "colima",
+            &["prune", "--all", "--force"],
+            dir,
+            Box::new(OkThenErr(std::sync::atomic::AtomicUsize::new(0))),
+        )
+        .with_extra_commands(vec![(
+            "colima",
+            &["ssh", "--", "sudo", "fstrim", "-av"],
+            Some("start the VM to trim"),
+        )]);
+        let reporter = crate::progress::DeepSuppressReporter;
+        let result = cleaner.clean(false, &reporter);
+        assert!(
+            result.is_ok(),
+            "a failed extra command must not fail the clean"
+        );
     }
 
     // ── type split: per_cleaner_filters / is_available live on each type ──
@@ -2333,6 +2495,22 @@ mod tests {
             .expect("advisory when colima disk exists");
         assert!(text.contains("[colima]"), "{text}");
         assert!(text.contains("fstrim"), "{text}");
+    }
+
+    #[test]
+    fn colima_confirm_message_describes_the_actual_action() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cleaner = CliCleaner::colima_prune(tmp.path(), Box::new(MissingToolRunner));
+        let msg = cleaner
+            .confirm_message
+            .expect("colima has a confirmation prompt");
+        assert!(msg.contains("fstrim"), "{msg}");
+        assert!(
+            !msg.contains("delete ALL stopped"),
+            "the prompt must not describe colima delete: {msg}"
+        );
+        assert!(msg.contains("~/.colima"), "{msg}");
+        assert!(msg.contains("deleted instead"), "{msg}");
     }
 
     #[test]
