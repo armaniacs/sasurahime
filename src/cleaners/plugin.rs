@@ -98,6 +98,40 @@ pub fn parse_protocol_output(stdout: &str) -> Option<ProtocolStatus> {
     Some(ProtocolStatus { status, bytes })
 }
 
+/// What a plugin's `clean` run reported beyond the exit code. Both fields are
+/// optional: the trailing JSON object `{"freed": n, "uses_trash": b}` is an
+/// additive extension of the exit-code-only protocol.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CleanReport {
+    pub freed: Option<u64>,
+    pub uses_trash: Option<bool>,
+}
+
+/// Parses the optional trailing JSON object of a `clean` run. Returns `None`
+/// when stdout holds no object with a `freed` or `uses_trash` field (no JSON,
+/// malformed JSON, or scan-style output), so the caller falls back to the
+/// exit-code-only protocol: 0 freed, no trash claim.
+/// ```
+/// use sasurahime::cleaners::plugin::parse_clean_output;
+/// let report =
+///     parse_clean_output("removing...\n{\"freed\": 1234, \"uses_trash\": false}").unwrap();
+/// assert_eq!(report.freed, Some(1234));
+/// assert_eq!(report.uses_trash, Some(false));
+/// // No JSON: the exit-code-only protocol keeps working.
+/// assert_eq!(parse_clean_output("done"), None);
+/// // Scan-style output carries no clean fields: not a clean report.
+/// assert_eq!(parse_clean_output("{\"status\": \"clean\", \"bytes\": 10}"), None);
+/// ```
+pub fn parse_clean_output(stdout: &str) -> Option<CleanReport> {
+    let value: serde_json::Value = serde_json::from_str(extract_last_json_object(stdout)).ok()?;
+    let freed = value.get("freed").and_then(|f| f.as_u64());
+    let uses_trash = value.get("uses_trash").and_then(|b| b.as_bool());
+    if freed.is_none() && uses_trash.is_none() {
+        return None;
+    }
+    Some(CleanReport { freed, uses_trash })
+}
+
 fn status_from_protocol(protocol: &ProtocolStatus) -> Option<ScanStatus> {
     match protocol.status.as_str() {
         "pruneable" => Some(if protocol.bytes > 0 {
@@ -336,15 +370,23 @@ impl Cleaner for PluginCleaner {
             args.push("--dry-run");
         }
         match self.run_protocol(&args) {
-            // The minimal protocol reports success by exit code only; bytes
-            // are unknown, so nothing is recorded as freed.
-            Some(out) if out.code == 0 => Ok(CleanResult {
-                name: self.name(),
-                bytes_freed: 0,
-                uses_trash: false,
-                skipped: vec![],
-                deleted_paths: vec![],
-            }),
+            Some(out) if out.code == 0 => {
+                // WHY the fallback: the trailing JSON object is an additive
+                // extension. A plugin that prints no JSON, or malformed JSON,
+                // keeps today's exit-code-only protocol (0 freed, no trash
+                // claim) instead of erroring. `--json` is deliberately NOT
+                // passed: a plugin that inspects its arguments could break on
+                // an unknown flag, while one that ignores arguments is
+                // unaffected either way.
+                let report = parse_clean_output(&out.stdout);
+                Ok(CleanResult {
+                    name: self.name(),
+                    bytes_freed: report.as_ref().and_then(|r| r.freed).unwrap_or(0),
+                    uses_trash: report.as_ref().and_then(|r| r.uses_trash).unwrap_or(false),
+                    skipped: vec![],
+                    deleted_paths: vec![],
+                })
+            }
             Some(out) => Err(anyhow::anyhow!("plugin exited with code {}", out.code)),
             None => Err(anyhow::anyhow!("plugin timed out or failed to spawn")),
         }
@@ -600,5 +642,124 @@ mod tests {
         let result = cleaner.clean(true, &reporter).unwrap();
         assert_eq!(result.bytes_freed, 0);
         assert_eq!(cleaner.name(), "good");
+    }
+
+    #[test]
+    fn parse_clean_output_reads_freed_and_uses_trash() {
+        // Real plugins print log lines around the trailing JSON object.
+        let report = parse_clean_output(
+            "[plugin] removing cache...\n{\"freed\": 1234, \"uses_trash\": false}",
+        )
+        .unwrap();
+        assert_eq!(report.freed, Some(1234));
+        assert_eq!(report.uses_trash, Some(false));
+
+        let trash = parse_clean_output("{\"freed\": 10, \"uses_trash\": true}").unwrap();
+        assert_eq!(trash.freed, Some(10));
+        assert_eq!(trash.uses_trash, Some(true));
+
+        // Either field alone is a valid report; the other falls back.
+        let freed_only = parse_clean_output("{\"freed\": 7}").unwrap();
+        assert_eq!(freed_only.freed, Some(7));
+        assert_eq!(freed_only.uses_trash, None);
+    }
+
+    #[test]
+    fn parse_clean_output_falls_back_without_clean_fields() {
+        // No JSON at all.
+        assert_eq!(parse_clean_output("done"), None);
+        assert_eq!(parse_clean_output(""), None);
+        // Malformed JSON.
+        assert_eq!(parse_clean_output("{\"freed\": "), None);
+        // Scan-style output carries no clean fields: not a clean report.
+        assert_eq!(
+            parse_clean_output("{\"status\": \"clean\", \"bytes\": 512}"),
+            None
+        );
+        // Negative or fractional freed is not a byte count: ignored.
+        assert_eq!(parse_clean_output("{\"freed\": -1}"), None);
+        assert_eq!(parse_clean_output("{\"freed\": 1.5}"), None);
+    }
+
+    #[test]
+    fn clean_reports_freed_from_trailing_json() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let plugin = tmp.path().join("sasurahime-reporting");
+        std::fs::write(
+            &plugin,
+            "#!/bin/sh\nif [ \"$1\" = \"scan\" ]; then echo '{\"status\":\"pruneable\",\"bytes\":512}'; exit 0; fi\necho '[plugin] removing...'\necho '{\"freed\": 1234, \"uses_trash\": false}'\nexit 0\n",
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&plugin, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let cleaner = PluginCleaner::new("reporting", plugin);
+        let reporter = crate::progress::DeepSuppressReporter;
+        let result = cleaner.clean(false, &reporter).unwrap();
+        assert_eq!(result.bytes_freed, 1234);
+        assert!(!result.uses_trash);
+    }
+
+    #[test]
+    fn clean_reports_uses_trash_from_trailing_json() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let plugin = tmp.path().join("sasurahime-trasher");
+        std::fs::write(
+            &plugin,
+            "#!/bin/sh\necho '{\"freed\": 10, \"uses_trash\": true}'\nexit 0\n",
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&plugin, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let cleaner = PluginCleaner::new("trasher", plugin);
+        let reporter = crate::progress::DeepSuppressReporter;
+        let result = cleaner.clean(false, &reporter).unwrap();
+        assert_eq!(result.bytes_freed, 10);
+        assert!(result.uses_trash);
+    }
+
+    #[test]
+    fn clean_without_json_keeps_the_exit_code_only_protocol() {
+        // WHY: a plugin that prints no JSON must keep working exactly as
+        // before the trailing-JSON extension: 0 freed, no trash claim.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let silent = tmp.path().join("sasurahime-silent");
+        std::fs::write(&silent, "#!/bin/sh\nexit 0\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&silent, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let cleaner = PluginCleaner::new("silent", silent);
+        let reporter = crate::progress::DeepSuppressReporter;
+        let result = cleaner.clean(false, &reporter).unwrap();
+        assert_eq!(result.bytes_freed, 0);
+        assert!(!result.uses_trash);
+    }
+
+    #[test]
+    fn clean_with_malformed_json_falls_back_without_error() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let broken = tmp.path().join("sasurahime-brokenjson");
+        std::fs::write(
+            &broken,
+            "#!/bin/sh\necho '{\"freed\": '\necho 'oops'\nexit 0\n",
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&broken, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let cleaner = PluginCleaner::new("brokenjson", broken);
+        let reporter = crate::progress::DeepSuppressReporter;
+        let result = cleaner.clean(false, &reporter).unwrap();
+        assert_eq!(result.bytes_freed, 0);
+        assert!(!result.uses_trash);
     }
 }
