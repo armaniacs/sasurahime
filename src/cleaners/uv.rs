@@ -1,4 +1,4 @@
-use crate::cleaner::{CleanResult, Cleaner, ScanResult, ScanStatus, SkipCause};
+use crate::cleaner::{CleanResult, Cleaner, ScanResult, ScanStatus};
 use crate::command::CommandRunner;
 use crate::format::dir_size;
 use crate::progress::ProgressReporter;
@@ -89,7 +89,7 @@ impl Cleaner for UvCleaner {
     fn clean(
         &self,
         dry_run: bool,
-        _reporter: &dyn ProgressReporter,
+        reporter: &dyn ProgressReporter,
         opts: &crate::cleaner::CleanOptions,
     ) -> Result<CleanResult> {
         if !self.runner.exists("uv") {
@@ -97,61 +97,59 @@ impl Cleaner for UvCleaner {
             return Ok(CleanResult::empty(self.name()));
         }
 
-        let before = dir_size(&self.cache_dir);
-
-        let mut skipped: Vec<crate::cleaner::SkippedEntry> = vec![];
-        // OR-in across every deletion: the seam's resolved mode is the truth.
-        let mut uses_trash = false;
-
-        // Remove old simple-vN index caches
-        for old in self.detect_old_indexes() {
-            if dry_run {
-                println!("[dry-run] would remove: {}", old.display());
-            } else {
-                let outcome =
-                    crate::trash::safe_delete(self.runner.as_ref(), &old, opts.trash_mode)?;
-                if let Some(reason) = outcome.skip_reason {
-                    skipped.push(crate::cleaner::SkippedEntry {
-                        path: old.clone(),
-                        reason: SkipCause::Delete(reason),
-                    });
-                    continue;
-                }
-                // OR-in only when the deletion actually happened: a skipped
-                // Trash move never claims Trash.
-                uses_trash |= outcome.uses_trash;
-                println!("Removed: {}", old.display());
-            }
-        }
-
-        // Prune unused package archives via uv itself
+        // Phase 1 (PBI 77): the simple-vN index deletions ride the delete
+        // ledger, which owns the per-entry contracts (progress, skip
+        // records, freed sums, CleanResult assembly). There is no
+        // caller-side unsafe-path guard here: the seam's scope tripwire
+        // refuses the same paths at deletion time, and the ledger records
+        // the refusal as a skipped entry (prose reason) and continues — a
+        // fatal per-item error no longer aborts the clean before the prune.
+        let items: Vec<(PathBuf, u64)> = self
+            .detect_old_indexes()
+            .into_iter()
+            .map(|p| {
+                let size = dir_size(&p);
+                (p, size)
+            })
+            .collect();
         if dry_run {
-            println!("[dry-run] would run: uv cache prune --force");
-        } else {
-            let output = self.runner.run("uv", &["cache", "prune", "--force"])?;
-            if !output.status.success() {
-                // PBI 53: a failed prune silently contributes 0 to `freed`
-                // (the per-item deletions above measured correctly). Warn so
-                // the prune failure is not invisible.
-                log::warn!(
-                    "uv cache prune --force exited with {} - the prune was not applied",
-                    output.status.code().unwrap_or(-1)
-                );
+            for (path, _) in &items {
+                println!("[dry-run] would remove: {}", path.display());
             }
+            println!("[dry-run] would run: uv cache prune --force");
+            return Ok(CleanResult::empty(self.name()));
         }
+        let phase1 = crate::trash::delete_entries(
+            self.name(),
+            self.runner.as_ref(),
+            reporter,
+            opts.trash_mode,
+            &items,
+        );
 
-        let after = if dry_run {
-            before
-        } else {
-            dir_size(&self.cache_dir)
-        };
-        let freed = before.saturating_sub(after);
+        // Phase 2 (PBI 77): prune unused package archives via uv itself.
+        // The `before` measurement sits AFTER the ledger so the phase-1
+        // deletions are never counted twice — once in the ledger sum and
+        // once in the delta; the delta only captures the prune's effect.
+        let before = dir_size(&self.cache_dir);
+        let output = self.runner.run("uv", &["cache", "prune", "--force"])?;
+        if !output.status.success() {
+            // PBI 53: a failed prune silently contributes 0 to `freed`
+            // (the delta over a failed prune is 0). Warn so the prune
+            // failure is not invisible.
+            log::warn!(
+                "uv cache prune --force exited with {} - the prune was not applied",
+                output.status.code().unwrap_or(-1)
+            );
+        }
+        let after = dir_size(&self.cache_dir);
+        let phase2 = before.saturating_sub(after);
 
         Ok(CleanResult {
             name: self.name(),
-            bytes_freed: freed,
-            uses_trash,
-            skipped,
+            bytes_freed: phase1.bytes_freed + phase2,
+            uses_trash: phase1.uses_trash,
+            skipped: phase1.skipped,
         })
     }
 }
@@ -159,7 +157,126 @@ impl Cleaner for UvCleaner {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cleaner::SkipCause;
+    use std::os::unix::process::ExitStatusExt;
     use tempfile::TempDir;
+
+    // ── ledger migration (PBI 77) ──
+
+    /// A runner that records every invocation, so the prune phase running
+    /// after a refused index deletion is observable. `uv` exists and
+    /// succeeds; `chflags` is permitted for the seam's permanent-mode clear.
+    #[derive(Default, Clone)]
+    struct RecordingUvRunner {
+        calls: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+    }
+    impl CommandRunner for RecordingUvRunner {
+        fn run(&self, program: &str, args: &[&str]) -> anyhow::Result<std::process::Output> {
+            self.calls
+                .lock()
+                .unwrap()
+                .push(format!("{program} {}", args.join(" ")));
+            Ok(std::process::Output {
+                status: std::process::ExitStatus::from_raw(0),
+                stdout: vec![],
+                stderr: vec![],
+            })
+        }
+        fn exists(&self, program: &str) -> bool {
+            program == "uv" || program == "chflags"
+        }
+    }
+
+    #[test]
+    fn clean_freed_is_the_ledger_sum_plus_the_prune_delta() {
+        // Two-phase accounting (PBI 77): phase 1 = the ledger sum for the
+        // simple-vN deletions; phase 2 = the dir_size delta measured AFTER
+        // the ledger (prune only). The post-ledger before measurement keeps
+        // a deleted index from being counted twice — once in the ledger sum
+        // and once in the delta.
+        let tmp = TempDir::new().unwrap();
+        let cache = tmp.path().join(".cache/uv");
+        std::fs::create_dir_all(cache.join("simple-v16")).unwrap();
+        std::fs::write(cache.join("simple-v16/index.html"), [0u8; 4096]).unwrap();
+        std::fs::create_dir_all(cache.join("simple-v21")).unwrap();
+        std::fs::write(cache.join("simple-v21/index.html"), [0u8; 8192]).unwrap();
+
+        let runner = MockRunner::new().with_success("uv").with_success("chflags");
+        let cleaner = UvCleaner::new(tmp.path(), Box::new(runner));
+        let opts = crate::cleaner::CleanOptions {
+            trash_mode: crate::trash::TrashMode::Permanent,
+            ..Default::default()
+        };
+        let r = cleaner
+            .clean(false, &crate::progress::DeepSuppressReporter, &opts)
+            .unwrap();
+        assert!(
+            !cache.join("simple-v16").exists(),
+            "the old index must delete"
+        );
+        assert!(
+            cache.join("simple-v21").exists(),
+            "the newest index must stay"
+        );
+        assert_eq!(
+            r.bytes_freed, 4096,
+            "phase 1 sums the deleted index once; phase 2 adds the prune delta (0 for a mock prune) — never 2x"
+        );
+        assert!(!r.uses_trash, "a permanent resolve must never claim Trash");
+        assert!(r.skipped.is_empty());
+    }
+
+    #[test]
+    fn clean_fatal_index_error_does_not_abort_the_prune_phase() {
+        // The hand-rolled loop propagated a fatal per-item error with `?`,
+        // aborting the whole clean — the prune phase never ran. The ledger
+        // records the refusal as a SkippedEntry (prose reason) and the run
+        // continues into the prune. A tempdir under /tmp never passes
+        // is_safe_delete_target (the canonicalized path starts with
+        // /private/tmp), so both index dirs are refused by the seam.
+        let tmp = tempfile::TempDir::new_in("/tmp").unwrap();
+        let cache = tmp.path().join(".cache/uv");
+        std::fs::create_dir_all(cache.join("simple-v16")).unwrap();
+        std::fs::create_dir_all(cache.join("simple-v21")).unwrap();
+
+        let runner = RecordingUvRunner::default();
+        let cleaner = UvCleaner::new(tmp.path(), Box::new(runner.clone()));
+        let opts = crate::cleaner::CleanOptions {
+            trash_mode: crate::trash::TrashMode::Permanent,
+            ..Default::default()
+        };
+        let r = cleaner
+            .clean(false, &crate::progress::DeepSuppressReporter, &opts)
+            .expect("a fatal per-item error must not abort the clean");
+        assert_eq!(
+            r.skipped.len(),
+            1,
+            "the refused index is recorded: {:?}",
+            r.skipped
+        );
+        assert_eq!(r.skipped[0].path, cache.join("simple-v16"));
+        assert!(
+            matches!(&r.skipped[0].reason, SkipCause::Reason(reason) if reason.contains("refusing to delete unsafe path")),
+            "the seam refusal rides as prose: {:?}",
+            r.skipped[0].reason
+        );
+        assert_eq!(r.bytes_freed, 0, "a refused path frees nothing");
+        assert_eq!(
+            r.exit_code(),
+            1,
+            "exit 1 rides the skip record, not an Err"
+        );
+        let calls = runner.calls.lock().unwrap();
+        assert_eq!(
+            *calls,
+            vec!["uv cache prune --force".to_string()],
+            "the prune phase still ran after the refusal: {calls:?}"
+        );
+        assert!(
+            cache.join("simple-v16").exists() && cache.join("simple-v21").exists(),
+            "the refused dir and the newest index must survive"
+        );
+    }
 
     #[test]
     fn parse_simple_version_valid() {
