@@ -10,10 +10,11 @@ use config::Config;
 use progress::{build_reporter_from_flags, merge_suppress_flags, ProgressReporter};
 use std::path::{Path, PathBuf};
 
-/// Macro that generates the CleanTarget enum, SUPPORTED_TARGETS, the dispatch
-/// helpers, standard_cleaners() and caches_group_cleaners() from a single
-/// definition table. all_cleaners() composes standard_cleaners() with
-/// special_cleaners().
+/// Macro that generates the CleanTarget enum, SUPPORTED_TARGETS,
+/// SPECIAL_TARGETS, ALL_TARGETS, the identity methods (command_name /
+/// dry_run / is_special), the dispatch helper, standard_cleaners() and
+/// caches_group_cleaners() from a single definition table.
+/// all_cleaners() composes standard_cleaners() with special_cleaners().
 ///
 /// Usage:
 /// ```ignore
@@ -24,19 +25,31 @@ use std::path::{Path, PathBuf};
 ///     Bun : "bun" => "description" ; @group caches ; { factory_expr }
 ///     ...
 ///     ;
-///     // Special enum variants inserted verbatim:
-///     // Caches { dry_run: bool },
-///     // Logs { dry_run: bool, #[arg(long)] keep_days: Option<u32> },
+///     // Special rows: the clap doc, the CLI name and the `dry_run`
+///     // marker live in the row header; the fields stay verbatim; the
+///     // second desc is the `sasurahime targets` listing text:
+///     Caches : "caches" => "Clean all generic caches (...)" ; special ;
+///         { #[arg(long)] dry_run: bool, } ; "All generic caches (...)" ;
+///         dry_run,
+///     ...
+///     ;
+///     // The external catch-all (exactly one):
+///     External : "external" => "Catch-all for external plugin targets" ;
+///         external ; (Vec<String>),
 /// }
 /// ```
+///
+/// The identity methods are exhaustive without a `_` arm: a variant added
+/// to the table gets its `command_name` / `dry_run` / `is_special` arm
+/// automatically, so a missing run arm or a removed cli-name drops the
+/// build instead of panicking at runtime. The special rows' enum variants
+/// are generated from their row headers, so `#[doc]` / `#[command(name)]`
+/// live only there (a duplicate clap derive attribute would not compile).
 ///
 /// The group membership is compile-time checked: a `@group <name>` row
 /// resolves `<name>::DEFINED_GROUP_MARKER`, and only the `caches` module is
 /// generated below, so an unknown group ident fails to compile instead of
 /// silently joining the caches batch.
-///
-/// Helper: extract the CLI command name for a standard CleanTarget variant.
-/// Generate dispatch_clean and dispatch helpers from the same definition table.
 macro_rules! define_cleaners {
     ($(
         $(#[$variant_meta:meta])*
@@ -45,7 +58,17 @@ macro_rules! define_cleaners {
         ($factory:expr)
     ),+ $(,)?
     ;
-        $( $special_variants:tt )*
+        $(
+            $svariant:ident : $scli_name:literal => $sdoc:expr ;
+            special ;
+            $sfields:tt ;
+            $stargets_desc:expr ;
+            dry_run
+        ),+ $(,)?
+    ;
+        $evariant:ident : $ecli_name:literal => $edoc:expr ;
+        external ;
+        $efields:tt $(,)?
     ) => {
         #[derive(Subcommand)]
         enum CleanTarget {
@@ -54,11 +77,35 @@ macro_rules! define_cleaners {
                 #[command(name = $cli_name)]
                 $variant { #[arg(long)] dry_run: bool },
             )*
-            $($special_variants)*
+            $(
+                #[doc = $sdoc]
+                #[command(name = $scli_name)]
+                $svariant $sfields,
+            )+
+            #[doc = $edoc]
+            #[command(external_subcommand)]
+            $evariant $efields,
         }
 
+        /// The standard rows of the table, in table order. Production
+        /// consumers read ALL_TARGETS (the generated union); this section
+        /// view backs the registry pins (table order, label match).
+        #[cfg(test)]
         const SUPPORTED_TARGETS: &[(&str, &str)] = &[
             $( ($cli_name, $desc) ),*
+        ];
+
+        /// The special rows of the table. Production consumers read
+        /// ALL_TARGETS; this section view backs the registry pins (name-set
+        /// union, non-overlap).
+        #[cfg(test)]
+        const SPECIAL_TARGETS: &[(&str, &str)] = &[
+            $( ($scli_name, $stargets_desc) ),*
+        ];
+
+        const ALL_TARGETS: &[(&str, &str)] = &[
+            $( ($cli_name, $desc), )*
+            $( ($scli_name, $stargets_desc), )*
         ];
 
         fn standard_cleaners(
@@ -118,17 +165,41 @@ macro_rules! define_cleaners {
         }
 
         impl CleanTarget {
-            fn dispatch_command_name(&self) -> &'static str {
+            /// The CLI command name, generated from the definition table's
+            /// row headers. The match is exhaustive without a `_` arm: a
+            /// variant added to the table gets its arm automatically, and
+            /// the external catch-all resolves the static marker.
+            fn command_name(&self) -> &'static str {
                 match self {
                     $( CleanTarget::$variant { .. } => $cli_name, )*
-                    _ => unreachable!("dispatch_command_name: unexpected special variant"),
+                    $( CleanTarget::$svariant { .. } => $scli_name, )*
+                    CleanTarget::$evariant(..) => $ecli_name,
                 }
             }
 
-            fn dispatch_dry_run(&self) -> bool {
+            /// The run's dry-run flag. Standard variants carry exactly one
+            /// `dry_run: bool` field; every special row ends with the
+            /// `dry_run` marker (its `dry_run` field is destructured, the
+            /// rest is ignored); the external catch-all carries raw args
+            /// and no field, so the panic-free answer is false — that arm
+            /// resolves its own dry-run two-position from the raw args.
+            fn dry_run(&self) -> bool {
                 match self {
                     $( CleanTarget::$variant { dry_run } => *dry_run, )*
-                    _ => unreachable!("dispatch_dry_run: unexpected special variant"),
+                    $( CleanTarget::$svariant { dry_run, .. } => *dry_run, )*
+                    CleanTarget::$evariant(..) => false,
+                }
+            }
+
+            /// True when the variant is handled by the special dispatch
+            /// block in run (the special rows plus the external catch-all).
+            /// Generated from the same table: a special row without a run
+            /// arm makes the run arm's match non-exhaustive at compile time.
+            fn is_special(&self) -> bool {
+                match self {
+                    $( CleanTarget::$variant { .. } => false, )*
+                    $( CleanTarget::$svariant { .. } => true, )*
+                    CleanTarget::$evariant(..) => true,
                 }
             }
         }
@@ -263,64 +334,102 @@ define_cleaners! {
     (|home, _config| cleaners::app_support::AppSupportCleaner::new(home, Box::new(SystemCommandRunner))),
 
     ;
-    /// Clean all generic caches (bun, go, pip, node-gyp, npm, yarn, pnpm)
-    Caches {
+    Caches : "caches"
+        => "Clean all generic caches (bun, go, pip, node-gyp, npm, yarn, pnpm)" ;
+    special ;
+    {
         #[arg(long)]
         dry_run: bool,
-    },
-    /// Remove log files older than N days
-    Logs {
+    } ;
+    "All generic caches (bun/go/pip/node-gyp/npm/yarn/pnpm)" ;
+    dry_run,
+
+    Logs : "logs"
+        => "Remove log files older than N days" ;
+    special ;
+    {
         #[arg(long)]
         dry_run: bool,
         /// Days to keep (default: value from config file, fallback 7)
         #[arg(long)]
         keep_days: Option<u32>,
-    },
-    /// Clean Xcode caches (DerivedData, Archives)
-    Xcode {
+    } ;
+    "Log files older than N days" ;
+    dry_run,
+
+    Xcode : "xcode"
+        => "Clean Xcode caches (DerivedData, Archives)" ;
+    special ;
+    {
         #[arg(long)]
         dry_run: bool,
         /// Subcategories to clean: derived-data, archives (default: derived-data only)
         #[arg(long, value_delimiter = ',')]
         sub: Option<Vec<String>>,
-    },
-    /// Report Trash size
-    Trash {
+    } ;
+    "Xcode DerivedData project directories" ;
+    dry_run,
+
+    Trash : "trash"
+        => "Report Trash size" ;
+    special ;
+    {
         #[arg(long)]
         dry_run: bool,
-    },
-    /// Analyze and clean Ollama model cache
-    Ollama {
+    } ;
+    "~/.Trash size (scan only)" ;
+    dry_run,
+
+    Ollama : "ollama"
+        => "Analyze and clean Ollama model cache" ;
+    special ;
+    {
         #[arg(long)]
         dry_run: bool,
-    },
-    /// Analyze and clean ~/Library/Logs/ with heuristic recommendations
-    #[command(name = "library-logs")]
-    LibraryLogs {
+    } ;
+    "Ollama model cache" ;
+    dry_run,
+
+    LibraryLogs : "library-logs"
+        => "Analyze and clean ~/Library/Logs/ with heuristic recommendations" ;
+    special ;
+    {
         #[arg(long)]
         dry_run: bool,
         /// Skip prompt — delete all suggested entries
         #[arg(long, short = 'a')]
         all: bool,
-    },
-    /// Remove old Xcode DeviceSupport directories, keeping recent N versions
-    #[command(name = "device-support")]
-    DeviceSupport {
+    } ;
+    "Analyze and clean ~/Library/Logs/ with heuristic recommendations" ;
+    dry_run,
+
+    DeviceSupport : "device-support"
+        => "Remove old Xcode DeviceSupport directories, keeping recent N versions" ;
+    special ;
+    {
         #[arg(long)]
         dry_run: bool,
         /// Number of recent versions to keep (default: 2)
         #[arg(long, default_value = "2")]
         keep: u32,
-    },
-    /// Clean iOS device backups from ~/Library/Application Support/MobileSync/Backup/
-    #[command(name = "ios-backup")]
-    IosBackup {
+    } ;
+    "Xcode DeviceSupport old version cleanup" ;
+    dry_run,
+
+    IosBackup : "ios-backup"
+        => "Clean iOS device backups from ~/Library/Application Support/MobileSync/Backup/" ;
+    special ;
+    {
         #[arg(long)]
         dry_run: bool,
-    },
-    /// Delete APFS local Time Machine snapshots
-    #[command(name = "apfs-snapshot")]
-    ApfsSnapshot {
+    } ;
+    "iOS device backups (irreversible \u{2014} backed up to Trash)" ;
+    dry_run,
+
+    ApfsSnapshot : "apfs-snapshot"
+        => "Delete APFS local Time Machine snapshots" ;
+    special ;
+    {
         #[arg(long)]
         dry_run: bool,
         /// Delete every local snapshot without prompting (mutually exclusive
@@ -335,31 +444,47 @@ define_cleaners! {
         /// and needs an extra confirmation). Requires --thin
         #[arg(long)]
         urgency: Option<u32>,
-    },
-    /// Report /private/var/vm swap files (no-op; re-initialized on reboot)
-    #[command(name = "vm-swap")]
-    VmSwap {
+    } ;
+    "APFS local Time Machine snapshots (tmutil deletelocalsnapshot)" ;
+    dry_run,
+
+    VmSwap : "vm-swap"
+        => "Report /private/var/vm swap files (no-op; re-initialized on reboot)" ;
+    special ;
+    {
         #[arg(long)]
         dry_run: bool,
-    },
-    /// Explicit full clean: Safe targets by default, everything with
-    /// --include-manual. Honors global --older-than / --larger-than filters.
-    All {
+    } ;
+    "/private/var/vm swap files (report only; re-initialized on reboot)" ;
+    dry_run,
+
+    All : "all"
+        => "Explicit full clean: Safe targets by default, everything with --include-manual. Honors global --older-than / --larger-than filters." ;
+    special ;
+    {
         #[arg(long)]
         dry_run: bool,
         /// Also clean Moderate / Risky / Manual targets
         #[arg(long)]
         include_manual: bool,
-    },
-    /// Purge stale project artifacts (node_modules / target / .build)
-    #[command(name = "project-artifacts")]
-    ProjectArtifacts {
+    } ;
+    "Explicit full clean (Safe targets; --include-manual for the rest)" ;
+    dry_run,
+
+    ProjectArtifacts : "project-artifacts"
+        => "Purge stale project artifacts (node_modules / target / .build)" ;
+    special ;
+    {
         #[arg(long)]
         dry_run: bool,
-    },
-    /// Catch-all for external plugin targets (sasurahime-* on PATH)
-    #[command(external_subcommand)]
-    External(Vec<String>),
+    } ;
+    "Stale project artifacts (node_modules / target / .build with manifests)" ;
+    dry_run,
+    ;
+    External : "external"
+        => "Catch-all for external plugin targets (sasurahime-* on PATH)" ;
+    external ;
+    (Vec<String>),
 }
 
 #[derive(Parser)]
@@ -465,59 +590,6 @@ enum Commands {
     },
 }
 
-// Manual CleanTarget impl — handles special variants not generated by the macro.
-impl CleanTarget {
-    fn command_name(&self) -> &'static str {
-        match self {
-            CleanTarget::Caches { .. } => "caches",
-            CleanTarget::Logs { .. } => "logs",
-            CleanTarget::Xcode { .. } => "xcode",
-            CleanTarget::Trash { .. } => "trash",
-            CleanTarget::Ollama { .. } => "ollama",
-            CleanTarget::LibraryLogs { .. } => "library-logs",
-            CleanTarget::DeviceSupport { .. } => "device-support",
-            CleanTarget::IosBackup { .. } => "ios-backup",
-            CleanTarget::ApfsSnapshot { .. } => "apfs-snapshot",
-            CleanTarget::VmSwap { .. } => "vm-swap",
-            CleanTarget::All { .. } => "all",
-            CleanTarget::ProjectArtifacts { .. } => "project-artifacts",
-            // The external catch-all has no single CLI name: it carries raw
-            // args and is dispatched specially in run. A static marker keeps
-            // this call panic-free for every variant.
-            CleanTarget::External(_) => "external",
-            _ => self.dispatch_command_name(),
-        }
-    }
-
-    fn dry_run(&self) -> bool {
-        match self {
-            CleanTarget::Caches { dry_run }
-            | CleanTarget::Xcode { dry_run, .. }
-            | CleanTarget::Trash { dry_run }
-            | CleanTarget::Ollama { dry_run }
-            | CleanTarget::LibraryLogs { dry_run, .. } => *dry_run,
-            CleanTarget::Logs { dry_run, .. } => *dry_run,
-            CleanTarget::DeviceSupport { dry_run, .. } => *dry_run,
-            CleanTarget::IosBackup { dry_run } => *dry_run,
-            CleanTarget::ApfsSnapshot { dry_run, .. } => *dry_run,
-            CleanTarget::VmSwap { dry_run } => *dry_run,
-            CleanTarget::All { dry_run, .. } => *dry_run,
-            CleanTarget::ProjectArtifacts { dry_run } => *dry_run,
-            // The external arm resolves its own dry-run two-position
-            // (global --dry-run OR a local one in the raw args); the enum
-            // level has no field, so the panic-free answer is false.
-            CleanTarget::External(_) => false,
-            _ => self.dispatch_dry_run(),
-        }
-    }
-}
-
-// Manual SUPPORTED_TARGETS entries for special targets not in the macro table
-// (shared with the library's correspondence-table tests).
-fn extra_targets() -> &'static [(&'static str, &'static str)] {
-    crate::cleaner::extra_targets()
-}
-
 fn home() -> PathBuf {
     // An EMPTY HOME is filtered inside the crate-wide resolver
     // (config::resolved_home_dir) exactly like the tripwire's empty filter
@@ -616,13 +688,11 @@ fn special_cleaners(
     ]
 }
 
-/// Built-in target names a plugin must never impersonate.
+/// Built-in target names a plugin must never impersonate. ALL_TARGETS is
+/// the generated union of the two table sections, so a table addition is
+/// protected here without touching this fn.
 fn builtin_target_names() -> Vec<&'static str> {
-    SUPPORTED_TARGETS
-        .iter()
-        .chain(extra_targets())
-        .map(|(name, _)| *name)
-        .collect()
+    ALL_TARGETS.iter().map(|(name, _)| *name).collect()
 }
 
 fn all_cleaners(home: &std::path::Path, config: &config::Config) -> Vec<Box<dyn cleaner::Cleaner>> {
@@ -1216,8 +1286,7 @@ fn main() -> anyhow::Result<()> {
             run_hint_flow(&home, trash_mode, cli.dry_run);
         }
         Some(Commands::Targets) => {
-            let mut targets: Vec<&(&str, &str)> =
-                SUPPORTED_TARGETS.iter().chain(extra_targets()).collect();
+            let mut targets: Vec<&(&str, &str)> = ALL_TARGETS.iter().collect();
             targets.sort_by_key(|(name, _)| *name);
             for (name, desc) in targets {
                 println!("{:<12} {}", name, desc);
@@ -1272,22 +1341,7 @@ fn main() -> anyhow::Result<()> {
             )?;
         }
         Some(Commands::Clean { target }) => {
-            if matches!(
-                target,
-                CleanTarget::Caches { .. }
-                    | CleanTarget::Logs { .. }
-                    | CleanTarget::Xcode { .. }
-                    | CleanTarget::Trash { .. }
-                    | CleanTarget::Ollama { .. }
-                    | CleanTarget::LibraryLogs { .. }
-                    | CleanTarget::DeviceSupport { .. }
-                    | CleanTarget::IosBackup { .. }
-                    | CleanTarget::ApfsSnapshot { .. }
-                    | CleanTarget::VmSwap { .. }
-                    | CleanTarget::All { .. }
-                    | CleanTarget::ProjectArtifacts { .. }
-                    | CleanTarget::External(_)
-            ) {
+            if target.is_special() {
                 // --- Special targets (custom dispatch logic) ---
                 match target {
                     CleanTarget::Caches { dry_run } => {
@@ -1768,113 +1822,32 @@ mod tests {
     }
 
     #[test]
-    fn every_clean_target_variant_resolves_command_name_and_dry_run() {
-        // Correspondence pin for the three manually-maintained variant lists
-        // (command_name, dry_run, and the special-target matches! in run):
-        // every variant must resolve without panicking, so adding a new one
-        // can never fall into the unreachable! catch-alls of the macro
-        // dispatch helpers. External is the historical trap: it fell into
-        // the `_` arms and panicked through dispatch_command_name and
-        // dispatch_dry_run.
-        let variants: Vec<CleanTarget> = vec![
-            // Special variants (manual dispatch logic).
-            CleanTarget::Caches { dry_run: true },
-            CleanTarget::Logs {
-                dry_run: true,
-                keep_days: None,
-            },
-            CleanTarget::Xcode {
-                dry_run: true,
-                sub: None,
-            },
-            CleanTarget::Trash { dry_run: true },
-            CleanTarget::Ollama { dry_run: true },
-            CleanTarget::LibraryLogs {
-                dry_run: true,
-                all: false,
-            },
-            CleanTarget::DeviceSupport {
-                dry_run: true,
-                keep: 2,
-            },
-            CleanTarget::IosBackup { dry_run: true },
-            CleanTarget::ApfsSnapshot {
-                dry_run: true,
-                all: false,
-                thin: None,
-                urgency: None,
-            },
-            CleanTarget::VmSwap { dry_run: true },
-            CleanTarget::All {
-                dry_run: true,
-                include_manual: false,
-            },
-            CleanTarget::ProjectArtifacts { dry_run: true },
-            CleanTarget::External(vec![]),
-            // Standard variants (macro table).
-            CleanTarget::Act { dry_run: true },
-            CleanTarget::Uv { dry_run: true },
-            CleanTarget::Brew { dry_run: true },
-            CleanTarget::Mise { dry_run: true },
-            CleanTarget::Browsers { dry_run: true },
-            CleanTarget::Bun { dry_run: true },
-            CleanTarget::Go { dry_run: true },
-            CleanTarget::Pip { dry_run: true },
-            CleanTarget::NodeGyp { dry_run: true },
-            CleanTarget::Npm { dry_run: true },
-            CleanTarget::Yarn { dry_run: true },
-            CleanTarget::Pnpm { dry_run: true },
-            CleanTarget::Cargo { dry_run: true },
-            CleanTarget::Docker { dry_run: true },
-            CleanTarget::Orbstack { dry_run: true },
-            CleanTarget::CocoaPods { dry_run: true },
-            CleanTarget::Colima { dry_run: true },
-            CleanTarget::SwiftPM { dry_run: true },
-            CleanTarget::Conda { dry_run: true },
-            CleanTarget::Poetry { dry_run: true },
-            CleanTarget::Pipx { dry_run: true },
-            CleanTarget::Deno { dry_run: true },
-            CleanTarget::Dotnet { dry_run: true },
-            CleanTarget::Gem { dry_run: true },
-            CleanTarget::Bundle { dry_run: true },
-            CleanTarget::Rustup { dry_run: true },
-            CleanTarget::Simulator { dry_run: true },
-            CleanTarget::Gradle { dry_run: true },
-            CleanTarget::Huggingface { dry_run: true },
-            CleanTarget::PreCommit { dry_run: true },
-            CleanTarget::JetBrains { dry_run: true },
-            CleanTarget::Downloads { dry_run: true },
-            CleanTarget::VscodeExtensions { dry_run: true },
-            CleanTarget::Maven { dry_run: true },
-            CleanTarget::Terraform { dry_run: true },
-            CleanTarget::Flutter { dry_run: true },
-            CleanTarget::Volta { dry_run: true },
-            CleanTarget::Sbt { dry_run: true },
-            CleanTarget::TreeSitter { dry_run: true },
-            CleanTarget::OrphanContainers { dry_run: true },
-            CleanTarget::LibraryCaches { dry_run: true },
-            CleanTarget::AppSupport { dry_run: true },
-        ];
-        let resolved: std::collections::HashSet<&str> = variants
-            .iter()
-            .map(|v| {
-                // Both calls must never panic for any variant.
-                let name = v.command_name();
-                let _dry = v.dry_run();
-                assert!(
-                    !name.is_empty(),
-                    "command_name must be non-empty for {name:?}"
-                );
-                name
-            })
-            .collect();
-        // The enumerated variants must cover every registered CLI name, so a
-        // future table addition cannot silently skip this pin.
-        for (cli, _) in SUPPORTED_TARGETS.iter().chain(extra_targets()) {
-            assert!(
-                resolved.contains(cli),
-                "clean target {cli} is missing from the variant pin list"
-            );
+    fn all_targets_is_the_supported_special_name_set() {
+        // Name-set pin (PBI-82 Phase 3): the 55-variant correspondence list
+        // is gone. command_name()/dry_run()/is_special() are generated with
+        // `_`-free exhaustive matches from the same definition table, so a
+        // variant added to the table can never fall into a catch-all at
+        // compile time (and removing a row's cli-name drops the build). What
+        // stays here is the NAME set: the generated ALL_TARGETS is exactly
+        // SUPPORTED_TARGETS + SPECIAL_TARGETS, with no overlap and no
+        // duplicates.
+        let names: Vec<&str> = ALL_TARGETS.iter().map(|(n, _)| *n).collect();
+        let supported: std::collections::HashSet<&str> =
+            SUPPORTED_TARGETS.iter().map(|(n, _)| *n).collect();
+        let special: std::collections::HashSet<&str> =
+            SPECIAL_TARGETS.iter().map(|(n, _)| *n).collect();
+        let n = names.len();
+        let mut sorted = names;
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(sorted.len(), n, "duplicate target name in ALL_TARGETS");
+        assert_eq!(
+            ALL_TARGETS.len(),
+            SUPPORTED_TARGETS.len() + SPECIAL_TARGETS.len(),
+            "ALL_TARGETS must be the union of the two table sections"
+        );
+        for name in &supported {
+            assert!(!special.contains(name), "registered twice: {name}");
         }
     }
 
@@ -1965,9 +1938,9 @@ mod tests {
         // (the macro table's cli name) to run_and_exit; the dispatched
         // cleaner's own name() must equal it, or `clean <target>` and
         // `clean all` would write history rows under two names. Rename the
-        // cleaner side only and this pin fails. extra_targets() is
-        // deliberately not chained: its names are the special targets,
-        // which carry no cleaner in standard_cleaners().
+        // cleaner side only and this pin fails. SUPPORTED_TARGETS is
+        // deliberately not chained with SPECIAL_TARGETS: the special
+        // targets carry no cleaner in standard_cleaners().
         let tmp = tempfile::TempDir::new().unwrap();
         let cleaners = standard_cleaners(tmp.path(), &config::Config::default());
         let names: std::collections::HashSet<&str> = cleaners.iter().map(|c| c.name()).collect();
@@ -2123,9 +2096,8 @@ mod tests {
         let tmp = tempfile::TempDir::new().unwrap();
         let cleaners = all_cleaners(tmp.path(), &config::Config::default());
         let names = names_of(&cleaners);
-        let missing: Vec<&str> = SUPPORTED_TARGETS
+        let missing: Vec<&str> = ALL_TARGETS
             .iter()
-            .chain(extra_targets())
             .map(|(cli, _)| *cli)
             .filter(|cli| !NOT_SCANNED.contains(cli))
             .filter(|cli| !names.contains(cli))
@@ -2143,7 +2115,7 @@ mod tests {
         let tmp = tempfile::TempDir::new().unwrap();
         let cleaners = all_cleaners(tmp.path(), &config::Config::default());
         let names = names_of(&cleaners);
-        for (cli, _) in SUPPORTED_TARGETS.iter().chain(extra_targets()) {
+        for (cli, _) in ALL_TARGETS.iter() {
             if NOT_SCANNED.contains(cli) {
                 continue;
             }
@@ -2287,11 +2259,7 @@ mod tests {
             .find(|c| c.name() == "library-caches")
             .unwrap();
         assert!(!c.auto_clean_allowed());
-        let names: Vec<&str> = SUPPORTED_TARGETS
-            .iter()
-            .chain(extra_targets())
-            .map(|(n, _)| *n)
-            .collect();
+        let names: Vec<&str> = ALL_TARGETS.iter().map(|(n, _)| *n).collect();
         assert!(names.contains(&"library-caches"));
         assert!(names.contains(&"caches"));
         assert_eq!(
@@ -2447,11 +2415,8 @@ mod tests {
     fn managed_patterns_clean_targets_are_registered() {
         // Correspondence table test: every path the explorer marks as managed
         // must map to a target that actually exists in the registry.
-        let registered: std::collections::HashSet<&str> = SUPPORTED_TARGETS
-            .iter()
-            .chain(extra_targets())
-            .map(|(n, _)| *n)
-            .collect();
+        let registered: std::collections::HashSet<&str> =
+            ALL_TARGETS.iter().map(|(n, _)| *n).collect();
         for pat in explorer::MANAGED_PATTERNS {
             assert!(
                 registered.contains(pat.clean_target),
@@ -2467,11 +2432,8 @@ mod tests {
         // a registered clean target (single source of truth: the main.rs macro
         // table plus extra_targets). EXCLUDED_PREFIXES also carries the
         // "os-managed" marker, which is never dispatched and checked separately.
-        let registered: std::collections::HashSet<&str> = SUPPORTED_TARGETS
-            .iter()
-            .chain(extra_targets())
-            .map(|(n, _)| *n)
-            .collect();
+        let registered: std::collections::HashSet<&str> =
+            ALL_TARGETS.iter().map(|(n, _)| *n).collect();
         for (_, target) in cleaners::library_caches::EXCLUDED_NAMES {
             assert!(
                 registered.contains(target),

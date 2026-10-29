@@ -353,46 +353,6 @@ pub trait Cleaner: Send + Sync {
     }
 }
 
-// Builtin target names that live outside the main.rs macro table (shared with
-// the library's correspondence-table tests and `main`'s PBI metadata).
-pub fn extra_targets() -> &'static [(&'static str, &'static str)] {
-    &[
-        (
-            "caches",
-            "All generic caches (bun/go/pip/node-gyp/npm/yarn/pnpm)",
-        ),
-        ("logs", "Log files older than N days"),
-        ("xcode", "Xcode DerivedData project directories"),
-        ("trash", "~/.Trash size (scan only)"),
-        ("ollama", "Ollama model cache"),
-        (
-            "library-logs",
-            "Analyze and clean ~/Library/Logs/ with heuristic recommendations",
-        ),
-        ("device-support", "Xcode DeviceSupport old version cleanup"),
-        (
-            "ios-backup",
-            "iOS device backups (irreversible — backed up to Trash)",
-        ),
-        (
-            "apfs-snapshot",
-            "APFS local Time Machine snapshots (tmutil deletelocalsnapshot)",
-        ),
-        (
-            "vm-swap",
-            "/private/var/vm swap files (report only; re-initialized on reboot)",
-        ),
-        (
-            "all",
-            "Explicit full clean (Safe targets; --include-manual for the rest)",
-        ),
-        (
-            "project-artifacts",
-            "Stale project artifacts (node_modules / target / .build with manifests)",
-        ),
-    ]
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
