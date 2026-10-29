@@ -327,7 +327,9 @@ define_cleaners! {
     help_template = "\n{name} {version}\n{about-with-newline}\n{usage-heading} {usage}\n\n{all-args}\n"
 )]
 struct Cli {
-    /// Non-interactive: clean all pruneable caches without prompting
+    /// Non-interactive: clean all pruneable caches without prompting.
+    /// With --permanent, one final "Are you sure?" confirmation still runs;
+    /// declining it (or a closed stdin) exits non-zero.
     #[arg(long)]
     yes: bool,
     /// Permanently delete files instead of moving to Trash.

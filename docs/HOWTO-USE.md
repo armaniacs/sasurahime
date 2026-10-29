@@ -256,7 +256,8 @@ sasurahime --yes
 
 Files are moved to Trash by default (see "Trash mode" below). If you
 combine `--yes` with `--permanent`, a confirmation prompt is shown before
-permanent deletion proceeds.
+permanent deletion proceeds; declining it (or reaching EOF on a redirected
+stdin) aborts with a non-zero exit code.
 
 After cleaning, the Tip block and auto-quit prompts are shown (the prompts still require interactive input, so in a fully non-interactive pipeline redirect stdin from `/dev/null` to suppress them).
 

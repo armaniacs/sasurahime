@@ -462,3 +462,49 @@ fn yes_flag_never_runs_ios_backup() {
     let stdout = String::from_utf8_lossy(&scan.stdout);
     assert!(stdout.contains("ios-backup"), "stdout:\n{stdout}");
 }
+
+#[test]
+fn yes_permanent_abort_at_confirmation_exits_non_zero() {
+    // PBI 69: an unattended `--yes --permanent` run that reaches EOF at
+    // the "Are you sure?" confirmation aborts. The abort must exit
+    // non-zero so a script can tell it from a completed run (it used to
+    // exit 0 and look like success).
+    let tmp = TempDir::new().unwrap();
+    let bin_dir = tmp.path().join("bin");
+    fs::create_dir_all(&bin_dir).unwrap();
+
+    // A minimal uv cache so at least one Safe target is pruneable and the
+    // permanent-deletion confirmation actually appears.
+    let uv_cache = tmp.path().join(".cache/uv/archive-v0");
+    fs::create_dir_all(&uv_cache).unwrap();
+    fs::write(uv_cache.join("dummy"), b"x".repeat(1024)).unwrap();
+
+    for tool in &[
+        "uv", "brew", "mise", "bun", "go", "pip", "npm", "yarn", "pnpm",
+    ] {
+        install_fake_tool(&bin_dir, tool);
+    }
+
+    let original_path = std::env::var("PATH").unwrap_or_default();
+    // `.output()` gives no stdin at all: an unattended run reads EOF.
+    let output = sasurahime(tmp.path())
+        .env("PATH", format!("{}:{original_path}", bin_dir.display()))
+        .args(["--permanent", "--yes"])
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("Are you sure"),
+        "the permanent confirmation must appear before the abort:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("Aborted"),
+        "the abort line must be shown:\n{stdout}"
+    );
+    assert!(
+        !output.status.success(),
+        "an aborted run must exit non-zero so scripts detect the failure, got: {:?}",
+        output.status.code()
+    );
+}

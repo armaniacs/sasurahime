@@ -27,6 +27,17 @@ All notable changes to sasurahime will be documented in this file. The format is
 
 ### Changed
 
+- `clean colima` and `clean all --include-manual` refuse the `~/.colima`
+  fallback delete on a non-TTY stdin (the same floor as ios-backup and
+  apfs-snapshot): colima's full deletion — `~/.colima` with the VM's disk
+  images — is TTY-only, so an unattended run now prints the standard
+  "not a terminal" remedy and deletes nothing instead of deleting
+  unconfirmed. A `colima prune` with the CLI installed still runs, and the
+  TTY confirm prompt is unchanged.
+- `--yes --permanent` aborting at the "Are you sure?" confirmation now
+  exits non-zero (it exited 0), so a script can tell an aborted run from
+  a completed one. The prompt itself is unchanged, and the `--yes` help
+  no longer claims "without prompting" for `--permanent` runs.
 - `--yes` runs now report the targets an interactive gate skipped
   ("needs an interactive terminal") instead of only a stderr line, so an
   unattended run where ollama models were never cleaned is visible in the

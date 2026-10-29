@@ -301,7 +301,13 @@ pub fn run_auto(cleaners: &[Box<dyn Cleaner>]) -> Result<()> {
         );
         if !confirm("Are you sure? [y/N] ", &mut std::io::stdout())? {
             println!("Aborted.");
-            return Ok(());
+            // PBI 69: the abort must not look like success to a script. An
+            // unattended `--yes --permanent` run that reaches EOF (or answers
+            // n) at this confirmation now exits non-zero, so a caller can
+            // tell an aborted run from a completed one. The TUI's own decline
+            // in run_interactive stays Ok: an interactive user chose to
+            // cancel, which is not a script failure.
+            anyhow::bail!("aborted before permanent deletion");
         }
     }
 

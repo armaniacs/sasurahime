@@ -554,6 +554,14 @@ impl CliCleaner {
                 // Interactive confirmation prompt when configured.
                 // Skipped when running under the interactive TUI (which already
                 // asked for confirmation) or when stdin is not a terminal.
+                // PBI 69 (WHY the skip is not enough): the TUI's suppression
+                // means the user already confirmed on a terminal, but a
+                // non-TTY stdin means the confirm cannot be shown at all.
+                // When this cleaner's destructive action (see the fallback
+                // delete below) is reachable on that non-TTY stdin, the
+                // refusal gate there stops it instead — colima's full
+                // deletion may only run on a TTY where the confirm was
+                // actually answered.
                 if let Some(msg) = &self.confirm_message {
                     if !prompt::confirm_suppressed() && prompt::is_interactive() {
                         // The long explanation prints as normal output and
@@ -581,6 +589,24 @@ impl CliCleaner {
                                 detect_dir.display(),
                                 crate::format::format_bytes(size_before)
                             );
+                            return Ok(CleanResult::empty(self.name()));
+                        }
+                        // PBI 69 (WHY): this fallback delete removes the
+                        // whole detect_dir tree — for colima, ~/.colima
+                        // including the VM's disk images. That full
+                        // deletion is the destructive action this
+                        // cleaner's confirm exists for, and it must only
+                        // run on a TTY: a non-TTY stdin cannot show the
+                        // confirm (the gate above silently skips it), so
+                        // refuse here with the standard remedy instead of
+                        // deleting unconfirmed — the same non-TTY floor
+                        // as ios-backup and apfs-snapshot. Only cleaners
+                        // that declare a confirm are gated: the run-CLI
+                        // path (a real `colima prune`) is a tool
+                        // invocation, not the deletion.
+                        if self.confirm_message.is_some()
+                            && !prompt::gate_interactive(self.display_name)
+                        {
                             return Ok(CleanResult::empty(self.name()));
                         }
                         // TOCTOU mitigation: re-validate fallback delete path.
@@ -1701,6 +1727,33 @@ mod tests {
             !msg.contains("Continue?"),
             "the explanation must not carry the prompt text: dialoguer clears one line, so a wrapped Confirm prompt doubles the message: {msg}"
         );
+    }
+
+    #[test]
+    fn colima_fallback_delete_refuses_non_tty_stdin() {
+        // PBI 69: the fallback delete removes the whole ~/.colima tree, VM
+        // disk images included. colima's full deletion is TTY-only: a
+        // non-TTY stdin cannot show the confirm, so the clean must refuse
+        // with the standard remedy and delete nothing — the same non-TTY
+        // floor as ios-backup / apfs-snapshot.
+        if prompt::is_interactive() {
+            // On a TTY the confirm prompt would block a test run; the TTY
+            // behavior is pinned by the E2E suite instead.
+            return;
+        }
+        let tmp = tempfile::TempDir::new().unwrap();
+        let disk = tmp.path().join(".colima/_lima/colima/disk");
+        fs::create_dir_all(disk.parent().unwrap()).unwrap();
+        fs::write(&disk, b"vm disk bytes").unwrap();
+        let cleaner = CliCleaner::colima_prune(tmp.path(), Box::new(MissingToolRunner));
+        let result = cleaner
+            .clean(false, &crate::progress::DeepSuppressReporter)
+            .expect("the refusal is a skip, not an error");
+        assert_eq!(
+            result.bytes_freed, 0,
+            "the refusal must report zero freed bytes"
+        );
+        assert!(disk.exists(), "the VM disk must survive the refusal");
     }
 
     #[test]

@@ -505,3 +505,43 @@ fn clean_colima_succeeds_when_fstrim_fails() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("fstrim -av"), "{stderr}");
 }
+
+#[test]
+fn clean_all_include_manual_refuses_colima_fallback_on_non_tty() {
+    // PBI 69: with colima not installed, the fallback delete removes the
+    // whole ~/.colima tree (VM disk images included). colima's full
+    // deletion is TTY-only: a non-TTY stdin cannot show the confirm, so
+    // the clean must refuse with the standard remedy and delete nothing
+    // — the same non-TTY floor as ios-backup / apfs-snapshot.
+    let tmp = TempDir::new().unwrap();
+    let colima_dir = tmp.path().join(".colima");
+    let disk = colima_dir.join("_lima/colima/disk");
+    fs::create_dir_all(disk.parent().unwrap()).unwrap();
+    fs::write(&disk, b"vm disk bytes").unwrap();
+
+    // The helper's restricted PATH has no colima, so the fallback delete
+    // is the only reachable path; `.output()` gives a non-TTY stdin.
+    let output = sasurahime(tmp.path())
+        .args(["clean", "all", "--include-manual"])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "a refusal is a skip, not a failure, exit code: {:?}",
+        output.status.code()
+    );
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        combined.contains("[colima] not a terminal"),
+        "colima must be refused with the standard remedy, got:\n{combined}"
+    );
+    assert!(
+        disk.exists(),
+        "the VM disk must survive the non-TTY refusal, got:\n{combined}"
+    );
+}

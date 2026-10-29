@@ -172,8 +172,17 @@ fn yes_does_not_run_project_artifacts() {
     let tmp = TempDir::new().unwrap();
     let project = make_old_project(tmp.path(), "old-app");
 
+    // PBI 69: the run must answer the permanent-deletion confirmation,
+    // otherwise an EOF abort exits non-zero before the skip notice this
+    // test pins. The helper's Command has no write_stdin, so the answer
+    // is piped from a file.
+    let stdin_file = tmp.path().join("yes_stdin.txt");
+    fs::write(&stdin_file, "y\n").unwrap();
+    let stdin = std::process::Stdio::from(fs::File::open(&stdin_file).unwrap());
+
     let output = sasurahime(tmp.path())
         .args(["--permanent", "--yes"])
+        .stdin(stdin)
         .output()
         .unwrap();
     assert!(output.status.success());
