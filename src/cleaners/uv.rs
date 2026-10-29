@@ -261,11 +261,7 @@ mod tests {
             r.skipped[0].reason
         );
         assert_eq!(r.bytes_freed, 0, "a refused path frees nothing");
-        assert_eq!(
-            r.exit_code(),
-            1,
-            "exit 1 rides the skip record, not an Err"
-        );
+        assert_eq!(r.exit_code(), 1, "exit 1 rides the skip record, not an Err");
         let calls = runner.calls.lock().unwrap();
         assert_eq!(
             *calls,

@@ -285,10 +285,7 @@ mod tests {
         assert_eq!(ticks[0].0, dir);
         assert!(result.bytes_freed > 0, "the deletion freed bytes");
         assert!(dir.exists(), "recreate=true must recreate the cache dir");
-        assert!(
-            !dir.join("data.bin").exists(),
-            "the contents must be gone"
-        );
+        assert!(!dir.join("data.bin").exists(), "the contents must be gone");
     }
 
     #[test]

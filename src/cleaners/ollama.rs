@@ -292,11 +292,7 @@ mod tests {
     /// fallback delete is the only seam this setup owns.
     fn fallback_cleaner(tmp: &tempfile::TempDir) -> OllamaCleaner {
         std::fs::create_dir_all(tmp.path().join(".ollama/models")).unwrap();
-        std::fs::write(
-            tmp.path().join(".ollama/models/keep.bin"),
-            vec![0u8; 1024],
-        )
-        .unwrap();
+        std::fs::write(tmp.path().join(".ollama/models/keep.bin"), vec![0u8; 1024]).unwrap();
         OllamaCleaner::new(tmp.path(), Box::new(MockOllamaRunner::not_installed()))
     }
 
@@ -351,11 +347,7 @@ mod tests {
             ..Default::default()
         };
         let r = cleaner
-            .clean(
-                false,
-                &crate::progress::DeepSuppressReporter,
-                &opts,
-            )
+            .clean(false, &crate::progress::DeepSuppressReporter, &opts)
             .expect("a fatal per-item error must not abort the clean");
         assert_eq!(r.bytes_freed, 0, "a refused path frees nothing");
         assert!(
