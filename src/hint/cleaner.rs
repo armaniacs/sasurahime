@@ -1,8 +1,11 @@
+use crate::cleaner::{CleanOptions, CleanResult, Cleaner, Risk, ScanResult, ScanStatus};
 use crate::command::CommandRunner;
 use crate::format::format_bytes;
 use crate::interactive::is_yes_answer;
-use std::path::Path;
+use crate::progress::ProgressReporter;
+use std::path::{Path, PathBuf};
 
+use super::detector::collect_hints;
 use super::{base_path, HintEntry, ProcessHint, PromptReader};
 
 const QUIT_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
@@ -160,28 +163,181 @@ pub fn auto_clean_hint(
     Ok(result)
 }
 
-/// For each hint that can be cleaned, ask the user and clean.
+/// True when `name` is a KNOWN_ENTRIES display name a `--sub` may select.
+/// Skip entries are excluded: they are never cleaned (detector.rs), so
+/// naming one is an unknown sub-target. One owner for the sub-target
+/// validation shared by the `clean hints` CLI arm and the seam.
+pub fn is_known_hint_name(name: &str) -> bool {
+    super::apps::KNOWN_ENTRIES
+        .iter()
+        .any(|e| !e.skip && e.display_name == name)
+}
+
+/// The KNOWN_ENTRIES hints cleaner (PBI-83): the whole hint table as ONE
+/// registry entry, so hint cleaning rides the same Cleaner-trait flow as
+/// every other target. `detect()` is the `collect_hints` aggregate, `clean()`
+/// is the quit → ledger → relaunch integration (PBI 80's `auto_clean_hint`)
+/// per selected hint, and `sub_targets()` lists the per-app display names
+/// the TUI and `--sub` both name. One cleaner, one name ("hints"): the
+/// registry pin stays intact, and the per-app quit/relaunch metadata never
+/// leaves the compile-time KNOWN_ENTRIES table the `|home, config|` factory
+/// signature cannot carry.
+pub struct KnownAppHintsCleaner {
+    home: PathBuf,
+    runner: Box<dyn CommandRunner>,
+    /// Sub-target filter: display names from `sub_targets()`. `None` cleans
+    /// every hint above its threshold; `Some` cleans only the named entries.
+    subs: Option<Vec<String>>,
+}
+
+impl KnownAppHintsCleaner {
+    pub fn new(home: &Path, runner: Box<dyn CommandRunner>) -> Self {
+        Self {
+            home: home.to_path_buf(),
+            runner,
+            subs: None,
+        }
+    }
+
+    /// Scopes the clean to the named entries (`clean hints --sub` and the
+    /// TUI's sub-target selection). Names are validated by the caller
+    /// (`is_known_hint_name`) before they reach here: an unknown name is an
+    /// error at the arm/seam, never a silent no-op clean (PBI 63 shape).
+    pub fn with_sub_names(mut self, subs: Vec<String>) -> Self {
+        self.subs = Some(subs);
+        self
+    }
+
+    /// The hints this cleaner would act on: the `collect_hints` aggregate
+    /// (above-threshold, skip entries excluded, largest first, top 5).
+    fn collect(&self) -> Vec<ProcessHint> {
+        collect_hints(&self.home, &*self.runner)
+    }
+}
+
+impl Cleaner for KnownAppHintsCleaner {
+    fn name(&self) -> &'static str {
+        "hints"
+    }
+
+    /// Moderate (never Safe): hint cleaning quits running apps and removes
+    /// their caches, so it never runs unattended and needs an explicit
+    /// selection (`clean hints`, `--sub`, or the TUI).
+    fn risk(&self) -> Risk {
+        Risk::Moderate
+    }
+
+    /// No prompt inside the cleaner: the prompt is the entry point's job
+    /// (the scan tip's offer). `clean hints` is itself an explicit selection.
+    fn interactive_gated(&self) -> bool {
+        false
+    }
+
+    fn detect(&self) -> ScanResult {
+        let hints = self.collect();
+        let total: u64 = hints.iter().map(|h| h.size_bytes).sum();
+        let mut r = ScanResult::new(
+            self.name(),
+            if total > 0 {
+                ScanStatus::Pruneable(total)
+            } else {
+                ScanStatus::NotFound
+            },
+        );
+        if crate::context::is_verbose() {
+            r = r.with_target(
+                "Library/Caches, Library/Application Support, Library/Logs (known app hints)",
+            );
+        }
+        r
+    }
+
+    fn sub_targets(&self) -> Vec<(&'static str, u64)> {
+        // The xcode precedent: display name + scanned bytes, the list the
+        // TUI selection and `clean hints --sub` both name.
+        self.collect()
+            .into_iter()
+            .map(|h| (h.entry.display_name, h.size_bytes))
+            .collect()
+    }
+
+    fn clean(
+        &self,
+        dry_run: bool,
+        _reporter: &dyn ProgressReporter,
+        opts: &CleanOptions,
+    ) -> anyhow::Result<CleanResult> {
+        let hints = self.collect();
+        let selected: Vec<&ProcessHint> = match &self.subs {
+            Some(subs) => hints
+                .iter()
+                .filter(|h| subs.iter().any(|s| *s == h.entry.display_name))
+                .collect(),
+            None => hints.iter().collect(),
+        };
+
+        let mut summary = CleanResult::empty(self.name());
+
+        // The top safety contract inside the cleaner too: a dry run never
+        // reaches the quit/delete/relaunch seam — it lists what would be
+        // cleaned and returns a zero result.
+        if dry_run {
+            for hint in &selected {
+                let size_str = format_bytes(hint.size_bytes);
+                if hint.running {
+                    eprintln!(
+                        "[dry-run] would quit and clear {} ({size_str})",
+                        hint.entry.display_name
+                    );
+                } else {
+                    eprintln!(
+                        "[dry-run] would clear {} ({size_str})",
+                        hint.entry.display_name
+                    );
+                }
+            }
+            return Ok(summary);
+        }
+
+        for hint in selected {
+            match auto_clean_hint(hint, &self.home, &*self.runner, opts.trash_mode) {
+                Ok(result) => {
+                    summary.bytes_freed += result.bytes_freed;
+                    summary.uses_trash |= result.uses_trash;
+                    summary.skipped.extend(result.skipped);
+                }
+                // A quit timeout is a prose error, not a ledger skip: the
+                // loop continues (the offer's former warn-and-continue
+                // policy), frees nothing for this hint, and never marks it
+                // skipped — the all-skipped exit-code contract only counts
+                // ledger skips.
+                Err(e) => eprintln!("  Error: {e}"),
+            }
+        }
+        Ok(summary)
+    }
+}
+
+/// The scan-tip offer, reduced to selection collection (PBI-83): ask the
+/// user per actionable hint and return the accepted entries. The execution
+/// is the caller's job — it rides the CleanByName seam through the
+/// [`KnownAppHintsCleaner`], so the deletion, dry_run and the history guard
+/// follow the same Cleaner-trait flow contract as every other cleaner.
 ///
 /// A dry run is the top safety contract: it never prompts (a `y` sitting in
-/// stdin is never read) and never reaches the quit/delete/relaunch seam — it
-/// prints one dry-run line per hint and returns a zero result (PBI 80).
+/// stdin is never read) and collects nothing — it prints one dry-run line
+/// per hint and returns an empty selection (PBI 80).
 ///
-/// Returns the aggregate of what the accepted hints actually cleaned, named
-/// "hints" (1 cleaner = 1 name), so the caller can ride the shared history
-/// guard and exit non-zero when every attempted deletion was skipped.
-///
-/// For running apps with a configured `quit_app`, the app is quit first, caches
-/// are deleted, and the app is optionally relaunched.  For non-running apps the
-/// cache directories are deleted directly without any quit/relaunch step.
+/// For running apps with a configured `quit_app`, and for non-running apps
+/// alike, the accepted entries come back as the selection; the quit →
+/// delete → relaunch steps live in the cleaner's clean() (one loop, no
+/// drift).
 pub fn offer_auto_clean(
     hints: &[ProcessHint],
-    home: &Path,
-    runner: &dyn CommandRunner,
-    prompt: &dyn PromptReader,
-    mode: crate::trash::TrashMode,
     dry_run: bool,
-) -> crate::cleaner::CleanResult {
-    let mut summary = crate::cleaner::CleanResult::empty("hints");
+    prompt: &dyn PromptReader,
+) -> Vec<&'static HintEntry> {
+    let mut accepted: Vec<&'static HintEntry> = Vec::new();
 
     let actionable: Vec<_> = hints
         .iter()
@@ -189,7 +345,7 @@ pub fn offer_auto_clean(
         .collect();
 
     if actionable.is_empty() {
-        return summary;
+        return accepted;
     }
 
     if dry_run {
@@ -207,7 +363,7 @@ pub fn offer_auto_clean(
                 );
             }
         }
-        return summary;
+        return accepted;
     }
 
     for hint in actionable {
@@ -223,21 +379,13 @@ pub fn offer_auto_clean(
                 hint.entry.display_name
             );
         }
-        match prompt.read_line() {
-            Some(input) if is_yes_answer(&input) => {
-                match auto_clean_hint(hint, home, runner, mode) {
-                    Ok(result) => {
-                        summary.bytes_freed += result.bytes_freed;
-                        summary.uses_trash |= result.uses_trash;
-                        summary.skipped.extend(result.skipped);
-                    }
-                    Err(e) => eprintln!("  Error: {e}"),
-                }
+        if let Some(input) = prompt.read_line() {
+            if is_yes_answer(&input) {
+                accepted.push(hint.entry);
             }
-            _ => {}
         }
     }
-    summary
+    accepted
 }
 
 /// The line printed after a hint's delete loop: `  [OK]` only when every

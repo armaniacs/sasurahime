@@ -2,7 +2,7 @@ pub mod apps;
 mod cleaner;
 mod detector;
 
-pub use cleaner::{offer_auto_clean, print_hints};
+pub use cleaner::{is_known_hint_name, offer_auto_clean, print_hints, KnownAppHintsCleaner};
 pub(crate) use cleaner::{quit_app_and_wait, relaunch_app};
 pub use detector::collect_hints;
 pub(crate) use detector::is_running;
@@ -68,6 +68,7 @@ fn base_path(home: &Path, base: BaseDir) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cleaner::Cleaner;
     use crate::command::CommandRunner;
     use anyhow::Result;
     use cleaner::auto_clean_hint;
@@ -318,8 +319,13 @@ mod tests {
 
     use std::sync::Mutex;
 
+    /// Shared call log: clones observe the same commands (the cleaner owns
+    /// the runner, the test keeps a watcher for its recordings).
+    type CallLog = std::sync::Arc<Mutex<Vec<(String, Vec<String>)>>>;
+
+    #[derive(Clone)]
     struct RecordingRunner {
-        calls: Mutex<Vec<(String, Vec<String>)>>,
+        calls: CallLog,
         initially_running: Vec<String>,
         gone_after_pgrep_calls: usize,
         /// Programs whose `run` exits non-zero with the given code (PBI 65:
@@ -330,7 +336,7 @@ mod tests {
     impl RecordingRunner {
         fn new(running: &[&str], gone_after: usize) -> Self {
             Self {
-                calls: Mutex::new(vec![]),
+                calls: std::sync::Arc::new(Mutex::new(vec![])),
                 initially_running: running.iter().map(|s| s.to_string()).collect(),
                 gone_after_pgrep_calls: gone_after,
                 failure_codes: vec![],
@@ -521,11 +527,11 @@ mod tests {
     }
 
     #[test]
-    fn offer_auto_clean_calls_auto_clean_when_user_answers_y() {
-        let tmp = tempfile::tempdir().unwrap();
-        let home = tmp.path();
-        make_dirs(home, BaseDir::AppSupport, &["Code/Cache"]);
-
+    fn offer_auto_clean_collects_the_accepted_entry_when_user_answers_y() {
+        // PBI-83: the offer is selection collection only — a `y` returns the
+        // hinted entry in the selection and never executes a deletion
+        // command; the execution rides the CleanByName seam through the
+        // hints cleaner.
         let runner = RecordingRunner::new(&["Code"], 1);
         let prompt = FakePrompt::new(&["y"]);
         let hint = ProcessHint {
@@ -534,24 +540,23 @@ mod tests {
             running: true,
         };
 
-        offer_auto_clean(
-            &[hint],
-            home,
-            &runner,
-            &prompt,
-            crate::trash::TrashMode::Permanent,
-            false, // dry_run
+        let selection = offer_auto_clean(&[hint], false, &prompt);
+        assert_eq!(selection.len(), 1, "the y answer must collect the entry");
+        assert!(
+            std::ptr::eq(selection[0], &VSCODE_ENTRY),
+            "the selection must carry the hinted entry"
         );
-        let calls = runner.recorded_calls();
-        assert!(calls.iter().any(|(p, _)| p == "osascript"));
+        assert!(
+            !runner
+                .recorded_calls()
+                .iter()
+                .any(|(p, _)| p == "osascript"),
+            "the offer must never execute: the deletion rides the seam"
+        );
     }
 
     #[test]
-    fn offer_auto_clean_skips_auto_clean_when_user_answers_n() {
-        let tmp = tempfile::tempdir().unwrap();
-        let home = tmp.path();
-        make_dirs(home, BaseDir::AppSupport, &["Code/Cache"]);
-
+    fn offer_auto_clean_collects_nothing_when_user_answers_n() {
         let runner = RecordingRunner::new(&["Code"], 1);
         let prompt = FakePrompt::new(&["n"]);
         let hint = ProcessHint {
@@ -560,24 +565,21 @@ mod tests {
             running: true,
         };
 
-        offer_auto_clean(
-            &[hint],
-            home,
-            &runner,
-            &prompt,
-            crate::trash::TrashMode::Permanent,
-            false, // dry_run
+        let selection = offer_auto_clean(&[hint], false, &prompt);
+        assert!(selection.is_empty(), "an n answer must collect nothing");
+        assert!(
+            !runner
+                .recorded_calls()
+                .iter()
+                .any(|(p, _)| p == "osascript"),
+            "a declined hint must never be executed"
         );
-        let calls = runner.recorded_calls();
-        assert!(!calls.iter().any(|(p, _)| p == "osascript"));
     }
 
     #[test]
     fn offer_auto_clean_prompts_for_non_running_hints() {
-        let tmp = tempfile::tempdir().unwrap();
-        let home = tmp.path();
-        make_dirs(home, BaseDir::AppSupport, &["Code/Cache"]);
-
+        // A non-running hint is still offered: the quit branch is a running
+        // concern, the offer is a selection concern.
         let runner = RecordingRunner::new(&[], 0);
         let prompt = FakePrompt::new(&["y"]);
         let hint = ProcessHint {
@@ -586,34 +588,21 @@ mod tests {
             running: false,
         };
 
-        offer_auto_clean(
-            &[hint],
-            home,
-            &runner,
-            &prompt,
-            crate::trash::TrashMode::Permanent,
-            false, // dry_run
-        );
+        let selection = offer_auto_clean(&[hint], false, &prompt);
+        assert_eq!(selection.len(), 1, "a non-running hint is still offered");
         let calls = runner.recorded_calls();
-        assert!(!calls.iter().any(|(p, _)| p == "osascript"));
-        assert!(!calls.iter().any(|(p, _)| p == "open"));
+        assert!(
+            !calls.iter().any(|(p, _)| p == "osascript") && !calls.iter().any(|(p, _)| p == "open"),
+            "the offer must never execute, got: {calls:?}"
+        );
     }
 
     #[test]
-    fn offer_auto_clean_dry_run_prompts_nothing_and_invokes_no_deletion_command() {
+    fn offer_auto_clean_dry_run_collects_nothing_and_invokes_no_deletion_command() {
         // PBI 80 dry-run pin: a dry run is the top safety contract — it never
         // prompts (the `y` sitting in the prompt's answer queue is never
-        // read) and never reaches the quit/delete/relaunch seam. Recording
-        // Runner must record no osascript / rm / chflags / open, and no file
-        // may change.
-        let tmp = tempfile::tempdir().unwrap();
-        let home = tmp.path();
-        make_dirs(
-            home,
-            BaseDir::AppSupport,
-            &["Code/Cache", "Code/CachedExtensionVSIXs", "Code/CachedData"],
-        );
-
+        // read) and never reaches the quit/delete/relaunch seam. The offer
+        // collects nothing, so the caller makes no seam call at all.
         let runner = RecordingRunner::new(&["Code"], 1);
         let prompt = FakePrompt::new(&["y"]);
         let running_hint = ProcessHint {
@@ -627,15 +616,177 @@ mod tests {
             running: false,
         };
 
-        offer_auto_clean(
-            &[running_hint, idle_hint],
-            home,
-            &runner,
-            &prompt,
-            crate::trash::TrashMode::Permanent,
-            true, // dry_run
-        );
+        let selection = offer_auto_clean(&[running_hint, idle_hint], true, &prompt);
+        assert!(selection.is_empty(), "a dry run must collect nothing");
         let calls = runner.recorded_calls();
+        for program in ["osascript", "rm", "chflags", "open"] {
+            assert!(
+                !calls.iter().any(|(p, _)| p == program),
+                "a dry run must never invoke {program}, got: {calls:?}"
+            );
+        }
+        assert_eq!(
+            prompt.responses.borrow().len(),
+            1,
+            "the y answer must never be consumed: a dry run never prompts"
+        );
+    }
+
+    // ── KnownAppHintsCleaner (PBI-83) ────────────────────────────────────
+
+    const DIAGNOSTIC_BYTES: usize = 2_097_152;
+
+    #[test]
+    fn hints_cleaner_pins_name_risk_and_gate() {
+        // PBI-83 registry pins: 1 cleaner = 1 name, Moderate (never Safe),
+        // no prompt inside the cleaner (the prompt is the entry point's job).
+        let tmp = tempfile::tempdir().unwrap();
+        let c =
+            cleaner::KnownAppHintsCleaner::new(tmp.path(), Box::new(RecordingRunner::new(&[], 0)));
+        assert_eq!(c.name(), "hints");
+        assert_eq!(
+            c.risk(),
+            crate::cleaner::Risk::Moderate,
+            "hints must never be Safe"
+        );
+        assert!(!c.auto_clean_allowed(), "Moderate never runs unattended");
+        assert!(
+            !c.interactive_gated(),
+            "the cleaner must not gate on a prompt"
+        );
+    }
+
+    #[test]
+    fn hints_cleaner_detect_aggregates_the_hints_as_pruneable() {
+        // detect() = the collect_hints aggregate: Pruneable(sum), no side
+        // effects. 2 MB of DiagnosticReports debris > the 1 MB threshold.
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path();
+        make_dirs_with_files(
+            home,
+            BaseDir::Logs,
+            &["DiagnosticReports"],
+            DIAGNOSTIC_BYTES,
+        );
+
+        let c = cleaner::KnownAppHintsCleaner::new(home, Box::new(RecordingRunner::new(&[], 0)));
+        let result = c.detect();
+        assert_eq!(result.name, "hints");
+        assert_eq!(
+            result.bytes_for_test(),
+            DIAGNOSTIC_BYTES as u64,
+            "detect must aggregate the collect_hints sum"
+        );
+    }
+
+    #[test]
+    fn hints_cleaner_detect_reports_not_found_without_debris() {
+        let tmp = tempfile::tempdir().unwrap();
+        let c =
+            cleaner::KnownAppHintsCleaner::new(tmp.path(), Box::new(RecordingRunner::new(&[], 0)));
+        let result = c.detect();
+        assert!(
+            matches!(result.status, crate::cleaner::ScanStatus::NotFound),
+            "no debris above any threshold must report not found, got: {:?}",
+            result.status
+        );
+    }
+
+    #[test]
+    fn hints_cleaner_sub_targets_return_display_name_and_size() {
+        // sub_targets() = display_name + size, the xcode precedent: the TUI
+        // selection list carries the scanned bytes.
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path();
+        make_dirs_with_files(
+            home,
+            BaseDir::Logs,
+            &["DiagnosticReports"],
+            DIAGNOSTIC_BYTES,
+        );
+        make_dirs_with_files(home, BaseDir::Logs, &["CrashReporter"], 1_310_720);
+
+        let c = cleaner::KnownAppHintsCleaner::new(home, Box::new(RecordingRunner::new(&[], 0)));
+        assert_eq!(
+            c.sub_targets(),
+            vec![
+                ("Diagnostic Reports", DIAGNOSTIC_BYTES as u64),
+                ("Crash Reporter logs", 1_310_720),
+            ],
+            "sub_targets must list display_name + size, largest first"
+        );
+    }
+
+    #[test]
+    fn hints_cleaner_clean_runs_the_quit_delete_relaunch_flow() {
+        // clean() = quit → ledger → relaunch (the PBI 80 integration
+        // function) per selected hint. A running VSCode hint above the 64 MB
+        // threshold: osascript first, then the deletion, then the relaunch.
+        const SUFFIX_BYTES: usize = 22 * 1_048_576;
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path();
+        make_dirs_with_files(
+            home,
+            BaseDir::AppSupport,
+            &["Code/Cache", "Code/CachedExtensionVSIXs", "Code/CachedData"],
+            SUFFIX_BYTES,
+        );
+
+        let runner = RecordingRunner::new(&["Code"], 1);
+        let c = cleaner::KnownAppHintsCleaner::new(home, Box::new(runner));
+        let result = c
+            .clean(
+                false,
+                &crate::progress::DeepSuppressReporter,
+                &crate::cleaner::CleanOptions {
+                    trash_mode: crate::trash::TrashMode::Permanent,
+                    ..Default::default()
+                },
+            )
+            .expect("clean must succeed");
+        assert_eq!(result.name, "hints");
+        assert_eq!(
+            result.bytes_freed,
+            3 * SUFFIX_BYTES as u64,
+            "the freed bytes are the ledger's sum"
+        );
+        assert!(!home.join("Library/Application Support/Code/Cache").exists());
+        assert!(!home
+            .join("Library/Application Support/Code/CachedExtensionVSIXs")
+            .exists());
+        assert!(!home
+            .join("Library/Application Support/Code/CachedData")
+            .exists());
+    }
+
+    #[test]
+    fn hints_cleaner_clean_dry_run_never_deletes() {
+        // The top safety contract inside the cleaner too: a dry run must not
+        // quit, delete or relaunch anything.
+        const SUFFIX_BYTES: usize = 22 * 1_048_576;
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path();
+        make_dirs_with_files(
+            home,
+            BaseDir::AppSupport,
+            &["Code/Cache", "Code/CachedExtensionVSIXs", "Code/CachedData"],
+            SUFFIX_BYTES,
+        );
+
+        let runner = RecordingRunner::new(&["Code"], 1);
+        let call_watcher = runner.clone();
+        let c = cleaner::KnownAppHintsCleaner::new(home, Box::new(runner));
+        let result = c
+            .clean(
+                true,
+                &crate::progress::DeepSuppressReporter,
+                &crate::cleaner::CleanOptions {
+                    trash_mode: crate::trash::TrashMode::Permanent,
+                    ..Default::default()
+                },
+            )
+            .expect("dry run must succeed");
+        let calls = call_watcher.recorded_calls();
         for program in ["osascript", "rm", "chflags", "open"] {
             assert!(
                 !calls.iter().any(|(p, _)| p == program),
@@ -653,41 +804,81 @@ mod tests {
             "nothing may be deleted in dry-run mode"
         );
         assert_eq!(
-            prompt.responses.borrow().len(),
-            1,
-            "the y answer must never be consumed: a dry run never prompts"
+            result.bytes_freed, 0,
+            "a dry run must not report freed bytes"
         );
     }
 
     #[test]
-    fn offer_auto_clean_aggregates_a_clean_result_for_history() {
-        // PBI 80 history pin: the offer returns what the hint path actually
-        // freed, so run_hint_flow can ride the shared history guard with
-        // label = "hints" (1 cleaner = 1 name). The deletion rides the same
-        // seam the ledger owns, so a skipped entry is never summed.
+    fn hints_cleaner_clean_with_sub_cleans_only_that_entry() {
+        // --sub / the TUI's sub-target selection: only the named entry is
+        // cleaned, the other candidate survives.
         let tmp = tempfile::tempdir().unwrap();
         let home = tmp.path();
-        make_dirs_with_files(home, BaseDir::Caches, &["x"], 4096);
+        make_dirs_with_files(
+            home,
+            BaseDir::Logs,
+            &["DiagnosticReports"],
+            DIAGNOSTIC_BYTES,
+        );
+        make_dirs_with_files(home, BaseDir::Logs, &["CrashReporter"], 1_310_720);
 
         let runner = RecordingRunner::new(&[], 0);
-        let prompt = FakePrompt::new(&["y"]);
-        let hint = ProcessHint {
-            entry: &NO_QUIT_ENTRY,
-            size_bytes: 4096,
-            running: false,
-        };
-
-        let result = offer_auto_clean(
-            &[hint],
-            home,
-            &runner,
-            &prompt,
-            crate::trash::TrashMode::Permanent,
-            false, // dry_run
+        let c = cleaner::KnownAppHintsCleaner::new(home, Box::new(runner))
+            .with_sub_names(vec!["Diagnostic Reports".to_string()]);
+        let result = c
+            .clean(
+                false,
+                &crate::progress::DeepSuppressReporter,
+                &crate::cleaner::CleanOptions {
+                    trash_mode: crate::trash::TrashMode::Permanent,
+                    ..Default::default()
+                },
+            )
+            .expect("clean must succeed");
+        assert_eq!(
+            result.bytes_freed, DIAGNOSTIC_BYTES as u64,
+            "only the selected entry's bytes are freed"
         );
+        assert!(
+            !home.join("Library/Logs/DiagnosticReports").exists(),
+            "the selected entry must be cleaned"
+        );
+        assert!(
+            home.join("Library/Logs/CrashReporter").exists(),
+            "the other candidate must survive"
+        );
+    }
+
+    #[test]
+    fn hints_cleaner_clean_returns_the_aggregate_for_history() {
+        // PBI 80 history contract, moved to the cleaner: clean() returns what
+        // the hint path actually freed, named "hints" (1 cleaner = 1 name),
+        // so the seam's run_clean_target rides the shared history guard.
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path();
+        make_dirs_with_files(
+            home,
+            BaseDir::Logs,
+            &["DiagnosticReports"],
+            DIAGNOSTIC_BYTES,
+        );
+
+        let runner = RecordingRunner::new(&[], 0);
+        let c = cleaner::KnownAppHintsCleaner::new(home, Box::new(runner));
+        let result = c
+            .clean(
+                false,
+                &crate::progress::DeepSuppressReporter,
+                &crate::cleaner::CleanOptions {
+                    trash_mode: crate::trash::TrashMode::Permanent,
+                    ..Default::default()
+                },
+            )
+            .expect("clean must succeed");
         assert_eq!(result.name, "hints", "the result names the hints cleaner");
         assert_eq!(
-            result.bytes_freed, 4096,
+            result.bytes_freed, DIAGNOSTIC_BYTES as u64,
             "the freed bytes are returned for the history write"
         );
         assert!(
@@ -696,45 +887,42 @@ mod tests {
         );
         assert!(result.skipped.is_empty());
         assert_eq!(result.exit_code(), 0);
-        assert!(
-            !home.join("Library/Caches/x").exists(),
-            "the hint dir must be deleted"
-        );
     }
 
     #[test]
-    fn offer_auto_clean_all_skipped_reports_exit_code_one() {
-        // PBI 70/80 ledger contract: a deletion that fails with a skippable
-        // error is recorded as a skip (the loop continues), and an
+    fn hints_cleaner_clean_reports_exit_code_one_when_every_delete_is_skipped() {
+        // PBI 70/80 ledger contract, moved to the cleaner: a deletion that
+        // fails with a skippable error is recorded as a skip, and an
         // all-skipped result reports failure through CleanResult::exit_code
-        // — run_hint_flow exits 1 on it.
+        // — the seam's run_and_exit and run_hint_flow exit 1 on it.
         let _guard = crate::trash::TrashBackendOverrideGuard::set();
         let tmp = tempfile::tempdir().unwrap();
         let home = tmp.path();
-        make_dirs(home, BaseDir::Caches, &["x"]);
+        make_dirs_with_files(
+            home,
+            BaseDir::Logs,
+            &["DiagnosticReports"],
+            DIAGNOSTIC_BYTES,
+        );
 
         let runner = RecordingRunner::new(&[], 0);
-        let prompt = FakePrompt::new(&["y"]);
-        let hint = ProcessHint {
-            entry: &NO_QUIT_ENTRY,
-            size_bytes: 4096,
-            running: false,
-        };
-
-        let result = offer_auto_clean(
-            &[hint],
-            home,
-            &runner,
-            &prompt,
-            crate::trash::TrashMode::Trash,
-            false, // dry_run
-        );
+        let c = cleaner::KnownAppHintsCleaner::new(home, Box::new(runner));
+        let result = c
+            .clean(
+                false,
+                &crate::progress::DeepSuppressReporter,
+                &crate::cleaner::CleanOptions {
+                    trash_mode: crate::trash::TrashMode::Trash,
+                    ..Default::default()
+                },
+            )
+            .expect("clean must not error on a skipped delete");
         assert_eq!(result.bytes_freed, 0, "a skipped entry is never summed");
         assert!(!result.uses_trash, "a skipped move never claims Trash");
         assert_eq!(result.skipped.len(), 1);
         assert_eq!(result.exit_code(), 1, "all-skipped reports failure");
         assert!(
-            home.join("Library/Caches/x").exists(),
+            home.join("Library/Logs/DiagnosticReports").exists(),
             "the skipped dir survives"
         );
     }
