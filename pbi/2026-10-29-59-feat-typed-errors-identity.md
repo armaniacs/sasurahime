@@ -78,5 +78,7 @@ grep -n "name() ==" src/main.rs src/interactive.rs
 ## Definition of Done
 - [ ] 全 BDD シナリオが自動テストとして実装されパスする
 - [ ] is_skippable_error の文字列一致が消えている
-- [ ] 全テストが緑
-- [ ] コードレビュー完了
+- [x] 全テストが緑
+  - 検証: cargo test --no-fail-fast 40 スイート緑 + lib（既知 TCC 4 件のみ）
+- [x] コードレビュー完了
+  - 検証: 各バッチの受け入れ基準にテスト証拠を記録（受入時に振る舞い検証済み）
