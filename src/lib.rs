@@ -25,6 +25,7 @@ pub mod explorer;
 pub mod format;
 pub mod hint;
 pub mod history;
+pub mod installed_apps;
 pub mod interactive;
 pub mod progress;
 pub mod prompt;

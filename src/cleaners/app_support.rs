@@ -247,31 +247,13 @@ pub struct AppSupportCleaner {
     app_roots: Vec<PathBuf>,
 }
 
-/// The real system roots (`/Applications`, `/System/Applications`, ...) cost
-/// minutes of cold metadata I/O on a fresh CI runner, so there the default
-/// collection limits itself to the HOME-derived root, where fixtures put
-/// their apps. An injected root set (tests, config) is never trimmed.
-fn default_app_roots(home: &Path) -> Vec<PathBuf> {
-    if crate::config::is_ci() {
-        vec![home.join("Applications")]
-    } else {
-        vec![
-            PathBuf::from("/Applications"),
-            PathBuf::from("/Applications/Utilities"),
-            PathBuf::from("/System/Applications"),
-            PathBuf::from("/System/Applications/Utilities"),
-            home.join("Applications"),
-        ]
-    }
-}
-
 impl AppSupportCleaner {
     pub fn new(home: &Path, runner: Box<dyn CommandRunner>) -> Self {
         Self {
             home: home.to_path_buf(),
             runner,
             min_app_bytes: None,
-            app_roots: default_app_roots(home),
+            app_roots: crate::installed_apps::default_app_roots(home),
         }
     }
 
@@ -780,61 +762,12 @@ pub fn matches_installed(dir_name: &str, installed: &InstalledApps) -> bool {
     false
 }
 
-/// An `.app` bundle probe shared with the orphan-containers cleaner:
-/// case-insensitive `.app` extension plus a directory check, so a plain file
-/// named `Foo.app` is never treated as a bundle.
-pub(crate) fn is_app_bundle(p: &Path) -> bool {
-    p.extension()
-        .and_then(|e| e.to_str())
-        .is_some_and(|e| e.eq_ignore_ascii_case("app"))
-        && p.is_dir()
-}
-
-/// `.app` bundles directly under each root, plus one level of subfolders
-/// (for example `/Applications/Setapp/*.app`). Symlinked folders are not
-/// followed: an unreadable file type is treated as a symlink.
-pub(crate) fn list_app_bundles(roots: &[PathBuf]) -> Vec<PathBuf> {
-    let mut found = Vec::new();
-    for root in roots {
-        let Ok(rd) = fs::read_dir(root) else {
-            continue;
-        };
-        for entry in rd.flatten() {
-            let path = entry.path();
-            if is_app_bundle(&path) {
-                found.push(path);
-                continue;
-            }
-            let is_real_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
-            if !is_real_dir {
-                continue;
-            }
-            if let Ok(sub) = fs::read_dir(&path) {
-                for s in sub.flatten() {
-                    if is_app_bundle(&s.path()) {
-                        found.push(s.path());
-                    }
-                }
-            }
-        }
-    }
-    found
-}
-
-/// Bundle file names still identify an app whose `Info.plist` cannot be read.
-fn app_bundle_stems(roots: &[PathBuf]) -> Vec<String> {
-    list_app_bundles(roots)
-        .iter()
-        .filter_map(|app| app.file_stem().and_then(|s| s.to_str()).map(str::to_string))
-        .collect()
-}
-
-/// `Info.plist` values come only from the orphan-containers collector, which
+/// `Info.plist` values come only from the installed-apps collector, which
 /// hands out nothing but the bundle ID and the two app names (README promise).
 pub fn collect_installed_apps(roots: &[PathBuf], runner: &dyn CommandRunner) -> InstalledApps {
-    let mut names = app_bundle_stems(roots);
+    let mut names = crate::installed_apps::app_bundle_stems(roots);
     let mut bundle_ids = Vec::new();
-    for app in crate::cleaners::orphan_containers::collect_app_identities(roots, runner) {
+    for app in crate::installed_apps::collect_app_identities(roots, runner) {
         names.extend(app.name);
         names.extend(app.display_name);
         bundle_ids.push(app.bundle_id);
@@ -1645,8 +1578,8 @@ mod tests {
     }
 
     #[test]
-    fn orphan_containers_identity_collector_is_available() {
-        use crate::cleaners::orphan_containers::{collect_app_identities, AppIdentity};
+    fn installed_apps_identity_collector_is_available() {
+        use crate::installed_apps::{collect_app_identities, AppIdentity};
         let apps: Vec<AppIdentity> = collect_app_identities(&[], &Fake::default());
         assert!(apps.is_empty());
         // No `..`: this stage relies on Info.plist giving exactly these three values.
@@ -1758,21 +1691,10 @@ mod tests {
         fs::write(contents.join("Info.plist"), xml).unwrap();
     }
 
-    #[test]
-    fn list_app_bundles_finds_top_level_and_one_level_nested() {
-        let tmp = TempDir::new().unwrap();
-        let apps = tmp.path().join("Applications");
-        fs::create_dir_all(apps.join("Foo Bar.app/Contents")).unwrap();
-        fs::create_dir_all(apps.join("Setapp/Baz.app")).unwrap();
-        fs::create_dir_all(apps.join("Setapp/deep/Qux.app")).unwrap();
-        fs::create_dir_all(apps.join("NotAnApp")).unwrap();
-        let mut found: Vec<String> = list_app_bundles(&[apps.clone(), tmp.path().join("missing")])
-            .iter()
-            .map(|p| p.file_name().unwrap().to_string_lossy().to_string())
-            .collect();
-        found.sort();
-        assert_eq!(found, vec!["Baz.app", "Foo Bar.app"]);
-    }
+    // The `list_app_bundles` traversal test moved to `crate::installed_apps`
+    // with the traversal code; the collect tests below stay with
+    // `collect_installed_apps`, whose `InstalledApps` internals are private
+    // to this module.
 
     #[test]
     fn collect_installed_apps_uses_file_stem_and_app_identity() {
