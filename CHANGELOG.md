@@ -54,19 +54,19 @@ All notable changes to sasurahime will be documented in this file. The format is
     the standard per-entry progress they never had;
   - a run where every entry is skipped now exits 1 in the cleaners whose
     loop recorded nothing (mise's `{tool} {version}` removals, the
-    generic path cleaners' unsafe-path refusals) — the same all-skipped
+    generic path cleaners' unsafe-path refusals) ― the same all-skipped
     contract the other ledger users pin.
 - Per-entry output is normalized to the ledger's standard
   `[<target>] removed: <path> (freed <size>)` line: the mise
   `{tool} {version}` label and the logs cleaner's per-target prefix fold
   into the printed path and target label, and a CLI-delegated deletion's
   failure (ollama) keeps its prose reason in
-  `SkippedEntry(SkipCause::Reason)` — never disguised as a `DeleteError`.
+  `SkippedEntry(SkipCause::Reason)` ― never disguised as a `DeleteError`.
 
 - `clean colima` and `clean all --include-manual` refuse the `~/.colima`
   fallback delete on a non-TTY stdin (the same floor as ios-backup and
-  apfs-snapshot): colima's full deletion — `~/.colima` with the VM's disk
-  images — is TTY-only, so an unattended run now prints the standard
+  apfs-snapshot): colima's full deletion ― `~/.colima` with the VM's disk
+  images ― is TTY-only, so an unattended run now prints the standard
   "not a terminal" remedy and deletes nothing instead of deleting
   unconfirmed. A `colima prune` with the CLI installed still runs, and the
   TTY confirm prompt is unchanged.
