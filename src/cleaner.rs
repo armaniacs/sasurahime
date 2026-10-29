@@ -93,8 +93,10 @@ pub enum DeleteError {
     TrashRefused(String),
     /// The filesystem denied the removal (EPERM / EACCES).
     PermissionDenied(std::io::Error),
-    /// The target was busy or otherwise unremovable-but-expected (EBUSY,
-    /// EAGAIN, EEXIST).
+    /// The target was busy or otherwise unremovable-but-expected: the
+    /// errnos EAGAIN, EBUSY, and EEXIST, matched at kind level as
+    /// `WouldBlock`, `ResourceBusy`, and `AlreadyExists` respectively by
+    /// [`classify_io_error`].
     Busy(std::io::Error),
     /// Any other deletion failure: fatal, not classified.
     Io(std::io::Error),
@@ -128,8 +130,16 @@ impl std::fmt::Display for DeleteError {
 impl std::error::Error for DeleteError {}
 
 /// Classifies a filesystem error by kind: a permission denial is a skip, a
-/// busy target (EBUSY maps to `WouldBlock`, `ResourceBusy`, EEXIST) is a
-/// skip, everything else is fatal.
+/// busy target is a skip, everything else is fatal.
+///
+/// The errno-to-kind mapping follows the Rust toolchain, not macOS:
+/// EAGAIN becomes `ErrorKind::WouldBlock` and EBUSY becomes
+/// `ErrorKind::ResourceBusy`, although older std releases mapped EBUSY to
+/// `WouldBlock` — matching both kinds keeps the behavior safe either way.
+/// EEXIST becomes `ErrorKind::AlreadyExists`, grouped with the busy skips
+/// because on the delete path EEXIST is expected rather than fatal: a
+/// racing clean may have already removed (or recreated) the candidate, so
+/// skipping it loses nothing.
 pub fn classify_io_error(e: std::io::Error) -> DeleteError {
     match e.kind() {
         std::io::ErrorKind::PermissionDenied => DeleteError::PermissionDenied(e),
@@ -486,9 +496,11 @@ mod tests {
     fn classify_io_error_maps_the_kinds() {
         // The one io-kind mapping (PBI 62): the four skippable kinds the
         // removed `is_skippable_error` duplicated live only here — a
-        // permission denial is a permission skip, a busy target (EBUSY is
-        // WouldBlock on macOS, plus ResourceBusy and EEXIST) is a busy
-        // skip, and everything else is fatal.
+        // permission denial is a permission skip, a busy target is a busy
+        // skip (EAGAIN maps to WouldBlock and EBUSY to ResourceBusy; older
+        // std releases mapped EBUSY to WouldBlock, so both kinds are
+        // matched, and EEXIST maps to AlreadyExists), and everything else
+        // is fatal.
         for kind in [
             std::io::ErrorKind::PermissionDenied,
             std::io::ErrorKind::WouldBlock,
