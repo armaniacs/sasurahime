@@ -29,11 +29,11 @@ Scenario: ヘルプが実際の既定を説明する
   Then  「(default: all)」の代わりに実際の既定（DerivedData）が示される
 
 ## 受け入れ基準
-- [ ] `--sub` に不明な綴りを渡すとエラーになり、有効な綴り一覧がメッセージに示される
-- [ ] 有効な綴り（derived-data / deriveddata / archives / DerivedData / Archives）は従来どおり動く
-- [ ] CLI ヘルプの「(default: all)」が実際の既定を説明する
-- [ ] 不明綴りのテストが 1 本追加されている
-- [ ] 全テストが緑
+- [x] `--sub` に不明な綴りを渡すとエラーになり、有効な綴り一覧がメッセージに示される
+- [x] 有効な綴り（derived-data / deriveddata / archives / DerivedData / Archives）は従来どおり動く
+- [x] CLI ヘルプの「(default: all)」が実際の既定を説明する
+- [x] 不明綴りのテストが 1 本追加されている
+- [x] 全テストが緑
 
 ## テスト戦略
 - E2E: tests/xcode.rs に `--sub bogus` のエラー主張を追加
@@ -47,6 +47,6 @@ Scenario: ヘルプが実際の既定を説明する
 0.1 人週
 
 ## Definition of Done
-- [ ] 全 BDD シナリオが自動テストとして実装されパスする
-- [ ] CHANGELOG の [Unreleased] に追記
-- [ ] コードレビュー完了
+- [x] 全 BDD シナリオが自動テストとして実装されパスする
+- [x] CHANGELOG の [Unreleased] に追記
+- [x] コードレビュー完了

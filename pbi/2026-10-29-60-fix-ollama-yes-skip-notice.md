@@ -25,10 +25,10 @@ Scenario: TTY では従来どおり選択プロンプトが出る
   Then  通知は出ず、従来どおり選択プロンプトが表示される
 
 ## 受け入れ基準
-- [ ] run_auto が非 TTY で gate によって skip されたターゲットを通知に含める
-- [ ] ollama の clean が非 TTY で skip される挙動は変わらない（PBI 52 修正の維持）
-- [ ] 非 TTY での通知を固定するテストが 1 本追加されている
-- [ ] 全テストが緑
+- [x] run_auto が非 TTY で gate によって skip されたターゲットを通知に含める
+- [x] ollama の clean が非 TTY で skip される挙動は変わらない（PBI 52 修正の維持）
+- [x] 非 TTY での通知を固定するテストが 1 本追加されている
+- [x] 全テストが緑
 
 ## テスト戦略
 - E2E: tests/ollama.rs の非 TTY E2E に通知の主張を追加
@@ -42,6 +42,6 @@ Scenario: TTY では従来どおり選択プロンプトが出る
 0.1 人週
 
 ## Definition of Done
-- [ ] 全 BDD シナリオが自動テストとして実装されパスする
-- [ ] CHANGELOG の [Unreleased] に追記
-- [ ] コードレビュー完了
+- [x] 全 BDD シナリオが自動テストとして実装されパスする
+- [x] CHANGELOG の [Unreleased] に追記
+- [x] コードレビュー完了

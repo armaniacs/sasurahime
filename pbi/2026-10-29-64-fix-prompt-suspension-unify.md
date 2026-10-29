@@ -24,10 +24,10 @@ Scenario: どの reporter を渡すかがテストで固定される
   Then  live reporter を渡していることがソースピンテストで固定される
 
 ## 受け入れ基準
-- [ ] TtyPrompt を呼ぶ全 call site が live reporter を渡す（no-op suspend のハードコードが消える）
-- [ ] call site の reporter を固定するソースピンテストが追加されている
-- [ ] dialoguer 呼び出しは prompt.rs 1 か所に集約されたまま
-- [ ] 全テストが緑
+- [x] TtyPrompt を呼ぶ全 call site が live reporter を渡す（no-op suspend のハードコードが消える）
+- [x] call site の reporter を固定するソースピンテストが追加されている
+- [x] dialoguer 呼び出しは prompt.rs 1 か所に集約されたまま
+- [x] 全テストが緑
 
 ## テスト戦略
 - 統合: prompt::tests の suspend 契約テスト（RecordingReporter で suspend 回数を数える）
@@ -41,6 +41,6 @@ Scenario: どの reporter を渡すかがテストで固定される
 1.0 人週
 
 ## Definition of Done
-- [ ] 全 BDD シナリオが自動テストとして実装されパスする
-- [ ] CHANGELOG の [Unreleased] に追記
-- [ ] コードレビュー完了
+- [x] 全 BDD シナリオが自動テストとして実装されパスする
+- [x] CHANGELOG の [Unreleased] に追記
+- [x] コードレビュー完了

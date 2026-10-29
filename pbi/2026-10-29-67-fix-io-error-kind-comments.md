@@ -24,10 +24,10 @@ Scenario: EEXIST の扱いに理由が書かれている
   Then  EEXIST を busy/skippable 扱いする理由が書かれている
 
 ## 受け入れ基準
-- [ ] `classify_io_error` の doc コメントが EBUSY のツールチェーン依存を説明する
-- [ ] `AlreadyExists` を busy 扱いする理由が doc に書かれている
-- [ ] テストコメントの「EBUSY (WouldBlock on macOS)」が修正されている
-- [ ] 全テストが緑（挙動変更なし）
+- [x] `classify_io_error` の doc コメントが EBUSY のツールチェーン依存を説明する
+- [x] `AlreadyExists` を busy 扱いする理由が doc に書かれている
+- [x] テストコメントの「EBUSY (WouldBlock on macOS)」が修正されている
+- [x] 全テストが緑（挙動変更なし）
 
 ## テスト戦略
 - 検索: `grep -n "WouldBlock on macOS" src/cleaner.rs` が 0 件
@@ -40,5 +40,5 @@ Scenario: EEXIST の扱いに理由が書かれている
 0.05 人週
 
 ## Definition of Done
-- [ ] コメント修正済み
-- [ ] コードレビュー完了
+- [x] コメント修正済み
+- [x] コードレビュー完了

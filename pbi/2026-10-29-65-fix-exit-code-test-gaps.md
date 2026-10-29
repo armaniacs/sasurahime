@@ -29,10 +29,10 @@ Scenario: apfs の tmutil 失敗が検知される
   Then  失敗が記録され、freed に含まれない
 
 ## 受け入れ基準
-- [ ] uv.rs の prune 非ゼロ終了分岐にテストが 1 本追加されている
-- [ ] hint/cleaner.rs の osascript quit/relaunch 分岐にテストが 2 本追加されている
-- [ ] apfs_snapshot.rs の thinlocalsnapshots 非ゼロ分岐にテストが 1 本追加されている
-- [ ] 全テストが緑
+- [x] uv.rs の prune 非ゼロ終了分岐にテストが 1 本追加されている
+- [x] hint/cleaner.rs の osascript quit/relaunch 分岐にテストが 2 本追加されている
+- [x] apfs_snapshot.rs の thinlocalsnapshots 非ゼロ分岐にテストが 1 本追加されている
+- [x] 全テストが緑
 
 ## テスト戦略
 - 単体: MockRunner（with_exit_code）で非ゼロ終了を注入する 4 本
@@ -45,5 +45,5 @@ Scenario: apfs の tmutil 失敗が検知される
 0.25 人週
 
 ## Definition of Done
-- [ ] 全 BDD シナリオが自動テストとして実装されパスする
-- [ ] コードレビュー完了
+- [x] 全 BDD シナリオが自動テストとして実装されパスする
+- [x] コードレビュー完了

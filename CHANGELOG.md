@@ -6,6 +6,36 @@ All notable changes to sasurahime will be documented in this file. The format is
 
 ## [Unreleased]
 
+### Fixed
+
+- The plugin protocol's JSON extractor now tracks JSON string state
+  (quotes and escapes), so a `}` inside a JSON string value can no longer
+  truncate the object and leave the plugin permanently unavailable.
+- Plugin-claimed `bytes` and `freed` are capped at the size sasurahime
+  verified on disk, so a plugin (or anything on PATH named `sasurahime-*`)
+  can no longer inflate the scan total, the "Total freed" line, or the
+  history. This also fixes the overflow panic a u64::MAX claim triggered
+  in the scan total.
+- Every prompt call site threads the live reporter down from `clean()`
+  instead of hardcoding a suppressor whose suspend is a no-op, so the
+  dialoguer redraw bug can no longer reproduce at the interactive
+  cleaners. A source-pin test keeps the port free of literal references.
+- `sasurahime clean xcode --sub <typo>` now errors with the expected
+  spellings instead of silently cleaning DerivedData only, and the CLI
+  help no longer claims "(default: all)" (the actual default is
+  derived-data only).
+
+### Changed
+
+- `--yes` runs now report the targets an interactive gate skipped
+  ("needs an interactive terminal") instead of only a stderr line, so an
+  unattended run where ollama models were never cleaned is visible in the
+  result notice. The skip behavior itself is unchanged.
+- The dead deletion sinks are gone: the compatibility free function
+  `delete_path` (zero callers, bypassed the scope tripwire) and the
+  orphaned `is_skippable_error` (its ErrorKind list lived only in
+  `classify_io_error`). Deletions reach the scanner through one seam.
+
 ## [0.4.3] - 2026-10-29
 
 ### Changed

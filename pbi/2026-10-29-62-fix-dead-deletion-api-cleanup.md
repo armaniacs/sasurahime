@@ -24,10 +24,10 @@ Scenario: 分類の写像が 1 つになる
   Then  書き換える場所は `classify_io_error` 1 か所だけですむ
 
 ## 受け入れ基準
-- [ ] 互換 free fn `delete_path` が src/trash.rs から削除されている
-- [ ] `is_skippable_error` が削除されているか、io kind 一覧を `classify_io_error` と重複しない（委譲）
-- [ ] 削除に伴い lib.rs の pub 再輸出が更新されている
-- [ ] 全テストが緑（挙動維持）
+- [x] 互換 free fn `delete_path` が src/trash.rs から削除されている
+- [x] `is_skippable_error` が削除されているか、io kind 一覧を `classify_io_error` と重複しない（委譲）
+- [x] 削除に伴い lib.rs の pub 再輸出が更新されている
+- [x] 全テストが緑（挙動維持）
 
 ## テスト戦略
 - 単体: 既存の分類テスト（is_skippable 系）が `DeleteError::is_skippable` / `classify_io_error` を指すように更新
@@ -41,6 +41,6 @@ Scenario: 分類の写像が 1 つになる
 0.1 人週
 
 ## Definition of Done
-- [ ] 全 BDD シナリオが自動テストとして実装されパスする
-- [ ] CHANGELOG の [Unreleased] に追記
-- [ ] コードレビュー完了
+- [x] 全 BDD シナリオが自動テストとして実装されパスする
+- [x] CHANGELOG の [Unreleased] に追記
+- [x] コードレビュー完了
