@@ -1,6 +1,6 @@
 use sasurahime::{
     batch, cleaner, cleaners, command, config, doctor, explorer, format, hint, history,
-    interactive, progress, safety, scan_cache, scanner,
+    interactive, progress, safety, scan_cache, scanner, unattended,
 };
 
 use clap::{Parser, Subcommand};
@@ -984,7 +984,9 @@ fn main() -> anyhow::Result<()> {
             doctor::run(&home);
         }
         Some(Commands::Auto { dry_run }) => {
-            // No [policy] section: refuse to delete anything unattended.
+            // No [policy] section: refuse to delete anything unattended. The
+            // entry gate stays at the arm (PBI 74): it is not a selection
+            // input.
             if !config.policy.present {
                 eprintln!(
                     "Error: no [policy] section in ~/.config/sasurahime/config.toml. Write a policy (e.g. older_than_days = 30) before running `auto`."
@@ -999,36 +1001,43 @@ fn main() -> anyhow::Result<()> {
                 trash_mode,
             };
             let cleaners_list = all_cleaners(&home, &config);
-            let mut skipped: Vec<String> = Vec::new();
-            // Skip policies stay at the call site: the wording is specific to
-            // `auto`. Risky (destructive/irreversible) and Manual
-            // (review-first) targets never run unattended, even with
+            // PBI 74: the run/skip classification is owned by
+            // UnattendedPolicy::Auto. The wording stays at the call site: it
+            // is specific to `auto`. Risky (destructive/irreversible) and
+            // Manual (review-first) targets never run unattended, even with
             // include_manual: whole-dir removals must never happen without a
             // human.
-            let mut batch_cleaners: Vec<&dyn cleaner::Cleaner> = Vec::new();
-            for c in &cleaners_list {
-                if matches!(c.risk(), cleaner::Risk::Risky | cleaner::Risk::Manual) {
-                    skipped.push(format!(
-                        "{} ({}): never runs unattended",
-                        c.name(),
-                        c.risk().label()
-                    ));
-                    continue;
-                }
-                // Moderate targets still honor [policy] include_manual;
-                // only Safe runs without it.
-                if !c.auto_clean_allowed()
-                    && !(opts.include_manual && c.risk() == cleaner::Risk::Moderate)
-                {
-                    skipped.push(format!(
-                        "{} ({}): set [policy] include_manual = true to include",
-                        c.name(),
-                        c.risk().label()
-                    ));
-                    continue;
-                }
-                batch_cleaners.push(c.as_ref());
-            }
+            let selection = unattended::UnattendedPolicy::Auto.select(&cleaners_list, &opts);
+            let skipped: Vec<String> = selection
+                .skipped
+                .iter()
+                .map(|(i, reason)| {
+                    let c = &cleaners_list[*i];
+                    match reason {
+                        unattended::SkipReason::NeverUnattended(risk) => {
+                            format!("{} ({}): never runs unattended", c.name(), risk.label())
+                        }
+                        unattended::SkipReason::NeedsOptIn(risk) => format!(
+                            "{} ({}): set [policy] include_manual = true to include",
+                            c.name(),
+                            risk.label()
+                        ),
+                        // Auto never classifies a target as scan-gated (it
+                        // scans nothing); the arm renders it truthfully if
+                        // wiring ever changes.
+                        unattended::SkipReason::NeedsExplicitSelection(risk) => format!(
+                            "{} ({}): needs an explicit selection",
+                            c.name(),
+                            risk.label()
+                        ),
+                    }
+                })
+                .collect();
+            let batch_cleaners: Vec<&dyn cleaner::Cleaner> = selection
+                .run
+                .iter()
+                .map(|&(i, _)| cleaners_list[i].as_ref())
+                .collect();
             let summary = batch::run_batch(
                 &batch_cleaners,
                 &opts,
@@ -1396,22 +1405,26 @@ fn main() -> anyhow::Result<()> {
                             trash_mode,
                         };
                         let cleaners_list = all_cleaners(&home, &config);
-                        let mut skipped_targets: usize = 0;
-                        // Skip policy stays at the call site: the wording is
-                        // specific to `clean all`.
-                        let mut batch_cleaners: Vec<&dyn cleaner::Cleaner> = Vec::new();
-                        for c in &cleaners_list {
-                            if !opts.include_manual && !c.auto_clean_allowed() {
-                                skipped_targets += 1;
-                                println!(
-                                    "Skipped {} ({}): needs --include-manual",
-                                    c.name(),
-                                    c.risk().label()
-                                );
-                                continue;
-                            }
-                            batch_cleaners.push(c.as_ref());
+                        // PBI 74: the classification is owned by
+                        // UnattendedPolicy::All — the opt-in unlocks EVERY
+                        // non-Safe risk here (unlike auto, where Risky and
+                        // Manual stay locked). The wording stays at the call
+                        // site: it is specific to `clean all`.
+                        let selection =
+                            unattended::UnattendedPolicy::All.select(&cleaners_list, &opts);
+                        for (i, reason) in &selection.skipped {
+                            let c = &cleaners_list[*i];
+                            println!(
+                                "Skipped {} ({}): needs --include-manual",
+                                c.name(),
+                                reason.risk().label()
+                            );
                         }
+                        let batch_cleaners: Vec<&dyn cleaner::Cleaner> = selection
+                            .run
+                            .iter()
+                            .map(|&(i, _)| cleaners_list[i].as_ref())
+                            .collect();
                         let summary = batch::run_batch(
                             &batch_cleaners,
                             &opts,
@@ -1425,9 +1438,10 @@ fn main() -> anyhow::Result<()> {
                             &summary,
                             interactive::ReportShape::Named,
                         )?;
-                        if skipped_targets > 0 {
+                        if !selection.skipped.is_empty() {
                             eprintln!(
-                                "Skipped {skipped_targets} target(s) that need --include-manual."
+                                "Skipped {} target(s) that need --include-manual.",
+                                selection.skipped.len()
                             );
                         }
                         interactive::report_total_freed(
