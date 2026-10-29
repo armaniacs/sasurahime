@@ -29,8 +29,39 @@ All notable changes to sasurahime will be documented in this file. The format is
   `--thin` errors instead of being silently ignored. The cleaner carries
   one explicit `SnapshotMode` (delete or thin), and the command help and
   docs state the exclusivity.
+- `clean ios-backup` wrapped the shared delete ledger's result in a bare
+  `freed` result, so its skipped entries and deleted paths were dropped:
+  an all-skipped run exited 0 and `--verbose` lost the audit trail. The
+  full result now propagates, so an all-skipped run exits 1 (the same
+  contract every other ledger user pins).
 
 ### Changed
+
+- The per-entry deletion bookkeeping is now one loop behind one
+  interface: `delete_ledger` owns the progress ticks, the fatal/skip
+  classification, the freed sums, the `uses_trash` truth (deletion
+  successes only), the deleted-path audit trail and the `CleanResult`
+  assembly, and the cleaners that hand-rolled it (mise, the generic cache
+  path cleaners, browsers, logs, custom paths, cargo, xcode, gradle,
+  jetbrains, and ollama's `ollama rm` deletions) ride the same ledger.
+  Two visible consequences:
+  - a fatal per-item error (an unsafe path, a vanished directory) is
+    recorded as a skipped entry with a prose reason and the remaining
+    items still delete in every migrated cleaner (six of the migrated
+    loops used to abort the whole clean with `?`); the generic cache path
+    cleaners' unsafe-path warning is now a recorded skip;
+  - `clean gradle`, `clean jetbrains` and the cargo registry cache print
+    the standard per-entry progress they never had;
+  - a run where every entry is skipped now exits 1 in the cleaners whose
+    loop recorded nothing (mise's `{tool} {version}` removals, the
+    generic path cleaners' unsafe-path refusals) — the same all-skipped
+    contract the other ledger users pin.
+- Per-entry output is normalized to the ledger's standard
+  `[<target>] removed: <path> (freed <size>)` line: the mise
+  `{tool} {version}` label and the logs cleaner's per-target prefix fold
+  into the printed path and target label, and a CLI-delegated deletion's
+  failure (ollama) keeps its prose reason in
+  `SkippedEntry(SkipCause::Reason)` — never disguised as a `DeleteError`.
 
 - `clean colima` and `clean all --include-manual` refuse the `~/.colima`
   fallback delete on a non-TTY stdin (the same floor as ios-backup and
