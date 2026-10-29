@@ -145,11 +145,16 @@ pub fn clean_cli_or_fallback(
         let size_before = dir_size(dir);
         let output = runner.run(config.tool, config.args)?;
         if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            log::warn!(
-                "{} failed (exit {:?}): {stderr}",
+            // The warning wording rides the shared helper (PBI 81); the
+            // outcome stays here — a failure must bail, because continuing
+            // would report `freed` bytes that were never freed.
+            let _ = crate::command::warn_tool_failure(
+                &mut std::io::stderr(),
+                name,
                 config.tool,
-                output.status.code()
+                config.args,
+                &output,
+                None,
             );
             anyhow::bail!(
                 "{} failed with exit code {:?}",

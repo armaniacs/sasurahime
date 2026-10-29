@@ -2,9 +2,9 @@ use crate::cleaner::{
     CleanCancelled, CleanOptions, CleanResult, Cleaner, PerCleanerFilters, Risk, ScanResult,
     ScanStatus,
 };
-use crate::command::CommandRunner;
 #[cfg(test)]
 use crate::command::SystemCommandRunner;
+use crate::command::{warn_tool_failure, CommandRunner};
 use crate::config::Config;
 use crate::disk_image::{
     colima_candidates, docker_desktop_candidates, DiskImageNotice, COLIMA_REMEDY, DOCKER_REMEDY,
@@ -508,17 +508,14 @@ impl CliCleaner {
                 let image_before = self.notice.as_ref().map_or(0, |n| n.physical_total());
                 let output = self.runner.run(program, args)?;
                 if !output.status.success() {
-                    eprintln!(
-                        "[{}] warning: `{} {}` exited with code {:?}",
+                    let _ = warn_tool_failure(
+                        &mut std::io::stderr(),
                         self.display_name,
                         program,
-                        args.join(" "),
-                        output.status.code()
+                        args,
+                        &output,
+                        None,
                     );
-                    let stderr = String::from_utf8_lossy(&output.stderr);
-                    if !stderr.is_empty() {
-                        eprintln!("[{}] stderr: {stderr}", self.display_name);
-                    }
                 } else if let Some(msg) = self
                     .notice
                     .as_ref()
@@ -629,36 +626,27 @@ impl CliCleaner {
                 let image_before = self.notice.as_ref().map_or(0, |n| n.physical_total());
                 let output = self.runner.run(program, args)?;
                 if !output.status.success() {
-                    eprintln!(
-                        "[{}] warning: `{} {}` exited with code {:?}",
+                    let _ = warn_tool_failure(
+                        &mut std::io::stderr(),
                         self.display_name,
                         program,
-                        args.join(" "),
-                        output.status.code()
+                        args,
+                        &output,
+                        None,
                     );
-                    let stderr = String::from_utf8_lossy(&output.stderr);
-                    if !stderr.is_empty() {
-                        eprintln!("[{}] stderr: {stderr}", self.display_name);
-                    }
                 }
                 for (extra_program, extra_args, remedy) in &self.extra_commands {
                     println!("$ {extra_program} {}", extra_args.join(" "));
                     match self.runner.run(extra_program, extra_args) {
                         Ok(output) if !output.status.success() => {
-                            eprintln!(
-                                "[{}] warning: `{} {}` exited with code {:?}",
+                            let _ = warn_tool_failure(
+                                &mut std::io::stderr(),
                                 self.display_name,
                                 extra_program,
-                                extra_args.join(" "),
-                                output.status.code()
+                                extra_args,
+                                &output,
+                                *remedy,
                             );
-                            let stderr = String::from_utf8_lossy(&output.stderr);
-                            if !stderr.is_empty() {
-                                eprintln!("[{}] stderr: {stderr}", self.display_name);
-                            }
-                            if let Some(remedy) = remedy {
-                                eprintln!("[{}] {remedy}", self.display_name);
-                            }
                         }
                         Ok(_) => {}
                         Err(e) => {

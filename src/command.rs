@@ -1,5 +1,5 @@
 use anyhow::Result;
-use std::io::Read;
+use std::io::{Read, Write};
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::process::{Command, Output, Stdio};
@@ -28,6 +28,38 @@ pub fn open_path(runner: &dyn CommandRunner, path: &std::path::Path) -> Result<(
         "open returned non-zero exit: {:?}",
         output.status.code()
     );
+    Ok(())
+}
+
+/// One owner of the tool-failure warning wording (PBI 81): the warning line
+/// with the exit code, the stderr relay, and the optional remedy. Only the
+/// wording is shared — the outcome policy stays at the call site
+/// (warn+continue for a generic cache prune, bail for the CLI-fallback
+/// adapter), because those are real domain policies, not drift. A remedy
+/// prints when the caller has an actionable fix to offer. Writer-parameterized
+/// so the wording is unit-testable, the same pattern as
+/// `write_not_a_terminal_remedy` (prompt.rs).
+pub fn warn_tool_failure(
+    out: &mut dyn Write,
+    display_name: &str,
+    program: &str,
+    args: &[&str],
+    output: &Output,
+    remedy: Option<&str>,
+) -> std::io::Result<()> {
+    writeln!(
+        out,
+        "[{display_name}] warning: `{program} {}` exited with code {:?}",
+        args.join(" "),
+        output.status.code()
+    )?;
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if !stderr.is_empty() {
+        writeln!(out, "[{display_name}] stderr: {stderr}")?;
+    }
+    if let Some(remedy) = remedy {
+        writeln!(out, "[{display_name}] {remedy}")?;
+    }
     Ok(())
 }
 
@@ -260,5 +292,176 @@ mod tests {
         let path = std::path::PathBuf::from(OsString::from_vec(vec![b'/', 0xff, b'x']));
         assert!(open_path(&runner, &path).is_err());
         assert!(runner.calls.lock().unwrap().is_empty());
+    }
+
+    #[cfg(unix)]
+    fn failed_output(code: i32, stderr: &[u8]) -> Output {
+        Output {
+            status: std::process::ExitStatus::from_raw(code << 8),
+            stdout: vec![],
+            stderr: stderr.to_vec(),
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn warn_tool_failure_prints_the_warning_line_with_the_exit_code() {
+        // The wording has one owner (PBI 81): the warning line names the
+        // cleaner and the exact command, then relays the exit code.
+        let output = failed_output(1, b"boom");
+        let mut buf: Vec<u8> = Vec::new();
+        warn_tool_failure(
+            &mut buf,
+            "bun",
+            "bun",
+            &["pm", "cache", "rm"],
+            &output,
+            None,
+        )
+        .unwrap();
+        let text = String::from_utf8(buf).unwrap();
+        assert!(text.contains("[bun] warning:"), "{text}");
+        assert!(text.contains("`bun pm cache rm`"), "{text}");
+        assert!(text.contains("Some(1)"), "the code must be relayed: {text}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn warn_tool_failure_relays_non_empty_stderr_once() {
+        let output = failed_output(1, b"boom");
+        let mut buf: Vec<u8> = Vec::new();
+        warn_tool_failure(
+            &mut buf,
+            "bun",
+            "bun",
+            &["pm", "cache", "rm"],
+            &output,
+            None,
+        )
+        .unwrap();
+        let text = String::from_utf8(buf).unwrap();
+        assert!(
+            text.matches("[bun] stderr: boom").count() == 1,
+            "non-empty stderr is relayed exactly once: {text}"
+        );
+        assert_eq!(
+            text.lines().count(),
+            2,
+            "warning + stderr, no remedy: {text}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn warn_tool_failure_omits_the_stderr_relay_when_stderr_is_empty() {
+        let output = failed_output(1, b"");
+        let mut buf: Vec<u8> = Vec::new();
+        warn_tool_failure(
+            &mut buf,
+            "bun",
+            "bun",
+            &["pm", "cache", "rm"],
+            &output,
+            None,
+        )
+        .unwrap();
+        let text = String::from_utf8(buf).unwrap();
+        assert!(
+            !text.contains("stderr:"),
+            "empty stderr must not be relayed: {text}"
+        );
+        assert_eq!(text.lines().count(), 1, "the warning line only: {text}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn warn_tool_failure_prints_the_remedy_when_present() {
+        let output = failed_output(1, b"");
+        let mut buf: Vec<u8> = Vec::new();
+        warn_tool_failure(
+            &mut buf,
+            "colima",
+            "colima",
+            &["ssh", "--", "sudo", "fstrim", "-av"],
+            &output,
+            Some("start the VM to trim"),
+        )
+        .unwrap();
+        let text = String::from_utf8(buf).unwrap();
+        assert!(
+            text.contains("[colima] start the VM to trim"),
+            "the remedy must print: {text}"
+        );
+        assert_eq!(text.lines().count(), 2, "warning + remedy: {text}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn warn_tool_failure_omits_the_remedy_when_none() {
+        let output = failed_output(1, b"");
+        let mut buf: Vec<u8> = Vec::new();
+        warn_tool_failure(
+            &mut buf,
+            "bun",
+            "bun",
+            &["pm", "cache", "rm"],
+            &output,
+            None,
+        )
+        .unwrap();
+        let text = String::from_utf8(buf).unwrap();
+        assert_eq!(text.lines().count(), 1, "no remedy line: {text}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn warn_tool_failure_relays_a_missing_exit_code_as_none() {
+        // A signal-terminated tool has no exit code: the raw wait status
+        // carries the signal instead, and code() returns None.
+        let output = Output {
+            status: std::process::ExitStatus::from_raw(9),
+            stdout: vec![],
+            stderr: vec![],
+        };
+        let mut buf: Vec<u8> = Vec::new();
+        warn_tool_failure(&mut buf, "bun", "bun", &[], &output, None).unwrap();
+        let text = String::from_utf8(buf).unwrap();
+        assert!(
+            text.contains("None"),
+            "a signal-terminated tool must relay the missing code: {text}"
+        );
+    }
+
+    #[test]
+    fn tool_failure_warning_wording_has_one_owner() {
+        // PBI 81: the tool-failure warning vocabulary is owned by
+        // warn_tool_failure in this file. The copies in generic.rs and the
+        // cli_fallback print part used to hand-write the line, so the
+        // outcome could drift while the wording drifted with it; the pin
+        // keeps the wording out of the cleaner layer. uv.rs and brew.rs
+        // keep their own variants by design (log-only, exit-to-empty — the
+        // PBI's scope fence leaves them out). The wording is assembled from
+        // parts so this pin's own source never carries the literal twice.
+        let wording = ["exited", "with", "code"].join(" ");
+        let cleaner_sources = [
+            include_str!("cleaners/generic.rs"),
+            include_str!("cli_fallback.rs"),
+            include_str!("cleaners/uv.rs"),
+        ];
+        for src in cleaner_sources {
+            assert!(
+                !src.contains(&wording),
+                "a hand-written tool-failure warning appeared in a cleaner — \
+                 the wording is owned by warn_tool_failure"
+            );
+        }
+        // The owner: the wording appears exactly once, inside
+        // warn_tool_failure itself.
+        let me = include_str!("command.rs");
+        assert_eq!(
+            me.matches(&wording).count(),
+            1,
+            "the warning wording must have exactly one owner"
+        );
     }
 }
