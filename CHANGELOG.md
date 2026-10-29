@@ -6,6 +6,8 @@ All notable changes to sasurahime will be documented in this file. The format is
 
 ## [Unreleased]
 
+## [0.4.3] - 2026-10-29
+
 ### Changed
 
 - Deletion failures are classified by type instead of by message text
@@ -32,8 +34,6 @@ All notable changes to sasurahime will be documented in this file. The format is
   progress line) can no longer resurface per call site. The hand-rolled
   "not a terminal" guards were replaced by one standardized gate, and the
   TUI's confirmation suppression moved into the port.
-### Changed
-
 - Plugins can report what they removed by printing a JSON object
   (`{"freed": N, "uses_trash": B}`) as the last line of stdout. Plugins that
   do not print JSON keep working through the exit-code-only protocol.
