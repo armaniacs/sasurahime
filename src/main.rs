@@ -8,7 +8,7 @@ use cleaner::{CleanCancelled, CleanOptions, CleanResult, Cleaner};
 use command::SystemCommandRunner;
 use config::Config;
 use progress::{build_reporter_from_flags, merge_suppress_flags, ProgressReporter};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Macro that generates the CleanTarget enum, SUPPORTED_TARGETS, the dispatch
 /// helpers and standard_cleaners() from a single definition table.
@@ -926,6 +926,24 @@ fn build_reporter(cli: &Cli, config: &Config) -> Box<dyn ProgressReporter> {
     build_reporter_from_flags(suppress, deep_suppress)
 }
 
+/// The one hint-flow entry point, shared by `scan` and the interactive arm:
+/// collect, print, then offer. `dry_run` is the run's global `--dry-run` —
+/// the offer never prompts and never deletes when it is set (PBI 80), and
+/// the resolved deletion mode flows down as an argument (PBI 71).
+fn run_hint_flow(home: &Path, trash_mode: sasurahime::trash::TrashMode, dry_run: bool) {
+    let runner = SystemCommandRunner;
+    let hints = hint::collect_hints(home, &runner);
+    hint::print_hints(&hints);
+    hint::offer_auto_clean(
+        &hints,
+        home,
+        &runner,
+        &hint::StdinPrompt,
+        trash_mode,
+        dry_run,
+    );
+}
+
 fn main() -> anyhow::Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn"))
         .format_timestamp(None)
@@ -1083,10 +1101,7 @@ fn main() -> anyhow::Result<()> {
                 return Ok(());
             }
             scanner::run_scan(&cleaners, &home);
-            let runner = SystemCommandRunner;
-            let hints = hint::collect_hints(&home, &runner);
-            hint::print_hints(&hints);
-            hint::offer_auto_clean(&hints, &home, &runner, &hint::StdinPrompt, trash_mode);
+            run_hint_flow(&home, trash_mode, cli.dry_run);
         }
         Some(Commands::Targets) => {
             let mut targets: Vec<&(&str, &str)> =
@@ -1118,10 +1133,7 @@ fn main() -> anyhow::Result<()> {
                     trash_mode,
                 )?;
             }
-            let runner = SystemCommandRunner;
-            let hints = hint::collect_hints(&home, &runner);
-            hint::print_hints(&hints);
-            hint::offer_auto_clean(&hints, &home, &runner, &hint::StdinPrompt, trash_mode);
+            run_hint_flow(&home, trash_mode, cli.dry_run);
         }
         Some(Commands::Explore { top, all, dirs }) => {
             let roots = if dirs.is_empty() {

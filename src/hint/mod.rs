@@ -540,6 +540,7 @@ mod tests {
             &runner,
             &prompt,
             crate::trash::TrashMode::Permanent,
+            false, // dry_run
         );
         let calls = runner.recorded_calls();
         assert!(calls.iter().any(|(p, _)| p == "osascript"));
@@ -565,6 +566,7 @@ mod tests {
             &runner,
             &prompt,
             crate::trash::TrashMode::Permanent,
+            false, // dry_run
         );
         let calls = runner.recorded_calls();
         assert!(!calls.iter().any(|(p, _)| p == "osascript"));
@@ -590,10 +592,71 @@ mod tests {
             &runner,
             &prompt,
             crate::trash::TrashMode::Permanent,
+            false, // dry_run
         );
         let calls = runner.recorded_calls();
         assert!(!calls.iter().any(|(p, _)| p == "osascript"));
         assert!(!calls.iter().any(|(p, _)| p == "open"));
+    }
+
+    #[test]
+    fn offer_auto_clean_dry_run_prompts_nothing_and_invokes_no_deletion_command() {
+        // PBI 80 dry-run pin: a dry run is the top safety contract — it never
+        // prompts (the `y` sitting in the prompt's answer queue is never
+        // read) and never reaches the quit/delete/relaunch seam. Recording
+        // Runner must record no osascript / rm / chflags / open, and no file
+        // may change.
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path();
+        make_dirs(
+            home,
+            BaseDir::AppSupport,
+            &["Code/Cache", "Code/CachedExtensionVSIXs", "Code/CachedData"],
+        );
+
+        let runner = RecordingRunner::new(&["Code"], 1);
+        let prompt = FakePrompt::new(&["y"]);
+        let running_hint = ProcessHint {
+            entry: &VSCODE_ENTRY,
+            size_bytes: 600 * 1024 * 1024,
+            running: true,
+        };
+        let idle_hint = ProcessHint {
+            entry: &VSCODE_ENTRY,
+            size_bytes: 600 * 1024 * 1024,
+            running: false,
+        };
+
+        offer_auto_clean(
+            &[running_hint, idle_hint],
+            home,
+            &runner,
+            &prompt,
+            crate::trash::TrashMode::Permanent,
+            true, // dry_run
+        );
+        let calls = runner.recorded_calls();
+        for program in ["osascript", "rm", "chflags", "open"] {
+            assert!(
+                !calls.iter().any(|(p, _)| p == program),
+                "a dry run must never invoke {program}, got: {calls:?}"
+            );
+        }
+        assert!(
+            home.join("Library/Application Support/Code/Cache").exists()
+                && home
+                    .join("Library/Application Support/Code/CachedExtensionVSIXs")
+                    .exists()
+                && home
+                    .join("Library/Application Support/Code/CachedData")
+                    .exists(),
+            "nothing may be deleted in dry-run mode"
+        );
+        assert_eq!(
+            prompt.responses.borrow().len(),
+            1,
+            "the y answer must never be consumed: a dry run never prompts"
+        );
     }
 
     static NO_QUIT_ENTRY: HintEntry = HintEntry {
