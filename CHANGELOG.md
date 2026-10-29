@@ -24,6 +24,11 @@ All notable changes to sasurahime will be documented in this file. The format is
   spellings instead of silently cleaning DerivedData only, and the CLI
   help no longer claims "(default: all)" (the actual default is
   derived-data only).
+- `sasurahime clean apfs-snapshot --all --thin <size>` now errors (exit 1)
+  instead of thin silently winning over `--all`, and `--urgency N` without
+  `--thin` errors instead of being silently ignored. The cleaner carries
+  one explicit `SnapshotMode` (delete or thin), and the command help and
+  docs state the exclusivity.
 
 ### Changed
 
