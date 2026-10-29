@@ -11,14 +11,17 @@ use progress::{build_reporter_from_flags, merge_suppress_flags, ProgressReporter
 use std::path::{Path, PathBuf};
 
 /// Macro that generates the CleanTarget enum, SUPPORTED_TARGETS, the dispatch
-/// helpers and standard_cleaners() from a single definition table.
-/// all_cleaners() composes standard_cleaners() with special_cleaners().
+/// helpers, standard_cleaners() and caches_group_cleaners() from a single
+/// definition table. all_cleaners() composes standard_cleaners() with
+/// special_cleaners().
 ///
 /// Usage:
 /// ```ignore
 /// define_cleaners! {
-///     // Standard cleaners (simple { dry_run: bool } variant):
+///     // Standard cleaners (simple { dry_run: bool } variant). An optional
+///     // `@group caches ;` marker joins the row to the caches batch:
 ///     Act : "act" => "description" ; |home, _config| { factory_expr }
+///     Bun : "bun" => "description" ; @group caches ; { factory_expr }
 ///     ...
 ///     ;
 ///     // Special enum variants inserted verbatim:
@@ -26,12 +29,19 @@ use std::path::{Path, PathBuf};
 ///     // Logs { dry_run: bool, #[arg(long)] keep_days: Option<u32> },
 /// }
 /// ```
+///
+/// The group membership is compile-time checked: a `@group <name>` row
+/// resolves `<name>::DEFINED_GROUP_MARKER`, and only the `caches` module is
+/// generated below, so an unknown group ident fails to compile instead of
+/// silently joining the caches batch.
+///
 /// Helper: extract the CLI command name for a standard CleanTarget variant.
 /// Generate dispatch_clean and dispatch helpers from the same definition table.
 macro_rules! define_cleaners {
     ($(
         $(#[$variant_meta:meta])*
         $variant:ident : $cli_name:literal => $desc:expr ;
+        $( @group $group:ident ; )?
         ($factory:expr)
     ),+ $(,)?
     ;
@@ -57,6 +67,37 @@ macro_rules! define_cleaners {
         ) -> Vec<Box<dyn cleaner::Cleaner>> {
             vec![
                 $( Box::new(($factory)(home, config)) as Box<dyn cleaner::Cleaner>, )*
+            ]
+        }
+
+        /// The group namespace a `@group <name>` row resolves at compile
+        /// time. Only the caches group is defined today: adding a group
+        /// needs a new module here (and a generated factory fn), which
+        /// keeps an unknown group ident a compile error rather than silent
+        /// membership in the caches batch.
+        #[doc(hidden)]
+        pub mod caches {
+            /// The marker every `@group <name>` row must resolve.
+            pub const DEFINED_GROUP_MARKER: () = ();
+        }
+
+        /// The `@group caches` rows of the table, in table order (PBI-82
+        /// Phase 2): the `clean caches` arm composes the batch from here,
+        /// so a new cache row marked `@group caches` joins the batch
+        /// without touching the arm.
+        fn caches_group_cleaners(
+            home: &std::path::Path,
+            config: &config::Config,
+        ) -> Vec<Box<dyn cleaner::Cleaner>> {
+            vec![
+                $(
+                    $(
+                        {
+                            const _: () = $group::DEFINED_GROUP_MARKER;
+                            Box::new(($factory)(home, config)) as Box<dyn cleaner::Cleaner>
+                        },
+                    )?
+                )*
             ]
         }
 
@@ -110,25 +151,25 @@ define_cleaners! {
     Browsers : "browsers" => "Old Puppeteer / Playwright builds";
     (|home, _config| cleaners::browser::BrowserCleaner::new(home, Box::new(SystemCommandRunner))),
 
-    Bun : "bun" => "Bun package cache";
+    Bun : "bun" => "Bun package cache" ; @group caches ;
     (|_home, _config| cleaners::generic::CliCleaner::bun(Box::new(SystemCommandRunner))),
 
-    Go : "go" => "Go build cache";
+    Go : "go" => "Go build cache" ; @group caches ;
     (|_home, _config| cleaners::generic::CliCleaner::go(Box::new(SystemCommandRunner))),
 
-    Pip : "pip" => "pip package cache";
+    Pip : "pip" => "pip package cache" ; @group caches ;
     (|_home, _config| cleaners::generic::CliCleaner::pip(Box::new(SystemCommandRunner))),
 
-    NodeGyp : "node-gyp" => "node-gyp build cache directories";
+    NodeGyp : "node-gyp" => "node-gyp build cache directories" ; @group caches ;
     (|home, config| cleaners::generic::PathCleaner::node_gyp(home, Box::new(SystemCommandRunner)).with_config(config)),
 
-    Npm : "npm" => "npm package cache";
+    Npm : "npm" => "npm package cache" ; @group caches ;
     (|_home, _config| cleaners::generic::CliCleaner::npm(Box::new(SystemCommandRunner))),
 
-    Yarn : "yarn" => "yarn cache";
+    Yarn : "yarn" => "yarn cache" ; @group caches ;
     (|_home, _config| cleaners::generic::CliCleaner::yarn(Box::new(SystemCommandRunner))),
 
-    Pnpm : "pnpm" => "pnpm store";
+    Pnpm : "pnpm" => "pnpm store" ; @group caches ;
     (|_home, _config| cleaners::generic::CliCleaner::pnpm(Box::new(SystemCommandRunner))),
 
     Cargo : "cargo" => "Cargo registry cache + target/ directories";
@@ -1250,39 +1291,13 @@ fn main() -> anyhow::Result<()> {
                 // --- Special targets (custom dispatch logic) ---
                 match target {
                     CleanTarget::Caches { dry_run } => {
-                        let caches: Vec<Box<dyn cleaner::Cleaner>> = vec![
-                            Box::new(cleaners::generic::CliCleaner::bun(Box::new(
-                                SystemCommandRunner,
-                            ))),
-                            Box::new(cleaners::generic::CliCleaner::go(Box::new(
-                                SystemCommandRunner,
-                            ))),
-                            Box::new(cleaners::generic::CliCleaner::pip(Box::new(
-                                SystemCommandRunner,
-                            ))),
-                            Box::new(
-                                cleaners::generic::PathCleaner::node_gyp(
-                                    &home,
-                                    Box::new(SystemCommandRunner),
-                                )
-                                .with_config(&config),
-                            ),
-                            Box::new(cleaners::generic::CliCleaner::npm(Box::new(
-                                SystemCommandRunner,
-                            ))),
-                            Box::new(cleaners::generic::CliCleaner::yarn(Box::new(
-                                SystemCommandRunner,
-                            ))),
-                            Box::new(cleaners::generic::CliCleaner::pnpm(Box::new(
-                                SystemCommandRunner,
-                            ))),
-                        ];
-                        // Bare batch: no post-clean notes (this entry point
-                        // never printed them). The run's resolved opts flow
-                        // down as an argument (the one mode resolution): the
-                        // TrashMode contract now holds here too, and every
-                        // caches cleaner still computes the same filters
-                        // from its own fields when the options carry none.
+                        // The batch is the @group caches rows of the macro
+                        // table: membership lives in the table, not here
+                        // (PBI-82 Phase 2). The run's resolved opts flow
+                        // down as an argument (the one mode resolution), and
+                        // the bare batch keeps no post-clean notes (this
+                        // entry point never printed them).
+                        let caches = caches_group_cleaners(&home, &config);
                         let batch_cleaners: Vec<&dyn cleaner::Cleaner> =
                             caches.iter().map(|c| c.as_ref()).collect();
                         run_caches_batch(&batch_cleaners, &clean_opts, reporter.as_ref(), dry_run)?;
@@ -2147,6 +2162,24 @@ mod tests {
         for ((cli, _), c) in SUPPORTED_TARGETS.iter().zip(&cleaners) {
             assert_eq!(c.name(), *cli);
         }
+    }
+
+    #[test]
+    fn caches_group_cleaners_match_the_marked_table_rows() {
+        // PBI-82 Phase 2 pin: the `@group caches` markers on the
+        // define_cleaners! table generate this membership. The `clean caches`
+        // arm no longer hand-lists the 7 cleaners: renaming or unmarking a
+        // row changes this set, and a new cache row marked `@group caches`
+        // joins the batch automatically.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let names = names_of(&caches_group_cleaners(
+            tmp.path(),
+            &config::Config::default(),
+        ));
+        assert_eq!(
+            names,
+            vec!["bun", "go", "pip", "node-gyp", "npm", "yarn", "pnpm"]
+        );
     }
 
     #[test]
