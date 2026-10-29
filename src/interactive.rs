@@ -70,21 +70,6 @@ pub(crate) fn compute_selected_total(
         .sum()
 }
 
-/// Indices that `--yes` may clean: Pruneable and allowed for unattended runs.
-pub(crate) fn auto_clean_indices(
-    results: &[ScanResult],
-    cleaners: &[Box<dyn Cleaner>],
-) -> Vec<usize> {
-    results
-        .iter()
-        .enumerate()
-        .filter(|(i, r)| {
-            matches!(r.status, ScanStatus::Pruneable(_)) && cleaners[*i].auto_clean_allowed()
-        })
-        .map(|(i, _)| i)
-        .collect()
-}
-
 /// Names of the Pruneable Safe targets whose clean() gates on an interactive
 /// prompt (`Cleaner::interactive_gated`) and therefore skips when the run is
 /// not interactive. Pure function — no I/O, fully testable. `interactive`
@@ -243,18 +228,31 @@ pub(crate) fn clean_sub_target(
 pub fn run_auto(cleaners: &[Box<dyn Cleaner>], mode: crate::trash::TrashMode) -> Result<()> {
     let (results, _available) = crate::scanner::detect_all(cleaners);
 
-    let pruneable_indices = auto_clean_indices(&results, cleaners);
+    // PBI 60: Safe targets whose clean() gates on an interactive prompt skip
+    // on a non-TTY stdin even though `--yes` selected them (the per-cleaner
+    // selection cannot run without a terminal). Name them here so an
+    // unattended run never looks like a no-op success. On a TTY the gate
+    // passes and the cleaner prompts, so this prints in non-interactive
+    // runs only. Read before the scan results move into the policy: the TTY
+    // fact is a per-run observation, not a selection input (PBI 74).
+    let gate_skipped = gate_skipped_names(&results, cleaners, crate::prompt::is_interactive());
+
+    let opts = crate::cleaner::CleanOptions {
+        trash_mode: mode,
+        ..Default::default()
+    };
+    // PBI 74: the run/skip classification is owned by
+    // UnattendedPolicy::Yes — the scan results ride in the policy, so this
+    // scan-driven flow cannot grow the registry-driven flows' filters. The
+    // wording below stays at the call site: it is specific to `--yes`.
+    let selection = crate::unattended::UnattendedPolicy::Yes { results }.select(cleaners, &opts);
 
     // Non-Safe targets (Moderate, Risky) are only reachable by an explicit
     // selection, so tell the user they were left out and why.
-    let skipped: Vec<String> = results
+    let skipped: Vec<String> = selection
+        .skipped
         .iter()
-        .enumerate()
-        .filter(|(i, r)| {
-            matches!(r.status, ScanStatus::Pruneable(b) if b > 0)
-                && !cleaners[*i].auto_clean_allowed()
-        })
-        .map(|(i, _)| format!("{} ({})", cleaners[i].name(), cleaners[i].risk().label()))
+        .map(|(i, reason)| format!("{} ({})", cleaners[*i].name(), reason.risk().label()))
         .collect();
     if !skipped.is_empty() {
         println!(
@@ -264,13 +262,6 @@ pub fn run_auto(cleaners: &[Box<dyn Cleaner>], mode: crate::trash::TrashMode) ->
         );
     }
 
-    // PBI 60: Safe targets whose clean() gates on an interactive prompt skip
-    // on a non-TTY stdin even though `--yes` selected them (the per-cleaner
-    // selection cannot run without a terminal). Name them here so an
-    // unattended run never looks like a no-op success. On a TTY the gate
-    // passes and the cleaner prompts, so this prints in non-interactive
-    // runs only.
-    let gate_skipped = gate_skipped_names(&results, cleaners, crate::prompt::is_interactive());
     if !gate_skipped.is_empty() {
         println!(
             "Skipped {} target(s) that need an interactive terminal: {}",
@@ -279,25 +270,18 @@ pub fn run_auto(cleaners: &[Box<dyn Cleaner>], mode: crate::trash::TrashMode) ->
         );
     }
 
-    if pruneable_indices.is_empty() {
+    if selection.run.is_empty() {
         println!("Nothing to clean.");
         return Ok(());
     }
 
     if mode == crate::trash::TrashMode::Permanent {
-        let total_reclaimable: u64 = pruneable_indices
-            .iter()
-            .filter_map(|&i| {
-                if let ScanStatus::Pruneable(b) = &results[i].status {
-                    Some(*b)
-                } else {
-                    None
-                }
-            })
-            .sum();
+        // The scanned pruneable bytes ride in the selection (PBI 74), so
+        // the confirmation reports the same sum the old scan-index path did.
+        let total_reclaimable: u64 = selection.run.iter().map(|&(_, bytes)| bytes).sum();
         println!(
             "Scan complete. Found {} item(s), ~{} will be permanently deleted.",
-            pruneable_indices.len(),
+            selection.run.len(),
             format_bytes(total_reclaimable),
         );
         if !confirm("Are you sure? [y/N] ", &mut std::io::stdout())? {
@@ -318,17 +302,14 @@ pub fn run_auto(cleaners: &[Box<dyn Cleaner>], mode: crate::trash::TrashMode) ->
     // The one batch path: animated spinner per cleaner, accumulation, the
     // history guard and per-target error collection all live in
     // batch::run_batch. with_notes=false: this flow never printed notes, and
-    // passing the default options is behavior-identical to the old bare
+    // passing the run's options is behavior-identical to the old bare
     // `clean(false, rep)` calls (every reachable cleaner computes the same
     // work when the options carry nothing). dry_run is always false here.
-    let selected: Vec<&dyn Cleaner> = pruneable_indices
+    let selected: Vec<&dyn Cleaner> = selection
+        .run
         .iter()
-        .map(|&i| cleaners[i].as_ref())
+        .map(|&(i, _)| cleaners[i].as_ref())
         .collect();
-    let opts = crate::cleaner::CleanOptions {
-        trash_mode: mode,
-        ..Default::default()
-    };
     let summary = crate::batch::run_batch(
         &selected,
         &opts,
@@ -598,50 +579,6 @@ mod tests {
         // Select xcode > DerivedData (idx 0) and brew (idx 1)
         let total = compute_selected_total(&[0, 1], &mapping, &results);
         assert_eq!(total, 500 + 2000);
-    }
-
-    #[test]
-    fn auto_clean_indices_skips_manual_only() {
-        let cleaners: Vec<Box<dyn Cleaner>> = vec![
-            Box::new(TestCleaner::new("brew", 2000, vec![])),
-            Box::new(crate::cleaners::manual_only::ManualOnly::new(Box::new(
-                TestCleaner::new("docker", 3000, vec![]),
-            ))),
-            Box::new(TestCleaner::new("empty", 0, vec![])),
-        ];
-        let results: Vec<ScanResult> = cleaners.iter().map(|c| c.detect()).collect();
-        assert_eq!(auto_clean_indices(&results, &cleaners), vec![0]);
-    }
-
-    #[test]
-    fn auto_clean_indices_excludes_unavailable() {
-        struct UnavailableCleaner(&'static str);
-        impl Cleaner for UnavailableCleaner {
-            fn name(&self) -> &'static str {
-                self.0
-            }
-            fn detect(&self) -> ScanResult {
-                ScanResult::new(self.0, ScanStatus::Unavailable)
-            }
-            fn clean(
-                &self,
-                _dry_run: bool,
-                _reporter: &dyn ProgressReporter,
-                _opts: &crate::cleaner::CleanOptions,
-            ) -> Result<CleanResult> {
-                panic!("unavailable cleaner must never be cleaned by --yes")
-            }
-        }
-        let cleaners: Vec<Box<dyn Cleaner>> = vec![
-            Box::new(TestCleaner::new("brew", 2000, vec![])),
-            Box::new(UnavailableCleaner("mise")),
-        ];
-        let results: Vec<ScanResult> = cleaners.iter().map(|c| c.detect()).collect();
-        assert_eq!(
-            auto_clean_indices(&results, &cleaners),
-            vec![0],
-            "unavailable targets must never be picked by --yes"
-        );
     }
 
     #[test]
