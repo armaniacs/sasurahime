@@ -87,6 +87,47 @@ fn clean_xcode_derived_data_only_via_sub() {
 }
 
 #[test]
+fn clean_xcode_unknown_sub_exits_nonzero_with_valid_spellings() {
+    let tmp = TempDir::new().unwrap();
+    let dd = tmp.path().join("Library/Developer/Xcode/DerivedData/MyApp");
+    let arch = tmp
+        .path()
+        .join("Library/Developer/Xcode/Archives/MyArchive");
+    fs::create_dir_all(&dd).unwrap();
+    fs::write(dd.join("build.log"), b"data").unwrap();
+    fs::create_dir_all(&arch).unwrap();
+    fs::write(arch.join("archive.xcarchive"), b"data").unwrap();
+
+    let output = sasurahime(tmp.path())
+        .args(["--permanent", "clean", "xcode", "--sub", "bogus"])
+        .output()
+        .unwrap();
+
+    assert!(
+        !output.status.success(),
+        "unknown --sub spelling must be an error, not a silent DerivedData-only clean"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    for spelling in [
+        "derived-data",
+        "deriveddata",
+        "archives",
+        "DerivedData",
+        "Archives",
+    ] {
+        assert!(
+            stderr.contains(spelling),
+            "stderr must list the valid spelling `{spelling}`, got:\n{stderr}"
+        );
+    }
+    assert!(dd.exists(), "nothing may be deleted when --sub is invalid");
+    assert!(
+        arch.exists(),
+        "nothing may be deleted when --sub is invalid"
+    );
+}
+
+#[test]
 fn clean_xcode_archives_only_via_sub() {
     let tmp = TempDir::new().unwrap();
     let dd = tmp.path().join("Library/Developer/Xcode/DerivedData/MyApp");
