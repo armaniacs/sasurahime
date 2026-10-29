@@ -182,10 +182,25 @@ impl CleanResult {
     }
 
     /// A result for "nothing happened": a tool that is not installed, a
-    /// cancelled run, a no-op target. Zero freed, nothing deleted.
+    /// no-op target. Zero freed, nothing deleted.
     pub fn empty(name: &'static str) -> Self {
         Self {
             name,
+            bytes_freed: 0,
+            uses_trash: false,
+            skipped: Vec::new(),
+        }
+    }
+
+    /// A result for a run the user cancelled before any cleaner reported.
+    /// Deliberately nameless: nothing ran to completion, so there is no
+    /// cleaner to name — the target the user saw (`Cleaning <label>...`)
+    /// lives in the caller's label, not in any cleaner's result, and
+    /// fabricating one would blur `name` from "the cleaner that produced
+    /// this result" into "the thing that was attempted".
+    pub fn cancelled() -> Self {
+        Self {
+            name: "",
             bytes_freed: 0,
             uses_trash: false,
             skipped: Vec::new(),

@@ -251,12 +251,6 @@ struct DeleteReport {
 }
 
 impl ApfsSnapshotCleaner {
-    /// A no-op result: nothing was freed, nothing was deleted, nothing
-    /// skipped. Every early exit of both modes returns this.
-    fn zero_result(&self) -> CleanResult {
-        CleanResult::empty(self.name())
-    }
-
     fn clean_delete(
         &self,
         all: bool,
@@ -264,13 +258,13 @@ impl ApfsSnapshotCleaner {
         reporter: &dyn ProgressReporter,
     ) -> Result<CleanResult> {
         if !self.runner.exists("tmutil") {
-            return Ok(self.zero_result());
+            return Ok(CleanResult::empty(self.name()));
         }
         let output = self.runner.run("tmutil", &["listlocalsnapshots", "/"])?;
         let names = parse_snapshot_names(&String::from_utf8_lossy(&output.stdout));
         if names.is_empty() {
             println!("[apfs-snapshot] no local snapshots found");
-            return Ok(self.zero_result());
+            return Ok(CleanResult::empty(self.name()));
         }
 
         eprintln!("⚠  Deleting snapshots {TM_PROTECTION_WARNING}");
@@ -280,14 +274,14 @@ impl ApfsSnapshotCleaner {
             for name in &names {
                 println!("  would delete: {}", name);
             }
-            return Ok(self.zero_result());
+            return Ok(CleanResult::empty(self.name()));
         }
 
         // `--all` is an explicit opt-in, so it skips the TTY guard that exists
         // only to stop an interactive prompt from being hit in a pipeline.
         // The `--all` alternative is documented in the command help.
         if !all && !crate::prompt::gate_interactive("apfs-snapshot") {
-            return Ok(self.zero_result());
+            return Ok(CleanResult::empty(self.name()));
         }
 
         let selected = if all {
@@ -297,7 +291,7 @@ impl ApfsSnapshotCleaner {
         };
         if selected.is_empty() {
             println!("[apfs-snapshot] nothing selected");
-            return Ok(self.zero_result());
+            return Ok(CleanResult::empty(self.name()));
         }
 
         // Snapshot sizes are not reported by tmutil, so the freed amount is the
@@ -391,7 +385,7 @@ impl ApfsSnapshotCleaner {
     ) -> Result<CleanResult> {
         if !self.runner.exists("tmutil") {
             println!("[apfs-snapshot] tmutil not found — skipping thinning.");
-            return Ok(self.zero_result());
+            return Ok(CleanResult::empty(self.name()));
         }
         if !validate_urgency(urgency) {
             anyhow::bail!(
@@ -413,7 +407,7 @@ impl ApfsSnapshotCleaner {
                 )?
             {
                 println!("[apfs-snapshot] cancelled");
-                return Ok(self.zero_result());
+                return Ok(CleanResult::empty(self.name()));
             }
         }
         if dry_run {
@@ -421,7 +415,7 @@ impl ApfsSnapshotCleaner {
                 "[apfs-snapshot] dry-run: would run `tmutil thinlocalsnapshots / {} {}`",
                 target_bytes, urgency
             );
-            return Ok(self.zero_result());
+            return Ok(CleanResult::empty(self.name()));
         }
         // Thinning is an explicit opt-in like --all, so it skips the plain
         // non-TTY guard; urgency 4 keeps its own confirmation above.
@@ -442,7 +436,7 @@ impl ApfsSnapshotCleaner {
                 "[apfs-snapshot] tmutil thinlocalsnapshots exited with {} - no space was reclaimed",
                 output.status.code().unwrap_or(-1)
             );
-            return Ok(self.zero_result());
+            return Ok(CleanResult::empty(self.name()));
         }
         let after = (self.free_space)();
         let freed = free_space_delta(before, after);

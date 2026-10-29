@@ -743,12 +743,7 @@ where
             Err(e) if e.is::<CleanCancelled>() => {
                 // User cancelled — clean shutdown, no [FAILED], no Freed line.
                 // The hint was already printed in GenericCleaner.
-                return Ok(CleanResult {
-                    name: "",
-                    bytes_freed: 0,
-                    uses_trash: false,
-                    skipped: vec![],
-                });
+                return Ok(CleanResult::cancelled());
             }
             Err(e) => {
                 eprintln!("{msg} [FAILED]");
@@ -759,14 +754,7 @@ where
         let r = cleaner_fn(dry_run, reporter, opts);
         match r {
             Ok(v) => v,
-            Err(e) if e.is::<CleanCancelled>() => {
-                return Ok(CleanResult {
-                    name: "",
-                    bytes_freed: 0,
-                    uses_trash: false,
-                    skipped: vec![],
-                })
-            }
+            Err(e) if e.is::<CleanCancelled>() => return Ok(CleanResult::cancelled()),
             Err(e) => return Err(e),
         }
     };

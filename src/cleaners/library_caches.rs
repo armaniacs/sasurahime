@@ -194,10 +194,6 @@ pub fn split_running(selected: Vec<CacheEntry>) -> (Vec<CacheEntry>, Vec<Skipped
     (to_delete, skipped)
 }
 
-fn empty_result(name: &'static str) -> CleanResult {
-    CleanResult::empty(name)
-}
-
 pub struct LibraryCachesCleaner {
     pub home: PathBuf,
     pub runner: Box<dyn CommandRunner>,
@@ -266,12 +262,12 @@ impl LibraryCachesCleaner {
         mode: crate::trash::TrashMode,
     ) -> Result<CleanResult> {
         if !self.caches_dir().exists() {
-            return Ok(empty_result(self.name()));
+            return Ok(CleanResult::empty(self.name()));
         }
         let mut entries = self.scan(true);
         if entries.is_empty() {
             println!("[library-caches] nothing to clean");
-            return Ok(empty_result(self.name()));
+            return Ok(CleanResult::empty(self.name()));
         }
         mark_running(&mut entries, self.runner.as_ref());
 
@@ -293,20 +289,20 @@ impl LibraryCachesCleaner {
             for e in &deletable {
                 println!("  would remove: {}", e.path.display());
             }
-            return Ok(empty_result(self.name()));
+            return Ok(CleanResult::empty(self.name()));
         }
         if deletable.is_empty() {
             println!("\n[library-caches] no deletable known caches");
-            return Ok(empty_result(self.name()));
+            return Ok(CleanResult::empty(self.name()));
         }
         if !crate::prompt::gate_interactive("library-caches") {
-            return Ok(empty_result(self.name()));
+            return Ok(CleanResult::empty(self.name()));
         }
 
         let selected = self.interactive_select(reporter, &deletable)?;
         if selected.is_empty() {
             println!("[library-caches] nothing selected");
-            return Ok(empty_result(self.name()));
+            return Ok(CleanResult::empty(self.name()));
         }
         let (to_delete, mut skipped) = split_running(selected);
         let mut result = self.delete_entries(&to_delete, reporter, mode)?;

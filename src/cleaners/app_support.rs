@@ -359,10 +359,6 @@ impl AppSupportCleaner {
         self.home.join("Library/Application Support")
     }
 
-    fn empty_result() -> CleanResult {
-        CleanResult::empty(NAME)
-    }
-
     fn running_apps(&self, cands: &[Candidate]) -> HashSet<&'static str> {
         let mut running = HashSet::new();
         for c in cands {
@@ -559,25 +555,25 @@ impl AppSupportCleaner {
     ) -> Result<CleanResult> {
         let base = self.base();
         if !base.exists() {
-            return Ok(Self::empty_result());
+            return Ok(CleanResult::empty(NAME));
         }
         let cands = scan_candidates(&base, self.min_app_bytes);
         if dry_run {
             self.print_dry_run(&cands);
-            return Ok(Self::empty_result());
+            return Ok(CleanResult::empty(NAME));
         }
         if cands.is_empty() {
             println!("[{NAME}] nothing to clean");
-            return Ok(Self::empty_result());
+            return Ok(CleanResult::empty(NAME));
         }
         if !crate::prompt::gate_interactive(NAME) {
-            return Ok(Self::empty_result());
+            return Ok(CleanResult::empty(NAME));
         }
         let running = self.running_apps(&cands);
         let selected = self.interactive_select(reporter, &cands, &running)?;
         if selected.is_empty() {
             println!("[{NAME}] nothing selected");
-            return Ok(Self::empty_result());
+            return Ok(CleanResult::empty(NAME));
         }
         let approved = self.confirm_quits(reporter, &selected, &running)?;
         let result = self.apply_selection(&selected, &approved, reporter, mode)?;

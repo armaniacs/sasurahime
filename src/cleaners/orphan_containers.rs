@@ -403,10 +403,6 @@ pub fn unreadable_hint(count: usize) -> Option<String> {
     ))
 }
 
-fn empty_result(name: &'static str) -> CleanResult {
-    CleanResult::empty(name)
-}
-
 fn print_unreadable_hint(count: usize) {
     if let Some(hint) = unreadable_hint(count) {
         eprintln!("{hint}");
@@ -452,14 +448,14 @@ impl OrphanContainersCleaner {
     ) -> Result<CleanResult> {
         if !self.any_root_exists() {
             println!("[orphan-containers] nothing to clean");
-            return Ok(empty_result(self.name()));
+            return Ok(CleanResult::empty(self.name()));
         }
 
         let scan = self.scan();
         if scan.candidates.is_empty() {
             println!("[orphan-containers] nothing to clean");
             print_unreadable_hint(scan.unreadable);
-            return Ok(empty_result(self.name()));
+            return Ok(CleanResult::empty(self.name()));
         }
 
         if dry_run {
@@ -476,20 +472,20 @@ impl OrphanContainersCleaner {
                 );
             }
             print_unreadable_hint(scan.unreadable);
-            return Ok(empty_result(self.name()));
+            return Ok(CleanResult::empty(self.name()));
         }
 
         // Which folders are safe to remove is a judgement call that only the
         // user can make, so there is no non-interactive path (no `--all`).
         if !crate::prompt::gate_interactive("orphan-containers") {
-            return Ok(empty_result(self.name()));
+            return Ok(CleanResult::empty(self.name()));
         }
 
         let selected = Self::interactive_select(reporter, &scan.candidates)?;
         if selected.is_empty() {
             println!("[orphan-containers] nothing selected");
             print_unreadable_hint(scan.unreadable);
-            return Ok(empty_result(self.name()));
+            return Ok(CleanResult::empty(self.name()));
         }
 
         let result = self.delete_selected(&selected, reporter, mode)?;
