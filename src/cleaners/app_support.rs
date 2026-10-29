@@ -477,14 +477,15 @@ impl AppSupportCleaner {
     ) -> Result<CleanResult> {
         let base = self.base();
         let mut states: Vec<(&'static str, AppState)> = Vec::new();
-        let mut freed = 0u64;
-        let mut uses_trash = false;
         let mut skipped = Vec::new();
-        let mut deleted = Vec::new();
+        let mut items: Vec<(std::path::PathBuf, u64)> = Vec::new();
 
-        reporter.progress_init(NAME, selected.len());
-        for (i, cand) in selected.iter().enumerate() {
-            reporter.progress_tick(&cand.path, i + 1, cand.size);
+        // Prepare the apps and resolve the allowlisted paths BEFORE the
+        // delete loop: a blocked app or a path outside the allowlist is a
+        // skip, not a deletion. The deletion itself (progress, per-entry
+        // skip classification, freed sums) lives in the shared
+        // `crate::trash::delete_entries`.
+        for cand in selected {
             let name = cand.target.hint_name;
             let idx = match states.iter().position(|(n, _)| *n == name) {
                 Some(i) => i,
@@ -511,38 +512,11 @@ impl AppSupportCleaner {
                     continue;
                 }
             };
-            let outcome = match crate::trash::safe_delete(self.runner.as_ref(), &path, mode) {
-                Ok(outcome) => outcome,
-                // A fatal per-entry error (e.g. the path vanished between
-                // scan and delete) must not abort the whole run: report it
-                // and continue with the remaining candidates.
-                Err(err) => {
-                    eprintln!("[{NAME}] error removing {}: {err:#}", path.display());
-                    skipped.push(SkippedEntry {
-                        path: path.clone(),
-                        reason: format!("{err:#}"),
-                    });
-                    continue;
-                }
-            };
-            if let Some(reason) = outcome.skip_reason {
-                eprintln!("[{NAME}] error removing {}: {reason}", path.display());
-                skipped.push(SkippedEntry {
-                    path: path.clone(),
-                    reason,
-                });
-                continue;
-            }
-            uses_trash |= outcome.uses_trash;
-            freed += cand.size;
-            println!(
-                "[{NAME}] removed: {} (freed {})",
-                path.display(),
-                format_bytes(cand.size)
-            );
-            deleted.push(path);
+            items.push((path, cand.size));
         }
-        reporter.progress_finish();
+
+        let mut result =
+            crate::trash::delete_entries(NAME, self.runner.as_ref(), reporter, mode, &items);
 
         for (name, state) in &states {
             if !matches!(state, AppState::Quit) {
@@ -559,13 +533,10 @@ impl AppSupportCleaner {
             }
         }
 
-        Ok(CleanResult {
-            name: NAME,
-            bytes_freed: freed,
-            uses_trash,
-            skipped,
-            deleted_paths: deleted,
-        })
+        // Merge the pre-delete skips (blocked apps, unresolvable paths) into
+        // the shared loop's result.
+        result.skipped.extend(skipped);
+        Ok(result)
     }
 
     /// The shared clean body. `mode` is the deletion mode threaded into

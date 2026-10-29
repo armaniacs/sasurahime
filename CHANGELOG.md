@@ -8,6 +8,11 @@ All notable changes to sasurahime will be documented in this file. The format is
 
 ### Changed
 
+- The per-cleaner delete loops collapsed into one shared loop
+  (`crate::trash::delete_entries`): progress ticks, skip classification,
+  freed-byte sums, and the deletion-mode truth now live in one place
+  instead of 6 copy-pasted loops (library-caches, library-logs,
+  orphan-containers, app-support, ios-backup, device-support).
 - Interactive prompts now run through a single prompt port
   (`crate::prompt`): the TTY gating, the live-output suspension, and the
   dialoguer calls are owned in one place instead of 8 cleaner files, so

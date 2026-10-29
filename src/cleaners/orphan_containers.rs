@@ -1,4 +1,4 @@
-use crate::cleaner::{CleanOptions, CleanResult, Cleaner, ScanResult, ScanStatus, SkippedEntry};
+use crate::cleaner::{CleanOptions, CleanResult, Cleaner, ScanResult, ScanStatus};
 use crate::command::CommandRunner;
 use crate::format::{dir_size, format_bytes};
 use crate::progress::ProgressReporter;
@@ -507,63 +507,21 @@ impl OrphanContainersCleaner {
         reporter: &dyn ProgressReporter,
         mode: crate::trash::TrashMode,
     ) -> Result<CleanResult> {
-        let mut freed: u64 = 0;
-        let mut uses_trash = false;
-        let mut skipped = Vec::new();
-        let mut deleted_paths = Vec::new();
         // No prompt can occur while this delete loop runs, so the live line
         // may tick on a steady 1s cadence: that is what makes `{elapsed}`
-        // update every second during the deletion.
+        // update every second during the deletion. The loop itself (and its
+        // per-entry contracts) lives in the shared
+        // `crate::trash::delete_entries`.
         reporter.enable_live_elapsed();
-        reporter.progress_init(self.name(), selected.len());
-        for (i, c) in selected.iter().enumerate() {
-            reporter.progress_tick(&c.path, i + 1, c.size);
-            let outcome = match crate::trash::safe_delete(self.runner.as_ref(), &c.path, mode) {
-                Ok(outcome) => outcome,
-                // A fatal per-entry error (e.g. the path vanished between
-                // scan and delete) must not abort the whole run: report it
-                // and continue with the remaining entries.
-                Err(err) => {
-                    eprintln!(
-                        "[orphan-containers] error removing {}: {err:#}",
-                        c.path.display()
-                    );
-                    skipped.push(SkippedEntry {
-                        path: c.path.clone(),
-                        reason: format!("{err:#}"),
-                    });
-                    continue;
-                }
-            };
-            if let Some(reason) = outcome.skip_reason {
-                eprintln!(
-                    "[orphan-containers] error removing {}: {reason}",
-                    c.path.display()
-                );
-                skipped.push(SkippedEntry {
-                    path: c.path.clone(),
-                    reason,
-                });
-                continue;
-            }
-            uses_trash |= outcome.uses_trash;
-            freed += c.size;
-            deleted_paths.push(c.path.clone());
-            println!(
-                "[orphan-containers] removed: {} (freed {})",
-                c.path.display(),
-                format_bytes(c.size)
-            );
-        }
-        reporter.progress_finish();
-        println!("[orphan-containers] total freed: {}", format_bytes(freed));
-        Ok(CleanResult {
-            name: self.name(),
-            bytes_freed: freed,
-            uses_trash,
-            skipped,
-            deleted_paths,
-        })
+        let items: Vec<(std::path::PathBuf, u64)> =
+            selected.iter().map(|c| (c.path.clone(), c.size)).collect();
+        let result =
+            crate::trash::delete_entries(self.name(), self.runner.as_ref(), reporter, mode, &items);
+        println!(
+            "[orphan-containers] total freed: {}",
+            crate::format::format_bytes(result.bytes_freed)
+        );
+        Ok(result)
     }
 }
 

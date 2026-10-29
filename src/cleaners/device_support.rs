@@ -1,4 +1,4 @@
-use crate::cleaner::{CleanResult, Cleaner, ScanResult, ScanStatus, SkippedEntry};
+use crate::cleaner::{CleanResult, Cleaner, ScanResult, ScanStatus};
 use crate::command::CommandRunner;
 use crate::format::dir_size;
 use crate::progress::ProgressReporter;
@@ -130,41 +130,22 @@ impl Cleaner for DeviceSupportCleaner {
             return Ok(CleanResult::empty(self.name()));
         }
 
-        reporter.progress_init(self.name(), to_delete.len());
-
-        let mut freed: u64 = 0;
-        let mut uses_trash = false;
-        let mut skipped = vec![];
-        for (i, p) in to_delete.iter().enumerate() {
-            let size = dir_size(p);
-            reporter.progress_tick(p, i + 1, size);
-            let outcome = crate::trash::safe_delete(
-                self.runner.as_ref(),
-                p,
-                crate::trash::TrashMode::Global,
-            )?;
-            if let Some(reason) = outcome.skip_reason {
-                log::error!("[device-support] error removing {}: {reason}", p.display());
-                skipped.push(SkippedEntry {
-                    path: p.to_path_buf(),
-                    reason,
-                });
-                continue;
-            }
-            uses_trash |= outcome.uses_trash;
-            freed += size;
-            println!("[device-support] removed: {}", p.display());
-        }
-
-        reporter.progress_finish();
-
-        Ok(CleanResult {
-            name: self.name(),
-            bytes_freed: freed,
-            uses_trash,
-            skipped,
-            deleted_paths: vec![],
-        })
+        // The shared delete loop owns the per-entry contracts (progress,
+        // skip classification, freed sums). Sizes are measured here, once
+        // per path, the same way the old inline loop measured them. The
+        // mode is Global: the CLI pins the process-global mode per run.
+        let items: Vec<(std::path::PathBuf, u64)> = to_delete
+            .iter()
+            .map(|p| (p.to_path_buf(), dir_size(p)))
+            .collect();
+        let result = crate::trash::delete_entries(
+            self.name(),
+            self.runner.as_ref(),
+            reporter,
+            crate::trash::TrashMode::Global,
+            &items,
+        );
+        Ok(result)
     }
 }
 

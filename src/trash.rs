@@ -208,6 +208,72 @@ pub fn safe_delete(
     }
 }
 
+/// The one delete loop: runs [`safe_delete`] per entry with progress ticks,
+/// records failures as skipped entries (a fatal per-entry error never aborts
+/// the run), sums the freed bytes, and reports the seam's `uses_trash` truth.
+///
+/// Every cleaner that deletes a list of scanned paths goes through here so
+/// the loop's contracts concentrate in one place instead of living as
+/// copy-pasted loops at each call site: a vanished path is reported and the
+/// remaining entries still process, a skippable failure is a `SkippedEntry`,
+/// and `uses_trash` is the resolved mode at deletion time. `items` pairs each
+/// path with its scanned byte size (the value the run reports as freed);
+/// `label` names the cleaner in the per-entry log lines.
+pub fn delete_entries(
+    label: &'static str,
+    runner: &dyn crate::command::CommandRunner,
+    reporter: &dyn crate::progress::ProgressReporter,
+    mode: TrashMode,
+    items: &[(std::path::PathBuf, u64)],
+) -> crate::cleaner::CleanResult {
+    let mut freed: u64 = 0;
+    let mut uses_trash = false;
+    let mut skipped = Vec::new();
+    let mut deleted_paths = Vec::new();
+    reporter.progress_init(label, items.len());
+    for (i, (path, size)) in items.iter().enumerate() {
+        reporter.progress_tick(path, i + 1, *size);
+        let outcome = match safe_delete(runner, path, mode) {
+            Ok(outcome) => outcome,
+            // A fatal per-entry error (e.g. the path vanished between scan
+            // and delete) must not abort the whole run: report it and
+            // continue with the remaining entries.
+            Err(err) => {
+                eprintln!("[{label}] error removing {}: {err:#}", path.display());
+                skipped.push(crate::cleaner::SkippedEntry {
+                    path: path.clone(),
+                    reason: format!("{err:#}"),
+                });
+                continue;
+            }
+        };
+        if let Some(reason) = outcome.skip_reason {
+            eprintln!("[{label}] error removing {}: {reason}", path.display());
+            skipped.push(crate::cleaner::SkippedEntry {
+                path: path.clone(),
+                reason,
+            });
+            continue;
+        }
+        uses_trash |= outcome.uses_trash;
+        freed += size;
+        deleted_paths.push(path.clone());
+        println!(
+            "[{label}] removed: {} (freed {})",
+            path.display(),
+            crate::format::format_bytes(*size)
+        );
+    }
+    reporter.progress_finish();
+    crate::cleaner::CleanResult {
+        name: label,
+        bytes_freed: freed,
+        uses_trash,
+        skipped,
+        deleted_paths,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -516,5 +582,56 @@ mod tests {
             !body.contains("DeleteMethod::Finder"),
             "the default Finder backend must not come back"
         );
+    }
+
+    // ── shared delete loop (PBI 56) ──
+
+    #[test]
+    fn delete_entries_continues_past_a_vanished_entry_and_sums_the_rest() {
+        // The shared loop's contract: a fatal per-entry error (a path that
+        // vanished between scan and delete) is reported as a SkippedEntry and
+        // the remaining entries still delete; the freed sum and the seam's
+        // uses_trash truth come out of the same loop every cleaner uses.
+        // The global pin is permanent here: a Permanent resolve must never
+        // claim Trash.
+        let _guard = crate::test_helpers::TrashModeGuard::set(false);
+        let tmp = TempDir::new().unwrap();
+        let (a, b) = (tmp.path().join("a"), tmp.path().join("b"));
+        for d in [&a, &b] {
+            fs::create_dir_all(d).unwrap();
+            fs::write(d.join("cache.bin"), vec![0u8; 1024]).unwrap();
+        }
+        fs::remove_dir_all(&a).unwrap(); // the vanished first entry
+        let runner = crate::test_helpers::MockRunner::new().with_success("chflags");
+        let items = vec![(a.clone(), 1024), (b.clone(), 1024)];
+        let r = delete_entries(
+            "loop-test",
+            &runner,
+            &crate::progress::DeepSuppressReporter,
+            TrashMode::Permanent,
+            &items,
+        );
+        assert!(!b.exists(), "the surviving entry must still delete");
+        assert!(!a.exists(), "the vanished entry stays vanished");
+        assert_eq!(r.bytes_freed, 1024, "only the surviving entry is summed");
+        assert_eq!(r.skipped.len(), 1, "the vanished entry is a skip");
+        assert_eq!(r.skipped[0].path, a);
+        assert!(!r.uses_trash, "a permanent resolve must never claim Trash");
+        assert_eq!(r.deleted_paths, vec![b], "the deleted path is recorded");
+    }
+
+    #[test]
+    fn delete_entries_empty_items_is_a_zero_result() {
+        let runner = crate::test_helpers::MockRunner::new();
+        let r = delete_entries(
+            "loop-test",
+            &runner,
+            &crate::progress::DeepSuppressReporter,
+            TrashMode::Global,
+            &[],
+        );
+        assert_eq!(r.bytes_freed, 0);
+        assert!(r.skipped.is_empty());
+        assert!(!r.uses_trash);
     }
 }

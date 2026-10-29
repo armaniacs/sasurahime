@@ -112,34 +112,24 @@ impl Cleaner for IosCleaner {
             return Ok(CleanResult::empty(self.name()));
         }
 
-        let mut total_freed: u64 = 0;
-        let mut uses_trash = false;
-        reporter.progress_init(self.name(), selected.len());
-        for (i, (path, size)) in selected.iter().enumerate() {
-            reporter.progress_tick(path, i + 1, *size);
-            let outcome = crate::trash::safe_delete(
-                self.runner.as_ref(),
-                path,
-                crate::trash::TrashMode::Global,
-            )?;
-            if let Some(reason) = outcome.skip_reason {
-                log::error!("[ios-backup] error removing {}: {reason}", path.display());
-                continue;
-            }
-            uses_trash |= outcome.uses_trash;
-            total_freed += size;
-            println!(
-                "[ios-backup] removed: {}  (freed {})",
-                path.display(),
-                crate::format::format_bytes(*size)
-            );
-        }
-        reporter.progress_finish();
+        // The shared delete loop owns the per-entry contracts. The mode is
+        // Global: the deletion scope was already gated interactively above.
+        let result = crate::trash::delete_entries(
+            self.name(),
+            self.runner.as_ref(),
+            reporter,
+            crate::trash::TrashMode::Global,
+            &selected,
+        );
         println!(
             "[ios-backup] total freed: {}",
-            crate::format::format_bytes(total_freed)
+            crate::format::format_bytes(result.bytes_freed)
         );
-        Ok(CleanResult::freed(self.name(), total_freed, uses_trash))
+        Ok(CleanResult::freed(
+            self.name(),
+            result.bytes_freed,
+            result.uses_trash,
+        ))
     }
 }
 

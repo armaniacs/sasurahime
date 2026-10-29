@@ -1,4 +1,4 @@
-use crate::cleaner::{CleanResult, Cleaner, ScanResult, ScanStatus, SkippedEntry};
+use crate::cleaner::{CleanResult, Cleaner, ScanResult, ScanStatus};
 use crate::command::CommandRunner;
 use crate::format::dir_size;
 use crate::progress::ProgressReporter;
@@ -149,63 +149,23 @@ impl LibraryLogsCleaner {
     /// The one delete loop shared by `clean` and `clean_with_opts`. ORs the
     /// seam-resolved trash truth across every deletion and records every
     /// failure (skippable or fatal) into the skipped channel instead of
-    /// aborting the run.
+    /// aborting the run. The loop itself lives in the shared
+    /// `crate::trash::delete_entries`.
     fn delete_entries(
         &self,
         entries: &[LogEntry],
         reporter: &dyn ProgressReporter,
         mode: crate::trash::TrashMode,
     ) -> Result<CleanResult> {
-        let mut total_freed: u64 = 0;
-        let mut uses_trash = false;
-        let mut skipped = Vec::new();
-        reporter.progress_init(self.name(), entries.len());
-        for (i, entry) in entries.iter().enumerate() {
-            reporter.progress_tick(&entry.path, i + 1, entry.size);
-            let outcome = match crate::trash::safe_delete(self.runner.as_ref(), &entry.path, mode) {
-                Ok(outcome) => outcome,
-                // A fatal per-entry error (e.g. the path vanished between
-                // scan and delete) must not abort the whole run: report
-                // it and continue with the remaining entries.
-                Err(err) => {
-                    eprintln!(
-                        "[library-logs] error removing {}: {err:#}",
-                        entry.path.display()
-                    );
-                    skipped.push(SkippedEntry {
-                        path: entry.path.clone(),
-                        reason: format!("{err:#}"),
-                    });
-                    continue;
-                }
-            };
-            if let Some(reason) = outcome.skip_reason {
-                eprintln!(
-                    "[library-logs] error removing {}: {reason}",
-                    entry.path.display()
-                );
-                skipped.push(SkippedEntry {
-                    path: entry.path.clone(),
-                    reason,
-                });
-                continue;
-            }
-            uses_trash |= outcome.uses_trash;
-            total_freed += entry.size;
-            println!(
-                "[library-logs] removed: {} (freed {})",
-                entry.path.display(),
-                crate::format::format_bytes(entry.size)
-            );
-        }
-        reporter.progress_finish();
-        Ok(CleanResult {
-            name: self.name(),
-            bytes_freed: total_freed,
-            uses_trash,
-            skipped,
-            deleted_paths: vec![],
-        })
+        let items: Vec<(std::path::PathBuf, u64)> =
+            entries.iter().map(|e| (e.path.clone(), e.size)).collect();
+        Ok(crate::trash::delete_entries(
+            self.name(),
+            self.runner.as_ref(),
+            reporter,
+            mode,
+            &items,
+        ))
     }
 }
 

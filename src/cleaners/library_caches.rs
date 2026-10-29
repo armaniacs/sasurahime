@@ -229,56 +229,17 @@ impl LibraryCachesCleaner {
         reporter: &dyn ProgressReporter,
         mode: crate::trash::TrashMode,
     ) -> Result<CleanResult> {
-        let mut freed: u64 = 0;
-        let mut uses_trash = false;
-        let mut skipped = Vec::new();
-        reporter.progress_init(self.name(), entries.len());
-        for (i, e) in entries.iter().enumerate() {
-            reporter.progress_tick(&e.path, i + 1, e.size);
-            let outcome = match crate::trash::safe_delete(self.runner.as_ref(), &e.path, mode) {
-                Ok(outcome) => outcome,
-                // A fatal per-entry error (e.g. the path vanished between
-                // scan and delete) must not abort the whole run: report it
-                // and continue with the remaining entries.
-                Err(err) => {
-                    eprintln!(
-                        "[library-caches] error removing {}: {err:#}",
-                        e.path.display()
-                    );
-                    skipped.push(SkippedEntry {
-                        path: e.path.clone(),
-                        reason: format!("{err:#}"),
-                    });
-                    continue;
-                }
-            };
-            if let Some(reason) = outcome.skip_reason {
-                eprintln!(
-                    "[library-caches] error removing {}: {reason}",
-                    e.path.display()
-                );
-                skipped.push(SkippedEntry {
-                    path: e.path.clone(),
-                    reason,
-                });
-                continue;
-            }
-            uses_trash |= outcome.uses_trash;
-            freed += e.size;
-            println!(
-                "[library-caches] removed: {} (freed {})",
-                e.path.display(),
-                format_bytes(e.size)
-            );
-        }
-        reporter.progress_finish();
-        Ok(CleanResult {
-            name: self.name(),
-            bytes_freed: freed,
-            uses_trash,
-            skipped,
-            deleted_paths: vec![],
-        })
+        // The shared delete loop owns the per-entry contracts (progress,
+        // skip classification, freed sums, uses_trash truth).
+        let items: Vec<(std::path::PathBuf, u64)> =
+            entries.iter().map(|e| (e.path.clone(), e.size)).collect();
+        Ok(crate::trash::delete_entries(
+            self.name(),
+            self.runner.as_ref(),
+            reporter,
+            mode,
+            &items,
+        ))
     }
 
     fn interactive_select(&self, entries: &[CacheEntry]) -> Result<Vec<CacheEntry>> {
