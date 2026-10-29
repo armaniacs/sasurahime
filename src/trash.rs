@@ -156,7 +156,11 @@ pub struct DeleteOutcome {
 /// skip classification are the seam's job for the deletions it mediates, and
 /// the enforced scope check keeps the deletion safety rules (which paths may
 /// be deleted at all) in that same single module.
-pub fn safe_delete(
+///
+/// Crate-internal since the ledger migration (PBI 77): the cleaner layer
+/// rides [`seam_delete`] / [`delete_entries`] instead of calling this seam
+/// directly, so only this module and the hint flow (PBI 80) reach it.
+pub(crate) fn safe_delete(
     runner: &dyn crate::command::CommandRunner,
     path: &Path,
     mode: TrashMode,
@@ -639,6 +643,43 @@ mod tests {
             !body.contains("DeleteMethod::Finder"),
             "the default Finder backend must not come back"
         );
+    }
+
+    // ── ledger bypass source pin (PBI 77) ──
+
+    #[test]
+    fn the_ledger_users_may_not_call_safe_delete_directly() {
+        // Source pin (the same style as the NsFileManager pin above): the 5
+        // ledger users (uv, project_artifacts, cli_fallback, generic,
+        // ollama) must ride delete_entries / delete_ledger with the
+        // seam_delete closure and never call safe_delete directly — the
+        // ledger owns the per-entry contracts, and a direct call bypasses
+        // them. The seam itself is crate-internal: only this module and the
+        // hint flow (PBI 80) reach it.
+        let self_src = include_str!("trash.rs");
+        // The pinned literal is split across a format call so this test's
+        // own source does not contain it and the assertion cannot
+        // self-satisfy.
+        let pinned = format!("pub{} fn safe_delete(", "(crate)");
+        assert!(
+            self_src.contains(&pinned),
+            "safe_delete must stay crate-internal (pub(crate)); the ledger users ride the adapter"
+        );
+        for (file, src) in [
+            ("uv.rs", include_str!("cleaners/uv.rs")),
+            (
+                "project_artifacts.rs",
+                include_str!("cleaners/project_artifacts.rs"),
+            ),
+            ("cli_fallback.rs", include_str!("cli_fallback.rs")),
+            ("generic.rs", include_str!("cleaners/generic.rs")),
+            ("ollama.rs", include_str!("cleaners/ollama.rs")),
+        ] {
+            assert!(
+                !src.contains("trash::safe_delete"),
+                "{file} must not call trash::safe_delete directly — ride the delete ledger instead"
+            );
+        }
     }
 
     // ── shared delete loop (PBI 56) ──
