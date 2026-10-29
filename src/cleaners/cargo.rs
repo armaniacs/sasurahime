@@ -1,4 +1,4 @@
-use crate::cleaner::{CleanResult, Cleaner, ScanResult, ScanStatus};
+use crate::cleaner::{CleanResult, Cleaner, ScanResult, ScanStatus, SkipCause};
 use crate::command::CommandRunner;
 use crate::format::dir_size;
 use crate::progress::ProgressReporter;
@@ -109,7 +109,7 @@ impl Cleaner for CargoCleaner {
                 if let Some(reason) = outcome.skip_reason {
                     skipped.push(crate::cleaner::SkippedEntry {
                         path: reg.to_path_buf(),
-                        reason,
+                        reason: SkipCause::Delete(reason),
                     });
                 } else {
                     // OR-in only when the deletion actually happened: a
@@ -142,7 +142,7 @@ impl Cleaner for CargoCleaner {
                 if let Some(reason) = outcome.skip_reason {
                     skipped.push(crate::cleaner::SkippedEntry {
                         path: path.to_path_buf(),
-                        reason,
+                        reason: SkipCause::Delete(reason),
                     });
                 } else {
                     // OR-in only when the deletion actually happened: a

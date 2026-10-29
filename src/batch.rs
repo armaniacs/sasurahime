@@ -179,7 +179,9 @@ mod tests {
                 uses_trash: false,
                 skipped: vec![crate::cleaner::SkippedEntry {
                     path: std::path::PathBuf::from("/tmp/locked-cache"),
-                    reason: "trash failed: boom".to_string(),
+                    reason: crate::cleaner::SkipCause::Delete(
+                        crate::cleaner::DeleteError::TrashRefused("boom".to_string()),
+                    ),
                 }],
                 deleted_paths: vec![],
             })

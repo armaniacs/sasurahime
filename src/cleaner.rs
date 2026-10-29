@@ -57,7 +57,87 @@ impl ScanResult {
 #[derive(Debug)]
 pub struct SkippedEntry {
     pub path: PathBuf,
-    pub reason: String,
+    /// Why the entry was skipped: a typed deletion failure (the seam's
+    /// classification) or a prose reason (a blocked app, a vanished path).
+    pub reason: SkipCause,
+}
+
+/// Why an entry was skipped. The deletion arm carries the seam's typed
+/// [`DeleteError`] so the skip/fatal classification is matched on by variant,
+/// never by message text: rewording an error message cannot flip a skip into
+/// a fatal failure (PBI 59).
+#[derive(Debug)]
+pub enum SkipCause {
+    /// The seam classified the deletion failure as skippable (a refused
+    /// trash move, a permission denial, a busy target).
+    Delete(DeleteError),
+    /// A prose reason: a blocked app, a vanished path, a config mismatch.
+    Reason(String),
+}
+
+impl std::fmt::Display for SkipCause {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SkipCause::Delete(err) => write!(f, "{err}"),
+            SkipCause::Reason(reason) => write!(f, "{reason}"),
+        }
+    }
+}
+
+/// A deletion failure, classified by cause instead of by message text (PBI
+/// 59): a refusal is [`DeleteError::is_skippable`] by variant, so rewording
+/// the Display text can never flip a skip into a fatal error.
+#[derive(Debug)]
+pub enum DeleteError {
+    /// The trash backend (trashItemAtURL / Finder) refused to move the entry.
+    TrashRefused(String),
+    /// The filesystem denied the removal (EPERM / EACCES).
+    PermissionDenied(std::io::Error),
+    /// The target was busy or otherwise unremovable-but-expected (EBUSY,
+    /// EAGAIN, EEXIST).
+    Busy(std::io::Error),
+    /// Any other deletion failure: fatal, not classified.
+    Io(std::io::Error),
+}
+
+impl DeleteError {
+    /// True when the clean run should continue past this failure (the entry
+    /// was NOT deleted): a refused trash move, a permission denial, or a
+    /// busy target. Everything else is fatal.
+    pub fn is_skippable(&self) -> bool {
+        match self {
+            DeleteError::TrashRefused(_)
+            | DeleteError::PermissionDenied(_)
+            | DeleteError::Busy(_) => true,
+            DeleteError::Io(_) => false,
+        }
+    }
+}
+
+impl std::fmt::Display for DeleteError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DeleteError::TrashRefused(msg) => write!(f, "trash failed: {msg}"),
+            DeleteError::PermissionDenied(e) | DeleteError::Busy(e) | DeleteError::Io(e) => {
+                write!(f, "{e}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for DeleteError {}
+
+/// Classifies a filesystem error by kind: a permission denial is a skip, a
+/// busy target (EBUSY maps to `WouldBlock`, `ResourceBusy`, EEXIST) is a
+/// skip, everything else is fatal.
+pub fn classify_io_error(e: std::io::Error) -> DeleteError {
+    match e.kind() {
+        std::io::ErrorKind::PermissionDenied => DeleteError::PermissionDenied(e),
+        std::io::ErrorKind::WouldBlock
+        | std::io::ErrorKind::ResourceBusy
+        | std::io::ErrorKind::AlreadyExists => DeleteError::Busy(e),
+        _ => DeleteError::Io(e),
+    }
 }
 
 #[derive(Debug)]
@@ -148,19 +228,23 @@ pub type CleanByName<'a> =
     dyn Fn(&str, Option<&str>, bool, &dyn ProgressReporter) -> Result<CleanResult> + 'a;
 
 pub fn is_skippable_error(e: &anyhow::Error) -> bool {
+    // Typed classification first: a `DeleteError` from the deletion seam is
+    // matched by variant, never by message text (PBI 59). Prose matching is
+    // gone: the seam produces typed errors, so rewording a message can no
+    // longer flip a skip into a fatal failure.
+    if let Some(del_err) = e.downcast_ref::<DeleteError>() {
+        return del_err.is_skippable();
+    }
     if let Some(io_err) = e.downcast_ref::<std::io::Error>() {
         return matches!(
             io_err.kind(),
             std::io::ErrorKind::PermissionDenied
                 | std::io::ErrorKind::WouldBlock
                 | std::io::ErrorKind::AlreadyExists
+                | std::io::ErrorKind::ResourceBusy
         );
     }
-    let msg = format!("{e:#}");
-    msg.contains("trash failed")
-        || msg.starts_with("Permission denied")
-        || msg.starts_with("Operation not permitted")
-        || msg.starts_with("Resource busy")
+    false
 }
 
 /// Which `[cleaner.<name>]` filters a cleaner actually honours. Command-based
@@ -404,26 +488,65 @@ mod tests {
 
     #[test]
     fn is_skippable_error_permission_denied_string() {
+        // PBI 59: prose matching is gone. A String-wrapped error without an
+        // io or DeleteError inside is fatal by classification, so rewording
+        // a message can never flip a skip into a fatal failure. The typed
+        // variants below carry the classification.
         let e = anyhow::anyhow!("Permission denied: /some/path");
-        assert!(is_skippable_error(&e));
+        assert!(!is_skippable_error(&e));
     }
 
     #[test]
-    fn is_skippable_error_operation_not_permitted_string() {
-        let e = anyhow::anyhow!("Operation not permitted");
-        assert!(is_skippable_error(&e));
+    fn delete_error_trash_refused_is_skippable() {
+        let e = DeleteError::TrashRefused("could not move to trash".to_string());
+        assert!(e.is_skippable());
+        assert!(is_skippable_error(&anyhow::Error::new(e)));
     }
 
     #[test]
-    fn is_skippable_error_resource_busy_string() {
-        let e = anyhow::anyhow!("Resource busy");
-        assert!(is_skippable_error(&e));
+    fn delete_error_permission_denied_is_skippable() {
+        let e = DeleteError::PermissionDenied(std::io::Error::from(
+            std::io::ErrorKind::PermissionDenied,
+        ));
+        assert!(e.is_skippable());
+        assert!(is_skippable_error(&anyhow::Error::new(e)));
     }
 
     #[test]
-    fn is_skippable_error_trash_failed_string() {
-        let e = anyhow::anyhow!("trash failed: could not move to trash");
-        assert!(is_skippable_error(&e));
+    fn delete_error_busy_is_skippable() {
+        let e = DeleteError::Busy(std::io::Error::from(std::io::ErrorKind::WouldBlock));
+        assert!(e.is_skippable());
+        assert!(is_skippable_error(&anyhow::Error::new(e)));
+    }
+
+    #[test]
+    fn delete_error_io_is_not_skippable() {
+        let e = DeleteError::Io(std::io::Error::from(std::io::ErrorKind::NotFound));
+        assert!(!e.is_skippable(), "an unclassified io error is fatal");
+        assert!(!is_skippable_error(&anyhow::Error::new(e)));
+    }
+
+    #[test]
+    fn delete_error_rewording_does_not_flip_the_classification() {
+        // PBI 59 acceptance: rewording the Display text changes nothing. Two
+        // TrashRefused errors with completely different messages classify
+        // the same.
+        let a = DeleteError::TrashRefused("trash failed: could not move to trash".to_string());
+        let b = DeleteError::TrashRefused("totally different wording entirely".to_string());
+        assert_eq!(a.is_skippable(), b.is_skippable());
+    }
+
+    #[test]
+    fn classify_io_error_maps_the_kinds() {
+        // The permanent-removal path classifies io errors by kind: EPERM is
+        // a permission skip, EBUSY (WouldBlock on macOS) is a busy skip, and
+        // everything else is fatal.
+        let perm = classify_io_error(std::io::Error::from(std::io::ErrorKind::PermissionDenied));
+        assert!(perm.is_skippable());
+        let busy = classify_io_error(std::io::Error::from(std::io::ErrorKind::WouldBlock));
+        assert!(busy.is_skippable());
+        let fatal = classify_io_error(std::io::Error::from(std::io::ErrorKind::NotFound));
+        assert!(!fatal.is_skippable());
     }
 
     #[test]
@@ -435,51 +558,6 @@ mod tests {
     #[test]
     fn is_skippable_error_clean_cancelled_is_not_skippable() {
         let e = anyhow::Error::from(crate::cleaner::CleanCancelled);
-        assert!(!is_skippable_error(&e));
-    }
-
-    #[test]
-    fn is_skippable_error_false_positive_permission_denied_in_filename() {
-        let e = anyhow::anyhow!("Database says: Operation not permitted in current mode");
-        assert!(
-            !is_skippable_error(&e),
-            "sentence with 'Operation not permitted' => not skippable"
-        );
-    }
-
-    #[test]
-    fn is_skippable_error_permission_denied_sentence_not_io_error() {
-        let e = anyhow::anyhow!("Error: user lacks 'Permission denied' access to resource");
-        assert!(
-            !is_skippable_error(&e),
-            "sentence with 'Permission denied' substring => not skippable"
-        );
-    }
-
-    #[test]
-    fn is_skippable_error_trash_failed_in_error_message() {
-        let e = anyhow::anyhow!("trash failed: /path/to/file");
-        assert!(is_skippable_error(&e));
-    }
-
-    #[test]
-    fn is_skippable_error_resource_busy_in_unrelated_error() {
-        let e = anyhow::anyhow!("The device reports 'Resource busy' in its status string");
-        assert!(
-            !is_skippable_error(&e),
-            "sentence with 'Resource busy' substring => not skippable"
-        );
-    }
-
-    #[test]
-    fn is_skippable_error_unrelated_error_without_skip_keywords() {
-        let e = anyhow::anyhow!("Disk full: cannot write to /dev/sda1");
-        assert!(!is_skippable_error(&e));
-    }
-
-    #[test]
-    fn is_skippable_error_filesystem_corruption() {
-        let e = anyhow::anyhow!("Input/output error: critical filesystem corruption detected");
         assert!(!is_skippable_error(&e));
     }
 }

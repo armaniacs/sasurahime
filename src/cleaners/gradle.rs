@@ -1,4 +1,4 @@
-use crate::cleaner::{CleanResult, Cleaner, ScanResult, ScanStatus};
+use crate::cleaner::{CleanResult, Cleaner, ScanResult, ScanStatus, SkipCause};
 use crate::command::CommandRunner;
 use crate::format::dir_size;
 use crate::progress::ProgressReporter;
@@ -144,7 +144,7 @@ impl Cleaner for GradleCleaner {
                 if let Some(reason) = outcome.skip_reason {
                     skipped.push(crate::cleaner::SkippedEntry {
                         path: path.to_path_buf(),
-                        reason,
+                        reason: SkipCause::Delete(reason),
                     });
                 } else {
                     uses_trash |= outcome.uses_trash;
@@ -283,7 +283,7 @@ impl Cleaner for JetBrainsCleaner {
                 if let Some(reason) = outcome.skip_reason {
                     skipped.push(crate::cleaner::SkippedEntry {
                         path: path.to_path_buf(),
-                        reason,
+                        reason: SkipCause::Delete(reason),
                     });
                 } else {
                     uses_trash |= outcome.uses_trash;

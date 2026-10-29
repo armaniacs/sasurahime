@@ -1,4 +1,4 @@
-use crate::cleaner::{CleanResult, Cleaner, ScanResult, ScanStatus};
+use crate::cleaner::{CleanResult, Cleaner, ScanResult, ScanStatus, SkipCause};
 use crate::progress::ProgressReporter;
 use anyhow::Result;
 use std::fs;
@@ -96,7 +96,7 @@ impl Cleaner for CustomPathCleaner {
                 if let Some(reason) = outcome.skip_reason {
                     skipped.push(crate::cleaner::SkippedEntry {
                         path: path.clone(),
-                        reason,
+                        reason: SkipCause::Delete(reason),
                     });
                     continue;
                 }

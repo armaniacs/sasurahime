@@ -5,12 +5,19 @@ use std::io::{BufRead, IsTerminal, Write};
 
 /// Build display items and their mapping to (cleaner_index, optional_sub_target).
 /// Pure function — no I/O, fully testable.
+/// One selection entry: the cleaner's index plus, when the selection is a
+/// sub-target, the sub's CLI spelling and its scanned bytes (the size rides
+/// in the mapping so the sum re-binds by value, not by string re-match).
+pub(crate) type SelectionEntry = (usize, Option<(&'static str, u64)>);
+
 pub(crate) fn build_selection_items(
     results: &[ScanResult],
     cleaners: &[Box<dyn Cleaner>],
     pruneable_indices: &[usize],
-) -> (Vec<(usize, Option<&'static str>)>, Vec<String>) {
-    let mut selection_mapping: Vec<(usize, Option<&'static str>)> = vec![];
+) -> (Vec<SelectionEntry>, Vec<String>) {
+    // The sub's scanned bytes ride in the mapping: the sum re-binds by the
+    // carried size instead of re-matching the sub name string (PBI 59).
+    let mut selection_mapping: Vec<SelectionEntry> = vec![];
     let items: Vec<String> = pruneable_indices
         .iter()
         .flat_map(|&i| {
@@ -25,7 +32,7 @@ pub(crate) fn build_selection_items(
             } else {
                 subs.iter()
                     .map(|&(sub_name, sub_size)| {
-                        selection_mapping.push((i, Some(sub_name)));
+                        selection_mapping.push((i, Some((sub_name, sub_size))));
                         format!(
                             "  {} > {}  ({})",
                             cleaners[i].name(),
@@ -44,21 +51,16 @@ pub(crate) fn build_selection_items(
 /// Pure function — no I/O, fully testable.
 pub(crate) fn compute_selected_total(
     selected: &[usize],
-    selection_mapping: &[(usize, Option<&'static str>)],
+    selection_mapping: &[SelectionEntry],
     results: &[ScanResult],
-    cleaners: &[Box<dyn Cleaner>],
 ) -> u64 {
     selected
         .iter()
         .map(|&si| {
-            let (cleaner_idx, sub_name) = &selection_mapping[si];
-            if let Some(sub_name) = sub_name {
-                cleaners[*cleaner_idx]
-                    .sub_targets()
-                    .iter()
-                    .find(|(n, _)| n == sub_name)
-                    .map(|(_, s)| *s)
-                    .unwrap_or(0)
+            let (cleaner_idx, sub) = &selection_mapping[si];
+            if let Some((_, sub_size)) = sub {
+                // The sub's size rode in the mapping: no string re-match.
+                *sub_size
             } else if let ScanStatus::Pruneable(b) = &results[*cleaner_idx].status {
                 *b
             } else {
@@ -338,7 +340,7 @@ pub fn run_interactive(cleaners: &[Box<dyn Cleaner>], clean_fn: &CleanByName) ->
         return Ok(());
     }
 
-    let total = compute_selected_total(&selected, &selection_mapping, &results, cleaners);
+    let total = compute_selected_total(&selected, &selection_mapping, &results);
 
     println!("\nWill free approximately {}.", format_bytes(total));
     if !confirm("Proceed? [y/N] ", &mut std::io::stdout())? {
@@ -352,8 +354,8 @@ pub fn run_interactive(cleaners: &[Box<dyn Cleaner>], clean_fn: &CleanByName) ->
 
     let mut freed: u64 = 0;
     for &si in &selected {
-        let (cleaner_idx, sub_name) = &selection_mapping[si];
-        if let Some(sub_name) = sub_name {
+        let (cleaner_idx, sub) = &selection_mapping[si];
+        if let Some((sub_name, _)) = sub {
             let name = cleaners[*cleaner_idx].name();
             // PBI-50: the sub-target clean runs in-process through the seam
             // (wired by the binary) instead of re-exec'ing this binary with
@@ -469,8 +471,10 @@ mod tests {
         let pruneable = vec![0];
         let (mapping, items) = build_selection_items(&results, &cleaners, &pruneable);
         assert_eq!(mapping.len(), 2);
-        assert_eq!(mapping[0], (0, Some("DerivedData")));
-        assert_eq!(mapping[1], (0, Some("Archives")));
+        // The sub's size rides in the mapping (PBI 59): the sum re-binds by
+        // the carried size, no string re-match.
+        assert_eq!(mapping[0], (0, Some(("DerivedData", 500))));
+        assert_eq!(mapping[1], (0, Some(("Archives", 300))));
         assert_eq!(items.len(), 2);
         assert!(items[0].contains("DerivedData"));
         assert!(items[0].contains("500"));
@@ -500,7 +504,7 @@ mod tests {
             vec![Box::new(TestCleaner::new("brew", 2000, vec![]))];
         let results = vec![cleaners[0].detect()];
         let (mapping, _items) = build_selection_items(&results, &cleaners, &[0]);
-        let total = compute_selected_total(&[0], &mapping, &results, &cleaners);
+        let total = compute_selected_total(&[0], &mapping, &results);
         assert_eq!(total, 2000);
     }
 
@@ -514,7 +518,7 @@ mod tests {
         let results = vec![cleaners[0].detect()];
         let (mapping, _items) = build_selection_items(&results, &cleaners, &[0]);
         // Select both sub-targets (indices 0 and 1 in the flattened items)
-        let total = compute_selected_total(&[0, 1], &mapping, &results, &cleaners);
+        let total = compute_selected_total(&[0, 1], &mapping, &results);
         assert_eq!(total, 800);
     }
 
@@ -527,7 +531,7 @@ mod tests {
         let results = vec![cleaners[0].detect(), cleaners[1].detect()];
         let (mapping, _items) = build_selection_items(&results, &cleaners, &[0, 1]);
         // Select xcode > DerivedData (idx 0) and brew (idx 1)
-        let total = compute_selected_total(&[0, 1], &mapping, &results, &cleaners);
+        let total = compute_selected_total(&[0, 1], &mapping, &results);
         assert_eq!(total, 500 + 2000);
     }
 

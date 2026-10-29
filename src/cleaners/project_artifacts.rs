@@ -1,4 +1,4 @@
-use crate::cleaner::{CleanResult, Cleaner, Risk, ScanResult, ScanStatus};
+use crate::cleaner::{CleanResult, Cleaner, Risk, ScanResult, ScanStatus, SkipCause};
 use anyhow::Result;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
@@ -190,7 +190,7 @@ impl ProjectArtifactsCleaner {
             if let Some(reason) = outcome.skip_reason {
                 skipped.push(crate::cleaner::SkippedEntry {
                     path: artifact.path.clone(),
-                    reason,
+                    reason: SkipCause::Delete(reason),
                 });
                 continue;
             }

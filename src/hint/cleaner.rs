@@ -111,7 +111,7 @@ pub fn auto_clean_hint(
                 crate::trash::safe_delete(runner, &path, crate::trash::TrashMode::Global)?;
             if let Some(reason) = outcome.skip_reason {
                 log::warn!("failed to delete {}: {reason}", path.display());
-                skip_reasons.push(reason);
+                skip_reasons.push(reason.to_string());
             }
         }
     }
@@ -139,7 +139,7 @@ fn clean_hint_dirs(
                 crate::trash::safe_delete(runner, &path, crate::trash::TrashMode::Global)?;
             if let Some(reason) = outcome.skip_reason {
                 log::warn!("failed to delete {}: {reason}", path.display());
-                skip_reasons.push(reason);
+                skip_reasons.push(reason.to_string());
             }
         }
     }

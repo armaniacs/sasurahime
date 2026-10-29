@@ -1,4 +1,4 @@
-use crate::cleaner::{CleanResult, Cleaner, ScanResult, ScanStatus, SkippedEntry};
+use crate::cleaner::{CleanResult, Cleaner, ScanResult, ScanStatus, SkipCause, SkippedEntry};
 use crate::command::CommandRunner;
 use crate::progress::ProgressReporter;
 use crate::prompt::PromptPort;
@@ -287,7 +287,7 @@ impl Cleaner for ApfsSnapshotCleaner {
             .iter()
             .map(|(d, reason)| SkippedEntry {
                 path: std::path::PathBuf::from(d),
-                reason: reason.clone(),
+                reason: SkipCause::Reason(reason.clone()),
             })
             .collect();
         if report.deleted == 0 {
@@ -845,7 +845,7 @@ mod tests {
         // The date lives in the path; the reason reports what tmutil said.
         assert!(result.skipped[0].path.ends_with("2026-05-11-120000"));
         assert!(
-            result.skipped[0].reason.contains("tmutil exited"),
+            format!("{}", result.skipped[0].reason).contains("tmutil exited"),
             "{:?}",
             result.skipped[0].reason
         );
@@ -1017,7 +1017,7 @@ mod tests {
             .unwrap();
         assert_eq!(result.skipped.len(), 1);
         assert!(
-            result.skipped[0].reason.contains("must be root"),
+            format!("{}", result.skipped[0].reason).contains("must be root"),
             "{:?}",
             result.skipped[0].reason
         );

@@ -1,4 +1,6 @@
-use crate::cleaner::{CleanOptions, CleanResult, Cleaner, ScanResult, ScanStatus, SkippedEntry};
+use crate::cleaner::{
+    CleanOptions, CleanResult, Cleaner, ScanResult, ScanStatus, SkipCause, SkippedEntry,
+};
 use crate::command::CommandRunner;
 use crate::format::{dir_size, format_bytes};
 use crate::hint::apps::KNOWN_ENTRIES;
@@ -498,7 +500,7 @@ impl AppSupportCleaner {
             if let AppState::Blocked(reason) = &states[idx].1 {
                 skipped.push(SkippedEntry {
                     path: cand.path.clone(),
-                    reason: reason.clone(),
+                    reason: SkipCause::Reason(reason.clone()),
                 });
                 continue;
             }
@@ -507,7 +509,7 @@ impl AppSupportCleaner {
                 Err(e) => {
                     skipped.push(SkippedEntry {
                         path: cand.path.clone(),
-                        reason: e.to_string(),
+                        reason: SkipCause::Reason(e.to_string()),
                     });
                     continue;
                 }
@@ -1423,7 +1425,7 @@ mod tests {
         assert!(base.join("Slack/Cache/a.bin").exists());
         assert_eq!(r.bytes_freed, 0);
         assert_eq!(r.skipped.len(), 1);
-        assert!(r.skipped[0].reason.contains("running"));
+        assert!(format!("{}", r.skipped[0].reason).contains("running"));
         assert!(!fake.calls().iter().any(|c| c.starts_with("osascript")));
         assert_eq!(r.exit_code(), 1);
     }

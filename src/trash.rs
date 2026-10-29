@@ -44,13 +44,15 @@ impl DeleteCtx {
     }
 
     /// Deletes `path` according to this context: macOS Trash when trash mode
-    /// is on, otherwise a permanent remove.
-    pub fn delete_path(&self, path: &Path) -> Result<()> {
+    /// is on, otherwise a permanent remove. Failures are typed
+    /// ([`crate::cleaner::DeleteError`]) so the skip/fatal classification
+    /// matches on variant, never on message text (PBI 59).
+    pub fn delete_path(&self, path: &Path) -> Result<(), crate::cleaner::DeleteError> {
         if self.trash_mode.resolve() {
             #[cfg(test)]
             if trash_backend_override_enabled() {
-                return Err(anyhow::anyhow!(
-                    "trash failed: simulated refusing backend (test override)"
+                return Err(crate::cleaner::DeleteError::TrashRefused(
+                    "simulated refusing backend (test override)".to_string(),
                 ));
             }
             // NsFileManager (trashItemAtURL) instead of the default Finder
@@ -61,12 +63,11 @@ impl DeleteCtx {
             let mut ctx = trash::TrashContext::new();
             ctx.set_delete_method(DeleteMethod::NsFileManager);
             ctx.delete(path)
-                .map_err(|e| anyhow::anyhow!("trash failed: {e}"))
+                .map_err(|e| crate::cleaner::DeleteError::TrashRefused(e.to_string()))
         } else if path.is_dir() {
-            fs::remove_dir_all(path)
-                .map_err(|e| anyhow::anyhow!("remove_dir_all {:?}: {}", path, e))
+            fs::remove_dir_all(path).map_err(crate::cleaner::classify_io_error)
         } else {
-            fs::remove_file(path).map_err(|e| anyhow::anyhow!("remove_file {:?}: {}", path, e))
+            fs::remove_file(path).map_err(crate::cleaner::classify_io_error)
         }
     }
 }
@@ -126,21 +127,25 @@ impl Drop for TrashBackendOverrideGuard {
 /// wrapper runs no scope tripwire and no chflags pre-step, and it exists for
 /// tests and legacy callers only.
 pub fn delete_path(path: &Path) -> Result<()> {
-    DeleteCtx::new(TrashMode::Global).delete_path(path)
+    DeleteCtx::new(TrashMode::Global)
+        .delete_path(path)
+        .map_err(anyhow::Error::new)
 }
 
 /// Outcome of a single deletion through the [`safe_delete`] seam. The seam
 /// returns its own truth: `uses_trash` is the mode that was actually
 /// resolved at deletion time, so a cleaner can never report Trash for a
-/// permanent removal.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// permanent removal, and a skip carries the typed [`DeleteError`]
+/// classification, not prose (PBI 59).
+#[derive(Debug)]
 pub struct DeleteOutcome {
     /// Whether the resolved mode moved the entry to the Trash.
     pub uses_trash: bool,
-    /// Set when the delete failed with a skippable error (permission denied,
-    /// resource busy, ...): the entry was NOT deleted, but the clean run
-    /// should continue. Fatal errors propagate as `Err` instead.
-    pub skip_reason: Option<String>,
+    /// Set when the delete failed with a skippable error (a refused trash
+    /// move, permission denied, resource busy, ...): the entry was NOT
+    /// deleted, but the clean run should continue. Fatal errors propagate as
+    /// `Err` instead. The classification is typed — matched on by variant.
+    pub skip_reason: Option<crate::cleaner::DeleteError>,
 }
 
 /// The one deletion seam: first enforces the scope check
@@ -195,14 +200,16 @@ pub fn safe_delete(
             uses_trash,
             skip_reason: None,
         }),
+        // The classification is typed (PBI 59): matched on by variant, so a
+        // reworded message can never flip a skip into a fatal failure.
         Err(e) => {
-            if crate::cleaner::is_skippable_error(&e) {
+            if e.is_skippable() {
                 Ok(DeleteOutcome {
                     uses_trash,
-                    skip_reason: Some(format!("{e:#}")),
+                    skip_reason: Some(e),
                 })
             } else {
-                Err(e)
+                Err(anyhow::Error::new(e))
             }
         }
     }
@@ -242,7 +249,7 @@ pub fn delete_entries(
                 eprintln!("[{label}] error removing {}: {err:#}", path.display());
                 skipped.push(crate::cleaner::SkippedEntry {
                     path: path.clone(),
-                    reason: format!("{err:#}"),
+                    reason: crate::cleaner::SkipCause::Reason(format!("{err:#}")),
                 });
                 continue;
             }
@@ -251,7 +258,7 @@ pub fn delete_entries(
             eprintln!("[{label}] error removing {}: {reason}", path.display());
             skipped.push(crate::cleaner::SkippedEntry {
                 path: path.clone(),
-                reason,
+                reason: crate::cleaner::SkipCause::Delete(reason),
             });
             continue;
         }
@@ -459,8 +466,9 @@ mod tests {
         .unwrap();
         let reason = outcome.skip_reason.expect("trash failure is skippable");
         assert!(
-            reason.contains("trash"),
-            "skip reason must mention the cause: {reason}"
+            matches!(reason, crate::cleaner::DeleteError::TrashRefused(_)),
+            "the skip must carry the typed TrashRefused classification: {:?}",
+            reason
         );
     }
 

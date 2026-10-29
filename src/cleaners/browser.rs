@@ -1,4 +1,4 @@
-use crate::cleaner::{CleanResult, Cleaner, ScanResult, ScanStatus};
+use crate::cleaner::{CleanResult, Cleaner, ScanResult, ScanStatus, SkipCause};
 use crate::cleaners::gradle::{is_version_dir, keep_highest};
 use crate::command::CommandRunner;
 use crate::format::dir_size;
@@ -151,7 +151,7 @@ impl Cleaner for BrowserCleaner {
                 if let Some(reason) = outcome.skip_reason {
                     skipped.push(crate::cleaner::SkippedEntry {
                         path: path.to_path_buf(),
-                        reason,
+                        reason: SkipCause::Delete(reason),
                     });
                 } else {
                     // OR-in only when the deletion actually happened: a

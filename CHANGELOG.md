@@ -8,6 +8,13 @@ All notable changes to sasurahime will be documented in this file. The format is
 
 ### Changed
 
+- Deletion failures are classified by type instead of by message text
+  (`DeleteError` / `SkipCause`): the seam's skip/fatal decision matches on
+  the variant, so rewording an error message can no longer flip a skip into
+  a fatal failure. Skipped entries carry the typed cause; the prose is
+  display-only. The sub-target selection sum re-binds by the carried size
+  instead of re-matching strings, and the Xcode sub-target spelling parser
+  is one parse for every accepted spelling.
 - The deletion-safety policy moved into its own module
   (`crate::safety`): `is_safe_delete_target` and `resolve_env_dir` no
   longer live in the cleaner layer, so the platform-side delete seam

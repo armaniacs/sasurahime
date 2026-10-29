@@ -1,4 +1,4 @@
-use crate::cleaner::{CleanResult, Cleaner, ScanResult, ScanStatus};
+use crate::cleaner::{CleanResult, Cleaner, ScanResult, ScanStatus, SkipCause};
 use crate::command::CommandRunner;
 use crate::format::dir_size;
 use crate::progress::ProgressReporter;
@@ -27,9 +27,12 @@ impl XcodeSubcategory {
     }
 
     pub fn parse(s: &str) -> Option<Self> {
+        // One parse for every accepted spelling (PBI 59): the CLI's `--sub`
+        // spellings and the TUI display names both resolve here, so `main`'s
+        // seam no longer needs a second display-name re-match.
         match s {
-            "derived-data" | "deriveddata" => Some(Self::DerivedData),
-            "archives" => Some(Self::Archives),
+            "derived-data" | "deriveddata" | "DerivedData" => Some(Self::DerivedData),
+            "archives" | "Archives" => Some(Self::Archives),
             _ => None,
         }
     }
@@ -236,7 +239,7 @@ impl Cleaner for XcodeCleaner {
                     if let Some(reason) = outcome.skip_reason {
                         all_skipped.push(crate::cleaner::SkippedEntry {
                             path: entry.to_path_buf(),
-                            reason,
+                            reason: SkipCause::Delete(reason),
                         });
                     } else {
                         // OR-in only when the deletion actually happened: a

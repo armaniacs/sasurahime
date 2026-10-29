@@ -6,7 +6,7 @@
 //! cleaner-layer `generic.rs` so the adapter lives with the other
 //! structural helpers instead of inside the 2000-line generic module.
 
-use crate::cleaner::{CleanResult, Cleaner, ScanResult, ScanStatus, SkippedEntry};
+use crate::cleaner::{CleanResult, Cleaner, ScanResult, ScanStatus, SkipCause, SkippedEntry};
 use crate::command::CommandRunner;
 use crate::format::dir_size;
 use crate::progress::ProgressReporter;
@@ -180,7 +180,7 @@ pub fn clean_cli_or_fallback(
             uses_trash: false,
             skipped: vec![SkippedEntry {
                 path: dir.to_path_buf(),
-                reason,
+                reason: SkipCause::Delete(reason),
             }],
             deleted_paths: vec![],
         });
@@ -274,10 +274,15 @@ mod tests {
             1,
             "the seam-classified failure must be recorded as a SkippedEntry"
         );
-        let reason = &result.skipped[0].reason;
+        // Typed classification (PBI 59): the seam's skip carries the variant,
+        // not prose, so a reworded message cannot flip the skip.
         assert!(
-            reason.starts_with("trash failed") && !reason.trim().is_empty(),
-            "the skip reason must name the underlying deletion failure: {reason}"
+            matches!(
+                &result.skipped[0].reason,
+                crate::cleaner::SkipCause::Delete(crate::cleaner::DeleteError::TrashRefused(_))
+            ),
+            "the skip must carry the typed TrashRefused classification: {:?}",
+            result.skipped[0].reason
         );
         assert!(
             !result.uses_trash,

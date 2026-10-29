@@ -1,4 +1,4 @@
-use crate::cleaner::{CleanResult, Cleaner, ScanResult, ScanStatus};
+use crate::cleaner::{CleanResult, Cleaner, ScanResult, ScanStatus, SkipCause};
 use crate::progress::ProgressReporter;
 use anyhow::Result;
 use std::fs;
@@ -194,7 +194,7 @@ impl Cleaner for LogCleaner {
             if let Some(reason) = outcome.skip_reason {
                 skipped.push(crate::cleaner::SkippedEntry {
                     path: path.to_path_buf(),
-                    reason,
+                    reason: SkipCause::Delete(reason),
                 });
             } else {
                 // OR-in only when the deletion actually happened: a skipped

@@ -1,4 +1,4 @@
-use crate::cleaner::{CleanResult, Cleaner, ScanResult, ScanStatus};
+use crate::cleaner::{CleanResult, Cleaner, ScanResult, ScanStatus, SkipCause};
 use crate::command::CommandRunner;
 use crate::format::{dir_size, parse_size_str, SizeUnits};
 use crate::progress::ProgressReporter;
@@ -189,7 +189,7 @@ impl Cleaner for OllamaCleaner {
                     eprintln!("[ollama] failed to remove {}: {reason}", m.name);
                     skipped.push(crate::cleaner::SkippedEntry {
                         path: self.models_dir.join(&m.name),
-                        reason,
+                        reason: SkipCause::Reason(reason),
                     });
                     continue;
                 }
@@ -263,7 +263,7 @@ impl OllamaCleaner {
         if let Some(reason) = outcome.skip_reason {
             skipped.push(crate::cleaner::SkippedEntry {
                 path: dir.to_path_buf(),
-                reason,
+                reason: SkipCause::Delete(reason),
             });
             freed = 0;
         } else {

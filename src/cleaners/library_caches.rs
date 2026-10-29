@@ -1,4 +1,6 @@
-use crate::cleaner::{CleanOptions, CleanResult, Cleaner, ScanResult, ScanStatus, SkippedEntry};
+use crate::cleaner::{
+    CleanOptions, CleanResult, Cleaner, ScanResult, ScanStatus, SkipCause, SkippedEntry,
+};
 use crate::command::CommandRunner;
 use crate::format::format_bytes;
 use crate::hint::{apps::KNOWN_ENTRIES, BaseDir, HintEntry};
@@ -182,7 +184,7 @@ pub fn split_running(selected: Vec<CacheEntry>) -> (Vec<CacheEntry>, Vec<Skipped
     for e in selected {
         if e.running {
             skipped.push(SkippedEntry {
-                reason: format!("{} is running: quit it first", e.display_name),
+                reason: SkipCause::Reason(format!("{} is running: quit it first", e.display_name)),
                 path: e.path,
             });
         } else {
@@ -587,7 +589,7 @@ mod tests {
         assert_eq!(to_delete.len(), 1);
         assert_eq!(to_delete[0].name, "B");
         assert_eq!(skipped.len(), 1);
-        assert!(skipped[0].reason.contains("running"));
+        assert!(format!("{}", skipped[0].reason).contains("running"));
     }
 
     fn cleaner(tmp: &TempDir) -> LibraryCachesCleaner {
@@ -763,7 +765,7 @@ mod tests {
         assert_eq!(r.skipped.len(), 1, "the vanished entry must be reported");
         assert_eq!(r.skipped[0].path, vanished);
         assert!(
-            r.skipped[0].reason.contains("No such file"),
+            format!("{}", r.skipped[0].reason).contains("No such file"),
             "the report must carry the failure cause: {}",
             r.skipped[0].reason
         );

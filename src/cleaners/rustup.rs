@@ -1,4 +1,4 @@
-use crate::cleaner::{CleanResult, Cleaner, ScanResult, ScanStatus};
+use crate::cleaner::{CleanResult, Cleaner, ScanResult, ScanStatus, SkipCause};
 use crate::command::CommandRunner;
 use crate::format::dir_size;
 use crate::progress::ProgressReporter;
@@ -171,7 +171,7 @@ impl Cleaner for RustupCleaner {
                     eprintln!("[rustup] failed to remove toolchain {toolchain}: {reason}");
                     skipped.push(crate::cleaner::SkippedEntry {
                         path: self.home.join(".rustup/toolchains").join(toolchain),
-                        reason,
+                        reason: SkipCause::Reason(reason),
                     });
                     continue;
                 }

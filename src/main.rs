@@ -827,15 +827,12 @@ where
     Ok(result)
 }
 
-/// Maps a sub-target name to the Xcode subcategory: the CLI's `--sub`
-/// spellings (`derived-data`, `deriveddata`, `archives`) and the TUI display
-/// names (`DerivedData`, `Archives`, from `Cleaner::sub_targets()`).
+/// Maps a sub-target name to the Xcode subcategory: one parse handles both
+/// the CLI's `--sub` spellings (`derived-data`, `deriveddata`, `archives`)
+/// and the TUI display names (`DerivedData`, `Archives`) — the second
+/// display-name re-match this used to carry is gone (PBI 59).
 fn xcode_subcategory(sub: &str) -> Option<cleaners::xcode::XcodeSubcategory> {
-    cleaners::xcode::XcodeSubcategory::parse(sub).or_else(|| {
-        cleaners::xcode::XcodeSubcategory::all()
-            .into_iter()
-            .find(|s| s.display_name() == sub)
-    })
+    cleaners::xcode::XcodeSubcategory::parse(sub)
 }
 
 /// PBI-50 in-process clean seam: resolves a clean target name (plus an
@@ -890,6 +887,14 @@ fn clean_by_name(
     }
     let mut registry: Vec<Box<dyn Cleaner>> = standard_cleaners(home, config);
     registry.extend(special_cleaners(home, config));
+    // Identity boundary (PBI 59): the standard targets' typed identity is the
+    // `CleanTarget` enum the CLI dispatches through. A parallel `CleanerId`
+    // on the `Cleaner` trait was considered and rejected: it would duplicate
+    // `CleanTarget` 1:1 for the 26 struct cleaners and still need a string
+    // arm for plugins (dynamic discovery), i.e. two sources of truth for the
+    // same identity. This seam is the one place a runtime string enters, and
+    // both sides of the equality are produced by the same code (the TUI's
+    // selection list is built from `cleaner.name()`).
     let cleaner = registry
         .into_iter()
         .find(|c| c.name() == name)
@@ -1568,7 +1573,9 @@ mod tests {
                     uses_trash: false,
                     skipped: vec![sasurahime::cleaner::SkippedEntry {
                         path: std::path::PathBuf::from("/tmp/skipped-file"),
-                        reason: "Permission denied".to_string(),
+                        reason: sasurahime::cleaner::SkipCause::Reason(
+                            "Permission denied".to_string(),
+                        ),
                     }],
                     deleted_paths: vec![],
                 })
