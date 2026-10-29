@@ -858,6 +858,49 @@ fn xcode_subcategory(sub: &str) -> Option<cleaners::xcode::XcodeSubcategory> {
     cleaners::xcode::XcodeSubcategory::parse(sub)
 }
 
+/// The one xcode clean runner (PBI-82): parses the requested subcategories
+/// through `xcode_subcategory`, rebuilds the cleaner with them and runs it
+/// through `run_clean_target`. Shared by the `clean xcode` CLI arm and the
+/// `clean_by_name` seam, so the parse and the unknown-spelling error have
+/// one owner. The error is the CLI arm's wording: it lists every accepted
+/// spelling (the seam's shorter variant is gone — PBI 63 makes an unknown
+/// spelling an error, not a silent drop). `subs = None` builds the bare
+/// cleaner, whose `clean()` defaults to DerivedData.
+fn run_xcode_clean(
+    home: &std::path::Path,
+    subs: Option<&[String]>,
+    dry_run: bool,
+    reporter: &dyn ProgressReporter,
+    opts: &CleanOptions,
+) -> anyhow::Result<CleanResult> {
+    let mut xcode_cleaner = cleaners::xcode::XcodeCleaner::new(home, Box::new(SystemCommandRunner));
+    if let Some(subs) = subs {
+        // PBI 63: an unknown spelling is an error, not a silent drop — the
+        // old filter_map narrowed the run to DerivedData and left Archives
+        // behind.
+        let parsed: Vec<_> = subs
+            .iter()
+            .map(|s| {
+                xcode_subcategory(s).ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "unknown xcode subcategory: {s} \
+                         (expected derived-data, deriveddata, \
+                         archives, DerivedData, Archives)"
+                    )
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        xcode_cleaner = xcode_cleaner.with_subcategories(parsed);
+    }
+    run_clean_target(
+        "xcode",
+        |dry, rep, opts| xcode_cleaner.clean(dry, rep, opts),
+        dry_run,
+        reporter,
+        opts,
+    )
+}
+
 /// PBI-50 in-process clean seam: resolves a clean target name (plus an
 /// optional sub-target) to the same dispatch the `clean <target>` CLI arm
 /// uses, and returns the REAL CleanResult instead of a fabricated zero.
@@ -896,20 +939,10 @@ fn clean_by_name(
 ) -> anyhow::Result<CleanResult> {
     if name == "xcode" {
         if let Some(sub) = sub {
-            let parsed = xcode_subcategory(sub).ok_or_else(|| {
-                anyhow::anyhow!(
-                    "unknown xcode sub-target: {sub} (expected derived-data or archives)"
-                )
-            })?;
-            let cleaner = cleaners::xcode::XcodeCleaner::new(home, Box::new(SystemCommandRunner))
-                .with_subcategories(vec![parsed]);
-            return run_clean_target(
-                name,
-                |dry, rep, opts| cleaner.clean(dry, rep, opts),
-                dry_run,
-                reporter,
-                opts,
-            );
+            // The seam shares the CLI arm's runner: the parse, the unknown
+            // spelling error and the cleaner construction have one owner.
+            let subs = vec![sub.to_string()];
+            return run_xcode_clean(home, Some(&subs), dry_run, reporter, opts);
         }
         // sub = None falls through to the registry resolution below, which
         // builds the same `XcodeCleaner::new` the `CleanTarget::Xcode` arm
@@ -1267,34 +1300,24 @@ fn main() -> anyhow::Result<()> {
                         )?;
                     }
                     CleanTarget::Xcode { dry_run, sub } => {
-                        let mut xcode_cleaner = cleaners::xcode::XcodeCleaner::new(
-                            &home,
-                            Box::new(SystemCommandRunner),
-                        );
-                        if let Some(ref subs) = sub {
-                            // PBI 63: an unknown spelling is an error, not a
-                            // silent drop — the old filter_map narrowed the
-                            // run to DerivedData and left Archives behind.
-                            let parsed: Vec<_> = subs
-                                .iter()
-                                .map(|s| {
-                                    xcode_subcategory(s).ok_or_else(|| {
-                                        anyhow::anyhow!(
-                                            "unknown xcode subcategory: {s} \
-                                             (expected derived-data, deriveddata, \
-                                             archives, DerivedData, Archives)"
-                                        )
-                                    })
-                                })
-                                .collect::<Result<Vec<_>, _>>()?;
-                            xcode_cleaner = xcode_cleaner.with_subcategories(parsed);
-                        }
-                        if cli.yes && xcode_cleaner.is_xcode_running() {
+                        // The --yes note stays at the call site: it is
+                        // specific to the CLI arm's flags (the seam never
+                        // prints it). is_xcode_running is a process check
+                        // (pgrep -x Xcode), so the arm checks it on a bare
+                        // cleaner built exactly like the one
+                        // run_xcode_clean builds.
+                        if cli.yes
+                            && cleaners::xcode::XcodeCleaner::new(
+                                &home,
+                                Box::new(SystemCommandRunner),
+                            )
+                            .is_xcode_running()
+                        {
                             eprintln!("Note: Xcode is running. Proceeding with --yes anyway.");
                         }
-                        run_and_exit(
-                            "xcode",
-                            |dry, rep, opts| xcode_cleaner.clean(dry, rep, opts),
+                        run_xcode_clean(
+                            &home,
+                            sub.as_deref(),
                             dry_run,
                             reporter.as_ref(),
                             &clean_opts,
@@ -2644,7 +2667,7 @@ mod tests {
         )
         .unwrap_err();
         assert!(
-            err.to_string().contains("unknown xcode sub-target"),
+            err.to_string().contains("unknown xcode subcategory"),
             "got: {err}"
         );
     }
