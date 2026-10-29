@@ -930,11 +930,17 @@ fn build_reporter(cli: &Cli, config: &Config) -> Box<dyn ProgressReporter> {
 /// collect, print, then offer. `dry_run` is the run's global `--dry-run` —
 /// the offer never prompts and never deletes when it is set (PBI 80), and
 /// the resolved deletion mode flows down as an argument (PBI 71).
+///
+/// What the hints path actually freed rides the same history guard as every
+/// batch (label = "hints", 1 cleaner = 1 name), and an all-skipped offer —
+/// every attempted deletion failed with a skippable error — reports failure
+/// through the exit code (PBI 70 contract). A quit timeout frees zero
+/// bytes, so the guard records nothing for it.
 fn run_hint_flow(home: &Path, trash_mode: sasurahime::trash::TrashMode, dry_run: bool) {
     let runner = SystemCommandRunner;
     let hints = hint::collect_hints(home, &runner);
     hint::print_hints(&hints);
-    hint::offer_auto_clean(
+    let result = hint::offer_auto_clean(
         &hints,
         home,
         &runner,
@@ -942,6 +948,16 @@ fn run_hint_flow(home: &Path, trash_mode: sasurahime::trash::TrashMode, dry_run:
         trash_mode,
         dry_run,
     );
+    batch::write_history_entry_if_needed(
+        result.name,
+        dry_run,
+        result.bytes_freed,
+        result.skipped.len(),
+        result.uses_trash,
+    );
+    if result.exit_code() == 1 {
+        std::process::exit(1);
+    }
 }
 
 fn main() -> anyhow::Result<()> {

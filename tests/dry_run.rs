@@ -376,6 +376,86 @@ fn scan_y_without_dry_run_deletes_hint_dirs() {
     );
 }
 
+#[test]
+fn scan_y_answers_write_a_hints_history_row_and_stats_reflects_it() {
+    let tmp = TempDir::new().unwrap();
+    let dir = make_diagnostic_reports(tmp.path());
+
+    let output = run_with_stdin(tmp.path(), &["--permanent", "scan"], "y\n");
+    let combined = combined_output(&output);
+    assert!(output.status.success(), "got:\n{combined}");
+    assert!(
+        !dir.exists(),
+        "the hint dir must be deleted, got:\n{combined}"
+    );
+
+    // The hint flow rides the same history guard as every batch: one
+    // "hints" row (1 cleaner = 1 name) for the bytes it actually freed.
+    let history_path = tmp.path().join(".local/share/sasurahime/history.json");
+    let entries = sasurahime::history::load_history(&history_path);
+    assert_eq!(
+        entries.len(),
+        1,
+        "one history row for the hint deletion, got: {entries:?}"
+    );
+    assert_eq!(
+        entries[0].cleaner, "hints",
+        "the row names the hints cleaner"
+    );
+    assert_eq!(
+        entries[0].freed_bytes, 2_097_152,
+        "the freed bytes are recorded"
+    );
+    assert!(
+        !entries[0].moved_to_trash,
+        "a permanent deletion records no trash"
+    );
+
+    // `sasurahime stats` reflects the hint deletion.
+    let stats = sasurahime(tmp.path()).args(["stats"]).output().unwrap();
+    let stats_out = combined_output(&stats);
+    assert!(stats.status.success(), "got:\n{stats_out}");
+    assert!(
+        stats_out.contains("hints"),
+        "stats must show the hints row, got:\n{stats_out}"
+    );
+    assert!(
+        stats_out.contains("2.0 MB"),
+        "stats must show the freed bytes, got:\n{stats_out}"
+    );
+}
+
+#[test]
+fn scan_y_with_undeletable_hint_dir_skips_and_exits_one() {
+    let tmp = TempDir::new().unwrap();
+    let dir = make_diagnostic_reports(tmp.path());
+    // A read-only Library/Logs makes the deletion a skippable failure
+    // (EPERM removing the entry from the locked parent dir), so the hint's
+    // only deletable entry skips: the ledger's all-skipped contract reports
+    // failure and the run exits 1.
+    let logs = tmp.path().join("Library/Logs");
+    fs::set_permissions(&logs, fs::Permissions::from_mode(0o555)).unwrap();
+
+    let output = run_with_stdin(tmp.path(), &["--permanent", "scan"], "y\n");
+    // Restore before the asserts so the tempdir can be dropped cleanly.
+    fs::set_permissions(&logs, fs::Permissions::from_mode(0o755)).unwrap();
+
+    let combined = combined_output(&output);
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "an all-skipped hint clean must exit 1, got:\n{combined}"
+    );
+    assert!(
+        dir.exists(),
+        "the undeletable hint dir must survive, got:\n{combined}"
+    );
+    assert!(
+        combined.contains("[SKIPPED]"),
+        "the skip must be reported, got:\n{combined}"
+    );
+}
+
 // --- PBI-38: external plugin targets (CleanTarget::External) ---
 
 /// Installs a fake `sasurahime-foo` plugin whose clean deletes

@@ -93,19 +93,24 @@ pub(crate) fn relaunch_app(entry: &HintEntry, runner: &dyn CommandRunner) -> any
 
 /// Quit the app (only when the hint is running and configures a quit_app),
 /// delete the hint's cache directories, optionally relaunch the running app.
-/// Returns Err if quit timed out. `mode` is the run's resolved deletion mode,
-/// passed down from `main` through `offer_auto_clean`.
+/// Returns the cleaned result (so the caller can ride the shared history
+/// guard) or Err if quit timed out. `mode` is the run's resolved deletion
+/// mode, passed down from `main` through `offer_auto_clean`.
 ///
 /// This is the ONE hint deletion loop: the quit/relaunch steps are gated on
 /// the hint's running flag, so a non-running hint is cleaned directly with
 /// neither step (the former clean_hint_dirs twin is gone — one loop, no
-/// drift).
+/// drift). The per-entry deletions ride the same delete ledger every
+/// cleaner uses (PBI 70 contract): a fatal error is a prose skip and the
+/// loop continues, skipped entries are recorded, freed only sums successes,
+/// and the seam's trash truth is OR-in. A dry run never reaches the ledger
+/// — the offer returns before the loop.
 pub fn auto_clean_hint(
     hint: &ProcessHint,
     home: &Path,
     runner: &dyn CommandRunner,
     mode: crate::trash::TrashMode,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<crate::cleaner::CleanResult> {
     let entry = hint.entry;
     // The quit branch fires only for a running hint that configures
     // quit_app: an entry without quit_app cannot be auto-quit (PBI 53 pins
@@ -117,19 +122,34 @@ pub fn auto_clean_hint(
 
     let base = base_path(home, entry.base_dir);
     eprintln!("  Clearing cache...");
-    let mut skip_reasons: Vec<String> = Vec::new();
-    for suffix in entry.path_suffixes {
-        let path = base.join(suffix);
-        if path.exists() {
-            // The seam clears uchg flags in permanent mode and honors the
-            // resolved deletion mode instead of a blind `rm -rf`.
-            let outcome = crate::trash::safe_delete(runner, &path, mode)?;
-            if let Some(reason) = outcome.skip_reason {
-                log::warn!("failed to delete {}: {reason}", path.display());
-                skip_reasons.push(reason.to_string());
-            }
-        }
-    }
+    // Only entries that exist join the ledger: the seam is not asked to
+    // delete a path that is not there (the pre-ledger loop filtered on
+    // exists()), and each item carries the size `format::dir_size` reports
+    // for it — the same metric `collect_hints` measured, so the freed sum
+    // equals what the tip displayed instead of repeating the aggregate per
+    // suffix on multi-suffix entries.
+    let items: Vec<(std::path::PathBuf, u64)> = entry
+        .path_suffixes
+        .iter()
+        .map(|suffix| base.join(suffix))
+        .filter(|path| path.exists())
+        .map(|path| {
+            let size = crate::format::dir_size(&path);
+            (path, size)
+        })
+        .collect();
+    let result = crate::trash::delete_entries(
+        "hints",
+        runner,
+        &crate::progress::DeepSuppressReporter,
+        mode,
+        &items,
+    );
+    let skip_reasons: Vec<String> = result
+        .skipped
+        .iter()
+        .map(|s| s.reason.to_string())
+        .collect();
     eprintln!("{}", completion_line(&skip_reasons));
 
     // Only a running app is relaunched: the non-running path never had a
@@ -137,14 +157,18 @@ pub fn auto_clean_hint(
     if hint.running {
         relaunch_app(entry, runner)?;
     }
-    Ok(())
+    Ok(result)
 }
 
 /// For each hint that can be cleaned, ask the user and clean.
 ///
 /// A dry run is the top safety contract: it never prompts (a `y` sitting in
 /// stdin is never read) and never reaches the quit/delete/relaunch seam — it
-/// prints one dry-run line per hint and returns (PBI 80).
+/// prints one dry-run line per hint and returns a zero result (PBI 80).
+///
+/// Returns the aggregate of what the accepted hints actually cleaned, named
+/// "hints" (1 cleaner = 1 name), so the caller can ride the shared history
+/// guard and exit non-zero when every attempted deletion was skipped.
 ///
 /// For running apps with a configured `quit_app`, the app is quit first, caches
 /// are deleted, and the app is optionally relaunched.  For non-running apps the
@@ -156,14 +180,16 @@ pub fn offer_auto_clean(
     prompt: &dyn PromptReader,
     mode: crate::trash::TrashMode,
     dry_run: bool,
-) {
+) -> crate::cleaner::CleanResult {
+    let mut summary = crate::cleaner::CleanResult::empty("hints");
+
     let actionable: Vec<_> = hints
         .iter()
         .filter(|h| !h.running || h.entry.quit_app.is_some())
         .collect();
 
     if actionable.is_empty() {
-        return;
+        return summary;
     }
 
     if dry_run {
@@ -181,7 +207,7 @@ pub fn offer_auto_clean(
                 );
             }
         }
-        return;
+        return summary;
     }
 
     for hint in actionable {
@@ -199,13 +225,19 @@ pub fn offer_auto_clean(
         }
         match prompt.read_line() {
             Some(input) if is_yes_answer(&input) => {
-                if let Err(e) = auto_clean_hint(hint, home, runner, mode) {
-                    eprintln!("  Error: {e}");
+                match auto_clean_hint(hint, home, runner, mode) {
+                    Ok(result) => {
+                        summary.bytes_freed += result.bytes_freed;
+                        summary.uses_trash |= result.uses_trash;
+                        summary.skipped.extend(result.skipped);
+                    }
+                    Err(e) => eprintln!("  Error: {e}"),
                 }
             }
             _ => {}
         }
     }
+    summary
 }
 
 /// The line printed after a hint's delete loop: `  [OK]` only when every

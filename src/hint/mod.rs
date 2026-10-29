@@ -659,6 +659,86 @@ mod tests {
         );
     }
 
+    #[test]
+    fn offer_auto_clean_aggregates_a_clean_result_for_history() {
+        // PBI 80 history pin: the offer returns what the hint path actually
+        // freed, so run_hint_flow can ride the shared history guard with
+        // label = "hints" (1 cleaner = 1 name). The deletion rides the same
+        // seam the ledger owns, so a skipped entry is never summed.
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path();
+        make_dirs_with_files(home, BaseDir::Caches, &["x"], 4096);
+
+        let runner = RecordingRunner::new(&[], 0);
+        let prompt = FakePrompt::new(&["y"]);
+        let hint = ProcessHint {
+            entry: &NO_QUIT_ENTRY,
+            size_bytes: 4096,
+            running: false,
+        };
+
+        let result = offer_auto_clean(
+            &[hint],
+            home,
+            &runner,
+            &prompt,
+            crate::trash::TrashMode::Permanent,
+            false, // dry_run
+        );
+        assert_eq!(result.name, "hints", "the result names the hints cleaner");
+        assert_eq!(
+            result.bytes_freed, 4096,
+            "the freed bytes are returned for the history write"
+        );
+        assert!(
+            !result.uses_trash,
+            "a permanent resolve must never claim Trash"
+        );
+        assert!(result.skipped.is_empty());
+        assert_eq!(result.exit_code(), 0);
+        assert!(
+            !home.join("Library/Caches/x").exists(),
+            "the hint dir must be deleted"
+        );
+    }
+
+    #[test]
+    fn offer_auto_clean_all_skipped_reports_exit_code_one() {
+        // PBI 70/80 ledger contract: a deletion that fails with a skippable
+        // error is recorded as a skip (the loop continues), and an
+        // all-skipped result reports failure through CleanResult::exit_code
+        // — run_hint_flow exits 1 on it.
+        let _guard = crate::trash::TrashBackendOverrideGuard::set();
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path();
+        make_dirs(home, BaseDir::Caches, &["x"]);
+
+        let runner = RecordingRunner::new(&[], 0);
+        let prompt = FakePrompt::new(&["y"]);
+        let hint = ProcessHint {
+            entry: &NO_QUIT_ENTRY,
+            size_bytes: 4096,
+            running: false,
+        };
+
+        let result = offer_auto_clean(
+            &[hint],
+            home,
+            &runner,
+            &prompt,
+            crate::trash::TrashMode::Trash,
+            false, // dry_run
+        );
+        assert_eq!(result.bytes_freed, 0, "a skipped entry is never summed");
+        assert!(!result.uses_trash, "a skipped move never claims Trash");
+        assert_eq!(result.skipped.len(), 1);
+        assert_eq!(result.exit_code(), 1, "all-skipped reports failure");
+        assert!(
+            home.join("Library/Caches/x").exists(),
+            "the skipped dir survives"
+        );
+    }
+
     static NO_QUIT_ENTRY: HintEntry = HintEntry {
         base_dir: BaseDir::Caches,
         path_suffixes: &["x"],
