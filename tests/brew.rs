@@ -114,3 +114,78 @@ fn clean_brew_not_found_exits_zero() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("not found") || stdout.contains("skipping"));
 }
+
+/// Creates a fake `brew` script that runs `sh` commands then prints a line.
+fn install_fake_brew_with_action(bin_dir: &std::path::Path, action: &str, output: &str, code: i32) {
+    let script = format!("#!/bin/sh\n{action}\necho \"{output}\"\nexit {code}\n");
+    let path = bin_dir.join("brew");
+    fs::write(&path, script).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+}
+
+#[test]
+fn clean_brew_nonzero_exit_reports_failure_and_no_freed() {
+    // Failure-path coverage (PBI 53): a non-zero cleanup exit must not have
+    // its partial stdout parsed as a freed-bytes report.
+    let tmp = TempDir::new().unwrap();
+    let bin_dir = tmp.path().join("bin");
+    fs::create_dir_all(&bin_dir).unwrap();
+    install_fake_brew_with_action(&bin_dir, "", "partial output before the failure", 1);
+
+    fs::create_dir_all(tmp.path().join("Library/Caches/Homebrew/downloads")).unwrap();
+
+    let original_path = std::env::var("PATH").unwrap_or_default();
+    let new_path = format!("{}:{}", bin_dir.display(), original_path);
+
+    let output = sasurahime(tmp.path())
+        .env("PATH", &new_path)
+        .args(["--permanent", "clean", "brew"])
+        .output()
+        .unwrap();
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stderr.contains("cleanup exited with 1"),
+        "expected the exit-code refusal on stderr:\n{stderr}"
+    );
+    assert!(
+        stdout.contains("Freed: 0 B"),
+        "a failed run must not report the partial run's bytes as freed:\n{stdout}"
+    );
+}
+
+#[test]
+fn clean_brew_parse_miss_warns_when_the_cache_shrinks() {
+    // Parse-miss evidence (PBI 53): brew exited 0 and the cache shrank, but
+    // the freed-bytes line did not parse (a wording change) - the warning
+    // must fire instead of a silent 0. This also exercises the second
+    // dir_size walk, which runs only on this path (review 2026-10-29).
+    let tmp = TempDir::new().unwrap();
+    let bin_dir = tmp.path().join("bin");
+    fs::create_dir_all(&bin_dir).unwrap();
+    let cache_file = tmp.path().join("Library/Caches/Homebrew/downloads/f.bin");
+    fs::create_dir_all(cache_file.parent().unwrap()).unwrap();
+    fs::write(&cache_file, vec![0u8; 4096]).unwrap();
+    let action = format!("rm -f \"{}\"", cache_file.display());
+    install_fake_brew_with_action(&bin_dir, &action, "brew changed its wording", 0);
+
+    let original_path = std::env::var("PATH").unwrap_or_default();
+    let new_path = format!("{}:{}", bin_dir.display(), original_path);
+
+    let output = sasurahime(tmp.path())
+        .env("PATH", &new_path)
+        .args(["--permanent", "clean", "brew"])
+        .output()
+        .unwrap();
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("could not be parsed") && stderr.contains("shrank by"),
+        "expected the parse-miss warning on stderr:\n{stderr}"
+    );
+}

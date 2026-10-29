@@ -275,4 +275,34 @@ mod tests {
             "deep target at depth 6 must be excluded by max_depth=5"
         );
     }
+
+    #[test]
+    fn clean_records_skipped_entry_when_the_trash_backend_refuses() {
+        // Failure-path coverage (review 2026-10-29): cargo deletes via
+        // safe_delete directly, so a skipped Trash move must be recorded as
+        // a SkippedEntry and never summed - the same PBI 53/59 convention
+        // the command cleaners pin. The trash backend override makes the
+        // platform move refuse deterministically.
+        let _mode = crate::test_helpers::TrashModeGuard::set(true);
+        let _backend = crate::trash::TrashBackendOverrideGuard::set();
+        let tmp = TempDir::new().unwrap();
+        let reg = tmp.path().join(".cargo/registry/cache/pkg");
+        fs::create_dir_all(&reg).unwrap();
+        fs::write(reg.join("dummy.crate"), b"x").unwrap();
+
+        let cleaner = CargoCleaner::new(tmp.path(), Box::new(SystemCommandRunner));
+        let r = cleaner
+            .clean(false, &crate::progress::DeepSuppressReporter)
+            .unwrap();
+        assert_eq!(r.bytes_freed, 0, "a skipped entry is never summed");
+        assert_eq!(r.skipped.len(), 1, "the refused move is a skip");
+        assert_eq!(r.skipped[0].path, tmp.path().join(".cargo/registry/cache"));
+        assert!(
+            matches!(&r.skipped[0].reason, crate::cleaner::SkipCause::Delete(_)),
+            "the seam's typed refusal rides in the skip: {:?}",
+            r.skipped[0].reason
+        );
+        assert_eq!(r.exit_code(), 1, "all-skipped reports failure");
+        assert!(reg.exists(), "the cache dir is untouched");
+    }
 }
