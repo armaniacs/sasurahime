@@ -8,6 +8,10 @@ pub struct BatchSummary {
     pub total_freed: u64,
     /// Per-target failures (cleaner name + error), reported by the caller.
     pub failures: Vec<(String, String)>,
+    /// Targets the user cancelled (cleaner name), reported by the caller as
+    /// a neutral `cancelled by user` line — a cancel is a run-level
+    /// decision, not an error, so it never lands in `failures`.
+    pub cancelled: Vec<String>,
     /// Per-entry skips (cleaner name + "path: reason"), reported by the
     /// caller in the single-target "N file(s) skipped" shape.
     pub skipped: Vec<(String, String)>,
@@ -20,11 +24,14 @@ pub struct BatchSummary {
 ///
 /// Reporter use per branch: the ANIMATED branch binds the cleaner's progress
 /// to the shared spinner (`with_spinner_result_progress`); the NON-animated
-/// branch passes `reporter` straight to the cleaner, so the caller's reporter
-/// carries the progress output while the plain spinner here is only a label —
-/// and enables no steady tick (no-tick-while-prompting: a cleaner on this
-/// path may still prompt). `reporter` is therefore only dead as a spinner
-/// source, never as the cleaner's progress sink.
+/// branch passes `reporter` straight to the cleaner. The [OK]/[FAILED]
+/// status line is owned by the reporter kind on both paths: the non-animated
+/// branch prints it only when `reporter.show_spinner()` (a quiet reporter —
+/// deep-suppress — gets none, matching the single-target path), and the
+/// animated branch is keyed on the caller's `animated` flag, which is never
+/// derived from `show_spinner` (no-tick-while-prompting: a cleaner on this
+/// path may still prompt, and a derived steady tick would redraw the line
+/// under the prompt).
 pub fn run_batch(
     cleaners: &[&dyn crate::cleaner::Cleaner],
     opts: &crate::cleaner::CleanOptions,
@@ -36,6 +43,7 @@ pub fn run_batch(
     let mut summary = BatchSummary {
         total_freed: 0,
         failures: Vec::new(),
+        cancelled: Vec::new(),
         skipped: Vec::new(),
     };
     for c in cleaners {
@@ -46,8 +54,15 @@ pub fn run_batch(
             crate::progress::with_spinner_result_progress(&msg, animated, |rep| {
                 c.clean(dry_run, rep, opts)
             })
-        } else {
+        } else if reporter.show_spinner() {
+            // Spinner reporter: the plain non-animated spinner draws the
+            // one status line, exactly like the single-target path.
             crate::progress::with_spinner_result(&msg, || c.clean(dry_run, reporter, opts))
+        } else {
+            // Quiet reporter (deep-suppress): no spinner, no status line —
+            // the single-target path's show_spinner()==false branch prints
+            // none either.
+            c.clean(dry_run, reporter, opts)
         };
         match result {
             Ok(r) => {
@@ -72,7 +87,19 @@ pub fn run_batch(
                     r.uses_trash,
                 );
             }
-            Err(e) => summary.failures.push((c.name().to_string(), e.to_string())),
+            Err(e) => {
+                // CleanCancelled is a run-level decision, not an error: it
+                // gets its own channel so the caller reports a neutral
+                // `cancelled by user` line instead of `Error cleaning ...`.
+                // The name comes from the loop variable `c` (CleanResult::
+                // cancelled() is intentionally nameless, so CleanResult.name
+                // has nothing to give); remaining targets keep running.
+                if e.is::<crate::cleaner::CleanCancelled>() {
+                    summary.cancelled.push(c.name().to_string());
+                } else {
+                    summary.failures.push((c.name().to_string(), e.to_string()));
+                }
+            }
         }
     }
     summary
@@ -163,6 +190,28 @@ mod tests {
             _opts: &CleanOptions,
         ) -> Result<CleanResult> {
             Err(anyhow::anyhow!("boom"))
+        }
+    }
+
+    /// Stub cleaner that always cancels: the `Err(CleanCancelled)` shape a
+    /// user decline returns (the CleanCancelled source itself is not touched
+    /// by this PBI — a hand-made Err drives the summary instead).
+    struct CancelledCleaner(&'static str);
+
+    impl crate::cleaner::Cleaner for CancelledCleaner {
+        fn name(&self) -> &'static str {
+            self.0
+        }
+        fn detect(&self) -> ScanResult {
+            ScanResult::new(self.0, ScanStatus::Clean)
+        }
+        fn clean(
+            &self,
+            _dry_run: bool,
+            _rep: &dyn ProgressReporter,
+            _opts: &CleanOptions,
+        ) -> Result<CleanResult> {
+            Err(anyhow::Error::from(crate::cleaner::CleanCancelled))
         }
     }
 
@@ -268,6 +317,70 @@ mod tests {
     }
 
     #[test]
+    fn run_batch_collects_cancelled_separately_from_failures() {
+        // A mixed batch must keep cancel apart from failure: cancelled
+        // target names go to `cancelled`, other errors go to `failures`,
+        // and the two never mix (cancel is a run-level decision, not an
+        // error — PBI 78).
+        let boxed: Vec<Box<dyn crate::cleaner::Cleaner>> = vec![
+            Box::new(CancelledCleaner("cancel-a")),
+            Box::new(FailingCleaner("bad")),
+            Box::new(OkCleaner("ok-a")),
+            Box::new(CancelledCleaner("cancel-b")),
+        ];
+        let cleaners: Vec<&dyn crate::cleaner::Cleaner> =
+            boxed.iter().map(|b| b.as_ref()).collect();
+        let summary = run_batch(
+            &cleaners,
+            &CleanOptions::default(),
+            &crate::progress::SuppressReporter,
+            true,  // dry_run: never deletes and never writes history
+            false, // animated
+            false, // with_notes
+        );
+        assert_eq!(
+            summary.cancelled,
+            vec!["cancel-a".to_string(), "cancel-b".to_string()],
+            "cancelled target names must be collected, in loop order"
+        );
+        assert_eq!(
+            summary.failures.len(),
+            1,
+            "only the real error is a failure"
+        );
+        assert_eq!(summary.failures[0].0, "bad");
+        assert_eq!(
+            summary.total_freed, 100,
+            "the successful clean still sums into total_freed"
+        );
+    }
+
+    #[test]
+    fn run_batch_reports_cancelled_not_failed() {
+        // A cancelled cleaner must never land in failures: the caller
+        // reports `{name}: cancelled by user`, never `Error cleaning ...`.
+        let boxed: Vec<Box<dyn crate::cleaner::Cleaner>> =
+            vec![Box::new(CancelledCleaner("colima"))];
+        let cleaners: Vec<&dyn crate::cleaner::Cleaner> =
+            boxed.iter().map(|b| b.as_ref()).collect();
+        let summary = run_batch(
+            &cleaners,
+            &CleanOptions::default(),
+            &crate::progress::SuppressReporter,
+            true,  // dry_run
+            false, // animated
+            false, // with_notes
+        );
+        assert_eq!(summary.cancelled, vec!["colima".to_string()]);
+        assert!(
+            summary.failures.is_empty(),
+            "a user cancel is not a failure, got: {:?}",
+            summary.failures
+        );
+        assert_eq!(summary.total_freed, 0);
+    }
+
+    #[test]
     fn run_batch_animated_path_accumulates_like_the_plain_path() {
         let boxed: Vec<Box<dyn crate::cleaner::Cleaner>> = vec![
             Box::new(OkCleaner("anim")),
@@ -286,6 +399,41 @@ mod tests {
         assert_eq!(summary.total_freed, 100);
         assert_eq!(summary.failures.len(), 1);
         assert_eq!(summary.failures[0].0, "bad-anim");
+    }
+
+    #[test]
+    fn run_batch_status_line_is_owned_by_the_reporter_kind() {
+        // The non-animated branch prints its [OK]/[FAILED] status line only
+        // when reporter.show_spinner(): a quiet reporter (deep-suppress)
+        // gets none, matching the single-target path's show_spinner()==
+        // false branch (PBI 78). The animated branch must stay first and
+        // stay keyed on the caller's animated flag — animated is never
+        // derived from show_spinner (no-tick-while-prompting: a cleaner on
+        // the non-animated path may still prompt, so a derived steady tick
+        // would redraw the line under the prompt). indicatif exposes no
+        // output-capture seam here, so this pins the source (the same style
+        // as the progress.rs steady-tick pins).
+        let src = include_str!("batch.rs");
+        let start = src
+            .find("let result = if animated {")
+            .expect("run_batch's branch dispatch must be present");
+        let end = src[start..]
+            .find("match result {")
+            .map(|i| start + i)
+            .unwrap_or(src.len());
+        let body = &src[start..end];
+        assert!(
+            body.starts_with("let result = if animated {"),
+            "the animated branch must stay first and keyed on the caller's animated flag"
+        );
+        assert!(
+            body.contains("} else if reporter.show_spinner() {"),
+            "the non-animated branch must gate the status line on reporter.show_spinner() (deep-suppress gets no [OK] line)"
+        );
+        assert!(
+            !body.contains("animated = "),
+            "animated must never be derived from another flag (no-tick-while-prompting)"
+        );
     }
 
     #[test]
