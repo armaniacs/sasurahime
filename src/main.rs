@@ -695,10 +695,23 @@ fn builtin_target_names() -> Vec<&'static str> {
     ALL_TARGETS.iter().map(|(name, _)| *name).collect()
 }
 
-fn all_cleaners(home: &std::path::Path, config: &config::Config) -> Vec<Box<dyn cleaner::Cleaner>> {
-    let mut cleaners: Vec<Box<dyn cleaner::Cleaner>> = standard_cleaners(home, config)
+/// The core registry: the macro table's standard rows plus the special
+/// cleaners, in table order. all_cleaners / clean_by_name / filter_support
+/// compose from here, so their registries cannot drift from each other
+/// (the drift that produced the caches TrashMode bug is unrepresentable).
+fn core_cleaners(
+    home: &std::path::Path,
+    config: &config::Config,
+) -> Vec<Box<dyn cleaner::Cleaner>> {
+    standard_cleaners(home, config)
         .into_iter()
         .chain(special_cleaners(home, config))
+        .collect()
+}
+
+fn all_cleaners(home: &std::path::Path, config: &config::Config) -> Vec<Box<dyn cleaner::Cleaner>> {
+    let mut cleaners: Vec<Box<dyn cleaner::Cleaner>> = core_cleaners(home, config)
+        .into_iter()
         .chain(
             cleaners::plugin::PluginCleaner::discover_excluding(&builtin_target_names())
                 .into_iter()
@@ -742,13 +755,19 @@ fn freed_message(bytes_freed: u64, uses_trash: bool, trash_mode: bool) -> String
 }
 
 /// Cleaners that accept `[cleaner.<name>]` filters, keyed by `Cleaner::name()`.
+///
+/// Plugin cleaners are deliberately excluded (only the core cleaners plus
+/// user-defined `[[custom]]` targets are listed): a `[cleaner.<plugin>]`
+/// block therefore reports `unknown cleaner name` instead of being silently
+/// applied to a plugin that may not honor the field. Widening this to
+/// plugins is a semantic decision left to a separate PBI (PBI-82 Phase 4
+/// records the exclusion on purpose, it is not an oversight).
 fn filter_support(
     home: &std::path::Path,
     config: &config::Config,
 ) -> Vec<(String, cleaner::PerCleanerFilters)> {
-    let mut support: Vec<(String, cleaner::PerCleanerFilters)> = standard_cleaners(home, config)
+    let mut support: Vec<(String, cleaner::PerCleanerFilters)> = core_cleaners(home, config)
         .into_iter()
-        .chain(special_cleaners(home, config))
         .map(|c| (c.name().to_string(), c.per_cleaner_filters()))
         .collect();
     for ct in &config.custom {
@@ -1059,8 +1078,7 @@ fn clean_by_name(
         // builds the same `XcodeCleaner::new` the `CleanTarget::Xcode` arm
         // builds for a no-`--sub` run (clean() then defaults to DerivedData).
     }
-    let mut registry: Vec<Box<dyn Cleaner>> = standard_cleaners(home, config);
-    registry.extend(special_cleaners(home, config));
+    let registry = core_cleaners(home, config);
     // Identity boundary (PBI 59): the standard targets' typed identity is the
     // `CleanTarget` enum the CLI dispatches through. A parallel `CleanerId`
     // on the `Cleaner` trait was considered and rejected: it would duplicate
@@ -2134,6 +2152,21 @@ mod tests {
         for ((cli, _), c) in SUPPORTED_TARGETS.iter().zip(&cleaners) {
             assert_eq!(c.name(), *cli);
         }
+    }
+
+    #[test]
+    fn core_cleaners_is_the_standard_special_union() {
+        // Registry pin (PBI-82 Phase 4): the shared core registry is exactly
+        // standard_cleaners + special_cleaners in table order, so
+        // all_cleaners / clean_by_name / filter_support cannot drift from
+        // each other (the drift that produced the caches TrashMode bug).
+        let tmp = tempfile::TempDir::new().unwrap();
+        let core = core_cleaners(tmp.path(), &config::Config::default());
+        let mut expected = standard_cleaners(tmp.path(), &config::Config::default());
+        expected.extend(special_cleaners(tmp.path(), &config::Config::default()));
+        let core_names: Vec<&str> = core.iter().map(|c| c.name()).collect();
+        let expected_names: Vec<&str> = expected.iter().map(|c| c.name()).collect();
+        assert_eq!(core_names, expected_names);
     }
 
     #[test]
