@@ -112,7 +112,7 @@ impl Cleaner for IosCleaner {
             return Ok(CleanResult::empty(self.name()));
         }
 
-        // The shared delete loop owns the per-entry contracts. The mode is
+        // The shared delete ledger owns the per-entry contracts. The mode is
         // Global: the deletion scope was already gated interactively above.
         let result = crate::trash::delete_entries(
             self.name(),
@@ -125,11 +125,11 @@ impl Cleaner for IosCleaner {
             "[ios-backup] total freed: {}",
             crate::format::format_bytes(result.bytes_freed)
         );
-        Ok(CleanResult::freed(
-            self.name(),
-            result.bytes_freed,
-            result.uses_trash,
-        ))
+        // The full result propagates: skipped entries and deleted paths
+        // reach the caller, so an all-skipped run exits 1 (the same
+        // contract every other ledger user pins) and --verbose keeps the
+        // audit trail.
+        Ok(result)
     }
 }
 
