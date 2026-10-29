@@ -1,4 +1,4 @@
-use crate::cleaner::{CleanResult, Cleaner, ScanResult, ScanStatus, SkipCause};
+use crate::cleaner::{CleanResult, Cleaner, ScanResult, ScanStatus};
 use crate::command::CommandRunner;
 use crate::format::{dir_size, parse_size_str, SizeUnits};
 use crate::progress::ProgressReporter;
@@ -119,7 +119,7 @@ impl Cleaner for OllamaCleaner {
             let models = self.list_models()?;
             if models.is_empty() {
                 if self.models_dir.exists() && dir_size(&self.models_dir) > 0 {
-                    return self.clean_fallback(dry_run, opts.trash_mode);
+                    return self.clean_fallback(dry_run, opts.trash_mode, reporter);
                 }
                 println!("[ollama] no models found");
                 return Ok(CleanResult::empty(self.name()));
@@ -195,7 +195,7 @@ impl Cleaner for OllamaCleaner {
             ));
         }
 
-        self.clean_fallback(dry_run, opts.trash_mode)
+        self.clean_fallback(dry_run, opts.trash_mode, reporter)
     }
 }
 
@@ -213,7 +213,12 @@ impl OllamaCleaner {
         }
     }
 
-    fn clean_fallback(&self, dry_run: bool, mode: crate::trash::TrashMode) -> Result<CleanResult> {
+    fn clean_fallback(
+        &self,
+        dry_run: bool,
+        mode: crate::trash::TrashMode,
+        reporter: &dyn ProgressReporter,
+    ) -> Result<CleanResult> {
         let dir = &self.models_dir;
         if !dir.exists() {
             return Ok(CleanResult::empty(self.name()));
@@ -227,24 +232,19 @@ impl OllamaCleaner {
             );
             return Ok(CleanResult::empty(self.name()));
         }
-        let outcome = crate::trash::safe_delete(self.runner.as_ref(), dir, mode)?;
-        let mut skipped: Vec<crate::cleaner::SkippedEntry> = vec![];
-        let mut freed = size;
-        if let Some(reason) = outcome.skip_reason {
-            skipped.push(crate::cleaner::SkippedEntry {
-                path: dir.to_path_buf(),
-                reason: SkipCause::Delete(reason),
-            });
-            freed = 0;
-        } else {
-            println!("[ollama] removed: {}", dir.display());
-        }
-        Ok(CleanResult {
-            name: self.name(),
-            bytes_freed: freed,
-            uses_trash: outcome.uses_trash,
-            skipped,
-        })
+        // The fallback delete rides the delete ledger (PBI 77): progress_init
+        // runs with items.len() (PBI 68) and the deletion ticks, a fatal
+        // per-item error is recorded as a SkippedEntry (prose reason) via
+        // the seam's scope tripwire instead of aborting the clean, and
+        // freed/uses_trash follow the ledger contract (freed only sums
+        // successes, uses_trash is the OR-in of the outcomes).
+        Ok(crate::trash::delete_entries(
+            self.name(),
+            self.runner.as_ref(),
+            reporter,
+            mode,
+            &[(dir.to_path_buf(), size)],
+        ))
     }
 }
 
@@ -253,6 +253,133 @@ mod tests {
     use super::*;
     use crate::command::CommandRunner;
     use std::os::unix::process::ExitStatusExt;
+
+    // ── ledger migration (PBI 77) ──
+
+    /// A reporter that records the progress calls, so the threading of the
+    /// reporter into the fallback delete ledger is observable.
+    struct RecordingReporter {
+        inits: std::sync::Mutex<Vec<(String, usize)>>,
+        ticks: std::sync::Mutex<Vec<(PathBuf, usize, u64)>>,
+    }
+
+    impl Default for RecordingReporter {
+        fn default() -> Self {
+            Self {
+                inits: std::sync::Mutex::new(Vec::new()),
+                ticks: std::sync::Mutex::new(Vec::new()),
+            }
+        }
+    }
+
+    impl crate::progress::ProgressReporter for RecordingReporter {
+        fn show_spinner(&self) -> bool {
+            false
+        }
+        fn progress_init(&self, label: &str, total: usize) {
+            self.inits.lock().unwrap().push((label.to_string(), total));
+        }
+        fn progress_tick(&self, path: &Path, current: usize, size_bytes: u64) {
+            self.ticks
+                .lock()
+                .unwrap()
+                .push((path.to_path_buf(), current, size_bytes));
+        }
+        fn progress_finish(&self) {}
+    }
+
+    /// An ollama-not-installed cleaner over a populated models dir: the
+    /// fallback delete is the only seam this setup owns.
+    fn fallback_cleaner(tmp: &tempfile::TempDir) -> OllamaCleaner {
+        std::fs::create_dir_all(tmp.path().join(".ollama/models")).unwrap();
+        std::fs::write(
+            tmp.path().join(".ollama/models/keep.bin"),
+            vec![0u8; 1024],
+        )
+        .unwrap();
+        OllamaCleaner::new(tmp.path(), Box::new(MockOllamaRunner::not_installed()))
+    }
+
+    impl MockOllamaRunner {
+        /// A runner that reports ollama as not installed, so the clean runs
+        /// the fallback delete.
+        fn not_installed() -> crate::test_helpers::MockRunner {
+            crate::test_helpers::MockRunner::new().with_not_found()
+        }
+    }
+
+    #[test]
+    fn clean_fallback_threads_the_reporter_into_the_ledger() {
+        // The fallback delete rides the delete ledger: progress_init carries
+        // the label and items.len() (PBI 68) and the deletion ticks. Before
+        // the ledger migration the reporter had no path into clean_fallback,
+        // so the progress tick was structurally absent.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cleaner = fallback_cleaner(&tmp);
+        let reporter = RecordingReporter::default();
+        let opts = crate::cleaner::CleanOptions {
+            trash_mode: crate::trash::TrashMode::Permanent,
+            ..Default::default()
+        };
+        let r = cleaner.clean(false, &reporter, &opts).unwrap();
+        let inits = reporter.inits.lock().unwrap();
+        assert_eq!(
+            *inits,
+            vec![("ollama".to_string(), 1)],
+            "progress_init runs once with the label and items.len()"
+        );
+        let ticks = reporter.ticks.lock().unwrap();
+        assert_eq!(ticks.len(), 1, "one tick per deleted entry: {ticks:?}");
+        assert_eq!(ticks[0].0, tmp.path().join(".ollama/models"));
+        assert!(r.bytes_freed > 0, "the fallback delete freed bytes");
+        assert!(!tmp.path().join(".ollama/models/keep.bin").exists());
+    }
+
+    #[test]
+    fn clean_fallback_records_an_unsafe_models_dir_as_a_skipped_entry() {
+        // The `safe_delete(...)?` direct call propagated a fatal per-item
+        // error with `?`, aborting the whole clean, and the hand-rolled
+        // bookkeeping recorded nothing for it. The ledger records the
+        // refusal as a SkippedEntry (prose reason) and the run completes:
+        // exit 1 rides the skip record. A tempdir under /tmp never passes
+        // is_safe_delete_target (the canonicalized path starts with
+        // /private/tmp).
+        let tmp = tempfile::TempDir::new_in("/tmp").unwrap();
+        let cleaner = fallback_cleaner(&tmp);
+        let opts = crate::cleaner::CleanOptions {
+            trash_mode: crate::trash::TrashMode::Permanent,
+            ..Default::default()
+        };
+        let r = cleaner
+            .clean(
+                false,
+                &crate::progress::DeepSuppressReporter,
+                &opts,
+            )
+            .expect("a fatal per-item error must not abort the clean");
+        assert_eq!(r.bytes_freed, 0, "a refused path frees nothing");
+        assert!(
+            tmp.path().join(".ollama/models/keep.bin").exists(),
+            "the unsafe dir must survive"
+        );
+        assert_eq!(
+            r.skipped.len(),
+            1,
+            "the refusal must be recorded as a SkippedEntry: {:?}",
+            r.skipped
+        );
+        assert_eq!(r.skipped[0].path, tmp.path().join(".ollama/models"));
+        assert!(
+            matches!(&r.skipped[0].reason, crate::cleaner::SkipCause::Reason(reason) if reason.contains("refusing to delete unsafe path")),
+            "the seam refusal rides as prose: {:?}",
+            r.skipped[0].reason
+        );
+        assert_eq!(
+            r.exit_code(),
+            1,
+            "the refusal must surface through the exit code"
+        );
+    }
 
     struct MockOllamaRunner {
         list_output: String,
