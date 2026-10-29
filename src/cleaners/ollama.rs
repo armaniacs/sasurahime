@@ -82,6 +82,14 @@ impl Cleaner for OllamaCleaner {
         crate::cleaner::Risk::Safe
     }
 
+    fn interactive_gated(&self) -> bool {
+        // PBI-52's gate below: the per-model selection must stay
+        // interactive, so a non-TTY run (including `--yes`) skips this
+        // cleaner. Declared so run_auto names it in the skipped-targets
+        // notice (PBI 60).
+        true
+    }
+
     fn is_available(&self) -> bool {
         self.runner.exists("ollama")
     }

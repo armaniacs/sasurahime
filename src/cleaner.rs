@@ -322,6 +322,16 @@ pub trait Cleaner: Send + Sync {
         self.risk() == Risk::Safe
     }
 
+    /// Whether this cleaner's default-options clean path (what `--yes` runs:
+    /// the batch with `CleanOptions::default`) gates on an interactive prompt
+    /// (`prompt::gate_interactive`) and therefore skips on a non-TTY stdin
+    /// even when `auto_clean_allowed()` selects it. Defaults to false; the
+    /// cleaners that gate on that exact path override it so run_auto can
+    /// name them in its skipped-targets notice (PBI 60).
+    fn interactive_gated(&self) -> bool {
+        false
+    }
+
     /// Read-only note shown under the scan table. Must not run external commands.
     fn advisory(&self) -> Option<String> {
         None

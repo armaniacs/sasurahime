@@ -176,6 +176,14 @@ impl Cleaner for LibraryLogsCleaner {
         crate::cleaner::Risk::Safe
     }
 
+    fn interactive_gated(&self) -> bool {
+        // The interactive select below is the only prompt this cleaner has:
+        // without `opts.all` (what `--yes` runs) a non-TTY run skips here.
+        // Declared so run_auto names it in the skipped-targets notice
+        // (PBI 60).
+        true
+    }
+
     fn name(&self) -> &'static str {
         "library-logs"
     }

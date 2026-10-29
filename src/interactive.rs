@@ -85,6 +85,33 @@ pub(crate) fn auto_clean_indices(
         .collect()
 }
 
+/// Names of the Pruneable Safe targets whose clean() gates on an interactive
+/// prompt (`Cleaner::interactive_gated`) and therefore skips when the run is
+/// not interactive. Pure function — no I/O, fully testable. `interactive`
+/// carries the stdin-is-a-terminal fact so run_auto reads the same
+/// `prompt::is_interactive` the cleaners' own gate reads: on a TTY the gate
+/// passes and the cleaner prompts, so the notice is for non-interactive runs
+/// only (PBI 60).
+pub(crate) fn gate_skipped_names(
+    results: &[ScanResult],
+    cleaners: &[Box<dyn Cleaner>],
+    interactive: bool,
+) -> Vec<String> {
+    if interactive {
+        return vec![];
+    }
+    results
+        .iter()
+        .enumerate()
+        .filter(|(i, r)| {
+            matches!(r.status, ScanStatus::Pruneable(b) if b > 0)
+                && cleaners[*i].auto_clean_allowed()
+                && cleaners[*i].interactive_gated()
+        })
+        .map(|(i, _)| cleaners[i].name().to_string())
+        .collect()
+}
+
 /// Ask a y/N question: write `prompt` verbatim to `out`, flush it, then read
 /// one line from `input`. Returns true only for a bare y/Y answer — n, any
 /// other word, an empty line and EOF all decline. The decline branch (print
@@ -233,6 +260,21 @@ pub fn run_auto(cleaners: &[Box<dyn Cleaner>]) -> Result<()> {
             "Skipped {} target(s) that need an explicit selection: {}",
             skipped.len(),
             skipped.join(", ")
+        );
+    }
+
+    // PBI 60: Safe targets whose clean() gates on an interactive prompt skip
+    // on a non-TTY stdin even though `--yes` selected them (the per-cleaner
+    // selection cannot run without a terminal). Name them here so an
+    // unattended run never looks like a no-op success. On a TTY the gate
+    // passes and the cleaner prompts, so this prints in non-interactive
+    // runs only.
+    let gate_skipped = gate_skipped_names(&results, cleaners, crate::prompt::is_interactive());
+    if !gate_skipped.is_empty() {
+        println!(
+            "Skipped {} target(s) that need an interactive terminal: {}",
+            gate_skipped.len(),
+            gate_skipped.join(", ")
         );
     }
 
@@ -740,6 +782,105 @@ mod tests {
         assert!(
             err.to_string().contains("unknown clean target"),
             "the seam error must reach the caller, got: {err}"
+        );
+    }
+
+    // --- PBI 60: run_auto's gate-skipped notice ---
+
+    /// A cleaner that gates on an interactive prompt (the ollama shape):
+    /// configurable size and risk, `interactive_gated()` always true.
+    struct GatedCleaner {
+        name: &'static str,
+        size: u64,
+        risk: crate::cleaner::Risk,
+    }
+
+    impl GatedCleaner {
+        fn new(name: &'static str) -> Self {
+            Self {
+                name,
+                size: 500,
+                risk: crate::cleaner::Risk::Safe,
+            }
+        }
+        fn with_size(mut self, size: u64) -> Self {
+            self.size = size;
+            self
+        }
+        fn with_risk(mut self, risk: crate::cleaner::Risk) -> Self {
+            self.risk = risk;
+            self
+        }
+    }
+
+    impl Cleaner for GatedCleaner {
+        fn name(&self) -> &'static str {
+            self.name
+        }
+        fn detect(&self) -> ScanResult {
+            if self.size > 0 {
+                ScanResult::new(self.name, ScanStatus::Pruneable(self.size))
+            } else {
+                ScanResult::new(self.name, ScanStatus::NotFound)
+            }
+        }
+        fn clean(&self, _dry_run: bool, _rep: &dyn ProgressReporter) -> Result<CleanResult> {
+            // The interactive gate skips before any deletion on a non-TTY
+            // stdin, so a gated clean can only ever return nothing.
+            Ok(CleanResult::empty(self.name))
+        }
+        fn risk(&self) -> crate::cleaner::Risk {
+            self.risk
+        }
+        fn interactive_gated(&self) -> bool {
+            true
+        }
+    }
+
+    #[test]
+    fn gate_skipped_names_includes_gated_safe_targets_when_not_interactive() {
+        // A Pruneable Safe cleaner that gates on interactive is selected by
+        // `--yes` but skips on a non-TTY stdin: it must be named so the
+        // unattended run never looks like a no-op success (PBI 60).
+        let cleaners: Vec<Box<dyn Cleaner>> = vec![
+            Box::new(TestCleaner::new("brew", 2000, vec![])),
+            Box::new(GatedCleaner::new("ollama")),
+        ];
+        let results: Vec<ScanResult> = cleaners.iter().map(|c| c.detect()).collect();
+        assert_eq!(
+            gate_skipped_names(&results, &cleaners, false),
+            vec!["ollama"],
+            "the gate-skipped Safe target must be named, ungated ones must not"
+        );
+    }
+
+    #[test]
+    fn gate_skipped_names_is_empty_when_interactive() {
+        // On a TTY the gate passes and the cleaner prompts, so the notice
+        // must not fire (PBI 60's TTY scenario).
+        let cleaners: Vec<Box<dyn Cleaner>> = vec![Box::new(GatedCleaner::new("ollama"))];
+        let results: Vec<ScanResult> = cleaners.iter().map(|c| c.detect()).collect();
+        assert!(
+            gate_skipped_names(&results, &cleaners, true).is_empty(),
+            "an interactive run must not warn about gate skips"
+        );
+    }
+
+    #[test]
+    fn gate_skipped_names_excludes_nothing_to_skip_and_non_safe() {
+        // A gated cleaner with nothing to reclaim skips nothing visible, and
+        // a non-Safe gated target is already covered by the
+        // explicit-selection notice: neither belongs in this list.
+        let cleaners: Vec<Box<dyn Cleaner>> = vec![
+            Box::new(GatedCleaner::new("hollow").with_size(0)),
+            Box::new(GatedCleaner::new("risky").with_risk(crate::cleaner::Risk::Risky)),
+            Box::new(GatedCleaner::new("ollama")),
+        ];
+        let results: Vec<ScanResult> = cleaners.iter().map(|c| c.detect()).collect();
+        assert_eq!(
+            gate_skipped_names(&results, &cleaners, false),
+            vec!["ollama"],
+            "only the Pruneable Safe gated targets are named"
         );
     }
 }
