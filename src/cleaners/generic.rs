@@ -1393,6 +1393,37 @@ mod tests {
         );
     }
 
+    #[test]
+    fn clean_continues_past_a_failing_tool_cli() {
+        // PBI 81 (BDD scenario 3): a non-zero exit from the generic cache
+        // CLI is warn+continue, not fatal — the clean still returns Ok and
+        // frees nothing (the run-CLI path never deletes). The warning
+        // wording itself is pinned by warn_tool_failure's
+        // writer-parameterized unit tests in command.rs.
+        struct FailingRunner;
+        impl CommandRunner for FailingRunner {
+            fn run(&self, _: &str, _: &[&str]) -> anyhow::Result<std::process::Output> {
+                use std::os::unix::process::ExitStatusExt;
+                Ok(std::process::Output {
+                    status: std::process::ExitStatus::from_raw(1 << 8),
+                    stdout: vec![],
+                    stderr: b"boom".to_vec(),
+                })
+            }
+            fn exists(&self, _: &str) -> bool {
+                true
+            }
+        }
+        let cleaner = CliCleaner::bun(Box::new(FailingRunner));
+        let result = cleaner.clean(
+            false,
+            &crate::progress::DeepSuppressReporter,
+            &crate::cleaner::CleanOptions::default(),
+        );
+        assert!(result.is_ok(), "a failed cache CLI must not fail the clean");
+        assert_eq!(result.unwrap().bytes_freed, 0, "a failed CLI frees nothing");
+    }
+
     // ── type split: per_cleaner_filters / is_available live on each type ──
 
     #[test]
