@@ -642,4 +642,68 @@ mod tests {
         assert!(r.skipped.is_empty());
         assert!(!r.uses_trash);
     }
+
+    #[test]
+    fn delete_entries_all_skipped_reports_exit_code_one() {
+        // Pinned intentionally (review 2026-10-29): the shared loop records
+        // skips, so a run where every entry is skipped exits 1. v0.4.2's
+        // ios-backup/device-support loops recorded no skip and exited 0 in
+        // the same situation - the flip is the loop's documented contract,
+        // not an accident, and scripts gating on the exit code rely on it.
+        let _backend = TrashBackendOverrideGuard::set();
+        let runner = crate::test_helpers::MockRunner::new().with_success("chflags");
+        let tmp = TempDir::new().unwrap();
+        let a = tmp.path().join("a");
+        fs::create_dir_all(&a).unwrap();
+        let r = delete_entries(
+            "loop-test",
+            &runner,
+            &crate::progress::DeepSuppressReporter,
+            TrashMode::Trash,
+            &[(a, 1024)],
+        );
+        assert_eq!(r.bytes_freed, 0, "a skipped entry is never summed");
+        assert_eq!(r.skipped.len(), 1);
+        assert_eq!(r.exit_code(), 1, "all-skipped reports failure");
+    }
+
+    #[test]
+    fn delete_entries_fatal_error_does_not_abort_the_remaining_entries() {
+        // Pinned intentionally (review 2026-10-29): a fatal per-entry error
+        // (an unsafe path here) is recorded as a skipped entry and the run
+        // continues. v0.4.2's ios-backup/device-support loops propagated the
+        // fatal error with `?` and aborted the whole clean; the shared loop
+        // converges on continue (the same contract every other cleaner uses).
+        let _guard = crate::test_helpers::TrashModeGuard::set(false);
+        let tmp = TempDir::new().unwrap();
+        let real = tmp.path().join("real");
+        fs::create_dir_all(&real).unwrap();
+        fs::write(real.join("cache.bin"), vec![0u8; 1024]).unwrap();
+        let runner = crate::test_helpers::MockRunner::new().with_success("chflags");
+        // A relative path never passes is_safe_delete_target: safe_delete
+        // bails fatally, and the loop must skip it, not abort.
+        let items = vec![
+            (std::path::PathBuf::from("relative/unsafe"), 100),
+            (real.clone(), 1024),
+        ];
+        let r = delete_entries(
+            "loop-test",
+            &runner,
+            &crate::progress::DeepSuppressReporter,
+            TrashMode::Permanent,
+            &items,
+        );
+        assert!(!real.exists(), "the safe entry still deletes");
+        assert_eq!(r.bytes_freed, 1024, "the safe entry is summed");
+        assert_eq!(r.skipped.len(), 1, "the unsafe path is a skip");
+        assert_eq!(
+            r.skipped[0].path,
+            std::path::PathBuf::from("relative/unsafe")
+        );
+        assert!(
+            matches!(&r.skipped[0].reason, crate::cleaner::SkipCause::Reason(_)),
+            "the fatal bail is a prose skip: {:?}",
+            r.skipped[0].reason
+        );
+    }
 }

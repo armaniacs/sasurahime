@@ -10,6 +10,15 @@ All notable changes to sasurahime will be documented in this file. The format is
 
 ### Changed
 
+- The shared delete loop (`crate::trash::delete_entries`) changes two
+  cleaners' failure semantics as part of the collapse: `clean ios-backup`
+  and `clean device-support` now record skipped entries instead of only
+  logging them, so a run where every entry is skipped exits 1 (it exited 0
+  in 0.4.2), and a fatal per-entry error (e.g. a vanished path) is reported
+  as a skipped entry with the remaining entries continuing instead of
+  aborting the run. device-support's skip report moved from the log to
+  stderr and its success line now reports the freed bytes. The loop-level
+  contracts are pinned by tests.
 - Deletion failures are classified by type instead of by message text
   (`DeleteError` / `SkipCause`): the seam's skip/fatal decision matches on
   the variant, so rewording an error message can no longer flip a skip into

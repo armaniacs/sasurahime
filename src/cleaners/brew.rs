@@ -95,8 +95,13 @@ impl Cleaner for BrewCleaner {
         }
 
         // The cache-dir size before the run: the only independent evidence
-        // of whether the cleanup actually freed anything (PBI 53).
-        let before_size = dir_size(&self.cache_dir);
+        // of whether the cleanup actually freed anything (PBI 53). The
+        // parse-miss branch needs a real run, so dry-run skips both walks.
+        let before_size = if dry_run {
+            0
+        } else {
+            dir_size(&self.cache_dir)
+        };
         let output = self.runner.run("brew", &args)?;
         if !output.status.success() {
             // PBI 53: a failed cleanup must not have its (partial) stdout
@@ -115,18 +120,23 @@ impl Cleaner for BrewCleaner {
         }
         let stdout = String::from_utf8_lossy(&output.stdout);
         let freed = Self::parse_brew_freed_bytes(&stdout);
-        let after = dir_size(&self.cache_dir);
 
         if freed > 0 {
             println!("Freed: {}", format_bytes(freed));
-        } else if !dry_run && after < before_size {
-            // Parse-miss evidence (PBI 53): brew exited 0 and the cache dir
-            // shrank, but the freed-bytes line did not parse (e.g. brew
-            // changed its wording). Never report 0 silently.
-            eprintln!(
-                "[brew] freed-bytes line could not be parsed, but the cache shrank by {}",
-                format_bytes(before_size - after)
-            );
+        } else if !dry_run {
+            // The second walk runs only when the freed-bytes line did not
+            // parse: the common parse path never pays for it (review
+            // 2026-10-29). The dir shrank, but the wording changed: warn.
+            let after = dir_size(&self.cache_dir);
+            if after < before_size {
+                // Parse-miss evidence (PBI 53): brew exited 0 and the cache
+                // dir shrank, but the freed-bytes line did not parse (e.g.
+                // brew changed its wording). Never report 0 silently.
+                eprintln!(
+                    "[brew] freed-bytes line could not be parsed, but the cache shrank by {}",
+                    format_bytes(before_size - after)
+                );
+            }
         }
 
         Ok(CleanResult {
