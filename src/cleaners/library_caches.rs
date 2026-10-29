@@ -5,7 +5,6 @@ use crate::command::CommandRunner;
 use crate::format::format_bytes;
 use crate::hint::{apps::KNOWN_ENTRIES, BaseDir, HintEntry};
 use crate::progress::ProgressReporter;
-use crate::prompt::PromptPort;
 use anyhow::Result;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -244,12 +243,18 @@ impl LibraryCachesCleaner {
         &self,
         reporter: &dyn ProgressReporter,
         entries: &[CacheEntry],
-    ) -> Result<Vec<CacheEntry>> {
+    ) -> Result<Option<Vec<CacheEntry>>> {
         let items: Vec<String> = entries.iter().map(render_item).collect();
         let defaults = vec![false; entries.len()];
         println!("\nSelect known app caches to move to Trash:\n");
-        let picked = crate::prompt::TtyPrompt.multi_select(reporter, None, &items, &defaults)?;
-        Ok(picked.into_iter().map(|i| entries[i].clone()).collect())
+        let picks = crate::prompt::CleanPrompt::for_current_run().multi_select(
+            "library-caches",
+            reporter,
+            None,
+            &items,
+            &defaults,
+        )?;
+        Ok(picks.map(|picked| picked.into_iter().map(|i| entries[i].clone()).collect()))
     }
 
     /// The shared clean body. `mode` is the resolved deletion mode threaded
@@ -295,11 +300,12 @@ impl LibraryCachesCleaner {
             println!("\n[library-caches] no deletable known caches");
             return Ok(CleanResult::empty(self.name()));
         }
-        if !crate::prompt::gate_interactive("library-caches") {
+        // The port owns the non-TTY resolution (PBI 75): on a non-TTY stdin
+        // it prints the standard remedy once and returns None, and the
+        // clean skips instead of hanging on a hidden prompt.
+        let Some(selected) = self.interactive_select(reporter, &deletable)? else {
             return Ok(CleanResult::empty(self.name()));
-        }
-
-        let selected = self.interactive_select(reporter, &deletable)?;
+        };
         if selected.is_empty() {
             println!("[library-caches] nothing selected");
             return Ok(CleanResult::empty(self.name()));

@@ -1,16 +1,17 @@
-//! One prompt port for every cleaner (PBI 55).
+//! One prompt port for every cleaner (PBI 55, PBI 75).
 //!
 //! Before this module the interactive prompts were embedded in the cleaner
 //! layer: dialoguer was called directly in 8 cleaner files, the TTY check
 //! was hand-rolled at 9 sites with drifted wording, the live-output
 //! suspension ran at only 2 of the prompt sites, and the TUI's
 //! "already asked" suppression was a `SKIP_CONFIRM` global read at exactly
-//! one site. This module owns all three contracts in one place: the TTY
-//! gating, the live-output suspension, and the dialoguer calls.
+//! one site. This module owns all four contracts in one place: which
+//! adapter a run gets (the TTY resolution), the TTY gating, the
+//! live-output suspension, and the dialoguer calls.
 
 use crate::progress::ProgressReporter;
 use anyhow::{bail, Result};
-use std::io::IsTerminal;
+use std::io::{IsTerminal, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Set once per run by the entry point: the TUI suppresses the per-cleaner
@@ -36,44 +37,72 @@ pub fn is_interactive() -> bool {
     std::io::stdin().is_terminal()
 }
 
-/// The standardized non-interactive gate: prints the remedy and returns
-/// false so the caller can skip its interactive path. Replaces the
-/// hand-rolled "not a terminal" guards whose wording had drifted.
-pub fn gate_interactive(name: &str) -> bool {
-    if is_interactive() {
-        return true;
-    }
-    eprintln!(
+/// The standard non-interactive remedy line. One owner of the wording: the
+/// hand-rolled "not a terminal" guards this replaced had drifted (PBI 55),
+/// and the [`NonInteractive`] port and the colima fallback refusal (PBI 69)
+/// print the same line. Writer-parameterized so the wording is unit-testable.
+pub fn write_not_a_terminal_remedy(out: &mut dyn Write, name: &str) -> std::io::Result<()> {
+    writeln!(
+        out,
         "[{name}] not a terminal - skipping. \
                Run `sasurahime clean {name}` interactively."
-    );
-    false
+    )
 }
 
-/// How a cleaner asks the user questions. The port owns the TTY gating, the
-/// live-output suspension, and the dialoguer calls so the per-cleaner call
-/// sites cannot diverge on those contracts (the dialoguer-redraw bug the
-/// confirm prompts hit is fixed once here, not per call site).
+/// The prompt port resolved for the current run (PBI 75): reads the
+/// terminal and hands back the adapter that matches it. TTY-ness is a
+/// per-process constant for a CLI run, so the resolution is ambient —
+/// callers need no `CleanOptions` threading and no `clean()` signature
+/// change, and the old "call `gate_interactive` first" ordering constraint
+/// lives in the port's implementation instead of a doc comment.
+pub struct CleanPrompt;
+
+impl CleanPrompt {
+    /// [`TtyPrompt`] when a terminal is attached, [`NonInteractive`]
+    /// otherwise. Both adapters are stateless unit structs, so the resolved
+    /// port is a `&'static` trait object.
+    pub fn for_current_run() -> &'static dyn PromptPort {
+        if is_interactive() {
+            &TtyPrompt
+        } else {
+            &NonInteractive
+        }
+    }
+}
+
+/// How a cleaner asks the user questions. The port owns the TTY resolution,
+/// the TTY gating, the live-output suspension, and the dialoguer calls so
+/// the per-cleaner call sites cannot diverge on those contracts (the
+/// dialoguer-redraw bug the confirm prompts hit is fixed once here, not per
+/// call site).
 pub trait PromptPort {
-    /// Asks a yes/no question. Errors when prompts are unavailable.
+    /// Asks a yes/no question. TTY-only: errors when prompts are
+    /// unavailable. A non-TTY run never reaches a confirm — the interactive
+    /// cleaners guard with `is_interactive()` before asking — so the error
+    /// is a defensive contract, not a path a user can hit.
     fn confirm(&self, reporter: &dyn ProgressReporter, prompt: &str) -> Result<bool>;
 
-    /// Asks a multi-select question. Errors when prompts are unavailable.
+    /// Asks a multi-select question. `name` is the CLI target name the
+    /// standard remedy names when prompts are unavailable.
+    ///
+    /// Returns `None` when prompts are unavailable (not a terminal): the
+    /// port prints the standard remedy line exactly once and the caller
+    /// skips its interactive path. An empty selection is `Some(vec![])`, so
+    /// "not a terminal" and "nothing selected" can never print together.
     /// `defaults` pre-checks items; an empty slice leaves every item
     /// unchecked (dialoguer's behavior when `defaults` is never set).
     fn multi_select(
         &self,
+        name: &str,
         reporter: &dyn ProgressReporter,
         prompt: Option<&str>,
         items: &[String],
         defaults: &[bool],
-    ) -> Result<Vec<usize>>;
+    ) -> Result<Option<Vec<usize>>>;
 }
 
 /// The real port: runs dialoguer under the reporter's live-output
 /// suspension, so a live progress line never redraws under a prompt.
-/// [`gate_interactive`] must be checked before calling; dialoguer fails on
-/// a non-TTY stdin.
 pub struct TtyPrompt;
 
 impl PromptPort for TtyPrompt {
@@ -96,11 +125,12 @@ impl PromptPort for TtyPrompt {
 
     fn multi_select(
         &self,
+        _name: &str,
         reporter: &dyn ProgressReporter,
         prompt: Option<&str>,
         items: &[String],
         defaults: &[bool],
-    ) -> Result<Vec<usize>> {
+    ) -> Result<Option<Vec<usize>>> {
         let mut picks = None;
         let mut run = || {
             let mut select = dialoguer::MultiSelect::new();
@@ -111,15 +141,15 @@ impl PromptPort for TtyPrompt {
         };
         reporter.suspend_live_output(&mut run);
         match picks {
-            Some(picks) => Ok(picks?),
+            Some(picks) => Ok(Some(picks?)),
             None => bail!("the selection prompt did not run"),
         }
     }
 }
 
-/// The port for a non-interactive run: prompts are unavailable. Callers
-/// reach this path through [`gate_interactive`], which prints the remedy
-/// before the cleaner skips.
+/// The port for a non-interactive run: prompts are unavailable. Resolution
+/// goes through [`CleanPrompt::for_current_run`], so a cleaner that reaches
+/// this port skips its interactive path without a hand-rolled gate.
 pub struct NonInteractive;
 
 impl PromptPort for NonInteractive {
@@ -129,12 +159,16 @@ impl PromptPort for NonInteractive {
 
     fn multi_select(
         &self,
+        name: &str,
         _reporter: &dyn ProgressReporter,
         _prompt: Option<&str>,
         _items: &[String],
         _defaults: &[bool],
-    ) -> Result<Vec<usize>> {
-        bail!("interactive prompts are unavailable (not a terminal)")
+    ) -> Result<Option<Vec<usize>>> {
+        // The remedy is the ONLY line this port prints: unavailable is not
+        // an empty selection, so "nothing selected" never follows it.
+        let _ = write_not_a_terminal_remedy(&mut std::io::stderr(), name);
+        Ok(None)
     }
 }
 
@@ -195,7 +229,7 @@ mod tests {
         let rep = RecordingReporter::new();
         let items = vec!["a".to_string(), "b".to_string()];
         let defaults = vec![false, false];
-        let result = TtyPrompt.multi_select(&rep, None, &items, &defaults);
+        let result = TtyPrompt.multi_select("ollama", &rep, None, &items, &defaults);
         assert!(result.is_err(), "a non-TTY interact() errors");
         assert_eq!(
             rep.suspends.load(AtomicOrdering::Relaxed),
@@ -236,26 +270,45 @@ mod tests {
     }
 
     #[test]
-    fn non_interactive_port_refuses_both_prompts() {
+    fn non_interactive_multi_select_is_unavailable_with_one_remedy_line() {
+        // PBI 75: the port owns the non-TTY resolution. Unavailable is not
+        // an empty selection: multi_select returns None (the caller skips),
+        // the standard remedy is the only line the port prints, and nothing
+        // is suspended (there is no dialoguer call to hide).
         let rep = RecordingReporter::new();
-        assert!(NonInteractive.confirm(&rep, "Proceed?").is_err());
-        let defaults: Vec<bool> = vec![];
-        assert!(NonInteractive
-            .multi_select(&rep, None, &[], &defaults)
-            .is_err());
-        // The NonInteractive port refuses before any dialoguer call: there is
-        // nothing to suspend (the caller gates on gate_interactive first).
-        assert_eq!(rep.suspends.load(AtomicOrdering::Relaxed), 0);
+        let items = vec!["a".to_string(), "b".to_string()];
+        let picks = NonInteractive
+            .multi_select("ollama", &rep, None, &items, &[])
+            .expect("unavailable is a None, not an error");
+        assert!(
+            picks.is_none(),
+            "unavailable must be None, not an empty pick list"
+        );
+        assert_eq!(
+            rep.suspends.load(AtomicOrdering::Relaxed),
+            0,
+            "nothing to suspend: no dialoguer call happens"
+        );
+        // The remedy wording and its one-line shape: the port writes exactly
+        // this line once per unavailable multi_select.
+        let mut buf: Vec<u8> = Vec::new();
+        write_not_a_terminal_remedy(&mut buf, "ollama").unwrap();
+        let line = String::from_utf8(buf).unwrap();
+        assert!(
+            line.starts_with("[ollama] not a terminal - skipping"),
+            "the remedy must name the target:\n{line}"
+        );
+        assert_eq!(line.lines().count(), 1, "exactly one remedy line:\n{line}");
     }
 
     #[test]
-    fn gate_interactive_prints_the_standard_remedy_when_not_interactive() {
-        if is_interactive() {
-            return;
-        }
-        // The gate returns false (skip) and prints the standardized remedy
-        // line with the cleaner name.
-        assert!(!gate_interactive("some-target"));
+    fn non_interactive_confirm_refuses() {
+        // confirm stays TTY-only (PBI 75): a non-TTY run never reaches a
+        // confirm (the interactive cleaners guard with is_interactive
+        // first), so the port errors instead of answering.
+        let rep = RecordingReporter::new();
+        assert!(NonInteractive.confirm(&rep, "Proceed?").is_err());
+        assert_eq!(rep.suspends.load(AtomicOrdering::Relaxed), 0);
     }
 
     #[test]

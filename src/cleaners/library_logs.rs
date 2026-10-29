@@ -2,7 +2,6 @@ use crate::cleaner::{CleanResult, Cleaner, ScanResult, ScanStatus};
 use crate::command::CommandRunner;
 use crate::format::dir_size;
 use crate::progress::ProgressReporter;
-use crate::prompt::PromptPort;
 use anyhow::Result;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -248,11 +247,13 @@ impl Cleaner for LibraryLogsCleaner {
             self.delete_entries(&entries, reporter, mode)
         } else {
             // The interactive select is the only prompt this cleaner has:
-            // without a terminal, skip instead of hanging on a hidden prompt.
-            if !crate::prompt::gate_interactive("library-logs") {
+            // the port owns the non-TTY resolution (PBI 75), so on a
+            // non-TTY stdin it prints the standard remedy once and returns
+            // None, and the clean skips instead of hanging on a hidden
+            // prompt. The `--all` branch above needs no terminal at all.
+            let Some(selected) = self.interactive_select(reporter, &entries)? else {
                 return Ok(CleanResult::empty(self.name()));
-            }
-            let selected = self.interactive_select(reporter, &entries)?;
+            };
             if selected.is_empty() {
                 println!("[library-logs] nothing selected");
                 return Ok(CleanResult::empty(self.name()));
@@ -274,7 +275,7 @@ impl LibraryLogsCleaner {
         &self,
         reporter: &dyn ProgressReporter,
         entries: &[LogEntry],
-    ) -> Result<Vec<LogEntry>> {
+    ) -> Result<Option<Vec<LogEntry>>> {
         let items: Vec<String> = entries
             .iter()
             .map(|e| {
@@ -301,10 +302,14 @@ impl LibraryLogsCleaner {
         let defaults: Vec<bool> = vec![true; entries.len()];
 
         println!("\nCleanable log directories in ~/Library/Logs/:\n");
-        let selections =
-            crate::prompt::TtyPrompt.multi_select(reporter, None, &items, &defaults)?;
-
-        Ok(selections.into_iter().map(|i| entries[i].clone()).collect())
+        let picks = crate::prompt::CleanPrompt::for_current_run().multi_select(
+            "library-logs",
+            reporter,
+            None,
+            &items,
+            &defaults,
+        )?;
+        Ok(picks.map(|selections| selections.into_iter().map(|i| entries[i].clone()).collect()))
     }
 }
 

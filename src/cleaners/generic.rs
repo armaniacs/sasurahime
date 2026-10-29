@@ -588,9 +588,11 @@ impl CliCleaner {
                         // that declare a confirm are gated: the run-CLI
                         // path (a real `colima prune`) is a tool
                         // invocation, not the deletion.
-                        if self.confirm_message.is_some()
-                            && !prompt::gate_interactive(self.display_name)
-                        {
+                        if self.confirm_message.is_some() && !prompt::is_interactive() {
+                            let _ = crate::prompt::write_not_a_terminal_remedy(
+                                &mut std::io::stderr(),
+                                self.display_name,
+                            );
                             return Ok(CleanResult::empty(self.name()));
                         }
                         // TOCTOU mitigation: re-validate fallback delete path.
