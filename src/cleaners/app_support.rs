@@ -1427,6 +1427,64 @@ mod tests {
         assert_eq!(r.exit_code(), 1);
     }
 
+    /// Records the totals that `progress_init` receives, so a test can pin
+    /// what the progress bar counts.
+    #[derive(Default)]
+    struct RecordingReporter {
+        totals: Mutex<Vec<usize>>,
+    }
+
+    impl RecordingReporter {
+        fn totals(&self) -> Vec<usize> {
+            self.totals.lock().unwrap().clone()
+        }
+    }
+
+    impl ProgressReporter for RecordingReporter {
+        fn show_spinner(&self) -> bool {
+            false
+        }
+        fn progress_init(&self, _label: &str, total: usize) {
+            self.totals.lock().unwrap().push(total);
+        }
+        fn progress_tick(&self, _path: &Path, _current: usize, _size_bytes: u64) {}
+        fn progress_finish(&self) {}
+    }
+
+    #[test]
+    fn apply_progress_total_counts_deletable_items_only() {
+        // Pin (PBI 68): the pre-delete filter removes blocked candidates
+        // before the delete loop, so the progress total is items.len() —
+        // the count of deletable paths only. v0.4.2 counted every selected
+        // candidate (selected.len()), which left the bar short of its total
+        // whenever an app was blocked. The bar counts what is about to be
+        // deleted; blocked candidates surface as skipped entries instead.
+        // Panic-safe pin: the guard restores the previous mode on drop.
+        let _mode = TrashModeGuard::set(false);
+        let tmp = TempDir::new().unwrap();
+        let base = base_of(&tmp);
+        put(&base, "Slack/Cache/a.bin", 10_000);
+        put(&base, "obsidian/Cache/a.bin", 10_000);
+        let fake = Fake::with_running(&["Slack"]);
+        let c = cleaner_for(&tmp, &fake);
+        let selected = scan_candidates(&base, Some(0));
+        assert_eq!(selected.len(), 2, "fixture: one blocked + one deletable");
+        let rep = RecordingReporter::default();
+        let r = c
+            .apply_selection(
+                &selected,
+                &HashSet::new(),
+                &rep,
+                crate::trash::TrashMode::Global,
+            )
+            .unwrap();
+        assert_eq!(r.skipped.len(), 1, "the running app must be blocked");
+        assert!(base.join("Slack/Cache/a.bin").exists());
+        assert!(!base.join("obsidian/Cache").exists());
+        // The total is the deletable count (1), never all selected (2).
+        assert_eq!(rep.totals(), vec![1]);
+    }
+
     #[test]
     fn apply_quits_approved_running_app_then_deletes_and_relaunches() {
         // Panic-safe pin: the guard restores the previous mode on drop.
