@@ -124,12 +124,7 @@ impl Cleaner for RustupCleaner {
     ) -> Result<CleanResult> {
         if !self.runner.exists("rustup") {
             println!("rustup: not found, skipping");
-            return Ok(CleanResult {
-                name: self.name(),
-                bytes_freed: 0,
-                uses_trash: false,
-                skipped: vec![],
-            });
+            return Ok(CleanResult::empty(self.name()));
         }
         let output = self.runner.run("rustup", &["toolchain", "list"])?;
         if !output.status.success() {
@@ -140,12 +135,7 @@ impl Cleaner for RustupCleaner {
                 "[rustup] toolchain list exited with {} - skipping",
                 output.status.code().unwrap_or(-1)
             );
-            return Ok(CleanResult {
-                name: self.name(),
-                bytes_freed: 0,
-                uses_trash: false,
-                skipped: vec![],
-            });
+            return Ok(CleanResult::empty(self.name()));
         }
         let stdout = String::from_utf8_lossy(&output.stdout);
         let (all, active) = Self::parse_toolchains(&stdout);

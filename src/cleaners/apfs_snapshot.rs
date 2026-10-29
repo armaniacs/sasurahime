@@ -254,12 +254,7 @@ impl ApfsSnapshotCleaner {
     /// A no-op result: nothing was freed, nothing was deleted, nothing
     /// skipped. Every early exit of both modes returns this.
     fn zero_result(&self) -> CleanResult {
-        CleanResult {
-            name: self.name(),
-            bytes_freed: 0,
-            uses_trash: false,
-            skipped: vec![],
-        }
+        CleanResult::empty(self.name())
     }
 
     fn clean_delete(

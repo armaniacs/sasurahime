@@ -526,12 +526,7 @@ impl CliCleaner {
                 {
                     println!("{msg}");
                 }
-                Ok(CleanResult {
-                    name: self.name(),
-                    bytes_freed: 0,
-                    uses_trash: false,
-                    skipped: vec![],
-                })
+                Ok(CleanResult::empty(self.name()))
             }
             Some(detect_dir) => {
                 let size_before = if detect_dir.exists() {
@@ -609,12 +604,7 @@ impl CliCleaner {
                             // seam was never invoked, so no Trash claim may be
                             // made (same as the free `clean_cli_or_fallback`'s
                             // unsafe-path return).
-                            return Ok(CleanResult {
-                                name: self.name(),
-                                bytes_freed: 0,
-                                uses_trash: false,
-                                skipped: vec![],
-                            });
+                            return Ok(CleanResult::empty(self.name()));
                         }
                         let outcome =
                             crate::trash::safe_delete(self.runner.as_ref(), detect_dir, mode)?;

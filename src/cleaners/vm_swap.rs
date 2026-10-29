@@ -127,12 +127,7 @@ impl Cleaner for VmSwapCleaner {
         // No-op: swap files are owned by the kernel and re-initialized on
         // reboot. Deleting them from a running system is not possible without
         // disabling swap.
-        Ok(CleanResult {
-            name: self.name(),
-            bytes_freed: 0,
-            uses_trash: false,
-            skipped: vec![],
-        })
+        Ok(CleanResult::empty(self.name()))
     }
 
     fn advisory(&self) -> Option<String> {

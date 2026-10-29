@@ -181,12 +181,7 @@ impl Cleaner for XcodeCleaner {
             // empty result instead of returning early.
             if !crate::interactive::confirm("Continue? [y/N] ", &mut std::io::stderr())? {
                 println!("Aborted.");
-                return Ok(CleanResult {
-                    name: self.name(),
-                    bytes_freed: 0,
-                    uses_trash: false,
-                    skipped: vec![],
-                });
+                return Ok(CleanResult::empty(self.name()));
             }
         }
 

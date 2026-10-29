@@ -123,12 +123,7 @@ impl Cleaner for OllamaCleaner {
                     return self.clean_fallback(dry_run, opts.trash_mode);
                 }
                 println!("[ollama] no models found");
-                return Ok(CleanResult {
-                    name: self.name(),
-                    bytes_freed: 0,
-                    uses_trash: false,
-                    skipped: vec![],
-                });
+                return Ok(CleanResult::empty(self.name()));
             }
 
             if dry_run {
@@ -140,12 +135,7 @@ impl Cleaner for OllamaCleaner {
                         crate::format::format_bytes(m.size)
                     );
                 }
-                return Ok(CleanResult {
-                    name: self.name(),
-                    bytes_freed: 0,
-                    uses_trash: false,
-                    skipped: vec![],
-                });
+                return Ok(CleanResult::empty(self.name()));
             }
 
             // PBI-52: ollama is classified `Risk::Safe`, so `--yes` selects it
@@ -155,12 +145,7 @@ impl Cleaner for OllamaCleaner {
             // is the standardized "not a terminal" gate (PBI 55): in a
             // non-TTY, ask for no selection and skip.
             if !crate::prompt::gate_interactive("ollama") {
-                return Ok(CleanResult {
-                    name: self.name(),
-                    bytes_freed: 0,
-                    uses_trash: false,
-                    skipped: vec![],
-                });
+                return Ok(CleanResult::empty(self.name()));
             }
 
             let items: Vec<String> = models
@@ -175,12 +160,7 @@ impl Cleaner for OllamaCleaner {
 
             if selections.is_empty() {
                 println!("[ollama] nothing selected");
-                return Ok(CleanResult {
-                    name: self.name(),
-                    bytes_freed: 0,
-                    uses_trash: false,
-                    skipped: vec![],
-                });
+                return Ok(CleanResult::empty(self.name()));
             }
 
             let items: Vec<(PathBuf, u64)> = selections
@@ -237,12 +217,7 @@ impl OllamaCleaner {
     fn clean_fallback(&self, dry_run: bool, mode: crate::trash::TrashMode) -> Result<CleanResult> {
         let dir = &self.models_dir;
         if !dir.exists() {
-            return Ok(CleanResult {
-                name: self.name(),
-                bytes_freed: 0,
-                uses_trash: false,
-                skipped: vec![],
-            });
+            return Ok(CleanResult::empty(self.name()));
         }
         let size = dir_size(dir);
         if dry_run {
@@ -251,12 +226,7 @@ impl OllamaCleaner {
                 dir.display(),
                 crate::format::format_bytes(size)
             );
-            return Ok(CleanResult {
-                name: self.name(),
-                bytes_freed: 0,
-                uses_trash: false,
-                skipped: vec![],
-            });
+            return Ok(CleanResult::empty(self.name()));
         }
         let outcome = crate::trash::safe_delete(self.runner.as_ref(), dir, mode)?;
         let mut skipped: Vec<crate::cleaner::SkippedEntry> = vec![];

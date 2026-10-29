@@ -84,12 +84,7 @@ impl Cleaner for BrewCleaner {
     ) -> Result<CleanResult> {
         if !self.runner.exists("brew") {
             println!("brew: not found, skipping");
-            return Ok(CleanResult {
-                name: self.name(),
-                bytes_freed: 0,
-                uses_trash: false,
-                skipped: vec![],
-            });
+            return Ok(CleanResult::empty(self.name()));
         }
 
         let mut args = vec!["cleanup", "-s", "--prune=all"];
@@ -114,12 +109,7 @@ impl Cleaner for BrewCleaner {
                 "[brew] cleanup exited with {} - skipping",
                 output.status.code().unwrap_or(-1)
             );
-            return Ok(CleanResult {
-                name: self.name(),
-                bytes_freed: 0,
-                uses_trash: false,
-                skipped: vec![],
-            });
+            return Ok(CleanResult::empty(self.name()));
         }
         let stdout = String::from_utf8_lossy(&output.stdout);
         let freed = Self::parse_brew_freed_bytes(&stdout);
