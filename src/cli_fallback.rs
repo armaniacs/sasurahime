@@ -6,11 +6,10 @@
 //! cleaner-layer `generic.rs` so the adapter lives with the other
 //! structural helpers instead of inside the 2000-line generic module.
 
-use crate::cleaner::{CleanResult, Cleaner, ScanResult, ScanStatus, SkipCause, SkippedEntry};
+use crate::cleaner::{CleanResult, Cleaner, ScanResult, ScanStatus};
 use crate::command::CommandRunner;
 use crate::format::dir_size;
 use crate::progress::ProgressReporter;
-use crate::safety::is_safe_delete_target;
 use anyhow::Result;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -91,7 +90,7 @@ impl Cleaner for CliFallbackCleaner {
     fn clean(
         &self,
         dry_run: bool,
-        _reporter: &dyn ProgressReporter,
+        reporter: &dyn ProgressReporter,
         opts: &crate::cleaner::CleanOptions,
     ) -> Result<CleanResult> {
         clean_cli_or_fallback(
@@ -101,6 +100,7 @@ impl Cleaner for CliFallbackCleaner {
             &self.config,
             dry_run,
             opts.trash_mode,
+            reporter,
         )
     }
 }
@@ -109,7 +109,11 @@ impl Cleaner for CliFallbackCleaner {
 /// when the tool is not installed.
 ///
 /// This eliminates the duplicated "CLI first → fallback" pattern between
-/// `huggingface.rs` and `pre_commit.rs`.
+/// `huggingface.rs` and `pre_commit.rs`. The fallback delete rides the
+/// delete ledger, which owns the per-entry contracts (progress, skip
+/// records, freed sums, CleanResult assembly); the recreate is ledger
+/// post-processing so a recreate failure can never masquerade as a skip
+/// record for an entry that was already deleted.
 pub fn clean_cli_or_fallback(
     name: &'static str,
     dir: &Path,
@@ -117,6 +121,7 @@ pub fn clean_cli_or_fallback(
     config: &CliFallbackConfig,
     dry_run: bool,
     mode: crate::trash::TrashMode,
+    reporter: &dyn ProgressReporter,
 ) -> Result<CleanResult> {
     if !dir.exists() {
         return Ok(CleanResult::empty(name));
@@ -166,41 +171,175 @@ pub fn clean_cli_or_fallback(
         );
         return Ok(CleanResult::empty(name));
     }
-    // Clean-time safety re-validation, same as the other deletion sinks:
-    // env-var-derived dirs are only checked at construction. This is
-    // validate-then-use (not an atomic guarantee): a concurrent swap in the
-    // parent dir between this check and the delete remains possible.
-    if !is_safe_delete_target(dir) {
-        eprintln!("[{name}] warning: unsafe path, skipping: {}", dir.display());
-        return Ok(CleanResult::empty(name));
-    }
-
-    let outcome = crate::trash::safe_delete(runner, dir, mode)?;
-    if let Some(reason) = outcome.skip_reason {
-        // The seam classified the failure as skippable: the entry was NOT
-        // deleted, so nothing is in the Trash and the run must not claim
-        // Trash. Only successful deletions contribute outcome.uses_trash
-        // (PBI 43 seam-truth convention).
-        return Ok(CleanResult {
-            name,
-            bytes_freed: 0,
-            uses_trash: false,
-            skipped: vec![SkippedEntry {
-                path: dir.to_path_buf(),
-                reason: SkipCause::Delete(reason),
-            }],
-        });
-    }
-    if config.recreate {
+    // There is no caller-side unsafe-path guard here anymore: the seam's
+    // scope tripwire refuses the same paths at deletion time, and the ledger
+    // records the refusal as a skipped entry (prose reason) — the skip
+    // channel and the deleted-path audit trail stay consistent with every
+    // other ledger user.
+    let result =
+        crate::trash::delete_entries(name, runner, reporter, mode, &[(dir.to_path_buf(), size)]);
+    // Recreate is ledger post-processing, never closure work: it only runs
+    // when every entry deleted, so a recreate failure propagates as an Err
+    // instead of masquerading as a skip record for a deleted entry.
+    if config.recreate && result.skipped.is_empty() {
         fs::create_dir_all(dir)?;
     }
-    println!("[{name}] removed cache: {}", dir.display());
-    Ok(CleanResult::freed(name, size, outcome.uses_trash))
+    Ok(result)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── ledger migration (PBI 77) ──
+
+    /// A reporter that records the progress calls, so the threading of the
+    /// reporter into the delete ledger is observable.
+    struct RecordingReporter {
+        inits: std::sync::Mutex<Vec<(String, usize)>>,
+        ticks: std::sync::Mutex<Vec<(PathBuf, usize, u64)>>,
+    }
+
+    impl Default for RecordingReporter {
+        fn default() -> Self {
+            Self {
+                inits: std::sync::Mutex::new(Vec::new()),
+                ticks: std::sync::Mutex::new(Vec::new()),
+            }
+        }
+    }
+
+    impl crate::progress::ProgressReporter for RecordingReporter {
+        fn show_spinner(&self) -> bool {
+            false
+        }
+        fn progress_init(&self, label: &str, total: usize) {
+            self.inits.lock().unwrap().push((label.to_string(), total));
+        }
+        fn progress_tick(&self, path: &Path, current: usize, size_bytes: u64) {
+            self.ticks
+                .lock()
+                .unwrap()
+                .push((path.to_path_buf(), current, size_bytes));
+        }
+        fn progress_finish(&self) {}
+    }
+
+    /// A runner that reports no tools exist (forcing the fallback delete)
+    /// and permits `chflags` for the seam's permanent-mode clear, which the
+    /// system performs.
+    struct FallbackNoToolRunner;
+    impl CommandRunner for FallbackNoToolRunner {
+        fn run(&self, program: &str, args: &[&str]) -> anyhow::Result<std::process::Output> {
+            assert_eq!(program, "chflags", "unexpected program {program}");
+            std::process::Command::new("chflags")
+                .args(args)
+                .output()
+                .map_err(|e| anyhow::anyhow!("chflags failed: {e}"))
+        }
+        fn exists(&self, program: &str) -> bool {
+            program == "chflags"
+        }
+    }
+
+    #[test]
+    fn clean_threads_the_reporter_into_the_ledger() {
+        // The fallback delete rides the delete ledger: progress_init carries
+        // the label and items.len() (PBI 68) and the deletion ticks. Before
+        // the ledger migration the reporter had no path into the fallback
+        // branch, so the progress tick was structurally absent.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let dir = tmp.path().join("cache");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("data.bin"), vec![0u8; 1024]).unwrap();
+        let cleaner = CliFallbackCleaner::with_parts(
+            "test-fallback",
+            CliFallbackConfig {
+                tool: "definitely-not-installed-tool",
+                args: &[],
+                recreate: true,
+            },
+            tmp.path().to_path_buf(),
+            Box::new(|h: &Path| h.join("cache")),
+            Box::new(FallbackNoToolRunner),
+        );
+        let reporter = RecordingReporter::default();
+        let result = cleaner
+            .clean(
+                false,
+                &reporter,
+                &crate::cleaner::CleanOptions {
+                    trash_mode: crate::trash::TrashMode::Permanent,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let inits = reporter.inits.lock().unwrap();
+        assert_eq!(
+            *inits,
+            vec![("test-fallback".to_string(), 1)],
+            "progress_init runs once with the label and items.len()"
+        );
+        let ticks = reporter.ticks.lock().unwrap();
+        assert_eq!(ticks.len(), 1, "one tick per deleted entry: {ticks:?}");
+        assert_eq!(ticks[0].0, dir);
+        assert!(result.bytes_freed > 0, "the deletion freed bytes");
+        assert!(dir.exists(), "recreate=true must recreate the cache dir");
+        assert!(
+            !dir.join("data.bin").exists(),
+            "the contents must be gone"
+        );
+    }
+
+    #[test]
+    fn clean_cli_or_fallback_records_an_unsafe_dir_as_a_skipped_entry() {
+        // The clean-time unsafe-path pre-check warned without recording: the
+        // skip channel and the exit code could not see the refusal. The
+        // seam's scope tripwire refuses the same path at deletion time and
+        // the ledger records it as a SkippedEntry (prose reason) — same as
+        // every other ledger user. A tempdir under /tmp never passes
+        // is_safe_delete_target (the canonicalized path starts with
+        // /private/tmp).
+        let tmp = tempfile::TempDir::new_in("/tmp").unwrap();
+        std::fs::write(tmp.path().join("keep.txt"), b"data").unwrap();
+        let config = CliFallbackConfig {
+            tool: "definitely-not-installed-tool",
+            args: &[],
+            recreate: false,
+        };
+        let result = clean_cli_or_fallback(
+            "test-fallback",
+            tmp.path(),
+            &MissingToolRunner,
+            &config,
+            false,
+            crate::trash::TrashMode::Permanent,
+            &crate::progress::DeepSuppressReporter,
+        )
+        .unwrap();
+        assert_eq!(result.bytes_freed, 0, "a refused dir frees nothing");
+        assert!(
+            tmp.path().join("keep.txt").exists(),
+            "the unsafe dir must survive"
+        );
+        assert_eq!(
+            result.skipped.len(),
+            1,
+            "the refusal must be recorded as a SkippedEntry: {:?}",
+            result.skipped
+        );
+        assert_eq!(result.skipped[0].path, tmp.path());
+        assert!(
+            matches!(&result.skipped[0].reason, crate::cleaner::SkipCause::Reason(reason) if reason.contains("refusing to delete unsafe path")),
+            "the seam refusal rides as prose: {:?}",
+            result.skipped[0].reason
+        );
+        assert_eq!(
+            result.exit_code(),
+            1,
+            "the refusal must surface through the exit code"
+        );
+    }
 
     /// A runner whose `run` must never be reached: the configured tool does
     /// not exist, so the fallback delete runs instead.
@@ -239,6 +378,7 @@ mod tests {
             &config,
             false,
             crate::trash::TrashMode::Permanent,
+            &crate::progress::DeepSuppressReporter,
         )
         .unwrap();
         assert_eq!(
@@ -278,6 +418,7 @@ mod tests {
             &config,
             false,
             crate::trash::TrashMode::Trash,
+            &crate::progress::DeepSuppressReporter,
         )
         .unwrap();
         assert!(dir.exists(), "a seam-skipped entry must survive");
