@@ -259,7 +259,6 @@ impl ApfsSnapshotCleaner {
             bytes_freed: 0,
             uses_trash: false,
             skipped: vec![],
-            deleted_paths: vec![],
         }
     }
 
@@ -342,7 +341,6 @@ impl ApfsSnapshotCleaner {
             bytes_freed,
             uses_trash: false,
             skipped,
-            deleted_paths: vec![],
         })
     }
 
@@ -462,7 +460,6 @@ impl ApfsSnapshotCleaner {
             bytes_freed: freed,
             uses_trash: false,
             skipped: vec![],
-            deleted_paths: vec![],
         })
     }
 }

@@ -80,7 +80,6 @@ mod tests {
                 bytes_freed: 7,
                 uses_trash: false,
                 skipped: vec![],
-                deleted_paths: vec![],
             })
         }
     }

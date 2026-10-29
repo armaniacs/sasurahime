@@ -438,7 +438,6 @@ impl Cleaner for PluginCleaner {
                         .unwrap_or(0),
                     uses_trash: report.as_ref().and_then(|r| r.uses_trash).unwrap_or(false),
                     skipped: vec![],
-                    deleted_paths: vec![],
                 })
             }
             Some(out) => Err(anyhow::anyhow!("plugin exited with code {}", out.code)),

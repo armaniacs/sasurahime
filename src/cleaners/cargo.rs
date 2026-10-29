@@ -122,8 +122,8 @@ impl Cleaner for CargoCleaner {
         }
 
         // The delete ledger owns the per-item contracts (progress, skip
-        // records, freed sums, deleted paths, CleanResult assembly); a
-        // fatal per-item error no longer aborts the remaining deletions.
+        // records, freed sums, CleanResult assembly); a fatal per-item
+        // error no longer aborts the remaining deletions.
         Ok(crate::trash::delete_ledger(
             self.name(),
             reporter,

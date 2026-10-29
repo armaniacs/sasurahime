@@ -76,7 +76,7 @@ impl Cleaner for CustomPathCleaner {
 
         // The caller owns the per-item size computation; the ledger owns
         // the per-item contracts (progress, skip records, freed sums,
-        // deleted paths, CleanResult assembly).
+        // CleanResult assembly).
         let items: Vec<(PathBuf, u64)> = entries
             .iter()
             .map(|e| {

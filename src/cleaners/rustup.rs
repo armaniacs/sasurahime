@@ -129,7 +129,6 @@ impl Cleaner for RustupCleaner {
                 bytes_freed: 0,
                 uses_trash: false,
                 skipped: vec![],
-                deleted_paths: vec![],
             });
         }
         let output = self.runner.run("rustup", &["toolchain", "list"])?;
@@ -146,7 +145,6 @@ impl Cleaner for RustupCleaner {
                 bytes_freed: 0,
                 uses_trash: false,
                 skipped: vec![],
-                deleted_paths: vec![],
             });
         }
         let stdout = String::from_utf8_lossy(&output.stdout);
@@ -192,7 +190,6 @@ impl Cleaner for RustupCleaner {
             bytes_freed: freed,
             uses_trash: false,
             skipped,
-            deleted_paths: vec![],
         })
     }
 }

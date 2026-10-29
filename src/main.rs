@@ -748,7 +748,6 @@ where
                     bytes_freed: 0,
                     uses_trash: false,
                     skipped: vec![],
-                    deleted_paths: vec![],
                 });
             }
             Err(e) => {
@@ -766,7 +765,6 @@ where
                     bytes_freed: 0,
                     uses_trash: false,
                     skipped: vec![],
-                    deleted_paths: vec![],
                 })
             }
             Err(e) => return Err(e),
@@ -1646,7 +1644,6 @@ mod tests {
                             "Permission denied".to_string(),
                         ),
                     }],
-                    deleted_paths: vec![],
                 })
             },
             false,

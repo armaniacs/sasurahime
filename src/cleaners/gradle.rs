@@ -124,7 +124,7 @@ impl Cleaner for GradleCleaner {
         let old = Self::find_old_caches(&caches);
         // The caller owns the per-item size computation; the ledger owns
         // the per-item contracts (progress — new for this cleaner, skip
-        // records, freed sums, deleted paths).
+        // records, freed sums).
         let items: Vec<(PathBuf, u64)> = old.iter().map(|p| (p.clone(), dir_size(p))).collect();
 
         if dry_run {
@@ -249,7 +249,7 @@ impl Cleaner for JetBrainsCleaner {
         let old = Self::find_old_caches(&dir);
         // The caller owns the per-item size computation; the ledger owns
         // the per-item contracts (progress — new for this cleaner, skip
-        // records, freed sums, deleted paths).
+        // records, freed sums).
         let items: Vec<(PathBuf, u64)> = old.iter().map(|p| (p.clone(), dir_size(p))).collect();
 
         if dry_run {

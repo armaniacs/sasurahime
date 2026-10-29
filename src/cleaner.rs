@@ -158,9 +158,6 @@ pub struct CleanResult {
     /// Whether the operation used macOS Trash (vs permanent deletion).
     pub uses_trash: bool,
     pub skipped: Vec<SkippedEntry>,
-    /// Paths that were successfully deleted (populated when --verbose is active).
-    /// Primarily used for audit trail in --permanent mode.
-    pub deleted_paths: Vec<PathBuf>,
 }
 
 impl CleanResult {
@@ -181,7 +178,6 @@ impl CleanResult {
             bytes_freed,
             uses_trash,
             skipped: Vec::new(),
-            deleted_paths: Vec::new(),
         }
     }
 
@@ -193,7 +189,6 @@ impl CleanResult {
             bytes_freed: 0,
             uses_trash: false,
             skipped: Vec::new(),
-            deleted_paths: Vec::new(),
         }
     }
 }

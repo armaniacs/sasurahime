@@ -203,7 +203,6 @@ impl ProjectArtifactsCleaner {
             bytes_freed: freed,
             uses_trash,
             skipped,
-            deleted_paths: vec![],
         })
     }
 }

@@ -186,7 +186,6 @@ impl Cleaner for XcodeCleaner {
                     bytes_freed: 0,
                     uses_trash: false,
                     skipped: vec![],
-                    deleted_paths: vec![],
                 });
             }
         }
@@ -196,7 +195,6 @@ impl Cleaner for XcodeCleaner {
         // seam-resolved truth.
         let mut uses_trash = false;
         let mut all_skipped: Vec<crate::cleaner::SkippedEntry> = Vec::new();
-        let mut deleted_paths: Vec<PathBuf> = Vec::new();
 
         for sub in subs {
             let (dir, label, ledger_label) = match sub {
@@ -218,7 +216,7 @@ impl Cleaner for XcodeCleaner {
 
             // The caller owns the per-item size computation; the ledger
             // owns the per-item contracts (progress, skip records, freed
-            // sums, deleted paths).
+            // sums).
             let items: Vec<(PathBuf, u64)> = entries
                 .filter_map(|e| e.ok())
                 .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
@@ -256,7 +254,6 @@ impl Cleaner for XcodeCleaner {
             total_freed += result.bytes_freed;
             uses_trash |= result.uses_trash;
             all_skipped.extend(result.skipped);
-            deleted_paths.extend(result.deleted_paths);
         }
 
         Ok(CleanResult {
@@ -264,7 +261,6 @@ impl Cleaner for XcodeCleaner {
             bytes_freed: total_freed,
             uses_trash,
             skipped: all_skipped,
-            deleted_paths,
         })
     }
 }

@@ -499,7 +499,6 @@ mod tests {
                 bytes_freed: self.size,
                 uses_trash: false,
                 skipped: vec![],
-                deleted_paths: vec![],
             })
         }
         // Test cleaners represent regenerable caches so the auto-clean
@@ -672,7 +671,6 @@ mod tests {
                     bytes_freed: 0,
                     uses_trash: false,
                     skipped: vec![],
-                    deleted_paths: vec![],
                 })
             }
         }

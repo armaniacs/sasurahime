@@ -261,8 +261,8 @@ pub fn seam_delete(
 /// (prose reason) and the run continues, a skippable or prose skip is
 /// recorded as a `SkippedEntry`, `freed` only sums entries whose deletion
 /// succeeded, `uses_trash` is the OR-in of the outcomes' truth
-/// (deletion successes only, PBI 43), deleted paths are recorded for the
-/// --verbose audit trail, and `progress_init` runs with `items.len()` —
+/// (deletion successes only, PBI 43), and `progress_init` runs with
+/// `items.len()` —
 /// the count of deletable entries only, the PBI 68 pin — before the
 /// ticks. An all-skipped ledger reports failure through
 /// [`crate::cleaner::CleanResult::exit_code`].
@@ -284,7 +284,6 @@ pub fn delete_ledger(
     let mut freed: u64 = 0;
     let mut uses_trash = false;
     let mut skipped = Vec::new();
-    let mut deleted_paths = Vec::new();
     reporter.progress_init(label, items.len());
     for (i, (path, size)) in items.iter().enumerate() {
         reporter.progress_tick(path, i + 1, *size);
@@ -308,7 +307,6 @@ pub fn delete_ledger(
                 // move never claims Trash (PBI 43).
                 uses_trash |= used;
                 freed += size;
-                deleted_paths.push(path.clone());
                 println!(
                     "[{label}] removed: {} (freed {})",
                     path.display(),
@@ -337,7 +335,6 @@ pub fn delete_ledger(
         bytes_freed: freed,
         uses_trash,
         skipped,
-        deleted_paths,
     }
 }
 
@@ -676,7 +673,6 @@ mod tests {
         assert_eq!(r.skipped.len(), 1, "the vanished entry is a skip");
         assert_eq!(r.skipped[0].path, a);
         assert!(!r.uses_trash, "a permanent resolve must never claim Trash");
-        assert_eq!(r.deleted_paths, vec![b], "the deleted path is recorded");
     }
 
     #[test]
@@ -792,11 +788,6 @@ mod tests {
             "the fatal error's prose rides in the skip: {:?}",
             r.skipped[0].reason
         );
-        assert_eq!(
-            r.deleted_paths,
-            vec![survivor],
-            "the deleted path is recorded"
-        );
     }
 
     #[test]
@@ -820,7 +811,6 @@ mod tests {
         );
         assert_eq!(r.bytes_freed, 0, "a skipped entry is never summed");
         assert!(!r.uses_trash, "a skipped CLI deletion never claims Trash");
-        assert!(r.deleted_paths.is_empty());
         assert_eq!(r.skipped.len(), 1);
         assert_eq!(r.skipped[0].path, model);
         assert!(
@@ -832,9 +822,9 @@ mod tests {
     }
 
     #[test]
-    fn delete_ledger_deletions_sum_freed_and_record_paths() {
+    fn delete_ledger_deletions_sum_freed() {
         // The success path: freed sums the items' sizes, uses_trash is the
-        // OR-in of the outcomes' truth, and the deleted paths are recorded.
+        // OR-in of the outcomes' truth.
         let tmp = TempDir::new().unwrap();
         let (a, b) = (tmp.path().join("a"), tmp.path().join("b"));
         for d in [&a, &b] {
@@ -853,7 +843,6 @@ mod tests {
         );
         assert_eq!(r.bytes_freed, 256 + 512);
         assert!(r.uses_trash, "the outcomes' truth is OR-in");
-        assert_eq!(r.deleted_paths, vec![a, b]);
         assert!(r.skipped.is_empty());
         assert_eq!(r.exit_code(), 0);
     }
@@ -869,7 +858,6 @@ mod tests {
         assert_eq!(r.bytes_freed, 0);
         assert!(r.skipped.is_empty());
         assert!(!r.uses_trash);
-        assert!(r.deleted_paths.is_empty());
         assert_eq!(r.exit_code(), 0);
     }
 }

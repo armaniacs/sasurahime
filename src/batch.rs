@@ -193,7 +193,6 @@ mod tests {
                         crate::cleaner::DeleteError::TrashRefused("boom".to_string()),
                     ),
                 }],
-                deleted_paths: vec![],
             })
         }
     }

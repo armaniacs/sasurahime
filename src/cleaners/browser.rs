@@ -143,9 +143,9 @@ impl Cleaner for BrowserCleaner {
         }
 
         // The delete ledger owns the per-entry contracts (progress, skip
-        // records, freed sums, deleted paths, CleanResult assembly); a
-        // fatal per-entry error no longer aborts the run. The seam adapter
-        // gets the resolved deletion mode from the caller.
+        // records, freed sums, CleanResult assembly); a fatal per-entry
+        // error no longer aborts the run. The seam adapter gets the
+        // resolved deletion mode from the caller.
         Ok(crate::trash::delete_ledger(
             self.name(),
             reporter,

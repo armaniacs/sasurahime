@@ -189,7 +189,6 @@ pub fn clean_cli_or_fallback(
                 path: dir.to_path_buf(),
                 reason: SkipCause::Delete(reason),
             }],
-            deleted_paths: vec![],
         });
     }
     if config.recreate {

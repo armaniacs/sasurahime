@@ -128,7 +128,6 @@ impl Cleaner for OllamaCleaner {
                     bytes_freed: 0,
                     uses_trash: false,
                     skipped: vec![],
-                    deleted_paths: vec![],
                 });
             }
 
@@ -146,7 +145,6 @@ impl Cleaner for OllamaCleaner {
                     bytes_freed: 0,
                     uses_trash: false,
                     skipped: vec![],
-                    deleted_paths: vec![],
                 });
             }
 
@@ -162,7 +160,6 @@ impl Cleaner for OllamaCleaner {
                     bytes_freed: 0,
                     uses_trash: false,
                     skipped: vec![],
-                    deleted_paths: vec![],
                 });
             }
 
@@ -183,7 +180,6 @@ impl Cleaner for OllamaCleaner {
                     bytes_freed: 0,
                     uses_trash: false,
                     skipped: vec![],
-                    deleted_paths: vec![],
                 });
             }
 
@@ -246,7 +242,6 @@ impl OllamaCleaner {
                 bytes_freed: 0,
                 uses_trash: false,
                 skipped: vec![],
-                deleted_paths: vec![],
             });
         }
         let size = dir_size(dir);
@@ -261,7 +256,6 @@ impl OllamaCleaner {
                 bytes_freed: 0,
                 uses_trash: false,
                 skipped: vec![],
-                deleted_paths: vec![],
             });
         }
         let outcome = crate::trash::safe_delete(self.runner.as_ref(), dir, mode)?;
@@ -281,7 +275,6 @@ impl OllamaCleaner {
             bytes_freed: freed,
             uses_trash: outcome.uses_trash,
             skipped,
-            deleted_paths: vec![],
         })
     }
 }

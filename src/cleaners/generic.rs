@@ -531,7 +531,6 @@ impl CliCleaner {
                     bytes_freed: 0,
                     uses_trash: false,
                     skipped: vec![],
-                    deleted_paths: vec![],
                 })
             }
             Some(detect_dir) => {
@@ -615,7 +614,6 @@ impl CliCleaner {
                                 bytes_freed: 0,
                                 uses_trash: false,
                                 skipped: vec![],
-                                deleted_paths: vec![],
                             });
                         }
                         let outcome =
@@ -633,7 +631,6 @@ impl CliCleaner {
                                     path: detect_dir.to_path_buf(),
                                     reason: SkipCause::Delete(reason),
                                 }],
-                                deleted_paths: vec![],
                             });
                         }
                         println!(
@@ -743,7 +740,6 @@ impl CliCleaner {
                     bytes_freed: freed,
                     uses_trash: false,
                     skipped: vec![],
-                    deleted_paths: vec![],
                 })
             }
         }
@@ -839,8 +835,8 @@ impl PathCleaner {
         // Caller-specific decisions stay here: per-dir existence, the age
         // and size filters, and the dry-run printing. The deletion
         // execution rides the delete ledger, which owns the per-entry
-        // contracts (progress, skip records, freed sums, deleted paths,
-        // CleanResult assembly).
+        // contracts (progress, skip records, freed sums, CleanResult
+        // assembly).
         let mut items: Vec<(PathBuf, u64)> = Vec::new();
         for d in &self.dirs {
             if !d.exists() {
@@ -1020,7 +1016,6 @@ mod tests {
         );
         assert!(!real.exists(), "the safe dir still deletes");
         assert_eq!(result.bytes_freed, real_size, "the safe dir is summed");
-        assert_eq!(result.deleted_paths, vec![real]);
     }
 
     // ── CliCleaner trash_mode pin contract ──

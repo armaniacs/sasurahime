@@ -130,10 +130,9 @@ impl Cleaner for IosCleaner {
             "[ios-backup] total freed: {}",
             crate::format::format_bytes(result.bytes_freed)
         );
-        // The full result propagates: skipped entries and deleted paths
-        // reach the caller, so an all-skipped run exits 1 (the same
-        // contract every other ledger user pins) and --verbose keeps the
-        // audit trail.
+        // The full result propagates: skipped entries reach the caller,
+        // so an all-skipped run exits 1 (the same contract every other
+        // ledger user pins).
         Ok(result)
     }
 }

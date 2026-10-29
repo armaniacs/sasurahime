@@ -200,7 +200,6 @@ impl Cleaner for LogCleaner {
             &items,
             crate::trash::seam_delete(&crate::command::SystemCommandRunner, opts.trash_mode),
         );
-        println!("Removed {} log files", result.deleted_paths.len());
         Ok(result)
     }
 }
