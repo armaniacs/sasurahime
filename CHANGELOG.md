@@ -42,14 +42,14 @@ All notable changes to sasurahime will be documented in this file. The format is
 
 - Review quick-win bundle. `TrashModeGuard::set` acquires the test lock
   internally and holds it until drop, which removes the hand-rolled 3-line
-  lock preamble from the 41 unit tests that pin the trash mode and closes
+  lock preamble from the unit tests that pin the trash mode and closes
   the lock-forgotten flake class. `docs/HOWTO-ADD-target.md` no longer
   points at the removed `AUTO_CLEAN_TARGETS` name list: `--yes` eligibility
   is derived from `risk()` (`Risk::Safe`) and the `ManualOnly` wrap for
   non-Safe targets is automatic. A membership test pins `clean caches` to
   the 7 generic cache table rows (bun, go, pip, node-gyp, npm, yarn, pnpm),
-  so a cache target added to the table can no longer silently miss the
-  batch. colima's after-clean disk-image notice is printed again on the
+  so dropping one of the 7 from the dispatch fails the test. colima's
+  after-clean disk-image notice is printed again on the
   `detect_dir` clean path: `Freed:` measures the cache directory, not the
   VM's sparse disk image, and fstrim only reclaims unused blocks, so the
   image often does not shrink -- the notice reports that with the remedy.
