@@ -321,12 +321,19 @@ impl AppSupportCleaner {
         }
         let items: Vec<String> = left.iter().map(format_leftover_line).collect();
         let defaults = vec![false; items.len()];
-        let picked = crate::prompt::TtyPrompt.multi_select(
+        // Display-only path, kept TTY-only by the is_interactive guard above
+        // (the silent no-op: a non-TTY run returns before any prompt or
+        // remedy), so the port's Option is always Some here.
+        let Some(picked) = crate::prompt::TtyPrompt.multi_select(
+            NAME,
             reporter,
             Some("Select leftovers to reveal in Finder (space to toggle, enter to confirm)"),
             &items,
             &defaults,
-        )?;
+        )?
+        else {
+            return Ok(());
+        };
         if picked.is_empty() {
             return Ok(());
         }
@@ -400,15 +407,16 @@ impl AppSupportCleaner {
         reporter: &dyn ProgressReporter,
         cands: &[Candidate],
         running: &HashSet<&'static str>,
-    ) -> Result<Vec<Candidate>> {
+    ) -> Result<Option<Vec<Candidate>>> {
         let items: Vec<String> = cands
             .iter()
             .map(|c| format_candidate_label(c, running.contains(c.target.hint_name)))
             .collect();
         let defaults = vec![false; items.len()];
         println!("\nCache directories under ~/Library/Application Support/ (none selected by default):\n");
-        let picked = crate::prompt::TtyPrompt.multi_select(reporter, None, &items, &defaults)?;
-        Ok(picked.into_iter().map(|i| cands[i].clone()).collect())
+        let picks = crate::prompt::CleanPrompt::for_current_run()
+            .multi_select(NAME, reporter, None, &items, &defaults)?;
+        Ok(picks.map(|picked| picked.into_iter().map(|i| cands[i].clone()).collect()))
     }
 
     fn confirm_quits(
@@ -566,11 +574,13 @@ impl AppSupportCleaner {
             println!("[{NAME}] nothing to clean");
             return Ok(CleanResult::empty(NAME));
         }
-        if !crate::prompt::gate_interactive(NAME) {
-            return Ok(CleanResult::empty(NAME));
-        }
+        // The port owns the non-TTY resolution (PBI 75): on a non-TTY stdin
+        // it prints the standard remedy once and returns None, and the
+        // clean skips instead of hanging on a hidden prompt.
         let running = self.running_apps(&cands);
-        let selected = self.interactive_select(reporter, &cands, &running)?;
+        let Some(selected) = self.interactive_select(reporter, &cands, &running)? else {
+            return Ok(CleanResult::empty(NAME));
+        };
         if selected.is_empty() {
             println!("[{NAME}] nothing selected");
             return Ok(CleanResult::empty(NAME));

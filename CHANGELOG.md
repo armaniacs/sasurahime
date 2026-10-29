@@ -82,11 +82,19 @@ All notable changes to sasurahime will be documented in this file. The format is
   `delete_path` (zero callers, bypassed the scope tripwire) and the
   orphaned `is_skippable_error` (its ErrorKind list lived only in
   `classify_io_error`). Deletions reach the scanner through one seam.
-- The batch arms (`auto`, `clean caches`, `clean all`) print their
-  failures, skipped files, and closing line through the same reporters
-  the TUI already used. One visible consequence: "Total freed" now has
-  the leading blank line every batch arm prints (the three CLI arms
-  dropped it). Line wording and output streams are unchanged.
+- The batch reports (`auto`, `clean caches`, `clean all`) now run through
+  the shared report functions the TUI already had instead of hand-written
+  copies in `main.rs`. One visible consequence: "Total freed" now has the
+  leading blank line every batch report prints (the three CLI arms dropped
+  it). Line wording and output streams are unchanged.
+- The prompt port now resolves TTY-ness itself (`CleanPrompt::
+  for_current_run`): the "call `gate_interactive` first" ordering
+  constraint is gone and the per-cleaner gate is deleted, so the non-TTY
+  remedy line prints right before the prompt instead of at the top of the
+  cleaner. An unavailable prompt is a `None` selection instead of an empty
+  one, so "not a terminal" and "nothing selected" can never print
+  together. `clean apfs-snapshot --all` still skips the TTY check (an
+  explicit opt-in) and the colima fallback refusal is unchanged.
 
 ## [0.4.3] - 2026-10-29
 

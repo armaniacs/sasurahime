@@ -2,7 +2,6 @@ use crate::cleaner::{CleanOptions, CleanResult, Cleaner, ScanResult, ScanStatus}
 use crate::command::CommandRunner;
 use crate::format::{dir_size, format_bytes};
 use crate::progress::ProgressReporter;
-use crate::prompt::PromptPort;
 use anyhow::Result;
 use std::collections::HashSet;
 use std::fs;
@@ -418,7 +417,7 @@ impl OrphanContainersCleaner {
     fn interactive_select(
         reporter: &dyn ProgressReporter,
         candidates: &[OrphanCandidate],
-    ) -> Result<Vec<OrphanCandidate>> {
+    ) -> Result<Option<Vec<OrphanCandidate>>> {
         let items: Vec<String> = candidates.iter().map(format_item).collect();
         println!("\nContainers of apps that are not installed (nothing is selected by default):\n");
         println!(
@@ -428,13 +427,14 @@ impl OrphanContainersCleaner {
         // The prompt owns the screen (suspension and the dialoguer call are
         // owned by the port, so the live progress line never redraws under
         // it). No defaults: nothing is selected by default.
-        let picks = crate::prompt::TtyPrompt.multi_select(
+        let picks = crate::prompt::CleanPrompt::for_current_run().multi_select(
+            "orphan-containers",
             reporter,
             Some("Select folders to move to Trash  [space to toggle, enter to confirm]"),
             &items,
             &[],
         )?;
-        Ok(picks.into_iter().map(|i| candidates[i].clone()).collect())
+        Ok(picks.map(|picked| picked.into_iter().map(|i| candidates[i].clone()).collect()))
     }
 
     /// The shared clean body. `mode` is the resolved deletion mode threaded
@@ -477,11 +477,12 @@ impl OrphanContainersCleaner {
 
         // Which folders are safe to remove is a judgement call that only the
         // user can make, so there is no non-interactive path (no `--all`).
-        if !crate::prompt::gate_interactive("orphan-containers") {
+        // The port owns the non-TTY resolution (PBI 75): on a non-TTY stdin
+        // it prints the standard remedy once and returns None, and the
+        // clean skips instead of hanging on a hidden prompt.
+        let Some(selected) = Self::interactive_select(reporter, &scan.candidates)? else {
             return Ok(CleanResult::empty(self.name()));
-        }
-
-        let selected = Self::interactive_select(reporter, &scan.candidates)?;
+        };
         if selected.is_empty() {
             println!("[orphan-containers] nothing selected");
             print_unreadable_hint(scan.unreadable);
@@ -1335,7 +1336,7 @@ mod tests {
             .unwrap_or(src.len());
         let select_body = &src[select_start..select_end];
         assert!(
-            select_body.contains("TtyPrompt.multi_select("),
+            select_body.contains("multi_select("),
             "the selection prompt must run through the port with the caller's reporter (the suspension follows it)"
         );
         assert!(

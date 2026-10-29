@@ -326,10 +326,11 @@ pub trait Cleaner: Send + Sync {
     }
 
     /// Whether this cleaner's default-options clean path (what `--yes` runs:
-    /// the batch with `CleanOptions::default`) gates on an interactive prompt
-    /// (`prompt::gate_interactive`) and therefore skips on a non-TTY stdin
-    /// even when `auto_clean_allowed()` selects it. Defaults to false; the
-    /// cleaners that gate on that exact path override it so run_auto can
+    /// the batch with `CleanOptions::default`) gates on an interactive
+    /// prompt (a multi_select that the port resolves to the NonInteractive
+    /// adapter on a non-TTY stdin, PBI 75) and therefore skips on a non-TTY
+    /// stdin even when `auto_clean_allowed()` selects it. Defaults to false;
+    /// the cleaners that gate on that exact path override it so run_auto can
     /// name them in its skipped-targets notice (PBI 60).
     fn interactive_gated(&self) -> bool {
         false

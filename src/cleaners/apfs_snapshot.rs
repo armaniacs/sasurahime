@@ -277,17 +277,18 @@ impl ApfsSnapshotCleaner {
             return Ok(CleanResult::empty(self.name()));
         }
 
-        // `--all` is an explicit opt-in, so it skips the TTY guard that exists
-        // only to stop an interactive prompt from being hit in a pipeline.
-        // The `--all` alternative is documented in the command help.
-        if !all && !crate::prompt::gate_interactive("apfs-snapshot") {
-            return Ok(CleanResult::empty(self.name()));
-        }
-
+        // `--all` is an explicit opt-in, so it skips the TTY resolution that
+        // exists only to stop an interactive prompt from being hit in a
+        // pipeline. The `--all` alternative is documented in the command help.
         let selected = if all {
             names.clone()
         } else {
-            self.interactive_select(reporter, &names)?
+            match self.interactive_select(reporter, &names)? {
+                Some(selected) => selected,
+                // Not a terminal: the port printed the standard remedy once,
+                // nothing is selected and the clean skips.
+                None => return Ok(CleanResult::empty(self.name())),
+            }
         };
         if selected.is_empty() {
             println!("[apfs-snapshot] nothing selected");
@@ -366,11 +367,17 @@ impl ApfsSnapshotCleaner {
         &self,
         reporter: &dyn ProgressReporter,
         names: &[String],
-    ) -> Result<Vec<String>> {
+    ) -> Result<Option<Vec<String>>> {
         let defaults = vec![true; names.len()];
         println!("\nLocal APFS Time Machine snapshots:\n");
-        let selections = crate::prompt::TtyPrompt.multi_select(reporter, None, names, &defaults)?;
-        Ok(selections.into_iter().map(|i| names[i].clone()).collect())
+        let picks = crate::prompt::CleanPrompt::for_current_run().multi_select(
+            "apfs-snapshot",
+            reporter,
+            None,
+            names,
+            &defaults,
+        )?;
+        Ok(picks.map(|selections| selections.into_iter().map(|i| names[i].clone()).collect()))
     }
 
     /// Thins local snapshots toward a target free-space amount, letting macOS

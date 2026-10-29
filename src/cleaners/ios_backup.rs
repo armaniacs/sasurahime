@@ -1,7 +1,6 @@
 use crate::cleaner::{CleanResult, Cleaner, ScanResult, ScanStatus};
 use crate::command::CommandRunner;
 use crate::progress::ProgressReporter;
-use crate::prompt::PromptPort;
 use anyhow::Result;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -106,12 +105,12 @@ impl Cleaner for IosCleaner {
         }
 
         // Safety: iOS backups are irreversible and must only be deleted
-        // interactively. If stdin is not a terminal (e.g. via --yes), refuse.
-        if !crate::prompt::gate_interactive("ios-backup") {
+        // interactively. The port owns the non-TTY resolution (PBI 75): on
+        // a non-TTY stdin it prints the standard remedy once and returns
+        // None, and the clean skips instead of hanging on a hidden prompt.
+        let Some(selected) = self.interactive_select(reporter, &entries)? else {
             return Ok(CleanResult::empty(self.name()));
-        }
-
-        let selected = self.interactive_select(reporter, &entries)?;
+        };
         if selected.is_empty() {
             println!("[ios-backup] nothing selected");
             return Ok(CleanResult::empty(self.name()));
@@ -142,7 +141,7 @@ impl IosCleaner {
         &self,
         reporter: &dyn ProgressReporter,
         entries: &[(PathBuf, u64)],
-    ) -> Result<Vec<(PathBuf, u64)>> {
+    ) -> Result<Option<Vec<(PathBuf, u64)>>> {
         let items: Vec<String> = entries
             .iter()
             .map(|(path, size)| {
@@ -152,9 +151,14 @@ impl IosCleaner {
             .collect();
         let defaults = vec![true; entries.len()];
         println!("\niOS device backups in ~/Library/Application Support/MobileSync/Backup/:\n");
-        let selections =
-            crate::prompt::TtyPrompt.multi_select(reporter, None, &items, &defaults)?;
-        Ok(selections.into_iter().map(|i| entries[i].clone()).collect())
+        let picks = crate::prompt::CleanPrompt::for_current_run().multi_select(
+            "ios-backup",
+            reporter,
+            None,
+            &items,
+            &defaults,
+        )?;
+        Ok(picks.map(|selections| selections.into_iter().map(|i| entries[i].clone()).collect()))
     }
 }
 

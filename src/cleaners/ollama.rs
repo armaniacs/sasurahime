@@ -2,7 +2,6 @@ use crate::cleaner::{CleanResult, Cleaner, ScanResult, ScanStatus, SkipCause};
 use crate::command::CommandRunner;
 use crate::format::{dir_size, parse_size_str, SizeUnits};
 use crate::progress::ProgressReporter;
-use crate::prompt::PromptPort;
 use anyhow::Result;
 use std::path::{Path, PathBuf};
 
@@ -141,13 +140,10 @@ impl Cleaner for OllamaCleaner {
             // PBI-52: ollama is classified `Risk::Safe`, so `--yes` selects it
             // for unattended cleaning, but the `MultiSelect::interact()` below
             // fails on a non-TTY stdin with an obscure dialoguer error - a
-            // Safe-classified target could never be cleaned by `--yes`. This
-            // is the standardized "not a terminal" gate (PBI 55): in a
-            // non-TTY, ask for no selection and skip.
-            if !crate::prompt::gate_interactive("ollama") {
-                return Ok(CleanResult::empty(self.name()));
-            }
-
+            // Safe-classified target could never be cleaned by `--yes`. The
+            // port owns the non-TTY resolution (PBI 75): on a non-TTY stdin
+            // it prints the standard remedy once and returns None, and the
+            // clean skips instead of hanging on a hidden prompt.
             let items: Vec<String> = models
                 .iter()
                 .map(|m| format!("{:<24}  {}", m.name, crate::format::format_bytes(m.size)))
@@ -155,8 +151,11 @@ impl Cleaner for OllamaCleaner {
             let defaults: Vec<bool> = vec![true; models.len()];
 
             println!("\nOllama models in ~/.ollama/models/:\n");
-            let selections =
-                crate::prompt::TtyPrompt.multi_select(reporter, None, &items, &defaults)?;
+            let picks = crate::prompt::CleanPrompt::for_current_run()
+                .multi_select("ollama", reporter, None, &items, &defaults)?;
+            let Some(selections) = picks else {
+                return Ok(CleanResult::empty(self.name()));
+            };
 
             if selections.is_empty() {
                 println!("[ollama] nothing selected");
