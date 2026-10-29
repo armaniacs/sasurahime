@@ -281,15 +281,16 @@ define_cleaners! {
     ApfsSnapshot {
         #[arg(long)]
         dry_run: bool,
-        /// Delete every local snapshot without prompting
+        /// Delete every local snapshot without prompting (mutually exclusive
+        /// with --thin)
         #[arg(long)]
         all: bool,
         /// Thin local snapshots toward this free-space target (e.g. 10GB,
-        /// decimal bytes as tmutil expects)
+        /// decimal bytes as tmutil expects). Mutually exclusive with --all
         #[arg(long)]
         thin: Option<String>,
         /// Thinning urgency 1..=4 (default 2; 4 interrupts running backups
-        /// and needs an extra confirmation)
+        /// and needs an extra confirmation). Requires --thin
         #[arg(long)]
         urgency: Option<u32>,
     },
@@ -1313,18 +1314,33 @@ fn main() -> anyhow::Result<()> {
                         thin,
                         urgency,
                     } => {
-                        let mut cleaner = cleaners::apfs_snapshot::ApfsSnapshotCleaner::new(
-                            Box::new(SystemCommandRunner),
-                        )
-                        .with_all(all);
-                        if let Some(spec) = thin {
+                        // Flags -> SnapshotMode in one place: --all and --thin
+                        // are mutually exclusive and --urgency only applies to
+                        // --thin, so conflicts and dangling flags fail loudly
+                        // (exit 1) instead of being silently dropped.
+                        let mode = if all && thin.is_some() {
+                            eprintln!("Error: --all and --thin are mutually exclusive; pick one.");
+                            std::process::exit(1);
+                        } else if let Some(spec) = thin {
                             let Some(bytes) = cleaners::apfs_snapshot::parse_size_decimal(&spec)
                             else {
                                 eprintln!("Error: cannot parse size: {spec} (expected e.g. 10GB)");
                                 std::process::exit(1);
                             };
-                            cleaner = cleaner.with_thin(bytes, urgency.unwrap_or(2));
-                        }
+                            cleaners::apfs_snapshot::SnapshotMode::Thin {
+                                target_bytes: bytes,
+                                urgency: urgency.unwrap_or(2),
+                            }
+                        } else if urgency.is_some() {
+                            eprintln!("Error: --urgency requires --thin.");
+                            std::process::exit(1);
+                        } else {
+                            cleaners::apfs_snapshot::SnapshotMode::Delete { all }
+                        };
+                        let cleaner = cleaners::apfs_snapshot::ApfsSnapshotCleaner::new(Box::new(
+                            SystemCommandRunner,
+                        ))
+                        .with_mode(mode);
                         run_and_exit(
                             "apfs-snapshot",
                             move |dry, rep| cleaner.clean(dry, rep),

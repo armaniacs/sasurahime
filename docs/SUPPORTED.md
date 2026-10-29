@@ -62,7 +62,7 @@ and packages are never touched.
 | `library-logs` | `~/Library/Logs/` (heuristic, interactive) |
 | `downloads` | `~/Downloads/` old files |
 | `ios-backup` | iOS backups — interactive only, never in `--yes` |
-| `apfs-snapshot` | APFS local Time Machine snapshots — interactive, or `--all` |
+| `apfs-snapshot` | APFS local Time Machine snapshots — interactive, `--all`, or `--thin` |
 | `orphan-containers` | Leftover `~/Library/Containers` and `~/Library/Group Containers` of uninstalled apps - interactive only, never in `--yes` |
 | `library-caches` | `~/Library/Caches/` per-app listing; known app caches removable - interactive only, never in `--yes` |
 | `app-support` | Cache dirs of known apps in `~/Library/Application Support/` - interactive only, never in `--yes` |
@@ -1175,13 +1175,20 @@ UUID-named subdirectory containing backup data (Manifest.db, etc.).
    not exist).
 
 **How clean works:**
-1. Lists all local snapshots from `tmutil listlocalsnapshots`.
-2. Without `--all`, opens an interactive `dialoguer::MultiSelect` prompt
+1. Resolves exactly one mode from the flags: delete mode (default) or thin
+   mode (`--thin`). `--all` and `--thin` are mutually exclusive, and
+   `--urgency` requires `--thin`; each conflict fails with an explicit error
+   (exit 1) before any snapshot command runs.
+2. Delete mode lists all local snapshots from `tmutil listlocalsnapshots`.
+   Without `--all`, it opens an interactive `dialoguer::MultiSelect` prompt
    (unless `--dry-run`). With `--all`, every snapshot is selected without
-   prompting, and a non-TTY invocation is allowed.
-3. Runs `tmutil deletelocalsnapshots <date>` for each selected snapshot.
+   prompting, and a non-TTY invocation is allowed. It then runs
+   `tmutil deletelocalsnapshots <date>` for each selected snapshot.
+3. Thin mode runs `tmutil thinlocalsnapshots / <target-bytes> <urgency>`
+   (urgency defaults to 2; 4 needs an extra confirmation), letting macOS
+   decide which snapshots to delete.
 4. Reports freed bytes as the increase in free space on `/` between before and
-   after the deletion. The value can be smaller than the real amount because
+   after the run. The value can be smaller than the real amount because
    purgeable space is reflected with a delay.
 
 **Privileges:** `tmutil deletelocalsnapshots` requires root. sasurahime never
@@ -1195,6 +1202,9 @@ is 1 when no snapshot could be deleted.
 **Safety:**
 - Deleting snapshots disables local Time Machine protection until the next
   backup.
+- **One mode per run:** `--all` and `--thin` are mutually exclusive and
+  `--urgency` requires `--thin`; conflicting flags fail with an explicit error
+  instead of silently picking one.
 - **Interactive by default:** never runs in `--yes` mode. Without `--all`,
   non-TTY invocations are safely skipped with a message.
 - In `--dry-run` mode (with or without `--all`), snapshots are listed but never
@@ -1557,7 +1567,7 @@ sasurahime は **51 のクリーンターゲット** を提供しています。
 | `library-logs` | `~/Library/Logs/`（ヒューリスティック、対話的） |
 | `downloads` | `~/Downloads/` の古いファイル |
 | `ios-backup` | iOS バックアップ — 対話的のみ、`--yes` では非実行 |
-| `apfs-snapshot` | APFS ローカル Time Machine スナップショット — 対話的、または `--all` |
+| `apfs-snapshot` | APFS ローカル Time Machine スナップショット — 対話的、`--all`、または `--thin` |
 | `orphan-containers` | アンインストール済みアプリの `~/Library/Containers` と `~/Library/Group Containers` の残骸 - 対話的のみ、`--yes` では実行しない |
 | `library-caches` | `~/Library/Caches/` のアプリ別一覧。既知アプリのキャッシュのみ削除可能 - 対話的のみ、`--yes` では非実行 |
 | `app-support` | `~/Library/Application Support/` 内の既知アプリのキャッシュ、対話的のみ、`--yes` では非実行 |
@@ -2544,13 +2554,19 @@ Time Machine スナップショット（`<date>` は `YYYY-MM-DD-HHMMSS`）。
    場合は 0）。
 
 **clean の動作:**
-1. `tmutil listlocalsnapshots` からローカルスナップショットを一覧表示します。
-2. `--all` なしの場合は対話的な `dialoguer::MultiSelect` プロンプトを開きます
-   （`--dry-run` 時を除く）。`--all` ありの場合はプロンプトなしで全件を選択し、
-   非 TTY でも実行できます。
-3. 選択されたスナップショットごとに `tmutil deletelocalsnapshots <date>`
-   を実行します。
-4. 解放バイト数は、削除前後の `/` の空き容量の増加分として報告します。
+1. フラグから 1 つのモードだけを決定します: 削除モード（既定）か thin モード
+   （`--thin`）。`--all` と `--thin` は同時指定できず、`--urgency` は
+   `--thin` が必須です。競合や単独指定は、スナップショットコマンドを実行する
+   前に明示エラー（終了コード 1）になります。
+2. 削除モードは `tmutil listlocalsnapshots` からローカルスナップショットを
+   一覧表示します。`--all` なしの場合は対話的な `dialoguer::MultiSelect`
+   プロンプトを開き（`--dry-run` 時を除く）、`--all` ありの場合はプロンプト
+   なしで全件を選択し、非 TTY でも実行できます。その後、選択された
+   スナップショットごとに `tmutil deletelocalsnapshots <date>` を実行します。
+3. thin モードは `tmutil thinlocalsnapshots / <target-bytes> <urgency>`
+   （urgency の既定は 2、4 は追加確認が必要）を実行し、どのスナップショットを
+   削除するかは macOS に任せます。
+4. 解放バイト数は、実行前後の `/` の空き容量の増加分として報告します。
    purgeable 領域の反映が遅れるため、実際より小さい値になることがあります。
 
 **権限:** `tmutil deletelocalsnapshots` は root 権限が必要です。sasurahime は
@@ -2564,6 +2580,9 @@ Time Machine スナップショット（`<date>` は `YYYY-MM-DD-HHMMSS`）。
 **安全性:**
 - スナップショットの削除は、次回のバックアップまでローカル Time Machine
   保護を無効にします。
+- **1 回の実行に 1 つのモード:** `--all` と `--thin` は同時指定できず、
+  `--urgency` は `--thin` が必須です。競合するフラグは、どちらかを黙って
+  選ぶのではなく明示エラーになります。
 - **既定はインタラクティブ:** `--yes` モードでは決して実行されません。
   `--all` なしの非 TTY 呼び出しは安全にスキップされます。
 - `--dry-run` モードでは（`--all` の有無にかかわらず）スナップショットが

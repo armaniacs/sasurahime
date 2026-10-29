@@ -4,10 +4,23 @@ use crate::progress::ProgressReporter;
 use crate::prompt::PromptPort;
 use anyhow::Result;
 
+/// The explicit cleaning mode for the apfs-snapshot target. Delete and thin
+/// are mutually exclusive by type, so a constructed cleaner can never carry
+/// both: what used to be `all: bool` plus `thin: Option<...>` (where a thin
+/// mode silently won over `--all`) is now one value the caller must pick.
+#[derive(Debug, Clone, Copy)]
+pub enum SnapshotMode {
+    /// Delete snapshots via `tmutil deletelocalsnapshots`; `all` skips the
+    /// interactive selection.
+    Delete { all: bool },
+    /// Thin local snapshots toward a target free-space amount.
+    /// `target_bytes` uses tmutil's decimal convention (GB = 10^9).
+    Thin { target_bytes: u64, urgency: u32 },
+}
+
 pub struct ApfsSnapshotCleaner {
     pub runner: Box<dyn CommandRunner>,
-    all: bool,
-    thin: Option<(u64, u32)>,
+    mode: SnapshotMode,
     free_space: Box<dyn Fn() -> Option<u64> + Send + Sync>,
 }
 
@@ -15,21 +28,15 @@ impl ApfsSnapshotCleaner {
     pub fn new(runner: Box<dyn CommandRunner>) -> Self {
         Self {
             runner,
-            all: false,
-            thin: None,
+            mode: SnapshotMode::Delete { all: false },
             free_space: Box::new(root_free_space),
         }
     }
 
-    pub fn with_all(mut self, all: bool) -> Self {
-        self.all = all;
-        self
-    }
-
-    /// Thins local snapshots toward a target free-space amount.
-    /// `target_bytes` uses tmutil's decimal convention (GB = 10^9).
-    pub fn with_thin(mut self, target_bytes: u64, urgency: u32) -> Self {
-        self.thin = Some((target_bytes, urgency));
+    /// Sets the cleaning mode. Delete and thin are mutually exclusive by
+    /// type: a mode replaces whatever the cleaner carried before.
+    pub fn with_mode(mut self, mode: SnapshotMode) -> Self {
+        self.mode = mode;
         self
     }
 
@@ -42,6 +49,17 @@ impl ApfsSnapshotCleaner {
 
 fn freed_bytes(before: u64, after: u64) -> u64 {
     after.saturating_sub(before)
+}
+
+/// Computes the freed amount as the increase in free space between two
+/// readings. A missing reading (fs error) makes the delta unattributable,
+/// so it is 0: a missing before-reading would otherwise report the entire
+/// free space as freed.
+fn free_space_delta(before: Option<u64>, after: Option<u64>) -> u64 {
+    match (before, after) {
+        (Some(b), Some(a)) => freed_bytes(b, a),
+        _ => 0,
+    }
 }
 
 fn root_free_space() -> Option<u64> {
@@ -101,6 +119,10 @@ pub fn validate_urgency(urgency: u32) -> bool {
 }
 
 const TM_PREFIX: &str = "com.apple.TimeMachine.";
+
+/// Both delete and thin disable local Time Machine protection until the
+/// next backup; only the verb differs.
+const TM_PROTECTION_WARNING: &str = "disables local Time Machine protection until the next backup.";
 
 /// Returns the `YYYY-MM-DD-HHMMSS` part of a Time Machine local snapshot name.
 /// `tmutil deletelocalsnapshots` accepts only this date form.
@@ -191,117 +213,13 @@ impl Cleaner for ApfsSnapshotCleaner {
     }
 
     fn clean(&self, dry_run: bool, reporter: &dyn ProgressReporter) -> Result<CleanResult> {
-        if self.thin.is_some() {
-            return self.clean_thin(reporter, dry_run);
+        match self.mode {
+            SnapshotMode::Delete { all } => self.clean_delete(all, dry_run, reporter),
+            SnapshotMode::Thin {
+                target_bytes,
+                urgency,
+            } => self.clean_thin(target_bytes, urgency, dry_run, reporter),
         }
-        if !self.runner.exists("tmutil") {
-            return Ok(CleanResult {
-                name: self.name(),
-                bytes_freed: 0,
-                uses_trash: false,
-                skipped: vec![],
-                deleted_paths: vec![],
-            });
-        }
-        let output = self.runner.run("tmutil", &["listlocalsnapshots", "/"])?;
-        let names = parse_snapshot_names(&String::from_utf8_lossy(&output.stdout));
-        if names.is_empty() {
-            println!("[apfs-snapshot] no local snapshots found");
-            return Ok(CleanResult {
-                name: self.name(),
-                bytes_freed: 0,
-                uses_trash: false,
-                skipped: vec![],
-                deleted_paths: vec![],
-            });
-        }
-
-        eprintln!(
-            "⚠  Deleting snapshots disables local Time Machine protection until the next backup."
-        );
-
-        if dry_run {
-            println!("[apfs-snapshot] dry-run: {} snapshot(s) found", names.len());
-            for name in &names {
-                println!("  would delete: {}", name);
-            }
-            return Ok(CleanResult {
-                name: self.name(),
-                bytes_freed: 0,
-                uses_trash: false,
-                skipped: vec![],
-                deleted_paths: vec![],
-            });
-        }
-
-        // `--all` is an explicit opt-in, so it skips the TTY guard that exists
-        // only to stop an interactive prompt from being hit in a pipeline.
-        // The `--all` alternative is documented in the command help.
-        if !self.all && !crate::prompt::gate_interactive("apfs-snapshot") {
-            return Ok(CleanResult {
-                name: self.name(),
-                bytes_freed: 0,
-                uses_trash: false,
-                skipped: vec![],
-                deleted_paths: vec![],
-            });
-        }
-
-        let selected = if self.all {
-            names.clone()
-        } else {
-            self.interactive_select(reporter, &names)?
-        };
-        if selected.is_empty() {
-            println!("[apfs-snapshot] nothing selected");
-            return Ok(CleanResult {
-                name: self.name(),
-                bytes_freed: 0,
-                uses_trash: false,
-                skipped: vec![],
-                deleted_paths: vec![],
-            });
-        }
-
-        // Snapshot sizes are not reported by tmutil, so the freed amount is the
-        // free-space delta. Purgeable space is updated lazily, so this can
-        // under-report right after deletion.
-        let before = (self.free_space)();
-        let report = self.delete_snapshots(&selected);
-        // Free space also moves for unrelated I/O, so a delta is only
-        // attributable to us when at least one deletion succeeded.
-        let bytes_freed = if report.deleted == 0 {
-            0
-        } else {
-            match (before, (self.free_space)()) {
-                (Some(b), Some(a)) => freed_bytes(b, a),
-                _ => 0,
-            }
-        };
-        if !report.failed.is_empty() {
-            let dates: Vec<String> = report.failed.iter().map(|(d, _)| d.clone()).collect();
-            eprint!("{}", sudo_hint(&dates));
-        }
-        let skipped = report
-            .failed
-            .iter()
-            .map(|(d, reason)| SkippedEntry {
-                path: std::path::PathBuf::from(d),
-                reason: SkipCause::Reason(reason.clone()),
-            })
-            .collect();
-        if report.deleted == 0 {
-            eprintln!("[apfs-snapshot] failed: no snapshot was deleted");
-        } else {
-            println!("[apfs-snapshot] done");
-        }
-        Ok(CleanResult {
-            name: self.name(),
-            bytes_freed,
-            uses_trash: false,
-            skipped,
-            deleted_paths: vec![],
-        })
     }
 }
 
@@ -328,6 +246,101 @@ struct DeleteReport {
 }
 
 impl ApfsSnapshotCleaner {
+    /// A no-op result: nothing was freed, nothing was deleted, nothing
+    /// skipped. Every early exit of both modes returns this.
+    fn zero_result(&self) -> CleanResult {
+        CleanResult {
+            name: self.name(),
+            bytes_freed: 0,
+            uses_trash: false,
+            skipped: vec![],
+            deleted_paths: vec![],
+        }
+    }
+
+    fn clean_delete(
+        &self,
+        all: bool,
+        dry_run: bool,
+        reporter: &dyn ProgressReporter,
+    ) -> Result<CleanResult> {
+        if !self.runner.exists("tmutil") {
+            return Ok(self.zero_result());
+        }
+        let output = self.runner.run("tmutil", &["listlocalsnapshots", "/"])?;
+        let names = parse_snapshot_names(&String::from_utf8_lossy(&output.stdout));
+        if names.is_empty() {
+            println!("[apfs-snapshot] no local snapshots found");
+            return Ok(self.zero_result());
+        }
+
+        eprintln!("⚠  Deleting snapshots {TM_PROTECTION_WARNING}");
+
+        if dry_run {
+            println!("[apfs-snapshot] dry-run: {} snapshot(s) found", names.len());
+            for name in &names {
+                println!("  would delete: {}", name);
+            }
+            return Ok(self.zero_result());
+        }
+
+        // `--all` is an explicit opt-in, so it skips the TTY guard that exists
+        // only to stop an interactive prompt from being hit in a pipeline.
+        // The `--all` alternative is documented in the command help.
+        if !all && !crate::prompt::gate_interactive("apfs-snapshot") {
+            return Ok(self.zero_result());
+        }
+
+        let selected = if all {
+            names.clone()
+        } else {
+            self.interactive_select(reporter, &names)?
+        };
+        if selected.is_empty() {
+            println!("[apfs-snapshot] nothing selected");
+            return Ok(self.zero_result());
+        }
+
+        // Snapshot sizes are not reported by tmutil, so the freed amount is the
+        // free-space delta. Purgeable space is updated lazily, so this can
+        // under-report right after deletion.
+        let before = (self.free_space)();
+        let report = self.delete_snapshots(&selected);
+        // Free space also moves for unrelated I/O, so a delta is only
+        // attributable to us when at least one deletion succeeded. The guard
+        // stays at the call site: the after-reading is only taken when it can
+        // be attributed.
+        let bytes_freed = if report.deleted == 0 {
+            0
+        } else {
+            free_space_delta(before, (self.free_space)())
+        };
+        if !report.failed.is_empty() {
+            let dates: Vec<String> = report.failed.iter().map(|(d, _)| d.clone()).collect();
+            eprint!("{}", sudo_hint(&dates));
+        }
+        let skipped = report
+            .failed
+            .iter()
+            .map(|(d, reason)| SkippedEntry {
+                path: std::path::PathBuf::from(d),
+                reason: SkipCause::Reason(reason.clone()),
+            })
+            .collect();
+        if report.deleted == 0 {
+            eprintln!("[apfs-snapshot] failed: no snapshot was deleted");
+        } else {
+            println!("[apfs-snapshot] done");
+        }
+        Ok(CleanResult {
+            name: self.name(),
+            bytes_freed,
+            uses_trash: false,
+            skipped,
+            deleted_paths: vec![],
+        })
+    }
+
     fn delete_snapshots(&self, names: &[String]) -> DeleteReport {
         let mut report = DeleteReport::default();
         for name in names {
@@ -371,29 +384,23 @@ impl ApfsSnapshotCleaner {
     /// Thins local snapshots toward a target free-space amount, letting macOS
     /// decide which snapshots to delete. Safer than deleting individual
     /// snapshots: the OS keeps the most useful ones.
-    fn clean_thin(&self, reporter: &dyn ProgressReporter, dry_run: bool) -> Result<CleanResult> {
-        let zero = CleanResult {
-            name: self.name(),
-            bytes_freed: 0,
-            uses_trash: false,
-            skipped: vec![],
-            deleted_paths: vec![],
-        };
-        let Some((target_bytes, urgency)) = self.thin else {
-            return Ok(zero);
-        };
+    fn clean_thin(
+        &self,
+        target_bytes: u64,
+        urgency: u32,
+        dry_run: bool,
+        reporter: &dyn ProgressReporter,
+    ) -> Result<CleanResult> {
         if !self.runner.exists("tmutil") {
             println!("[apfs-snapshot] tmutil not found — skipping thinning.");
-            return Ok(zero);
+            return Ok(self.zero_result());
         }
         if !validate_urgency(urgency) {
             anyhow::bail!(
                 "urgency must be 1..=4, got {urgency}. Lower urgency deletes fewer snapshots."
             );
         }
-        eprintln!(
-            "⚠  Thinning snapshots disables local Time Machine protection until the next backup."
-        );
+        eprintln!("⚠  Thinning snapshots {TM_PROTECTION_WARNING}");
         if urgency == 4 {
             eprintln!(
                 "⚠  Urgency 4 interrupts running backups: data written while thinning runs may be lost."
@@ -408,7 +415,7 @@ impl ApfsSnapshotCleaner {
                 )?
             {
                 println!("[apfs-snapshot] cancelled");
-                return Ok(zero);
+                return Ok(self.zero_result());
             }
         }
         if dry_run {
@@ -416,7 +423,7 @@ impl ApfsSnapshotCleaner {
                 "[apfs-snapshot] dry-run: would run `tmutil thinlocalsnapshots / {} {}`",
                 target_bytes, urgency
             );
-            return Ok(zero);
+            return Ok(self.zero_result());
         }
         // Thinning is an explicit opt-in like --all, so it skips the plain
         // non-TTY guard; urgency 4 keeps its own confirmation above.
@@ -437,15 +444,10 @@ impl ApfsSnapshotCleaner {
                 "[apfs-snapshot] tmutil thinlocalsnapshots exited with {} - no space was reclaimed",
                 output.status.code().unwrap_or(-1)
             );
-            return Ok(zero);
+            return Ok(self.zero_result());
         }
         let after = (self.free_space)();
-        // Both readings must exist: a missing before-reading would report the
-        // entire free space as freed.
-        let freed = match (before, after) {
-            (Some(b), Some(a)) => freed_bytes(b, a),
-            _ => 0,
-        };
+        let freed = free_space_delta(before, after);
         println!(
             "Freed: {} (purgeable space is updated lazily by macOS; the change may not be visible immediately.)",
             crate::format::format_bytes(freed)
@@ -767,7 +769,7 @@ mod tests {
         };
         let (probe, _) = scripted_free_space(vec![Some(100), Some(350)]);
         let cleaner = ApfsSnapshotCleaner::new(Box::new(runner))
-            .with_all(true)
+            .with_mode(SnapshotMode::Delete { all: true })
             .with_free_space(probe);
         let reporter = crate::progress::VerboseProgress::new();
         let result = cleaner.clean(false, &reporter).unwrap();
@@ -783,7 +785,7 @@ mod tests {
         // Only the "after" reading failing must not be read as the whole disk being freed.
         let (probe, _) = scripted_free_space(vec![None, Some(350)]);
         let cleaner = ApfsSnapshotCleaner::new(Box::new(runner))
-            .with_all(true)
+            .with_mode(SnapshotMode::Delete { all: true })
             .with_free_space(probe);
         let reporter = crate::progress::VerboseProgress::new();
         let result = cleaner.clean(false, &reporter).unwrap();
@@ -822,7 +824,7 @@ mod tests {
         };
         let (probe, _) = scripted_free_space(vec![Some(100), Some(500)]);
         let cleaner = ApfsSnapshotCleaner::new(Box::new(runner))
-            .with_all(true)
+            .with_mode(SnapshotMode::Delete { all: true })
             .with_free_space(probe);
         let reporter = crate::progress::VerboseProgress::new();
         let result = cleaner.clean(false, &reporter).unwrap();
@@ -835,7 +837,7 @@ mod tests {
     fn clean_partial_success_reports_delta_and_skips_failed() {
         let (probe, _) = scripted_free_space(vec![Some(100), Some(400)]);
         let cleaner = ApfsSnapshotCleaner::new(Box::new(Mixed))
-            .with_all(true)
+            .with_mode(SnapshotMode::Delete { all: true })
             .with_free_space(probe);
         let reporter = crate::progress::VerboseProgress::new();
         let result = cleaner.clean(false, &reporter).unwrap();
@@ -868,7 +870,7 @@ mod tests {
         };
         let (probe, probe_calls) = scripted_free_space(vec![Some(100), Some(350)]);
         let cleaner = ApfsSnapshotCleaner::new(Box::new(runner))
-            .with_all(true)
+            .with_mode(SnapshotMode::Delete { all: true })
             .with_free_space(probe);
         let reporter = crate::progress::VerboseProgress::new();
         let result = cleaner.clean(true, &reporter).unwrap();
@@ -880,6 +882,22 @@ mod tests {
     fn freed_bytes_is_free_space_delta() {
         assert_eq!(freed_bytes(100, 350), 250);
         assert_eq!(freed_bytes(350, 100), 0);
+    }
+
+    #[test]
+    fn free_space_delta_treats_a_missing_reading_as_zero() {
+        assert_eq!(free_space_delta(Some(100), Some(350)), 250);
+        assert_eq!(
+            free_space_delta(None, Some(350)),
+            0,
+            "missing before-reading"
+        );
+        assert_eq!(
+            free_space_delta(Some(100), None),
+            0,
+            "missing after-reading"
+        );
+        assert_eq!(free_space_delta(None, None), 0);
     }
 
     #[test]
@@ -905,7 +923,8 @@ mod tests {
             calls: Arc::clone(&calls),
             delete_status: 0,
         };
-        let cleaner = ApfsSnapshotCleaner::new(Box::new(runner)).with_all(true);
+        let cleaner = ApfsSnapshotCleaner::new(Box::new(runner))
+            .with_mode(SnapshotMode::Delete { all: true });
         let reporter = crate::progress::VerboseProgress::new();
         // Non-TTY under `cargo test`: the deletion path must run, not the skip path.
         let result = cleaner.clean(false, &reporter).unwrap();
@@ -929,7 +948,8 @@ mod tests {
             calls: Arc::clone(&calls),
             delete_status: 0,
         };
-        let cleaner = ApfsSnapshotCleaner::new(Box::new(runner)).with_all(true);
+        let cleaner = ApfsSnapshotCleaner::new(Box::new(runner))
+            .with_mode(SnapshotMode::Delete { all: true });
         let reporter = crate::progress::VerboseProgress::new();
         cleaner.clean(true, &reporter).unwrap();
         assert!(!calls
@@ -1009,7 +1029,7 @@ mod tests {
         };
         let (probe, _) = scripted_free_space(vec![Some(100), Some(100)]);
         let cleaner = ApfsSnapshotCleaner::new(Box::new(runner))
-            .with_all(true)
+            .with_mode(SnapshotMode::Delete { all: true })
             .with_free_space(probe);
         let result = cleaner
             .clean(false, &crate::progress::DeepSuppressReporter)
@@ -1047,7 +1067,10 @@ mod tests {
         // A runner without any tmutil behavior errors on unexpected programs:
         // Ok(0-freed) proves dry-run made no tmutil call.
         let cleaner = ApfsSnapshotCleaner::new(Box::new(crate::test_helpers::MockRunner::new()))
-            .with_thin(10_000_000_000, 2);
+            .with_mode(SnapshotMode::Thin {
+                target_bytes: 10_000_000_000,
+                urgency: 2,
+            });
         let reporter = crate::progress::DeepSuppressReporter;
         let result = cleaner.clean(true, &reporter).unwrap();
         assert_eq!(result.bytes_freed, 0);
@@ -1059,7 +1082,10 @@ mod tests {
         let cleaner = ApfsSnapshotCleaner::new(Box::new(
             crate::test_helpers::MockRunner::new().with_not_found(),
         ))
-        .with_thin(10_000_000_000, 2);
+        .with_mode(SnapshotMode::Thin {
+            target_bytes: 10_000_000_000,
+            urgency: 2,
+        });
         let reporter = crate::progress::DeepSuppressReporter;
         let result = cleaner.clean(false, &reporter).unwrap();
         assert_eq!(result.bytes_freed, 0);
@@ -1072,7 +1098,10 @@ mod tests {
         let cleaner = ApfsSnapshotCleaner::new(Box::new(
             crate::test_helpers::MockRunner::new().with_success("tmutil"),
         ))
-        .with_thin(10_000_000_000, 2)
+        .with_mode(SnapshotMode::Thin {
+            target_bytes: 10_000_000_000,
+            urgency: 2,
+        })
         .with_free_space(|| None);
         let reporter = crate::progress::DeepSuppressReporter;
         let result = cleaner.clean(false, &reporter).unwrap();
@@ -1085,7 +1114,10 @@ mod tests {
         let cleaner = ApfsSnapshotCleaner::new(Box::new(
             crate::test_helpers::MockRunner::new().with_success("tmutil"),
         ))
-        .with_thin(10_000_000_000, 5);
+        .with_mode(SnapshotMode::Thin {
+            target_bytes: 10_000_000_000,
+            urgency: 5,
+        });
         let reporter = crate::progress::DeepSuppressReporter;
         assert!(cleaner.clean(false, &reporter).is_err());
     }
@@ -1147,7 +1179,10 @@ mod tests {
         let cleaner = ApfsSnapshotCleaner::new(Box::new(
             crate::test_helpers::MockRunner::new().with_success("tmutil"),
         ))
-        .with_thin(10_000_000_000, 2)
+        .with_mode(SnapshotMode::Thin {
+            target_bytes: 10_000_000_000,
+            urgency: 2,
+        })
         .with_free_space(move || {
             if calls.fetch_add(1, Ordering::SeqCst) == 0 {
                 None // before: fs error
@@ -1172,7 +1207,10 @@ mod tests {
         let cleaner = ApfsSnapshotCleaner::new(Box::new(
             crate::test_helpers::MockRunner::new().with_exit_code("tmutil", 1 << 8),
         ))
-        .with_thin(10_000_000_000, 2)
+        .with_mode(SnapshotMode::Thin {
+            target_bytes: 10_000_000_000,
+            urgency: 2,
+        })
         .with_free_space(probe);
         let reporter = crate::progress::DeepSuppressReporter;
         let result = cleaner.clean(false, &reporter).unwrap();

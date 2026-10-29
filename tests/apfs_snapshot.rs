@@ -186,3 +186,73 @@ fn thin_rejects_unparseable_sizes() {
         "the error must explain the expected format, got:\n{combined}"
     );
 }
+
+#[test]
+fn all_and_thin_together_fail_loudly_without_running_tmutil() {
+    let tmp = TempDir::new().unwrap();
+    // The conflict must be an explicit error (exit 1), not thin silently
+    // winning over --all. The error happens at flag conversion, before any
+    // cleaner is constructed, so tmutil is never called.
+    let output = Command::cargo_bin("sasurahime")
+        .unwrap()
+        .env("HOME", tmp.path())
+        .args([
+            "--permanent",
+            "clean",
+            "apfs-snapshot",
+            "--all",
+            "--thin",
+            "10GB",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "conflicting flags must exit 1, got stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        combined.contains("mutually exclusive"),
+        "the error must name the conflict, got:\n{combined}"
+    );
+    assert!(
+        !combined.contains("deleted:"),
+        "tmutil must never run before the conflict error, got:\n{combined}"
+    );
+}
+
+#[test]
+fn urgency_without_thin_fails_loudly() {
+    let tmp = TempDir::new().unwrap();
+    // --urgency only applies to --thin; alone it used to be silently ignored
+    // (the default was only evaluated inside thin mode).
+    let output = Command::cargo_bin("sasurahime")
+        .unwrap()
+        .env("HOME", tmp.path())
+        .args(["--permanent", "clean", "apfs-snapshot", "--urgency", "3"])
+        .output()
+        .unwrap();
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "--urgency without --thin must exit 1, got stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        combined.contains("--urgency requires --thin"),
+        "the error must point at the missing flag, got:\n{combined}"
+    );
+}
