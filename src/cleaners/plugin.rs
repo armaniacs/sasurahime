@@ -165,6 +165,30 @@ fn status_from_protocol(protocol: &ProtocolStatus) -> Option<ScanStatus> {
     }
 }
 
+/// Caps a plugin-claimed byte count at the size sasurahime itself verified
+/// on the filesystem (PBI 66). The plugin protocol carries no managed-path
+/// field, so the only real size the tool can check is the plugin binary's
+/// own on-disk footprint; a claim above that can never reach the scan
+/// totals, history or `Total freed`. A vanished path verifies to 0, which
+/// caps any claim to 0: the real size is reported truthfully, the claim is
+/// not rejected (not fail-closed — truthful).
+fn cap_claimed_at_verified(claimed: u64, verified: u64) -> u64 {
+    claimed.min(verified)
+}
+
+/// Caps a scan status' claimed bytes at the size sasurahime verified (PBI
+/// 66): a forged `bytes` claim can neither inflate the row nor overflow the
+/// scan total — an uncapped u64::MAX claim used to panic the total sum.
+fn cap_scan_status(path: &Path, status: ScanStatus) -> ScanStatus {
+    match status {
+        ScanStatus::Pruneable(bytes) => ScanStatus::Pruneable(cap_claimed_at_verified(
+            bytes,
+            crate::format::dir_size(path),
+        )),
+        other => other,
+    }
+}
+
 pub struct PluginCleaner {
     static_name: &'static str,
     pub path: PathBuf,
@@ -374,7 +398,9 @@ impl Cleaner for PluginCleaner {
             .as_ref()
             .and_then(status_from_protocol)
         {
-            Some(status) => ScanResult::new(self.name(), status),
+            // PBI 66: the claimed `bytes` are capped at the size sasurahime
+            // verified itself before they reach the scan row and total.
+            Some(status) => ScanResult::new(self.name(), cap_scan_status(&self.path, status)),
             None => unavailable(),
         }
     }
@@ -398,9 +424,17 @@ impl Cleaner for PluginCleaner {
                 // an unknown flag, while one that ignores arguments is
                 // unaffected either way.
                 let report = parse_clean_output(&out.stdout);
+                // PBI 66: the claimed `freed` is capped at the size
+                // sasurahime verified itself before it reaches `Total
+                // freed`, history and the (in Trash) note.
+                let verified = crate::format::dir_size(&self.path);
                 Ok(CleanResult {
                     name: self.name(),
-                    bytes_freed: report.as_ref().and_then(|r| r.freed).unwrap_or(0),
+                    bytes_freed: report
+                        .as_ref()
+                        .and_then(|r| r.freed)
+                        .map(|claimed| cap_claimed_at_verified(claimed, verified))
+                        .unwrap_or(0),
                     uses_trash: report.as_ref().and_then(|r| r.uses_trash).unwrap_or(false),
                     skipped: vec![],
                     deleted_paths: vec![],
@@ -416,7 +450,12 @@ impl Cleaner for PluginCleaner {
     }
 
     fn advisory(&self) -> Option<String> {
-        Some("External plugin: sasurahime does not review third-party plugin behavior.".to_string())
+        Some(
+            "External plugin: sasurahime does not review third-party plugin behavior. \
+             Claimed bytes/freed are capped at the size sasurahime verified on disk \
+             (the plugin binary's own footprint); a claim above it is never reported."
+                .to_string(),
+        )
     }
 
     fn risk(&self) -> Risk {
@@ -821,5 +860,88 @@ mod tests {
         let result = cleaner.clean(false, &reporter).unwrap();
         assert_eq!(result.bytes_freed, 0);
         assert!(!result.uses_trash);
+    }
+
+    #[test]
+    fn cap_claimed_at_verified_is_min_of_claimed_and_verified() {
+        // PBI 66: the cap is min(claimed, verified). A vanished path
+        // verifies to 0, which caps any claim to 0.
+        assert_eq!(cap_claimed_at_verified(18446744073709551615, 4096), 4096);
+        assert_eq!(
+            cap_claimed_at_verified(512, 4096),
+            512,
+            "a claim within the verified size passes through"
+        );
+        assert_eq!(
+            cap_claimed_at_verified(512, 0),
+            0,
+            "no verified size caps the claim to 0"
+        );
+    }
+
+    #[test]
+    fn detect_caps_the_claimed_bytes_at_the_verified_size() {
+        // PBI 66: a plugin claiming u64::MAX bytes must not inflate the scan:
+        // the row reports the size sasurahime verified (the plugin binary's
+        // own on-disk footprint), never the forged claim.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let plugin = tmp.path().join("sasurahime-huge");
+        std::fs::write(
+            &plugin,
+            "#!/bin/sh\necho '{\"status\":\"pruneable\",\"bytes\":18446744073709551615}'\nexit 0\n",
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&plugin, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let verified = crate::format::dir_size(&plugin);
+        let cleaner = PluginCleaner::new("huge", plugin);
+        match cleaner.detect().status {
+            ScanStatus::Pruneable(bytes) => {
+                assert_ne!(
+                    bytes,
+                    u64::MAX,
+                    "the forged u64::MAX claim must never be reported"
+                );
+                assert_eq!(
+                    bytes, verified,
+                    "claimed bytes are capped at the size sasurahime verified"
+                );
+            }
+            other => panic!("expected a pruneable row, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn clean_caps_the_claimed_freed_at_the_verified_size() {
+        // PBI 66: a plugin claiming 1000000 freed bytes must not forge the
+        // audit trail: `Total freed`, history and the trash note only record
+        // what sasurahime verified itself.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let plugin = tmp.path().join("sasurahime-liar");
+        std::fs::write(
+            &plugin,
+            "#!/bin/sh\necho '{\"freed\": 1000000, \"uses_trash\": false}'\nexit 0\n",
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&plugin, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let verified = crate::format::dir_size(&plugin);
+        let cleaner = PluginCleaner::new("liar", plugin);
+        let reporter = crate::progress::DeepSuppressReporter;
+        let result = cleaner.clean(false, &reporter).unwrap();
+        assert_ne!(
+            result.bytes_freed, 1000000,
+            "the forged freed claim must never be reported"
+        );
+        assert_eq!(
+            result.bytes_freed, verified,
+            "freed is capped at the size sasurahime verified"
+        );
     }
 }

@@ -353,3 +353,88 @@ fn plugin_clean_does_not_pass_a_json_flag() {
         "the plugin must receive exactly `clean`, got: {args}"
     );
 }
+
+#[test]
+fn plugin_scan_claim_is_capped_at_the_verified_size() {
+    // PBI 66: a plugin's claimed `bytes` must not inflate the scan. A forged
+    // u64::MAX claim is capped at the size sasurahime verified itself (the
+    // plugin binary's own on-disk footprint) in the row and the total.
+    let tmp = TempDir::new().unwrap();
+    let bin_dir = tmp.path().join("bin");
+    fs::create_dir_all(&bin_dir).unwrap();
+    install_plugin(
+        &bin_dir,
+        "sasurahime-foo",
+        "#!/bin/sh\necho '{\"status\":\"pruneable\",\"bytes\":18446744073709551615}'\nexit 0\n",
+    );
+    let plugin = bin_dir.join("sasurahime-foo");
+    let path = format!("{}:/usr/bin:/bin", bin_dir.display());
+
+    let output = sasurahime(tmp.path(), &path).arg("scan").output().unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        !stdout.contains("18446744073709551615"),
+        "the forged u64::MAX claim must never appear in the scan report:\n{stdout}"
+    );
+
+    // scan --json reports the capped raw byte count: the verified size.
+    let json = sasurahime(tmp.path(), &path)
+        .args(["scan", "--json"])
+        .output()
+        .unwrap();
+    assert!(json.status.success());
+    let stdout = String::from_utf8_lossy(&json.stdout);
+    let verified = sasurahime::format::dir_size(&plugin);
+    assert!(
+        stdout.contains(&format!("\"size_bytes\": {}", verified)),
+        "the row must report the verified size {verified}, got:\n{stdout}"
+    );
+    assert!(
+        !stdout.contains("18446744073709551615"),
+        "the forged claim must never appear in scan --json:\n{stdout}"
+    );
+}
+
+#[test]
+fn plugin_freed_claim_is_capped_at_the_verified_size() {
+    // PBI 66: a plugin's claimed `freed` must not forge the audit trail. A
+    // 1000000-byte claim is capped at the size sasurahime verified itself
+    // before `Total freed`, history and the trash note report it.
+    let tmp = TempDir::new().unwrap();
+    let bin_dir = tmp.path().join("bin");
+    fs::create_dir_all(&bin_dir).unwrap();
+    install_plugin(
+        &bin_dir,
+        "sasurahime-foo",
+        "#!/bin/sh\necho '{\"freed\": 1000000, \"uses_trash\": false}'\nexit 0\n",
+    );
+    let plugin = bin_dir.join("sasurahime-foo");
+    let path = format!("{}:/usr/bin:/bin", bin_dir.display());
+
+    let output = sasurahime(tmp.path(), &path)
+        .args(["clean", "foo"])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "the plugin clean must run");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let verified = sasurahime::format::dir_size(&plugin);
+
+    let history = fs::read_to_string(history_path(tmp.path()))
+        .expect("a capped-freed clean is still recorded in history");
+    assert!(
+        !history.contains("\"freed_bytes\": 1000000"),
+        "the forged freed claim must never reach history: {history}"
+    );
+    assert!(
+        history.contains(&format!("\"freed_bytes\": {}", verified)),
+        "history must record the verified size {verified}, got: {history}"
+    );
+    assert!(
+        stdout.contains(&format!(
+            "Freed: {}",
+            sasurahime::format::format_bytes(verified)
+        )),
+        "the Freed line must report the verified size, got:\n{stdout}"
+    );
+}
