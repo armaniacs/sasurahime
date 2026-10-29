@@ -227,26 +227,6 @@ impl std::error::Error for CleanCancelled {}
 pub type CleanByName<'a> =
     dyn Fn(&str, Option<&str>, bool, &dyn ProgressReporter) -> Result<CleanResult> + 'a;
 
-pub fn is_skippable_error(e: &anyhow::Error) -> bool {
-    // Typed classification first: a `DeleteError` from the deletion seam is
-    // matched by variant, never by message text (PBI 59). Prose matching is
-    // gone: the seam produces typed errors, so rewording a message can no
-    // longer flip a skip into a fatal failure.
-    if let Some(del_err) = e.downcast_ref::<DeleteError>() {
-        return del_err.is_skippable();
-    }
-    if let Some(io_err) = e.downcast_ref::<std::io::Error>() {
-        return matches!(
-            io_err.kind(),
-            std::io::ErrorKind::PermissionDenied
-                | std::io::ErrorKind::WouldBlock
-                | std::io::ErrorKind::AlreadyExists
-                | std::io::ErrorKind::ResourceBusy
-        );
-    }
-    false
-}
-
 /// Which `[cleaner.<name>]` filters a cleaner actually honours. Command-based
 /// cleaners never look at them; a cleaner's `per_cleaner_filters()` override
 /// is the one owner of this fact and `main`'s ineffective-setting warning
@@ -407,12 +387,6 @@ mod tests {
         assert_eq!(r.primary_target.as_deref(), Some("/some/path"));
     }
 
-    #[test]
-    fn is_skippable_error_permission_denied() {
-        let e = anyhow::Error::from(std::io::Error::from(std::io::ErrorKind::PermissionDenied));
-        assert!(is_skippable_error(&e));
-    }
-
     // ── Risk ──
 
     struct StubCleaner {
@@ -473,44 +447,9 @@ mod tests {
     }
 
     #[test]
-    fn is_skippable_error_would_block() {
-        let e = anyhow::Error::from(std::io::Error::from(std::io::ErrorKind::WouldBlock));
-        assert!(is_skippable_error(&e));
-    }
-
-    #[test]
-    fn is_skippable_error_already_exists() {
-        let e = anyhow::Error::from(std::io::Error::from(std::io::ErrorKind::AlreadyExists));
-        assert!(is_skippable_error(&e));
-    }
-
-    #[test]
-    fn is_skippable_error_not_found_is_not_skippable() {
-        let e = anyhow::Error::from(std::io::Error::from(std::io::ErrorKind::NotFound));
-        assert!(!is_skippable_error(&e));
-    }
-
-    #[test]
-    fn is_skippable_error_connection_refused_is_not_skippable() {
-        let e = anyhow::Error::from(std::io::Error::from(std::io::ErrorKind::ConnectionRefused));
-        assert!(!is_skippable_error(&e));
-    }
-
-    #[test]
-    fn is_skippable_error_permission_denied_string() {
-        // PBI 59: prose matching is gone. A String-wrapped error without an
-        // io or DeleteError inside is fatal by classification, so rewording
-        // a message can never flip a skip into a fatal failure. The typed
-        // variants below carry the classification.
-        let e = anyhow::anyhow!("Permission denied: /some/path");
-        assert!(!is_skippable_error(&e));
-    }
-
-    #[test]
     fn delete_error_trash_refused_is_skippable() {
         let e = DeleteError::TrashRefused("could not move to trash".to_string());
         assert!(e.is_skippable());
-        assert!(is_skippable_error(&anyhow::Error::new(e)));
     }
 
     #[test]
@@ -519,21 +458,18 @@ mod tests {
             std::io::ErrorKind::PermissionDenied,
         ));
         assert!(e.is_skippable());
-        assert!(is_skippable_error(&anyhow::Error::new(e)));
     }
 
     #[test]
     fn delete_error_busy_is_skippable() {
         let e = DeleteError::Busy(std::io::Error::from(std::io::ErrorKind::WouldBlock));
         assert!(e.is_skippable());
-        assert!(is_skippable_error(&anyhow::Error::new(e)));
     }
 
     #[test]
     fn delete_error_io_is_not_skippable() {
         let e = DeleteError::Io(std::io::Error::from(std::io::ErrorKind::NotFound));
         assert!(!e.is_skippable(), "an unclassified io error is fatal");
-        assert!(!is_skippable_error(&anyhow::Error::new(e)));
     }
 
     #[test]
@@ -548,26 +484,43 @@ mod tests {
 
     #[test]
     fn classify_io_error_maps_the_kinds() {
-        // The permanent-removal path classifies io errors by kind: EPERM is
-        // a permission skip, EBUSY (WouldBlock on macOS) is a busy skip, and
-        // everything else is fatal.
-        let perm = classify_io_error(std::io::Error::from(std::io::ErrorKind::PermissionDenied));
-        assert!(perm.is_skippable());
-        let busy = classify_io_error(std::io::Error::from(std::io::ErrorKind::WouldBlock));
-        assert!(busy.is_skippable());
-        let fatal = classify_io_error(std::io::Error::from(std::io::ErrorKind::NotFound));
-        assert!(!fatal.is_skippable());
+        // The one io-kind mapping (PBI 62): the four skippable kinds the
+        // removed `is_skippable_error` duplicated live only here — a
+        // permission denial is a permission skip, a busy target (EBUSY is
+        // WouldBlock on macOS, plus ResourceBusy and EEXIST) is a busy
+        // skip, and everything else is fatal.
+        for kind in [
+            std::io::ErrorKind::PermissionDenied,
+            std::io::ErrorKind::WouldBlock,
+            std::io::ErrorKind::ResourceBusy,
+            std::io::ErrorKind::AlreadyExists,
+        ] {
+            let e = classify_io_error(std::io::Error::from(kind));
+            assert!(e.is_skippable(), "{kind:?} must stay skippable");
+        }
+        for kind in [
+            std::io::ErrorKind::NotFound,
+            std::io::ErrorKind::ConnectionRefused,
+        ] {
+            let e = classify_io_error(std::io::Error::from(kind));
+            assert!(!e.is_skippable(), "{kind:?} must stay fatal");
+        }
     }
 
     #[test]
-    fn is_skippable_error_arbitrary_error_is_not_skippable() {
-        let e = anyhow::anyhow!("something went horribly wrong");
-        assert!(!is_skippable_error(&e));
-    }
-
-    #[test]
-    fn is_skippable_error_clean_cancelled_is_not_skippable() {
-        let e = anyhow::Error::from(crate::cleaner::CleanCancelled);
-        assert!(!is_skippable_error(&e));
+    fn classify_io_error_matches_the_kind_never_the_message_text() {
+        // PBI 59/62: classification is by io ErrorKind, never by message
+        // text, so a misleading message cannot flip a fatal kind into a
+        // skip (the old prose test's subject, made typed).
+        let misleading = std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "Permission denied: /some/path",
+        );
+        let e = classify_io_error(misleading);
+        assert!(
+            matches!(e, DeleteError::Io(_)),
+            "a non-skippable kind stays fatal regardless of message text: {e}"
+        );
+        assert!(!e.is_skippable());
     }
 }

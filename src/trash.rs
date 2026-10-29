@@ -120,18 +120,6 @@ impl Drop for TrashBackendOverrideGuard {
     }
 }
 
-/// Test/compat-only bypass of the [`safe_delete`] seam over [`DeleteCtx`]:
-/// reads the process-global mode that `main` pins once per run. The
-/// `Cleaner` trait now carries a [`DeleteCtx`], so cleaner-level call sites
-/// go through the seam (`safe_delete`) instead; unlike the seam, this
-/// wrapper runs no scope tripwire and no chflags pre-step, and it exists for
-/// tests and legacy callers only.
-pub fn delete_path(path: &Path) -> Result<()> {
-    DeleteCtx::new(TrashMode::Global)
-        .delete_path(path)
-        .map_err(anyhow::Error::new)
-}
-
 /// Outcome of a single deletion through the [`safe_delete`] seam. The seam
 /// returns its own truth: `uses_trash` is the mode that was actually
 /// resolved at deletion time, so a cleaner can never report Trash for a
@@ -186,8 +174,9 @@ pub fn safe_delete(
     // delegating the move (and any flag behavior) outside the crate, so
     // whether Finder clears or refuses a uchg-locked item is not decidable
     // from the crate source. If the backend refuses, the error reaches this
-    // crate as "trash failed: ..." and is_skippable_error classifies it as
-    // skippable: the locked entry is skipped and the clean run continues.
+    // crate as the typed [`DeleteError::TrashRefused`] variant, which
+    // [`DeleteError::is_skippable`] classifies as skippable: the locked
+    // entry is skipped and the clean run continues.
     if !mode.resolve() {
         let path_str = path.to_string_lossy();
         if let Err(e) = runner.run("chflags", &["-R", "nouchg", &path_str]) {
@@ -348,8 +337,9 @@ mod tests {
     }
 
     #[test]
-    fn compat_wrapper_reads_the_global_mode() {
-        // The wrapper is the only global reader left; one locked test covers it.
+    fn global_trash_mode_pin_round_trips() {
+        // The process-global pin is read by `TrashMode::Global` (the seam's
+        // compat path); one locked test covers the setter/getter pair.
         let _lock = crate::context::TEST_LOCK
             .lock()
             .unwrap_or_else(|p| p.into_inner());
@@ -454,9 +444,9 @@ mod tests {
 
     #[test]
     fn safe_delete_skippable_error_returns_skip_reason() {
-        // A Trash-mode delete of a nonexistent path fails with a
-        // "trash failed: ..." error, which is_skippable_error classifies as
-        // skippable; a NotFound in permanent mode is fatal by design.
+        // A Trash-mode delete of a nonexistent path fails with the typed
+        // TrashRefused classification, which is skippable; a NotFound in
+        // permanent mode is fatal by design.
         let runner = RecordingRunner::new();
         let outcome = safe_delete(
             &runner,
