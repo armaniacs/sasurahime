@@ -11,7 +11,7 @@ use crate::disk_image::{
 };
 use crate::format::dir_size;
 use crate::progress::ProgressReporter;
-use crate::prompt::{self, PromptPort, TtyPrompt};
+use crate::prompt::{self, CleanPrompt};
 use crate::safety::resolve_env_dir;
 use anyhow::Result;
 use std::fs;
@@ -511,16 +511,20 @@ impl CliCleaner {
         let program = self.program;
         let args = self.args;
         if let Some(msg) = &self.confirm_message {
-            if !prompt::confirm_suppressed() && prompt::is_interactive() {
-                // The long explanation prints as normal output and
-                // the Confirm prompt stays one short line: dialoguer
-                // clears one line deep, so a wrapped prompt would
-                // double the message (the confirm-duplication fix).
-                println!("\n{msg}");
-                // The prompt owns the screen (suspension and the
-                // one-line Confirm prompt are owned by the port, so
-                // the live progress line never redraws under it).
-                let confirmed = TtyPrompt.confirm(reporter, "Proceed?")?;
+            // The gate rides the port (PBI 81): the TTY resolution, the
+            // TUI-suppression check, the explanation placement, and the
+            // one-line Confirm prompt are owned by prompt.rs. None = the
+            // confirm could not be shown — proceed silently, and the
+            // non-TTY floor at the fallback delete (below) still refuses
+            // the deletion. PBI 69 (WHY the silent proceed is not
+            // enough): the TUI's suppression means the user already
+            // confirmed on a terminal, but a non-TTY stdin means the
+            // confirm cannot be shown at all. When this cleaner's
+            // destructive action is reachable on that non-TTY stdin, the
+            // refusal gate there stops it instead — colima's full
+            // deletion may only run on a TTY where the confirm was
+            // actually answered.
+            if let Some(confirmed) = CleanPrompt::confirm_on_tty(reporter, msg)? {
                 if !confirmed {
                     println!("{}: cancelled", self.display_name);
                     eprintln!("  $ {program} {}", args.join(" "));
@@ -1905,13 +1909,14 @@ mod tests {
 
     #[test]
     fn confirm_prompt_ownership_lives_in_the_port() {
-        // The confirm branch's prompt contracts (suspension, the one-line
-        // Confirm prompt) are owned by the prompt port (PBI 55): the
-        // cleaner calls the port instead of running dialoguer itself, so
-        // the dialoguer-redraw fix cannot resurface per call site. The
-        // suspension contract is behaviorally tested in the port's own
-        // tests (prompt::tests::tty_prompt_suspends_live_output_*); this
-        // pins the seam shape.
+        // The confirm gate's prompt contracts — the TTY resolution, the TUI
+        // suppression, the explanation placement, and the one-line Confirm
+        // prompt — are owned by the prompt port (PBI 55, PBI 81): the
+        // cleaner names `confirm_on_tty` and handles the answer, so the
+        // dialoguer-redraw fix cannot resurface per call site. The
+        // suspension and None semantics are behaviorally tested in the
+        // port's own tests (prompt::tests::tty_prompt_suspends_live_output_*,
+        // prompt::tests::confirm_on_tty_*); this pins the seam shape.
         let src = include_str!("generic.rs");
         let start = src
             .find("fn clean_with_mode(")
@@ -1922,15 +1927,23 @@ mod tests {
             .unwrap_or(src.len());
         let body = &src[start..end];
         assert!(
-            body.contains("TtyPrompt.confirm"),
-            "the confirm prompt must run through the prompt port"
+            body.contains("confirm_on_tty"),
+            "the confirm gate must run through the port's confirm_on_tty"
+        );
+        assert!(
+            !body.contains("TtyPrompt"),
+            "the cleaner must not resolve the TTY or name the adapter — the port owns the TTY resolution"
         );
         assert!(
             !body.contains("dialoguer::"),
             "the cleaner must not call dialoguer directly (the port owns the prompt)"
         );
         assert!(
-            !body.contains("with_prompt(*msg)"),
+            !body.contains("confirm_suppressed()"),
+            "the cleaner must not hand-roll the TUI-suppression predicate — the port owns it"
+        );
+        assert!(
+            !body.contains("with_prompt"),
             "the Confirm prompt must stay one short line — the long explanation prints as normal output above it, because dialoguer clears one line and a wrapped prompt doubles the message"
         );
     }
