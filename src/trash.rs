@@ -204,23 +204,79 @@ pub fn safe_delete(
     }
 }
 
-/// The one delete loop: runs [`safe_delete`] per entry with progress ticks,
-/// records failures as skipped entries (a fatal per-entry error never aborts
-/// the run), sums the freed bytes, and reports the seam's `uses_trash` truth.
-///
-/// Every cleaner that deletes a list of scanned paths goes through here so
-/// the loop's contracts concentrate in one place instead of living as
-/// copy-pasted loops at each call site: a vanished path is reported and the
-/// remaining entries still process, a skippable failure is a `SkippedEntry`,
-/// and `uses_trash` is the resolved mode at deletion time. `items` pairs each
-/// path with its scanned byte size (the value the run reports as freed);
-/// `label` names the cleaner in the per-entry log lines.
-pub fn delete_entries(
-    label: &'static str,
+/// Outcome of one per-item deletion handed back to the [`delete_ledger`].
+/// The ledger owns the loop, so a deletion closure returns its own truth:
+/// `Deleted` carries the resolved trash truth (a run that deleted nothing
+/// can never claim Trash, PBI 43), and a skip carries either the seam's
+/// typed classification or a prose reason (a CLI-delegated deletion's
+/// failure — never disguised as a [`crate::cleaner::DeleteError`]). Fatal
+/// failures propagate as `Err`; the ledger turns them into a prose skip
+/// and continues instead of aborting the run.
+#[derive(Debug)]
+pub enum DeletionOutcome {
+    /// The entry was deleted. `uses_trash` is whether the resolved mode
+    /// moved it to the Trash.
+    Deleted {
+        /// Whether the resolved mode moved the entry to the Trash.
+        uses_trash: bool,
+    },
+    /// The entry was NOT deleted: the seam classified the failure as
+    /// skippable (a refused trash move, a permission denial, a busy
+    /// target).
+    Skipped(crate::cleaner::DeleteError),
+    /// The entry was NOT deleted, with a prose reason (a failed CLI
+    /// deletion such as `ollama rm`).
+    SkippedReason(String),
+}
+
+/// The seam adapter: fixes [`safe_delete`] as the per-item deletion a
+/// [`delete_ledger`] runs and maps the seam's outcome into the ledger's.
+/// Every path-deleting cleaner rides this adapter (or a CLI adapter like
+/// ollama's `ollama rm` closure), so the uchg rule, the scope tripwire,
+/// mode resolution and skip classification stay the seam's job for every
+/// deletion the ledger mediates.
+pub fn seam_delete(
     runner: &dyn crate::command::CommandRunner,
-    reporter: &dyn crate::progress::ProgressReporter,
     mode: TrashMode,
+) -> impl FnMut(&Path, u64) -> Result<DeletionOutcome> + '_ {
+    move |path: &Path, _size: u64| {
+        let outcome = safe_delete(runner, path, mode)?;
+        match outcome.skip_reason {
+            None => Ok(DeletionOutcome::Deleted {
+                uses_trash: outcome.uses_trash,
+            }),
+            Some(reason) => Ok(DeletionOutcome::Skipped(reason)),
+        }
+    }
+}
+
+/// The one delete ledger: the loop every cleaner's per-entry deletions
+/// ride, so the bookkeeping contract concentrates in one interface instead
+/// of living as hand-rolled loops at each call site. Per item it ticks the
+/// reporter, runs the caller's deletion closure, and owns the whole
+/// ledger contract: a fatal closure error is recorded as a skipped entry
+/// (prose reason) and the run continues, a skippable or prose skip is
+/// recorded as a `SkippedEntry`, `freed` only sums entries whose deletion
+/// succeeded, `uses_trash` is the OR-in of the outcomes' truth
+/// (deletion successes only, PBI 43), deleted paths are recorded for the
+/// --verbose audit trail, and `progress_init` runs with `items.len()` —
+/// the count of deletable entries only, the PBI 68 pin — before the
+/// ticks. An all-skipped ledger reports failure through
+/// [`crate::cleaner::CleanResult::exit_code`].
+///
+/// `items` pairs each path with the byte count the run reports as freed
+/// when its deletion succeeds; the caller owns the per-item size
+/// computation and display labels (the ledger never re-walks a path).
+/// `label` names the cleaner in the progress and per-entry log lines.
+/// dry-run never reaches the ledger: callers print their own dry-run
+/// lines and return before calling it. `seam_delete` is the adapter for
+/// path deletions via [`safe_delete`]; a CLI-delegated deletion (like
+/// `ollama rm`) rides the same ledger through its own closure.
+pub fn delete_ledger(
+    label: &'static str,
+    reporter: &dyn crate::progress::ProgressReporter,
     items: &[(std::path::PathBuf, u64)],
+    mut delete: impl FnMut(&Path, u64) -> Result<DeletionOutcome>,
 ) -> crate::cleaner::CleanResult {
     let mut freed: u64 = 0;
     let mut uses_trash = false;
@@ -229,9 +285,9 @@ pub fn delete_entries(
     reporter.progress_init(label, items.len());
     for (i, (path, size)) in items.iter().enumerate() {
         reporter.progress_tick(path, i + 1, *size);
-        let outcome = match safe_delete(runner, path, mode) {
+        let outcome = match delete(path, *size) {
             Ok(outcome) => outcome,
-            // A fatal per-entry error (e.g. the path vanished between scan
+            // A fatal per-item error (e.g. the path vanished between scan
             // and delete) must not abort the whole run: report it and
             // continue with the remaining entries.
             Err(err) => {
@@ -243,22 +299,34 @@ pub fn delete_entries(
                 continue;
             }
         };
-        if let Some(reason) = outcome.skip_reason {
-            eprintln!("[{label}] error removing {}: {reason}", path.display());
-            skipped.push(crate::cleaner::SkippedEntry {
-                path: path.clone(),
-                reason: crate::cleaner::SkipCause::Delete(reason),
-            });
-            continue;
+        match outcome {
+            DeletionOutcome::Deleted { uses_trash: used } => {
+                // OR-in only when the deletion actually happened: a skipped
+                // move never claims Trash (PBI 43).
+                uses_trash |= used;
+                freed += size;
+                deleted_paths.push(path.clone());
+                println!(
+                    "[{label}] removed: {} (freed {})",
+                    path.display(),
+                    crate::format::format_bytes(*size)
+                );
+            }
+            DeletionOutcome::Skipped(reason) => {
+                eprintln!("[{label}] error removing {}: {reason}", path.display());
+                skipped.push(crate::cleaner::SkippedEntry {
+                    path: path.clone(),
+                    reason: crate::cleaner::SkipCause::Delete(reason),
+                });
+            }
+            DeletionOutcome::SkippedReason(reason) => {
+                eprintln!("[{label}] error removing {}: {reason}", path.display());
+                skipped.push(crate::cleaner::SkippedEntry {
+                    path: path.clone(),
+                    reason: crate::cleaner::SkipCause::Reason(reason),
+                });
+            }
         }
-        uses_trash |= outcome.uses_trash;
-        freed += size;
-        deleted_paths.push(path.clone());
-        println!(
-            "[{label}] removed: {} (freed {})",
-            path.display(),
-            crate::format::format_bytes(*size)
-        );
     }
     reporter.progress_finish();
     crate::cleaner::CleanResult {
@@ -268,6 +336,21 @@ pub fn delete_entries(
         skipped,
         deleted_paths,
     }
+}
+
+/// The seam-fixed convenience wrapper over [`delete_ledger`]: pairs every
+/// item with the [`safe_delete`] seam via [`seam_delete`]. The seam users
+/// keep this exact shape; cleaners whose deletion is not path-based (or
+/// whose per-item behavior differs, like `ollama rm`) call
+/// [`delete_ledger`] with their own closure instead.
+pub fn delete_entries(
+    label: &'static str,
+    runner: &dyn crate::command::CommandRunner,
+    reporter: &dyn crate::progress::ProgressReporter,
+    mode: TrashMode,
+    items: &[(std::path::PathBuf, u64)],
+) -> crate::cleaner::CleanResult {
+    delete_ledger(label, reporter, items, seam_delete(runner, mode))
 }
 
 #[cfg(test)]
@@ -695,5 +778,121 @@ mod tests {
             "the fatal bail is a prose skip: {:?}",
             r.skipped[0].reason
         );
+    }
+
+    // ── delete_ledger contract (PBI 70) ──
+
+    #[test]
+    fn delete_ledger_fatal_closure_error_is_a_prose_skip_and_continues() {
+        // The generalized ledger's contract, driven through a custom
+        // closure (no seam involved): a fatal per-item error is recorded as
+        // a prose skip and the remaining entries still delete. The ledger
+        // owns the loop, so no call site can reintroduce a `?` abort.
+        let tmp = TempDir::new().unwrap();
+        let fatal = tmp.path().join("fatal");
+        let survivor = tmp.path().join("survivor");
+        fs::create_dir_all(&survivor).unwrap();
+        fs::write(survivor.join("cache.bin"), vec![0u8; 512]).unwrap();
+        let items = vec![(fatal.clone(), 1024), (survivor.clone(), 512)];
+        let r = delete_ledger(
+            "ledger-test",
+            &crate::progress::DeepSuppressReporter,
+            &items,
+            |path: &Path, _size: u64| {
+                if path.file_name().and_then(|n| n.to_str()) == Some("fatal") {
+                    anyhow::bail!("simulated fatal deletion failure");
+                }
+                fs::remove_dir_all(path)?;
+                Ok(DeletionOutcome::Deleted { uses_trash: false })
+            },
+        );
+        assert!(!survivor.exists(), "the surviving entry still deletes");
+        assert_eq!(r.bytes_freed, 512, "only the surviving entry is summed");
+        assert_eq!(r.skipped.len(), 1, "the fatal entry is a skip");
+        assert_eq!(r.skipped[0].path, fatal);
+        assert!(
+            matches!(&r.skipped[0].reason, crate::cleaner::SkipCause::Reason(reason) if reason.contains("simulated fatal")),
+            "the fatal error's prose rides in the skip: {:?}",
+            r.skipped[0].reason
+        );
+        assert_eq!(
+            r.deleted_paths,
+            vec![survivor],
+            "the deleted path is recorded"
+        );
+    }
+
+    #[test]
+    fn delete_ledger_prose_skip_records_the_reason_and_exit_code_one() {
+        // A CLI-delegated deletion's contract (ollama rm): the failure
+        // keeps its prose reason — never disguised as a DeleteError — a
+        // skipped entry is never summed, no Trash claim is made, and an
+        // all-skipped ledger reports failure (exit 1).
+        let tmp = TempDir::new().unwrap();
+        let model = tmp.path().join("llama3.2:3b");
+        let items = vec![(model.clone(), 2048)];
+        let r = delete_ledger(
+            "cli-test",
+            &crate::progress::DeepSuppressReporter,
+            &items,
+            |_path: &Path, _size: u64| {
+                Ok(DeletionOutcome::SkippedReason(
+                    "ollama rm exited with 1".to_string(),
+                ))
+            },
+        );
+        assert_eq!(r.bytes_freed, 0, "a skipped entry is never summed");
+        assert!(!r.uses_trash, "a skipped CLI deletion never claims Trash");
+        assert!(r.deleted_paths.is_empty());
+        assert_eq!(r.skipped.len(), 1);
+        assert_eq!(r.skipped[0].path, model);
+        assert!(
+            matches!(&r.skipped[0].reason, crate::cleaner::SkipCause::Reason(reason) if reason == "ollama rm exited with 1"),
+            "the CLI failure's prose rides in the skip: {:?}",
+            r.skipped[0].reason
+        );
+        assert_eq!(r.exit_code(), 1, "all-skipped reports failure");
+    }
+
+    #[test]
+    fn delete_ledger_deletions_sum_freed_and_record_paths() {
+        // The success path: freed sums the items' sizes, uses_trash is the
+        // OR-in of the outcomes' truth, and the deleted paths are recorded.
+        let tmp = TempDir::new().unwrap();
+        let (a, b) = (tmp.path().join("a"), tmp.path().join("b"));
+        for d in [&a, &b] {
+            fs::create_dir_all(d).unwrap();
+            fs::write(d.join("cache.bin"), vec![0u8; 256]).unwrap();
+        }
+        let items = vec![(a.clone(), 256), (b.clone(), 512)];
+        let r = delete_ledger(
+            "ledger-test",
+            &crate::progress::DeepSuppressReporter,
+            &items,
+            |path: &Path, _size: u64| {
+                fs::remove_dir_all(path)?;
+                Ok(DeletionOutcome::Deleted { uses_trash: true })
+            },
+        );
+        assert_eq!(r.bytes_freed, 256 + 512);
+        assert!(r.uses_trash, "the outcomes' truth is OR-in");
+        assert_eq!(r.deleted_paths, vec![a, b]);
+        assert!(r.skipped.is_empty());
+        assert_eq!(r.exit_code(), 0);
+    }
+
+    #[test]
+    fn delete_ledger_empty_items_is_a_zero_result() {
+        let r = delete_ledger(
+            "ledger-test",
+            &crate::progress::DeepSuppressReporter,
+            &[],
+            |_: &Path, _: u64| unreachable!("no items, no deletions"),
+        );
+        assert_eq!(r.bytes_freed, 0);
+        assert!(r.skipped.is_empty());
+        assert!(!r.uses_trash);
+        assert!(r.deleted_paths.is_empty());
+        assert_eq!(r.exit_code(), 0);
     }
 }
