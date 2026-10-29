@@ -1,4 +1,4 @@
-use crate::cleaner::{CleanResult, Cleaner, Risk, ScanResult, ScanStatus, SkipCause};
+use crate::cleaner::{CleanResult, Cleaner, Risk, ScanResult, ScanStatus};
 use anyhow::Result;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
@@ -162,48 +162,41 @@ impl ProjectArtifactsCleaner {
 
     /// The shared clean body. `mode` is the deletion mode for the seam:
     /// `Global` reads the process-global mode; `Trash` / `Permanent` pin it
-    /// so the seam outcome and the deletion agree.
-    fn clean_with_mode(&self, dry_run: bool, mode: crate::trash::TrashMode) -> Result<CleanResult> {
-        let mut freed: u64 = 0;
-        let mut skipped: Vec<crate::cleaner::SkippedEntry> = vec![];
-        // The seam outcome is the one owner of the Trash claim.
-        let mut uses_trash = false;
-        for artifact in self.detect_artifacts_inner(false) {
-            if dry_run {
-                println!("[dry-run] would remove: {}", artifact.path.display());
-                continue;
+    /// so the seam outcome and the deletion agree. The reporter is threaded
+    /// through to the delete ledger, which owns the per-entry contracts
+    /// (progress, skip records, freed sums, CleanResult assembly).
+    fn clean_with_mode(
+        &self,
+        dry_run: bool,
+        reporter: &dyn crate::progress::ProgressReporter,
+        mode: crate::trash::TrashMode,
+    ) -> Result<CleanResult> {
+        // Caller-specific decisions stay here: the artifact walk and the
+        // dry-run printing. There is no caller-side unsafe-path guard here:
+        // the seam's scope tripwire refuses the same paths at deletion time,
+        // and the ledger records the refusal as a skipped entry (prose
+        // reason) and continues — the skip channel and the deleted-path
+        // audit trail stay consistent with every other ledger user.
+        let items: Vec<(PathBuf, u64)> = self
+            .detect_artifacts_inner(false)
+            .into_iter()
+            .map(|a| (a.path, a.size))
+            .collect();
+        if dry_run {
+            for (path, _) in &items {
+                println!("[dry-run] would remove: {}", path.display());
             }
-            if !crate::safety::is_safe_delete_target(&artifact.path) {
-                eprintln!(
-                    "[project-artifacts] warning: unsafe path, skipping: {}",
-                    artifact.path.display()
-                );
-                continue;
-            }
-            // The cleaner has no runner field: the seam only needs one for the
-            // permanent-mode uchg clear, which the system runner performs.
-            let outcome = crate::trash::safe_delete(
-                &crate::command::SystemCommandRunner,
-                &artifact.path,
-                mode,
-            )?;
-            if let Some(reason) = outcome.skip_reason {
-                skipped.push(crate::cleaner::SkippedEntry {
-                    path: artifact.path.clone(),
-                    reason: SkipCause::Delete(reason),
-                });
-                continue;
-            }
-            uses_trash |= outcome.uses_trash;
-            freed += artifact.size;
-            println!("Removed: {}", artifact.path.display());
+            return Ok(CleanResult::empty(self.name()));
         }
-        Ok(CleanResult {
-            name: self.name(),
-            bytes_freed: freed,
-            uses_trash,
-            skipped,
-        })
+        // The cleaner has no runner field: the seam only needs one for the
+        // permanent-mode uchg clear, which the system runner performs.
+        Ok(crate::trash::delete_entries(
+            self.name(),
+            &crate::command::SystemCommandRunner,
+            reporter,
+            mode,
+            &items,
+        ))
     }
 }
 
@@ -215,7 +208,7 @@ impl Cleaner for ProjectArtifactsCleaner {
     fn clean(
         &self,
         dry_run: bool,
-        _reporter: &dyn crate::progress::ProgressReporter,
+        reporter: &dyn crate::progress::ProgressReporter,
         opts: &crate::cleaner::CleanOptions,
     ) -> Result<CleanResult> {
         // Stricter wins: the global age filter tightens the recency window,
@@ -232,7 +225,7 @@ impl Cleaner for ProjectArtifactsCleaner {
         // `uses_trash` and the actual deletion can never disagree; `None`
         // keeps the resolved mode.
         let mode = opts.trash_mode;
-        effective.clean_with_mode(dry_run, mode)
+        effective.clean_with_mode(dry_run, reporter, mode)
     }
 
     fn detect(&self) -> ScanResult {
@@ -263,6 +256,7 @@ impl Cleaner for ProjectArtifactsCleaner {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cleaner::SkipCause;
 
     fn write_file(dir: &Path, name: &str, bytes: usize) {
         std::fs::write(dir.join(name), vec![0u8; bytes]).unwrap();
@@ -626,6 +620,127 @@ mod tests {
         assert_eq!(
             result.uses_trash, deletions_happened,
             "uses_trash must come from the deletion outcomes' seam truth"
+        );
+    }
+
+    // ── ledger migration (PBI 77) ──
+
+    /// A reporter that records the progress calls, so the threading of the
+    /// reporter from `clean` into the delete ledger is observable.
+    struct RecordingReporter {
+        inits: std::sync::Mutex<Vec<(String, usize)>>,
+        ticks: std::sync::Mutex<Vec<(PathBuf, usize, u64)>>,
+        finishes: std::sync::atomic::AtomicUsize,
+    }
+
+    impl Default for RecordingReporter {
+        fn default() -> Self {
+            Self {
+                inits: std::sync::Mutex::new(Vec::new()),
+                ticks: std::sync::Mutex::new(Vec::new()),
+                finishes: std::sync::atomic::AtomicUsize::new(0),
+            }
+        }
+    }
+
+    impl crate::progress::ProgressReporter for RecordingReporter {
+        fn show_spinner(&self) -> bool {
+            false
+        }
+        fn progress_init(&self, label: &str, total: usize) {
+            self.inits.lock().unwrap().push((label.to_string(), total));
+        }
+        fn progress_tick(&self, path: &Path, current: usize, size_bytes: u64) {
+            self.ticks
+                .lock()
+                .unwrap()
+                .push((path.to_path_buf(), current, size_bytes));
+        }
+        fn progress_finish(&self) {
+            self.finishes
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+
+    #[test]
+    fn clean_threads_the_reporter_into_the_ledger() {
+        // progress_init carries the label and items.len() (PBI 68) and every
+        // deletion ticks: the reporter is threaded from clean into
+        // clean_with_mode through to delete_entries. Before the ledger
+        // migration the reporter had no path into clean_with_mode, so the
+        // progress tick was structurally absent for project-artifacts.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let project = tmp.path().join("old-app");
+        std::fs::create_dir_all(project.join("node_modules")).unwrap();
+        write_file(&project, "package.json", 100);
+        write_file(&project.join("node_modules"), "x.js", 4096);
+        make_old(&project.join("package.json"));
+        make_old(&project.join("node_modules"));
+
+        let cleaner = ProjectArtifactsCleaner::new(vec![tmp.path().to_path_buf()]);
+        let reporter = RecordingReporter::default();
+        let opts = crate::cleaner::CleanOptions {
+            trash_mode: crate::trash::TrashMode::Permanent,
+            ..Default::default()
+        };
+        cleaner.clean(false, &reporter, &opts).unwrap();
+        let inits = reporter.inits.lock().unwrap();
+        assert_eq!(
+            *inits,
+            vec![("project-artifacts".to_string(), 1)],
+            "progress_init runs once with the label and items.len()"
+        );
+        let ticks = reporter.ticks.lock().unwrap();
+        assert_eq!(ticks.len(), 1, "one tick per deleted artifact: {ticks:?}");
+        assert_eq!(ticks[0].0, project.join("node_modules"));
+    }
+
+    #[test]
+    fn clean_records_an_unsafe_artifact_path_as_a_skipped_entry() {
+        // The caller-side unsafe-path pre-check printed a bare warning and
+        // recorded nothing, so the skip channel and the exit code could not
+        // see the refusal. The seam's scope tripwire refuses the same path at
+        // deletion time and the ledger records it as a skipped entry (prose
+        // reason) — same as every other ledger user (generic.rs precedent).
+        // A tempdir under /tmp never passes is_safe_delete_target (the
+        // canonicalized path starts with /private/tmp), so the detected
+        // artifact is refused by the seam, not deleted.
+        let tmp = tempfile::TempDir::new_in("/tmp").unwrap();
+        let project = tmp.path().join("proj");
+        std::fs::create_dir_all(project.join("node_modules")).unwrap();
+        write_file(&project, "package.json", 100);
+        write_file(&project.join("node_modules"), "x.js", 4096);
+        make_old(&project.join("package.json"));
+        make_old(&project.join("node_modules"));
+
+        let cleaner = ProjectArtifactsCleaner::new(vec![tmp.path().to_path_buf()]);
+        let reporter = crate::progress::DeepSuppressReporter;
+        let opts = crate::cleaner::CleanOptions {
+            trash_mode: crate::trash::TrashMode::Permanent,
+            ..Default::default()
+        };
+        let result = cleaner.clean(false, &reporter, &opts).unwrap();
+        assert!(
+            project.join("node_modules").exists(),
+            "an unsafe path must survive"
+        );
+        assert_eq!(result.bytes_freed, 0, "a refused path frees nothing");
+        assert_eq!(
+            result.skipped.len(),
+            1,
+            "the refusal must be recorded as a SkippedEntry: {:?}",
+            result.skipped
+        );
+        assert_eq!(result.skipped[0].path, project.join("node_modules"));
+        assert!(
+            matches!(&result.skipped[0].reason, SkipCause::Reason(reason) if reason.contains("refusing to delete unsafe path")),
+            "the seam refusal rides as prose: {:?}",
+            result.skipped[0].reason
+        );
+        assert_eq!(
+            result.exit_code(),
+            1,
+            "the refusal must surface through the exit code"
         );
     }
 
