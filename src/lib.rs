@@ -15,6 +15,7 @@
 pub mod batch;
 pub mod cleaner;
 pub mod cleaners;
+pub mod cli_fallback;
 pub mod command;
 pub mod config;
 pub mod context;
@@ -27,6 +28,7 @@ pub mod history;
 pub mod interactive;
 pub mod progress;
 pub mod prompt;
+pub mod safety;
 pub mod scan_cache;
 pub mod scanner;
 #[cfg(test)]

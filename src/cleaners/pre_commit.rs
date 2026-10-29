@@ -4,17 +4,17 @@ use crate::progress::ProgressReporter;
 use anyhow::Result;
 use std::path::Path;
 
-/// Thin wrapper over [`generic::CliFallbackCleaner`]: this cleaner differs
+/// Thin wrapper over [`crate::cli_fallback::CliFallbackCleaner`]: this cleaner differs
 /// from the shared adapter only in its cache-dir resolution (PRE_COMMIT_HOME /
 /// XDG_CACHE_HOME) and its CLI tool configuration, so the detect/clean
 /// skeleton lives in the adapter.
-pub struct PreCommitCleaner(super::generic::CliFallbackCleaner);
+pub struct PreCommitCleaner(crate::cli_fallback::CliFallbackCleaner);
 
 impl PreCommitCleaner {
     pub fn new(home: &Path, runner: Box<dyn CommandRunner>) -> Self {
-        Self(super::generic::CliFallbackCleaner::with_parts(
+        Self(crate::cli_fallback::CliFallbackCleaner::with_parts(
             "pre-commit",
-            super::generic::CliFallbackConfig {
+            crate::cli_fallback::CliFallbackConfig {
                 tool: "pre-commit",
                 args: &["clean"],
                 recreate: false,
@@ -24,14 +24,14 @@ impl PreCommitCleaner {
                 // Priority: $PRE_COMMIT_HOME > $XDG_CACHE_HOME/pre-commit > ~/.cache/pre-commit
                 // Each override value is validated BEFORE any subpath is joined.
                 if std::env::var("PRE_COMMIT_HOME").is_ok() {
-                    return super::generic::resolve_env_dir(
+                    return crate::safety::resolve_env_dir(
                         "PRE_COMMIT_HOME",
                         "",
                         h.join(".cache/pre-commit"),
                         "pre-commit",
                     );
                 }
-                super::generic::resolve_env_dir(
+                crate::safety::resolve_env_dir(
                     "XDG_CACHE_HOME",
                     "pre-commit",
                     h.join(".cache/pre-commit"),
@@ -70,8 +70,8 @@ impl Cleaner for PreCommitCleaner {
 mod tests {
     use super::*;
     use crate::cleaner::ScanStatus;
-    use crate::cleaners::generic::resolve_env_dir;
     use crate::command::{CommandRunner, SystemCommandRunner};
+    use crate::safety::resolve_env_dir;
     use crate::test_helpers::EnvGuard;
     use std::fs;
     use std::process::Output;

@@ -52,7 +52,7 @@ impl Cleaner for CustomPathCleaner {
 
     fn clean(&self, dry_run: bool, reporter: &dyn ProgressReporter) -> Result<CleanResult> {
         let path = &self.path;
-        if !crate::cleaners::generic::is_safe_delete_target(path) {
+        if !crate::safety::is_safe_delete_target(path) {
             eprintln!(
                 "{}: path {:?} is not safe to delete, skipping",
                 self.name, path

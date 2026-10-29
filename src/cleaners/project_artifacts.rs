@@ -173,7 +173,7 @@ impl ProjectArtifactsCleaner {
                 println!("[dry-run] would remove: {}", artifact.path.display());
                 continue;
             }
-            if !crate::cleaners::generic::is_safe_delete_target(&artifact.path) {
+            if !crate::safety::is_safe_delete_target(&artifact.path) {
                 eprintln!(
                     "[project-artifacts] warning: unsafe path, skipping: {}",
                     artifact.path.display()

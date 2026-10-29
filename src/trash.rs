@@ -144,7 +144,7 @@ pub struct DeleteOutcome {
 }
 
 /// The one deletion seam: first enforces the scope check
-/// ([`crate::cleaners::generic::is_safe_delete_target`]) so HOME, its
+/// ([`crate::safety::is_safe_delete_target`]) so HOME, its
 /// ancestors, system roots and the mounted/shared roots (/Volumes, /net,
 /// /Users/Shared, /Library, /opt, /private/var/vm) are refused before
 /// anything is touched, then clears macOS `uchg` immutable flags before a
@@ -169,7 +169,7 @@ pub fn safe_delete(
     // ancestors, system roots, relative targets). This runs before the
     // chflags call and the delete itself, so a misdirected override (e.g.
     // ACT_CACHE_DIR=$HOME) can never reach the deletion sink.
-    if !crate::cleaners::generic::is_safe_delete_target(path) {
+    if !crate::safety::is_safe_delete_target(path) {
         log::warn!("refusing to delete unsafe path: {}", path.display());
         anyhow::bail!("refusing to delete unsafe path: {}", path.display());
     }

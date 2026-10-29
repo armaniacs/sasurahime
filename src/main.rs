@@ -1,6 +1,6 @@
 use sasurahime::{
     batch, cleaner, cleaners, command, config, doctor, explorer, format, hint, history,
-    interactive, progress, scan_cache, scanner,
+    interactive, progress, safety, scan_cache, scanner,
 };
 
 use clap::{Parser, Subcommand};
@@ -1433,7 +1433,7 @@ fn main() -> anyhow::Result<()> {
                             // attempt: the cleaner-level check only skips
                             // (exit 0), an explicit `clean <name>` must fail
                             // loudly and leave the path alone.
-                            if !cleaners::generic::is_safe_delete_target(&path) {
+                            if !safety::is_safe_delete_target(&path) {
                                 eprintln!(
                                     "Error: refusing to clean '{name}': {} is not safe to delete.",
                                     path.display()

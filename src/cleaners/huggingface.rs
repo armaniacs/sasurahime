@@ -4,16 +4,16 @@ use crate::progress::ProgressReporter;
 use anyhow::Result;
 use std::path::Path;
 
-/// Thin wrapper over [`generic::CliFallbackCleaner`]: this cleaner differs
+/// Thin wrapper over [`crate::cli_fallback::CliFallbackCleaner`]: this cleaner differs
 /// from the shared adapter only in its cache-dir resolution (HF_HOME) and its
 /// CLI tool configuration, so the detect/clean skeleton lives in the adapter.
-pub struct HuggingFaceCleaner(super::generic::CliFallbackCleaner);
+pub struct HuggingFaceCleaner(crate::cli_fallback::CliFallbackCleaner);
 
 impl HuggingFaceCleaner {
     pub fn new(home: &Path, runner: Box<dyn CommandRunner>) -> Self {
-        Self(super::generic::CliFallbackCleaner::with_parts(
+        Self(crate::cli_fallback::CliFallbackCleaner::with_parts(
             "huggingface",
-            super::generic::CliFallbackConfig {
+            crate::cli_fallback::CliFallbackConfig {
                 tool: "huggingface-cli",
                 args: &["delete-cache", "--yes"],
                 recreate: true,
@@ -23,7 +23,7 @@ impl HuggingFaceCleaner {
                 // The HF_HOME value itself is validated BEFORE "hub" is joined, so a
                 // root-adjacent value (e.g. HF_HOME=/) falls back to the default
                 // instead of producing a joined path that passes the safety check.
-                super::generic::resolve_env_dir(
+                crate::safety::resolve_env_dir(
                     "HF_HOME",
                     "hub",
                     h.join(".cache/huggingface/hub"),
@@ -62,8 +62,8 @@ impl Cleaner for HuggingFaceCleaner {
 mod tests {
     use super::*;
     use crate::cleaner::ScanStatus;
-    use crate::cleaners::generic::resolve_env_dir;
     use crate::command::{CommandRunner, SystemCommandRunner};
+    use crate::safety::resolve_env_dir;
     use crate::test_helpers::EnvGuard;
     use std::fs;
     use std::path::PathBuf;

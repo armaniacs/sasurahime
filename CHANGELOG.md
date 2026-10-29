@@ -8,6 +8,11 @@ All notable changes to sasurahime will be documented in this file. The format is
 
 ### Changed
 
+- The deletion-safety policy moved into its own module
+  (`crate::safety`): `is_safe_delete_target` and `resolve_env_dir` no
+  longer live in the cleaner layer, so the platform-side delete seam
+  (`trash::safe_delete`) no longer calls back into it. The "CLI tool
+  first, fallback delete" adapter moved to `crate::cli_fallback`.
 - The per-cleaner delete loops collapsed into one shared loop
   (`crate::trash::delete_entries`): progress ticks, skip classification,
   freed-byte sums, and the deletion-mode truth now live in one place
