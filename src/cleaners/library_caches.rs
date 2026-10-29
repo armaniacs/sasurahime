@@ -244,16 +244,15 @@ impl LibraryCachesCleaner {
         ))
     }
 
-    fn interactive_select(&self, entries: &[CacheEntry]) -> Result<Vec<CacheEntry>> {
+    fn interactive_select(
+        &self,
+        reporter: &dyn ProgressReporter,
+        entries: &[CacheEntry],
+    ) -> Result<Vec<CacheEntry>> {
         let items: Vec<String> = entries.iter().map(render_item).collect();
         let defaults = vec![false; entries.len()];
         println!("\nSelect known app caches to move to Trash:\n");
-        let picked = crate::prompt::TtyPrompt.multi_select(
-            &crate::progress::DeepSuppressReporter,
-            None,
-            &items,
-            &defaults,
-        )?;
+        let picked = crate::prompt::TtyPrompt.multi_select(reporter, None, &items, &defaults)?;
         Ok(picked.into_iter().map(|i| entries[i].clone()).collect())
     }
 
@@ -304,7 +303,7 @@ impl LibraryCachesCleaner {
             return Ok(empty_result(self.name()));
         }
 
-        let selected = self.interactive_select(&deletable)?;
+        let selected = self.interactive_select(reporter, &deletable)?;
         if selected.is_empty() {
             println!("[library-caches] nothing selected");
             return Ok(empty_result(self.name()));

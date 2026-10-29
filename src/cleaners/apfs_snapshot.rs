@@ -190,9 +190,9 @@ impl Cleaner for ApfsSnapshotCleaner {
         ScanResult::new(self.name(), ScanStatus::Pruneable(size))
     }
 
-    fn clean(&self, dry_run: bool, _reporter: &dyn ProgressReporter) -> Result<CleanResult> {
+    fn clean(&self, dry_run: bool, reporter: &dyn ProgressReporter) -> Result<CleanResult> {
         if self.thin.is_some() {
-            return self.clean_thin(dry_run);
+            return self.clean_thin(reporter, dry_run);
         }
         if !self.runner.exists("tmutil") {
             return Ok(CleanResult {
@@ -250,7 +250,7 @@ impl Cleaner for ApfsSnapshotCleaner {
         let selected = if self.all {
             names.clone()
         } else {
-            self.interactive_select(&names)?
+            self.interactive_select(reporter, &names)?
         };
         if selected.is_empty() {
             println!("[apfs-snapshot] nothing selected");
@@ -357,22 +357,21 @@ impl ApfsSnapshotCleaner {
         report
     }
 
-    fn interactive_select(&self, names: &[String]) -> Result<Vec<String>> {
+    fn interactive_select(
+        &self,
+        reporter: &dyn ProgressReporter,
+        names: &[String],
+    ) -> Result<Vec<String>> {
         let defaults = vec![true; names.len()];
         println!("\nLocal APFS Time Machine snapshots:\n");
-        let selections = crate::prompt::TtyPrompt.multi_select(
-            &crate::progress::DeepSuppressReporter,
-            None,
-            names,
-            &defaults,
-        )?;
+        let selections = crate::prompt::TtyPrompt.multi_select(reporter, None, names, &defaults)?;
         Ok(selections.into_iter().map(|i| names[i].clone()).collect())
     }
 
     /// Thins local snapshots toward a target free-space amount, letting macOS
     /// decide which snapshots to delete. Safer than deleting individual
     /// snapshots: the OS keeps the most useful ones.
-    fn clean_thin(&self, dry_run: bool) -> Result<CleanResult> {
+    fn clean_thin(&self, reporter: &dyn ProgressReporter, dry_run: bool) -> Result<CleanResult> {
         let zero = CleanResult {
             name: self.name(),
             bytes_freed: 0,
@@ -404,7 +403,7 @@ impl ApfsSnapshotCleaner {
             // and the one-line Confirm prompt.
             if !crate::prompt::is_interactive()
                 || !crate::prompt::TtyPrompt.confirm(
-                    &crate::progress::DeepSuppressReporter,
+                    reporter,
                     "Interrupt running backups and thin with urgency 4?",
                 )?
             {

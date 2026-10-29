@@ -106,7 +106,7 @@ impl Cleaner for IosCleaner {
             return Ok(CleanResult::empty(self.name()));
         }
 
-        let selected = self.interactive_select(&entries)?;
+        let selected = self.interactive_select(reporter, &entries)?;
         if selected.is_empty() {
             println!("[ios-backup] nothing selected");
             return Ok(CleanResult::empty(self.name()));
@@ -134,7 +134,11 @@ impl Cleaner for IosCleaner {
 }
 
 impl IosCleaner {
-    fn interactive_select(&self, entries: &[(PathBuf, u64)]) -> Result<Vec<(PathBuf, u64)>> {
+    fn interactive_select(
+        &self,
+        reporter: &dyn ProgressReporter,
+        entries: &[(PathBuf, u64)],
+    ) -> Result<Vec<(PathBuf, u64)>> {
         let items: Vec<String> = entries
             .iter()
             .map(|(path, size)| {
@@ -144,12 +148,8 @@ impl IosCleaner {
             .collect();
         let defaults = vec![true; entries.len()];
         println!("\niOS device backups in ~/Library/Application Support/MobileSync/Backup/:\n");
-        let selections = crate::prompt::TtyPrompt.multi_select(
-            &crate::progress::DeepSuppressReporter,
-            None,
-            &items,
-            &defaults,
-        )?;
+        let selections =
+            crate::prompt::TtyPrompt.multi_select(reporter, None, &items, &defaults)?;
         Ok(selections.into_iter().map(|i| entries[i].clone()).collect())
     }
 }

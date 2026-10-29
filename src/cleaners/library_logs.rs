@@ -258,7 +258,7 @@ impl Cleaner for LibraryLogsCleaner {
             if !crate::prompt::gate_interactive("library-logs") {
                 return Ok(CleanResult::empty(self.name()));
             }
-            let selected = self.interactive_select(&entries)?;
+            let selected = self.interactive_select(reporter, &entries)?;
             if selected.is_empty() {
                 println!("[library-logs] nothing selected");
                 return Ok(CleanResult::empty(self.name()));
@@ -276,7 +276,11 @@ impl Cleaner for LibraryLogsCleaner {
 // ── Interactive selection ──
 
 impl LibraryLogsCleaner {
-    fn interactive_select(&self, entries: &[LogEntry]) -> Result<Vec<LogEntry>> {
+    fn interactive_select(
+        &self,
+        reporter: &dyn ProgressReporter,
+        entries: &[LogEntry],
+    ) -> Result<Vec<LogEntry>> {
         let items: Vec<String> = entries
             .iter()
             .map(|e| {
@@ -303,12 +307,8 @@ impl LibraryLogsCleaner {
         let defaults: Vec<bool> = vec![true; entries.len()];
 
         println!("\nCleanable log directories in ~/Library/Logs/:\n");
-        let selections = crate::prompt::TtyPrompt.multi_select(
-            &crate::progress::DeepSuppressReporter,
-            None,
-            &items,
-            &defaults,
-        )?;
+        let selections =
+            crate::prompt::TtyPrompt.multi_select(reporter, None, &items, &defaults)?;
 
         Ok(selections.into_iter().map(|i| entries[i].clone()).collect())
     }

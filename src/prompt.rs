@@ -205,6 +205,37 @@ mod tests {
     }
 
     #[test]
+    fn cleaner_prompt_call_sites_pass_a_live_reporter_not_a_suppressor() {
+        // PBI 64: the port owns the suspension, but the suspension only
+        // happens when the caller passes the LIVE reporter. Six call sites
+        // used to hardcode &DeepSuppressReporter, whose suspend_live_output
+        // is the no-op default, so the dialoguer redraw bug could still
+        // reproduce at those cleaners. The pin: no cleaner ever passes a
+        // literal reference to the port - every call site threads the live
+        // reporter down from clean().
+        let sources = [
+            include_str!("cleaners/library_caches.rs"),
+            include_str!("cleaners/library_logs.rs"),
+            include_str!("cleaners/app_support.rs"),
+            include_str!("cleaners/ios_backup.rs"),
+            include_str!("cleaners/apfs_snapshot.rs"),
+            include_str!("cleaners/generic.rs"),
+            include_str!("cleaners/ollama.rs"),
+            include_str!("cleaners/orphan_containers.rs"),
+        ];
+        for src in sources {
+            // Whitespace-normalized so a wrapped argument list still matches.
+            let flat = src.split_whitespace().collect::<Vec<_>>().join(" ");
+            assert!(
+                !flat.contains("multi_select (&") && !flat.contains("confirm (&"),
+                "a prompt call site passes a literal reference (the suppressor) \
+                 instead of the live reporter:\n{}",
+                &flat[..flat.len().min(200)]
+            );
+        }
+    }
+
+    #[test]
     fn non_interactive_port_refuses_both_prompts() {
         let rep = RecordingReporter::new();
         assert!(NonInteractive.confirm(&rep, "Proceed?").is_err());

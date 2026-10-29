@@ -299,7 +299,7 @@ impl AppSupportCleaner {
     }
 
     /// Display only. Selected entries are opened in Finder; nothing is deleted.
-    fn show_leftovers(&self, dry_run: bool) -> Result<()> {
+    fn show_leftovers(&self, reporter: &dyn ProgressReporter, dry_run: bool) -> Result<()> {
         if !self.base().exists() {
             return Ok(());
         }
@@ -322,7 +322,7 @@ impl AppSupportCleaner {
         let items: Vec<String> = left.iter().map(format_leftover_line).collect();
         let defaults = vec![false; items.len()];
         let picked = crate::prompt::TtyPrompt.multi_select(
-            &crate::progress::DeepSuppressReporter,
+            reporter,
             Some("Select leftovers to reveal in Finder (space to toggle, enter to confirm)"),
             &items,
             &defaults,
@@ -332,7 +332,7 @@ impl AppSupportCleaner {
         }
         if open_needs_confirmation(picked.len()) {
             let ok = crate::prompt::TtyPrompt.confirm(
-                &crate::progress::DeepSuppressReporter,
+                reporter,
                 &format!("This opens {} Finder windows. Continue?", picked.len()),
             )?;
             if !ok {
@@ -401,6 +401,7 @@ impl AppSupportCleaner {
 
     fn interactive_select(
         &self,
+        reporter: &dyn ProgressReporter,
         cands: &[Candidate],
         running: &HashSet<&'static str>,
     ) -> Result<Vec<Candidate>> {
@@ -410,17 +411,13 @@ impl AppSupportCleaner {
             .collect();
         let defaults = vec![false; items.len()];
         println!("\nCache directories under ~/Library/Application Support/ (none selected by default):\n");
-        let picked = crate::prompt::TtyPrompt.multi_select(
-            &crate::progress::DeepSuppressReporter,
-            None,
-            &items,
-            &defaults,
-        )?;
+        let picked = crate::prompt::TtyPrompt.multi_select(reporter, None, &items, &defaults)?;
         Ok(picked.into_iter().map(|i| cands[i].clone()).collect())
     }
 
     fn confirm_quits(
         &self,
+        reporter: &dyn ProgressReporter,
         selected: &[Candidate],
         running: &HashSet<&'static str>,
     ) -> Result<HashSet<&'static str>> {
@@ -431,7 +428,7 @@ impl AppSupportCleaner {
                 continue;
             }
             let ok = crate::prompt::TtyPrompt.confirm(
-                &crate::progress::DeepSuppressReporter,
+                reporter,
                 &format!("{name} is running. Quit it now? (its own save dialogs apply)"),
             )?;
             if ok {
@@ -551,7 +548,7 @@ impl AppSupportCleaner {
         mode: crate::trash::TrashMode,
     ) -> Result<CleanResult> {
         let result = self.clean_cache_dirs(dry_run, reporter, mode)?;
-        self.show_leftovers(dry_run)?;
+        self.show_leftovers(reporter, dry_run)?;
         Ok(result)
     }
 
@@ -578,12 +575,12 @@ impl AppSupportCleaner {
             return Ok(Self::empty_result());
         }
         let running = self.running_apps(&cands);
-        let selected = self.interactive_select(&cands, &running)?;
+        let selected = self.interactive_select(reporter, &cands, &running)?;
         if selected.is_empty() {
             println!("[{NAME}] nothing selected");
             return Ok(Self::empty_result());
         }
-        let approved = self.confirm_quits(&selected, &running)?;
+        let approved = self.confirm_quits(reporter, &selected, &running)?;
         let result = self.apply_selection(&selected, &approved, reporter, mode)?;
         println!("[{NAME}] total freed: {}", format_bytes(result.bytes_freed));
         Ok(result)
