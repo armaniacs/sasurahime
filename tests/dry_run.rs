@@ -165,6 +165,32 @@ fn clean_caches_dispatches_every_generic_cache_table_row() {
 }
 
 #[test]
+fn clean_caches_permanent_deletes_the_node_gyp_dirs() {
+    // PBI-82 Phase 0 pin: the `clean caches` arm must forward the run's
+    // resolved `CleanOptions`, so `--permanent` (TrashMode::Permanent)
+    // reaches the node-gyp fallback delete and the two HOME-scoped
+    // node-gyp dirs are deleted, not moved to (or skipped by) the trash
+    // backend. The other caches cleaners only delegate to package-manager
+    // CLIs, which are absent from PATH here.
+    let tmp = TempDir::new().unwrap();
+    let (dot_cache, library_cache) = make_node_gyp_caches(tmp.path());
+
+    let output = sasurahime(tmp.path())
+        .args(["--permanent", "clean", "caches"])
+        .output()
+        .unwrap();
+    let combined = combined_output(&output);
+    assert!(
+        output.status.success(),
+        "--permanent clean caches must succeed, got:\n{combined}"
+    );
+    assert!(
+        !dot_cache.exists() && !library_cache.exists(),
+        "--permanent must delete the node-gyp fallback dirs, got:\n{combined}"
+    );
+}
+
+#[test]
 fn global_dry_run_reaches_standard_clean_target() {
     let tmp = TempDir::new().unwrap();
     let (dot_cache, library_cache) = make_node_gyp_caches(tmp.path());

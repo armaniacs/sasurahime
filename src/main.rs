@@ -828,6 +828,28 @@ where
     Ok(result)
 }
 
+/// Runs the `clean caches` batch and reports through the shared helpers
+/// (PBI 73). The cleaners, the run's resolved opts, the reporter and
+/// `dry_run` all arrive as arguments, so the arm owns no mode: the
+/// TrashMode contract (the one mode resolution in `main`) holds here too,
+/// and a test can inject stubs for every dependency.
+fn run_caches_batch(
+    cleaners: &[&dyn cleaner::Cleaner],
+    opts: &CleanOptions,
+    reporter: &dyn ProgressReporter,
+    dry_run: bool,
+) -> anyhow::Result<()> {
+    // Bare batch: no post-clean notes (this entry point never printed them).
+    let summary = batch::run_batch(cleaners, opts, reporter, dry_run, false, false);
+    interactive::report_batch_failures(
+        &mut std::io::stderr(),
+        &summary,
+        interactive::ReportShape::Named,
+    )?;
+    interactive::report_total_freed(&mut std::io::stdout(), summary.total_freed)?;
+    Ok(())
+}
+
 /// Maps a sub-target name to the Xcode subcategory: one parse handles both
 /// the CLI's `--sub` spellings (`derived-data`, `deriveddata`, `archives`)
 /// and the TUI display names (`DerivedData`, `Archives`) — the second
@@ -1223,29 +1245,14 @@ fn main() -> anyhow::Result<()> {
                             ))),
                         ];
                         // Bare batch: no post-clean notes (this entry point
-                        // never printed them). Passing the default options is
-                        // behavior-identical to the old bare `clean()` calls:
-                        // every caches cleaner computes the same filters from
-                        // its own fields when the options carry none.
+                        // never printed them). The run's resolved opts flow
+                        // down as an argument (the one mode resolution): the
+                        // TrashMode contract now holds here too, and every
+                        // caches cleaner still computes the same filters
+                        // from its own fields when the options carry none.
                         let batch_cleaners: Vec<&dyn cleaner::Cleaner> =
                             caches.iter().map(|c| c.as_ref()).collect();
-                        let summary = batch::run_batch(
-                            &batch_cleaners,
-                            &cleaner::CleanOptions::default(),
-                            reporter.as_ref(),
-                            dry_run,
-                            false,
-                            false,
-                        );
-                        interactive::report_batch_failures(
-                            &mut std::io::stderr(),
-                            &summary,
-                            interactive::ReportShape::Named,
-                        )?;
-                        interactive::report_total_freed(
-                            &mut std::io::stdout(),
-                            summary.total_freed,
-                        )?;
+                        run_caches_batch(&batch_cleaners, &clean_opts, reporter.as_ref(), dry_run)?;
                     }
                     CleanTarget::Logs { dry_run, keep_days } => {
                         run_and_exit(
