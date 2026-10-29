@@ -85,7 +85,12 @@ impl Cleaner for CargoCleaner {
         r
     }
 
-    fn clean(&self, dry_run: bool, reporter: &dyn ProgressReporter) -> Result<CleanResult> {
+    fn clean(
+        &self,
+        dry_run: bool,
+        reporter: &dyn ProgressReporter,
+        _opts: &crate::cleaner::CleanOptions,
+    ) -> Result<CleanResult> {
         let reg = self.home.join(".cargo/registry/cache");
         // Registry first, then the target dirs, in one ledger call: the
         // registry's single delete rides the same per-entry contracts as
@@ -253,7 +258,11 @@ mod tests {
 
         let cleaner = CargoCleaner::new(tmp.path(), Box::new(SystemCommandRunner));
         let r = cleaner
-            .clean(false, &crate::progress::DeepSuppressReporter)
+            .clean(
+                false,
+                &crate::progress::DeepSuppressReporter,
+                &crate::cleaner::CleanOptions::default(),
+            )
             .unwrap();
         assert_eq!(r.bytes_freed, 0, "a skipped entry is never summed");
         assert_eq!(r.skipped.len(), 1, "the refused move is a skip");

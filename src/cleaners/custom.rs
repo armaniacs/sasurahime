@@ -50,7 +50,12 @@ impl Cleaner for CustomPathCleaner {
         r
     }
 
-    fn clean(&self, dry_run: bool, reporter: &dyn ProgressReporter) -> Result<CleanResult> {
+    fn clean(
+        &self,
+        dry_run: bool,
+        reporter: &dyn ProgressReporter,
+        _opts: &crate::cleaner::CleanOptions,
+    ) -> Result<CleanResult> {
         let path = &self.path;
         if !crate::safety::is_safe_delete_target(path) {
             eprintln!(
@@ -150,7 +155,9 @@ mod tests {
 
         let reporter = DeepSuppressReporter;
         let cleaner = CustomPathCleaner::new("my-cache".to_string(), cache_dir.clone());
-        let result = cleaner.clean(true, &reporter).unwrap();
+        let result = cleaner
+            .clean(true, &reporter, &crate::cleaner::CleanOptions::default())
+            .unwrap();
         assert_eq!(result.bytes_freed, 0);
         assert!(file.exists(), "dry-run must not delete files");
     }
@@ -170,7 +177,9 @@ mod tests {
 
         let reporter = DeepSuppressReporter;
         let cleaner = CustomPathCleaner::new("my-cache".to_string(), cache_dir.clone());
-        cleaner.clean(false, &reporter).unwrap();
+        cleaner
+            .clean(false, &reporter, &crate::cleaner::CleanOptions::default())
+            .unwrap();
 
         // Root dir must still exist
         assert!(cache_dir.exists(), "root dir must survive clean");
@@ -186,7 +195,9 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let cleaner = CustomPathCleaner::new("missing".to_string(), tmp.path().join("nonexistent"));
         let reporter = DeepSuppressReporter;
-        let result = cleaner.clean(false, &reporter).unwrap();
+        let result = cleaner
+            .clean(false, &reporter, &crate::cleaner::CleanOptions::default())
+            .unwrap();
         assert_eq!(result.bytes_freed, 0);
     }
 
@@ -197,7 +208,9 @@ mod tests {
             std::path::PathBuf::from("/etc/passwd"),
         );
         let reporter = DeepSuppressReporter;
-        let result = cleaner.clean(false, &reporter).unwrap();
+        let result = cleaner
+            .clean(false, &reporter, &crate::cleaner::CleanOptions::default())
+            .unwrap();
         assert_eq!(result.bytes_freed, 0, "must not delete unsafe paths");
     }
 }

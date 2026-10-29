@@ -23,17 +23,13 @@ impl Cleaner for ManualOnly {
         self.inner.detect()
     }
 
-    fn clean(&self, dry_run: bool, reporter: &dyn ProgressReporter) -> Result<CleanResult> {
-        self.inner.clean(dry_run, reporter)
-    }
-
-    fn clean_with_opts(
+    fn clean(
         &self,
         dry_run: bool,
         reporter: &dyn ProgressReporter,
         opts: &CleanOptions,
     ) -> Result<CleanResult> {
-        self.inner.clean_with_opts(dry_run, reporter, opts)
+        self.inner.clean(dry_run, reporter, opts)
     }
 
     fn is_available(&self) -> bool {
@@ -73,7 +69,12 @@ mod tests {
         fn detect(&self) -> ScanResult {
             ScanResult::new("stub", ScanStatus::Pruneable(7))
         }
-        fn clean(&self, _dry_run: bool, _reporter: &dyn ProgressReporter) -> Result<CleanResult> {
+        fn clean(
+            &self,
+            _dry_run: bool,
+            _reporter: &dyn ProgressReporter,
+            _opts: &CleanOptions,
+        ) -> Result<CleanResult> {
             Ok(CleanResult {
                 name: "stub",
                 bytes_freed: 7,
@@ -114,6 +115,11 @@ mod tests {
         assert_eq!(c.name(), "stub");
         assert!(matches!(c.detect().status, ScanStatus::Pruneable(7)));
         let reporter = crate::progress::VerboseProgress::new();
-        assert_eq!(c.clean(false, &reporter).unwrap().bytes_freed, 7);
+        assert_eq!(
+            c.clean(false, &reporter, &crate::cleaner::CleanOptions::default())
+                .unwrap()
+                .bytes_freed,
+            7
+        );
     }
 }

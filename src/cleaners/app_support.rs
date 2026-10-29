@@ -619,15 +619,11 @@ impl Cleaner for AppSupportCleaner {
         r
     }
 
-    fn clean(&self, dry_run: bool, reporter: &dyn ProgressReporter) -> Result<CleanResult> {
-        // Plain clean keeps the process-global trash mode (compat path).
-        self.clean_with_mode(dry_run, reporter, crate::trash::TrashMode::Global)
-    }
-
-    /// Cleans with `opts`, pinning `opts.trash_mode` when set so `uses_trash`
-    /// and the actual deletion can never disagree (the `CleanOptions`
-    /// contract). `None` keeps the process-global mode (compat).
-    fn clean_with_opts(
+    /// Cleans with the run's options: `opts.trash_mode` pins the deletion
+    /// mode when set so `uses_trash` and the actual deletion can never
+    /// disagree (the `CleanOptions` contract). `None` keeps the
+    /// process-global mode (compat).
+    fn clean(
         &self,
         dry_run: bool,
         reporter: &dyn ProgressReporter,
@@ -1366,7 +1362,13 @@ mod tests {
         put(&base, "Slack/Cache/a.bin", 10_000);
         let fake = Fake::with_running(&["Slack"]);
         let c = cleaner_for(&tmp, &fake);
-        let r = c.clean(true, &DeepSuppressReporter).unwrap();
+        let r = c
+            .clean(
+                true,
+                &DeepSuppressReporter,
+                &crate::cleaner::CleanOptions::default(),
+            )
+            .unwrap();
         assert_eq!(r.bytes_freed, 0);
         assert!(base.join("Slack/Cache/a.bin").exists());
         assert!(fake.calls().is_empty(), "calls: {:?}", fake.calls());
@@ -2029,7 +2031,13 @@ mod tests {
         let apps = tmp.path().join("Apps");
         fs::create_dir_all(&apps).unwrap();
         let c = cleaner_for(&tmp, &fake).with_app_roots(vec![apps]);
-        let r = c.clean(true, &DeepSuppressReporter).unwrap();
+        let r = c
+            .clean(
+                true,
+                &DeepSuppressReporter,
+                &crate::cleaner::CleanOptions::default(),
+            )
+            .unwrap();
         assert_eq!(r.bytes_freed, 0);
         assert!(d.join("data.bin").exists());
         assert!(fake

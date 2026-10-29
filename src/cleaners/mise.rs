@@ -330,15 +330,11 @@ impl Cleaner for MiseCleaner {
         r
     }
 
-    fn clean(&self, dry_run: bool, reporter: &dyn ProgressReporter) -> Result<CleanResult> {
-        // Plain clean keeps the process-global trash mode (compat path).
-        self.clean_with_mode(dry_run, reporter, crate::trash::TrashMode::Global)
-    }
-
-    /// Cleans with `opts`, pinning `opts.trash_mode` when set so `uses_trash`
-    /// and the actual deletion can never disagree (the `CleanOptions`
-    /// contract). `None` keeps the process-global mode (compat).
-    fn clean_with_opts(
+    /// Cleans with the run's options: `opts.trash_mode` pins the deletion
+    /// mode when set so `uses_trash` and the actual deletion can never
+    /// disagree (the `CleanOptions` contract). `None` keeps the
+    /// process-global mode (compat).
+    fn clean(
         &self,
         dry_run: bool,
         reporter: &dyn ProgressReporter,
@@ -632,7 +628,11 @@ mod tests {
         let cleaner = MiseCleaner::new(tmp.path(), Box::new(runner));
         // even though mise is not found, clean should not crash
         let result = cleaner
-            .clean(false, &crate::progress::DeepSuppressReporter)
+            .clean(
+                false,
+                &crate::progress::DeepSuppressReporter,
+                &crate::cleaner::CleanOptions::default(),
+            )
             .unwrap();
         assert_eq!(result.bytes_freed, 0);
     }
@@ -647,7 +647,11 @@ mod tests {
         assert!(matches!(detect_result.status, ScanStatus::NotFound));
         // clean should also soft-fail
         let clean_result = cleaner
-            .clean(false, &crate::progress::DeepSuppressReporter)
+            .clean(
+                false,
+                &crate::progress::DeepSuppressReporter,
+                &crate::cleaner::CleanOptions::default(),
+            )
             .unwrap();
         assert_eq!(clean_result.bytes_freed, 0);
     }
@@ -683,7 +687,11 @@ mod tests {
             .with_success("chflags");
         let cleaner = MiseCleaner::new(tmp.path(), Box::new(runner));
         let result = cleaner
-            .clean(false, &crate::progress::DeepSuppressReporter)
+            .clean(
+                false,
+                &crate::progress::DeepSuppressReporter,
+                &crate::cleaner::CleanOptions::default(),
+            )
             .unwrap();
         assert_eq!(result.bytes_freed, 0, "nothing may be deleted");
         assert!(version.exists(), "the installed runtime must survive");
@@ -720,7 +728,11 @@ mod tests {
             .with_success("chflags");
         let cleaner = MiseCleaner::new(tmp.path(), Box::new(runner));
         let result = cleaner
-            .clean(false, &crate::progress::DeepSuppressReporter)
+            .clean(
+                false,
+                &crate::progress::DeepSuppressReporter,
+                &crate::cleaner::CleanOptions::default(),
+            )
             .unwrap();
         assert!(!version.exists(), "an unused runtime stays deletable");
         assert!(result.bytes_freed > 0);
@@ -792,7 +804,7 @@ mod tests {
         let (cleaner, version) = unused_version_cleaner(&tmp);
         let opts = pin_opts(Some(crate::trash::TrashMode::Permanent));
         let result = cleaner
-            .clean_with_opts(false, &crate::progress::DeepSuppressReporter, &opts)
+            .clean(false, &crate::progress::DeepSuppressReporter, &opts)
             .unwrap();
         assert!(
             !version.exists(),
@@ -822,7 +834,7 @@ mod tests {
         let (cleaner, _version) = unused_version_cleaner(&tmp);
         let opts = pin_opts(Some(crate::trash::TrashMode::Trash));
         let result = cleaner
-            .clean_with_opts(false, &crate::progress::DeepSuppressReporter, &opts)
+            .clean(false, &crate::progress::DeepSuppressReporter, &opts)
             .unwrap();
         let deletions_happened = result.bytes_freed > 0;
         assert_eq!(
@@ -841,7 +853,7 @@ mod tests {
         let (cleaner, version) = unused_version_cleaner(&tmp);
         let opts = pin_opts(None);
         let result = cleaner
-            .clean_with_opts(false, &crate::progress::DeepSuppressReporter, &opts)
+            .clean(false, &crate::progress::DeepSuppressReporter, &opts)
             .unwrap();
         assert!(
             !version.exists(),
@@ -866,7 +878,11 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let (cleaner, version) = unused_version_cleaner(&tmp);
         let result = cleaner
-            .clean(false, &crate::progress::DeepSuppressReporter)
+            .clean(
+                false,
+                &crate::progress::DeepSuppressReporter,
+                &crate::cleaner::CleanOptions::default(),
+            )
             .unwrap();
         assert_eq!(result.bytes_freed, 0, "a skipped entry is never summed");
         assert_eq!(result.skipped.len(), 1, "the refused move is a skip");

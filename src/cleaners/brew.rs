@@ -76,7 +76,12 @@ impl Cleaner for BrewCleaner {
         r
     }
 
-    fn clean(&self, dry_run: bool, _reporter: &dyn ProgressReporter) -> Result<CleanResult> {
+    fn clean(
+        &self,
+        dry_run: bool,
+        _reporter: &dyn ProgressReporter,
+        _opts: &crate::cleaner::CleanOptions,
+    ) -> Result<CleanResult> {
         if !self.runner.exists("brew") {
             println!("brew: not found, skipping");
             return Ok(CleanResult {
@@ -228,7 +233,11 @@ mod tests {
             .with_exit_code("brew", 1 << 8);
         let cleaner = BrewCleaner::new(tmp.path(), Box::new(runner));
         let result = cleaner
-            .clean(false, &crate::progress::DeepSuppressReporter)
+            .clean(
+                false,
+                &crate::progress::DeepSuppressReporter,
+                &crate::cleaner::CleanOptions::default(),
+            )
             .unwrap();
         assert_eq!(result.bytes_freed, 0, "a failed cleanup must report 0");
     }
@@ -247,7 +256,11 @@ mod tests {
         );
         let cleaner = BrewCleaner::new(tmp.path(), Box::new(runner));
         let result = cleaner
-            .clean(false, &crate::progress::DeepSuppressReporter)
+            .clean(
+                false,
+                &crate::progress::DeepSuppressReporter,
+                &crate::cleaner::CleanOptions::default(),
+            )
             .unwrap();
         assert_eq!(result.bytes_freed, 1_048_576);
     }

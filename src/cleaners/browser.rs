@@ -111,7 +111,12 @@ impl Cleaner for BrowserCleaner {
         r
     }
 
-    fn clean(&self, dry_run: bool, reporter: &dyn ProgressReporter) -> Result<CleanResult> {
+    fn clean(
+        &self,
+        dry_run: bool,
+        reporter: &dyn ProgressReporter,
+        _opts: &crate::cleaner::CleanOptions,
+    ) -> Result<CleanResult> {
         let any_found = self.groups.iter().any(|g| g.parent.exists());
         if !any_found {
             println!("browsers: not found, skipping");

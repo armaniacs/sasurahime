@@ -86,7 +86,12 @@ impl Cleaner for UvCleaner {
         r
     }
 
-    fn clean(&self, dry_run: bool, _reporter: &dyn ProgressReporter) -> Result<CleanResult> {
+    fn clean(
+        &self,
+        dry_run: bool,
+        _reporter: &dyn ProgressReporter,
+        _opts: &crate::cleaner::CleanOptions,
+    ) -> Result<CleanResult> {
         if !self.runner.exists("uv") {
             println!("uv: not found, skipping");
             return Ok(CleanResult::empty(self.name()));
@@ -291,7 +296,11 @@ mod tests {
             Box::new(MockRunner::new().with_exit_code("uv", 1 << 8)),
         );
         let result = cleaner
-            .clean(false, &crate::progress::DeepSuppressReporter)
+            .clean(
+                false,
+                &crate::progress::DeepSuppressReporter,
+                &crate::cleaner::CleanOptions::default(),
+            )
             .expect("a failed prune must not fail the run");
         assert_eq!(
             result.bytes_freed, 0,

@@ -213,7 +213,7 @@ impl Cleaner for ProjectArtifactsCleaner {
         "project-artifacts"
     }
 
-    fn clean_with_opts(
+    fn clean(
         &self,
         dry_run: bool,
         _reporter: &dyn crate::progress::ProgressReporter,
@@ -243,15 +243,6 @@ impl Cleaner for ProjectArtifactsCleaner {
         }
         let total: u64 = artifacts.iter().map(|a| a.size).sum();
         ScanResult::new(self.name(), ScanStatus::Pruneable(total))
-    }
-
-    fn clean(
-        &self,
-        dry_run: bool,
-        _reporter: &dyn crate::progress::ProgressReporter,
-    ) -> Result<CleanResult> {
-        // Plain clean keeps the process-global trash mode (compat path).
-        self.clean_with_mode(dry_run, crate::trash::TrashMode::Global)
     }
 
     fn is_available(&self) -> bool {
@@ -381,7 +372,9 @@ mod tests {
 
         let cleaner = ProjectArtifactsCleaner::new(vec![tmp.path().to_path_buf()]);
         let reporter = crate::progress::DeepSuppressReporter;
-        let result = cleaner.clean(true, &reporter).unwrap();
+        let result = cleaner
+            .clean(true, &reporter, &crate::cleaner::CleanOptions::default())
+            .unwrap();
         assert_eq!(result.bytes_freed, 0);
         assert!(project.join("node_modules").exists());
     }
@@ -443,7 +436,9 @@ mod tests {
         let cleaner = ProjectArtifactsCleaner::new(vec![tmp.path().to_path_buf()]);
         let reporter = crate::progress::DeepSuppressReporter;
         let _mode = crate::test_helpers::TrashModeGuard::set(false);
-        let result = cleaner.clean(false, &reporter).unwrap();
+        let result = cleaner
+            .clean(false, &reporter, &crate::cleaner::CleanOptions::default())
+            .unwrap();
         assert!(
             !project.join("node_modules").exists(),
             "the stale artifact must be removed even with a poisoned cache"
@@ -515,7 +510,9 @@ mod tests {
         let reporter = crate::progress::DeepSuppressReporter;
         let _mode = crate::test_helpers::TrashModeGuard::set(false);
         // Plain clean (recency_days=7): the project is deletable.
-        cleaner.clean(false, &reporter).unwrap();
+        cleaner
+            .clean(false, &reporter, &crate::cleaner::CleanOptions::default())
+            .unwrap();
         assert!(
             !project.join("node_modules").exists(),
             "recency_days=7 deletes a 10-day-old project"
@@ -539,7 +536,7 @@ mod tests {
             larger_than_mb: None,
             trash_mode: None,
         };
-        cleaner.clean_with_opts(false, &reporter, &opts).unwrap();
+        cleaner.clean(false, &reporter, &opts).unwrap();
         // Restore the mode while still holding the lock so a parallel test
         // cannot pin its own mode between the restore and the unlock.
         drop(_mode);
@@ -579,7 +576,7 @@ mod tests {
             trash_mode: Some(crate::trash::TrashMode::Permanent),
         };
         let reporter = crate::progress::DeepSuppressReporter;
-        let result = cleaner.clean_with_opts(false, &reporter, &opts).unwrap();
+        let result = cleaner.clean(false, &reporter, &opts).unwrap();
         assert!(
             !tmp.path().join("proj/node_modules").exists(),
             "the pinned permanent mode must delete for real"
@@ -608,7 +605,7 @@ mod tests {
             trash_mode: Some(crate::trash::TrashMode::Trash),
         };
         let reporter = crate::progress::DeepSuppressReporter;
-        let result = cleaner.clean_with_opts(false, &reporter, &opts).unwrap();
+        let result = cleaner.clean(false, &reporter, &opts).unwrap();
         let deletions_happened = result.skipped.is_empty();
         assert_eq!(
             result.uses_trash, deletions_happened,
@@ -632,7 +629,7 @@ mod tests {
             trash_mode: None,
         };
         let reporter = crate::progress::DeepSuppressReporter;
-        let result = cleaner.clean_with_opts(false, &reporter, &opts).unwrap();
+        let result = cleaner.clean(false, &reporter, &opts).unwrap();
         assert!(
             !tmp.path().join("proj/node_modules").exists(),
             "the global permanent mode must delete for real"

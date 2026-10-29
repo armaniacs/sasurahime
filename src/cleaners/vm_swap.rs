@@ -118,7 +118,12 @@ impl Cleaner for VmSwapCleaner {
         r
     }
 
-    fn clean(&self, _dry_run: bool, _reporter: &dyn ProgressReporter) -> Result<CleanResult> {
+    fn clean(
+        &self,
+        _dry_run: bool,
+        _reporter: &dyn ProgressReporter,
+        _opts: &crate::cleaner::CleanOptions,
+    ) -> Result<CleanResult> {
         // No-op: swap files are owned by the kernel and re-initialized on
         // reboot. Deleting them from a running system is not possible without
         // disabling swap.
@@ -187,7 +192,9 @@ mod tests {
         std::fs::write(&swap, b"x".repeat(64)).unwrap();
         let cleaner = VmSwapCleaner::new(tmp.path().to_path_buf(), Box::new(MockRunner::new()));
         let reporter = crate::progress::VerboseProgress::new();
-        let result = cleaner.clean(false, &reporter).unwrap();
+        let result = cleaner
+            .clean(false, &reporter, &crate::cleaner::CleanOptions::default())
+            .unwrap();
         assert_eq!(result.bytes_freed, 0);
         assert!(swap.exists(), "no-op must not delete the swap file");
     }

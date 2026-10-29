@@ -111,7 +111,12 @@ impl Cleaner for DeviceSupportCleaner {
         r
     }
 
-    fn clean(&self, dry_run: bool, reporter: &dyn ProgressReporter) -> Result<CleanResult> {
+    fn clean(
+        &self,
+        dry_run: bool,
+        reporter: &dyn ProgressReporter,
+        _opts: &crate::cleaner::CleanOptions,
+    ) -> Result<CleanResult> {
         let to_delete = self.versions_to_delete();
         if to_delete.is_empty() {
             println!("[device-support] nothing to clean");

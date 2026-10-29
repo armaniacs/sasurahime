@@ -475,7 +475,12 @@ mod tests {
                 ScanResult::new(self.name, ScanStatus::NotFound)
             }
         }
-        fn clean(&self, _dry_run: bool, _reporter: &dyn ProgressReporter) -> Result<CleanResult> {
+        fn clean(
+            &self,
+            _dry_run: bool,
+            _reporter: &dyn ProgressReporter,
+            _opts: &crate::cleaner::CleanOptions,
+        ) -> Result<CleanResult> {
             Ok(CleanResult {
                 name: self.name,
                 bytes_freed: self.size,
@@ -610,6 +615,7 @@ mod tests {
                 &self,
                 _dry_run: bool,
                 _reporter: &dyn ProgressReporter,
+                _opts: &crate::cleaner::CleanOptions,
             ) -> Result<CleanResult> {
                 panic!("unavailable cleaner must never be cleaned by --yes")
             }
@@ -645,6 +651,7 @@ mod tests {
                 &self,
                 _dry_run: bool,
                 _reporter: &dyn ProgressReporter,
+                _opts: &crate::cleaner::CleanOptions,
             ) -> Result<CleanResult> {
                 self.0.fetch_add(1, Ordering::SeqCst);
                 Ok(CleanResult {
@@ -830,7 +837,12 @@ mod tests {
                 ScanResult::new(self.name, ScanStatus::NotFound)
             }
         }
-        fn clean(&self, _dry_run: bool, _rep: &dyn ProgressReporter) -> Result<CleanResult> {
+        fn clean(
+            &self,
+            _dry_run: bool,
+            _rep: &dyn ProgressReporter,
+            _opts: &crate::cleaner::CleanOptions,
+        ) -> Result<CleanResult> {
             // The interactive gate skips before any deletion on a non-TTY
             // stdin, so a gated clean can only ever return nothing.
             Ok(CleanResult::empty(self.name))

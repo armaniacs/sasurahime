@@ -44,12 +44,10 @@ pub fn run_batch(
             // No steady tick while a cleaner may still prompt: the animated
             // branch is for flows that already suppressed its prompts.
             crate::progress::with_spinner_result_progress(&msg, animated, |rep| {
-                c.clean_with_opts(dry_run, rep, opts)
+                c.clean(dry_run, rep, opts)
             })
         } else {
-            crate::progress::with_spinner_result(&msg, || {
-                c.clean_with_opts(dry_run, reporter, opts)
-            })
+            crate::progress::with_spinner_result(&msg, || c.clean(dry_run, reporter, opts))
         };
         match result {
             Ok(r) => {
@@ -141,7 +139,12 @@ mod tests {
         fn detect(&self) -> ScanResult {
             ScanResult::new(self.0, ScanStatus::Clean)
         }
-        fn clean(&self, _dry_run: bool, _rep: &dyn ProgressReporter) -> Result<CleanResult> {
+        fn clean(
+            &self,
+            _dry_run: bool,
+            _rep: &dyn ProgressReporter,
+            _opts: &CleanOptions,
+        ) -> Result<CleanResult> {
             Ok(CleanResult::freed(self.0, 100, false))
         }
     }
@@ -156,7 +159,12 @@ mod tests {
         fn detect(&self) -> ScanResult {
             ScanResult::new(self.0, ScanStatus::Clean)
         }
-        fn clean(&self, _dry_run: bool, _rep: &dyn ProgressReporter) -> Result<CleanResult> {
+        fn clean(
+            &self,
+            _dry_run: bool,
+            _rep: &dyn ProgressReporter,
+            _opts: &CleanOptions,
+        ) -> Result<CleanResult> {
             Err(anyhow::anyhow!("boom"))
         }
     }
@@ -172,7 +180,12 @@ mod tests {
         fn detect(&self) -> ScanResult {
             ScanResult::new(self.0, ScanStatus::Clean)
         }
-        fn clean(&self, _dry_run: bool, _rep: &dyn ProgressReporter) -> Result<CleanResult> {
+        fn clean(
+            &self,
+            _dry_run: bool,
+            _rep: &dyn ProgressReporter,
+            _opts: &CleanOptions,
+        ) -> Result<CleanResult> {
             Ok(CleanResult {
                 name: self.0,
                 bytes_freed: 0,

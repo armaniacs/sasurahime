@@ -284,16 +284,17 @@ pub trait Cleaner: Send + Sync {
     /// Read-only. Never deletes anything.
     fn detect(&self) -> ScanResult;
     /// Performs cleanup. When `dry_run` is true, must not delete anything.
-    fn clean(&self, dry_run: bool, reporter: &dyn ProgressReporter) -> Result<CleanResult>;
-    /// Clean with additional options. Default impl calls `clean()` ignoring opts.
-    fn clean_with_opts(
+    ///
+    /// `opts` carries the run's resolved options (filters and the trash
+    /// mode): there is exactly one clean method per cleaner, and every impl
+    /// must honour what `opts` says instead of falling back to a default
+    /// that ignores it (the merged `clean`/`clean_with_opts` contract).
+    fn clean(
         &self,
         dry_run: bool,
         reporter: &dyn ProgressReporter,
-        _opts: &CleanOptions,
-    ) -> Result<CleanResult> {
-        self.clean(dry_run, reporter)
-    }
+        opts: &CleanOptions,
+    ) -> Result<CleanResult>;
     /// Whether this cleaner is available (tool installed, config exists, etc.).
     /// Defaults to true; override to skip unavailable cleaners during scan.
     fn is_available(&self) -> bool {
@@ -409,7 +410,12 @@ mod tests {
         fn detect(&self) -> ScanResult {
             ScanResult::new("stub", ScanStatus::NotFound)
         }
-        fn clean(&self, _: bool, _: &dyn ProgressReporter) -> Result<CleanResult> {
+        fn clean(
+            &self,
+            _: bool,
+            _: &dyn ProgressReporter,
+            _: &CleanOptions,
+        ) -> Result<CleanResult> {
             unimplemented!()
         }
         fn risk(&self) -> Risk {

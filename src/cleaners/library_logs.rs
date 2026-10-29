@@ -209,18 +209,12 @@ impl Cleaner for LibraryLogsCleaner {
         r
     }
 
-    /// Delegates to `clean_with_opts` with the default options, so the
-    /// interactive flow has one owner.
-    fn clean(&self, dry_run: bool, reporter: &dyn ProgressReporter) -> Result<CleanResult> {
-        self.clean_with_opts(dry_run, reporter, &crate::cleaner::CleanOptions::default())
-    }
-
     /// One body for both entry points. `opts.all` switches between the
     /// interactive selection and the non-interactive process-everything run.
     /// The global `older_than_days` combines with the cleaner's own recency
     /// heuristic (the stricter wins: the LARGER day count) and `trash_mode`
     /// pins the deletion mode when set (`None` reads the process-global mode).
-    fn clean_with_opts(
+    fn clean(
         &self,
         dry_run: bool,
         reporter: &dyn ProgressReporter,
@@ -462,7 +456,7 @@ mod tests {
             ..Default::default()
         };
         let result = cleaner
-            .clean_with_opts(false, &crate::progress::DeepSuppressReporter, &opts)
+            .clean(false, &crate::progress::DeepSuppressReporter, &opts)
             .unwrap();
         assert!(
             result.bytes_freed > 0,
@@ -479,7 +473,11 @@ mod tests {
         let runner = crate::test_helpers::MockRunner::new().with_success("chflags");
         let cleaner = LibraryLogsCleaner::new(tmp.path(), Box::new(runner));
         let result = cleaner
-            .clean(true, &crate::progress::DeepSuppressReporter)
+            .clean(
+                true,
+                &crate::progress::DeepSuppressReporter,
+                &crate::cleaner::CleanOptions::default(),
+            )
             .unwrap();
         // dry run should succeed without interactive prompt
         assert_eq!(result.bytes_freed, 0);
@@ -504,7 +502,7 @@ mod tests {
             ..Default::default()
         };
         let result = cleaner
-            .clean_with_opts(false, &crate::progress::DeepSuppressReporter, &opts)
+            .clean(false, &crate::progress::DeepSuppressReporter, &opts)
             .unwrap();
         assert_eq!(
             result.bytes_freed, 0,
@@ -532,7 +530,7 @@ mod tests {
             ..Default::default()
         };
         let result = cleaner
-            .clean_with_opts(false, &crate::progress::DeepSuppressReporter, &opts)
+            .clean(false, &crate::progress::DeepSuppressReporter, &opts)
             .unwrap();
         assert!(result.bytes_freed > 0, "the pinned mode still deletes");
         assert!(
@@ -560,7 +558,11 @@ mod tests {
         let runner = crate::test_helpers::MockRunner::new().with_success("chflags");
         let cleaner = LibraryLogsCleaner::new(tmp.path(), Box::new(runner));
         let result = cleaner
-            .clean(false, &crate::progress::DeepSuppressReporter)
+            .clean(
+                false,
+                &crate::progress::DeepSuppressReporter,
+                &crate::cleaner::CleanOptions::default(),
+            )
             .unwrap();
         assert_eq!(
             result.bytes_freed, 0,

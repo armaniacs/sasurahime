@@ -110,7 +110,12 @@ impl Cleaner for OllamaCleaner {
         r
     }
 
-    fn clean(&self, dry_run: bool, reporter: &dyn ProgressReporter) -> Result<CleanResult> {
+    fn clean(
+        &self,
+        dry_run: bool,
+        reporter: &dyn ProgressReporter,
+        _opts: &crate::cleaner::CleanOptions,
+    ) -> Result<CleanResult> {
         if self.runner.exists("ollama") {
             let models = self.list_models()?;
             if models.is_empty() {

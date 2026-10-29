@@ -158,7 +158,12 @@ impl Cleaner for LogCleaner {
         r
     }
 
-    fn clean(&self, dry_run: bool, reporter: &dyn ProgressReporter) -> Result<CleanResult> {
+    fn clean(
+        &self,
+        dry_run: bool,
+        reporter: &dyn ProgressReporter,
+        _opts: &crate::cleaner::CleanOptions,
+    ) -> Result<CleanResult> {
         let mut all_old: Vec<(String, PathBuf)> = Vec::new();
         for target in self.all_targets() {
             let target_name = target.name.to_string();

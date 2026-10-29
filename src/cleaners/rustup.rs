@@ -116,7 +116,12 @@ impl Cleaner for RustupCleaner {
         r
     }
 
-    fn clean(&self, dry_run: bool, _reporter: &dyn ProgressReporter) -> Result<CleanResult> {
+    fn clean(
+        &self,
+        dry_run: bool,
+        _reporter: &dyn ProgressReporter,
+        _opts: &crate::cleaner::CleanOptions,
+    ) -> Result<CleanResult> {
         if !self.runner.exists("rustup") {
             println!("rustup: not found, skipping");
             return Ok(CleanResult {
@@ -364,7 +369,11 @@ mod tests {
             runner: Box::new(RemoveFailingRunner),
         };
         let result = cleaner
-            .clean(false, &crate::progress::DeepSuppressReporter)
+            .clean(
+                false,
+                &crate::progress::DeepSuppressReporter,
+                &crate::cleaner::CleanOptions::default(),
+            )
             .unwrap();
         assert_eq!(result.bytes_freed, 0, "a failed removal must not count");
         assert_eq!(
@@ -408,7 +417,11 @@ mod tests {
             runner: Box::new(ListFailingRunner),
         };
         let result = cleaner
-            .clean(false, &crate::progress::DeepSuppressReporter)
+            .clean(
+                false,
+                &crate::progress::DeepSuppressReporter,
+                &crate::cleaner::CleanOptions::default(),
+            )
             .unwrap();
         assert_eq!(result.bytes_freed, 0, "nothing may be deleted");
         assert!(

@@ -109,7 +109,12 @@ impl Cleaner for GradleCleaner {
         r
     }
 
-    fn clean(&self, dry_run: bool, reporter: &dyn ProgressReporter) -> Result<CleanResult> {
+    fn clean(
+        &self,
+        dry_run: bool,
+        reporter: &dyn ProgressReporter,
+        _opts: &crate::cleaner::CleanOptions,
+    ) -> Result<CleanResult> {
         let caches = self.home.join(".gradle/caches");
         if !caches.exists() {
             // Nothing is deleted on this path: the seam is never invoked, so
@@ -229,7 +234,12 @@ impl Cleaner for JetBrainsCleaner {
         r
     }
 
-    fn clean(&self, dry_run: bool, reporter: &dyn ProgressReporter) -> Result<CleanResult> {
+    fn clean(
+        &self,
+        dry_run: bool,
+        reporter: &dyn ProgressReporter,
+        _opts: &crate::cleaner::CleanOptions,
+    ) -> Result<CleanResult> {
         let dir = self.home.join("Library/Caches/JetBrains");
         if !dir.exists() {
             // Nothing is deleted on this path: the seam is never invoked, so
@@ -302,7 +312,11 @@ mod tests {
         let runner = MockRunner::new().with_success("chflags");
         let cleaner = GradleCleaner::new(tmp.path(), Box::new(runner));
         let result = cleaner
-            .clean(false, &crate::progress::DeepSuppressReporter)
+            .clean(
+                false,
+                &crate::progress::DeepSuppressReporter,
+                &crate::cleaner::CleanOptions::default(),
+            )
             .unwrap();
         // The seam outcome is the one owner of the Trash claim: uses_trash
         // must come from the deletion outcomes, never from a global read. A
@@ -331,7 +345,11 @@ mod tests {
         let runner = MockRunner::new().with_success("chflags");
         let cleaner = GradleCleaner::new(tmp.path(), Box::new(runner));
         let result = cleaner
-            .clean(false, &crate::progress::DeepSuppressReporter)
+            .clean(
+                false,
+                &crate::progress::DeepSuppressReporter,
+                &crate::cleaner::CleanOptions::default(),
+            )
             .unwrap();
         assert!(result.skipped.is_empty(), "nothing was attempted");
         assert_eq!(result.bytes_freed, 0, "nothing was deleted");
@@ -361,7 +379,11 @@ mod tests {
         let runner = MockRunner::new().with_success("chflags");
         let cleaner = GradleCleaner::new(tmp.path(), Box::new(runner));
         let result = cleaner
-            .clean(false, &crate::progress::DeepSuppressReporter)
+            .clean(
+                false,
+                &crate::progress::DeepSuppressReporter,
+                &crate::cleaner::CleanOptions::default(),
+            )
             .unwrap();
         assert_eq!(
             result.skipped.len(),
@@ -387,7 +409,11 @@ mod tests {
         fs::create_dir_all(caches.join("8.8.0")).unwrap();
         let cleaner = GradleCleaner::new(tmp.path(), Box::new(MockRunner::new().with_not_found()));
         let _ = cleaner
-            .clean(true, &crate::progress::DeepSuppressReporter)
+            .clean(
+                true,
+                &crate::progress::DeepSuppressReporter,
+                &crate::cleaner::CleanOptions::default(),
+            )
             .unwrap();
         assert!(caches.join("8.12.0").exists(), "dry-run must not delete");
         assert!(caches.join("8.8.0").exists(), "dry-run must not delete");
@@ -536,7 +562,11 @@ mod tests {
         let runner = MockRunner::new().with_success("chflags");
         let cleaner = JetBrainsCleaner::new(tmp.path(), Box::new(runner));
         let result = cleaner
-            .clean(false, &crate::progress::DeepSuppressReporter)
+            .clean(
+                false,
+                &crate::progress::DeepSuppressReporter,
+                &crate::cleaner::CleanOptions::default(),
+            )
             .unwrap();
         // Same seam-truth contract as the gradle test: Trash is claimed
         // exactly when a deletion actually happened (see the gradle test's
@@ -557,7 +587,11 @@ mod tests {
         let cleaner =
             JetBrainsCleaner::new(tmp.path(), Box::new(MockRunner::new().with_not_found()));
         let _ = cleaner
-            .clean(true, &crate::progress::DeepSuppressReporter)
+            .clean(
+                true,
+                &crate::progress::DeepSuppressReporter,
+                &crate::cleaner::CleanOptions::default(),
+            )
             .unwrap();
         assert!(jb.join("GoLand2025.1").exists(), "dry-run must not delete");
         assert!(jb.join("GoLand2024.2").exists(), "dry-run must not delete");

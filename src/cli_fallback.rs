@@ -88,7 +88,12 @@ impl Cleaner for CliFallbackCleaner {
         r
     }
 
-    fn clean(&self, dry_run: bool, _reporter: &dyn ProgressReporter) -> Result<CleanResult> {
+    fn clean(
+        &self,
+        dry_run: bool,
+        _reporter: &dyn ProgressReporter,
+        _opts: &crate::cleaner::CleanOptions,
+    ) -> Result<CleanResult> {
         clean_cli_or_fallback(
             self.name(),
             &self.cache_dir(),

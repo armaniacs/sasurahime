@@ -353,15 +353,11 @@ impl Cleaner for LibraryCachesCleaner {
         r
     }
 
-    fn clean(&self, dry_run: bool, reporter: &dyn ProgressReporter) -> Result<CleanResult> {
-        // Plain clean keeps the process-global trash mode (compat path).
-        self.clean_with_mode(dry_run, reporter, crate::trash::TrashMode::Global)
-    }
-
-    /// Cleans with `opts`, pinning `opts.trash_mode` when set so `uses_trash`
-    /// and the actual deletion can never disagree (the `CleanOptions`
-    /// contract). `None` keeps the process-global mode (compat).
-    fn clean_with_opts(
+    /// Cleans with the run's options: `opts.trash_mode` pins the deletion
+    /// mode when set so `uses_trash` and the actual deletion can never
+    /// disagree (the `CleanOptions` contract). `None` keeps the
+    /// process-global mode (compat).
+    fn clean(
         &self,
         dry_run: bool,
         reporter: &dyn ProgressReporter,
@@ -779,7 +775,11 @@ mod tests {
         let mut cl = cleaner(&tmp);
         cl.threshold_override = Some(1);
         let r = cl
-            .clean(true, &crate::progress::DeepSuppressReporter)
+            .clean(
+                true,
+                &crate::progress::DeepSuppressReporter,
+                &crate::cleaner::CleanOptions::default(),
+            )
             .unwrap();
         assert_eq!(r.bytes_freed, 0);
         assert!(c.join("typescript/data.bin").exists());
@@ -790,7 +790,11 @@ mod tests {
     fn clean_without_dir_is_ok_and_empty() {
         let tmp = TempDir::new().unwrap();
         let r = cleaner(&tmp)
-            .clean(false, &crate::progress::DeepSuppressReporter)
+            .clean(
+                false,
+                &crate::progress::DeepSuppressReporter,
+                &crate::cleaner::CleanOptions::default(),
+            )
             .unwrap();
         assert_eq!(r.bytes_freed, 0);
         assert_eq!(r.exit_code(), 0);

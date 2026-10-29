@@ -389,6 +389,7 @@ mod tests {
             &self,
             _dry_run: bool,
             _reporter: &dyn crate::progress::ProgressReporter,
+            _opts: &crate::cleaner::CleanOptions,
         ) -> anyhow::Result<crate::cleaner::CleanResult> {
             Ok(crate::cleaner::CleanResult::empty(self.name))
         }
@@ -448,6 +449,7 @@ mod tests {
             &self,
             _dry_run: bool,
             _reporter: &dyn crate::progress::ProgressReporter,
+            _opts: &crate::cleaner::CleanOptions,
         ) -> anyhow::Result<crate::cleaner::CleanResult> {
             Ok(crate::cleaner::CleanResult::empty(self.0))
         }
@@ -495,6 +497,7 @@ mod tests {
             &self,
             _dry_run: bool,
             _reporter: &dyn crate::progress::ProgressReporter,
+            _opts: &crate::cleaner::CleanOptions,
         ) -> anyhow::Result<crate::cleaner::CleanResult> {
             Ok(crate::cleaner::CleanResult::empty("counting"))
         }

@@ -53,8 +53,13 @@ impl Cleaner for HuggingFaceCleaner {
         self.0.detect()
     }
 
-    fn clean(&self, dry_run: bool, reporter: &dyn ProgressReporter) -> Result<CleanResult> {
-        self.0.clean(dry_run, reporter)
+    fn clean(
+        &self,
+        dry_run: bool,
+        reporter: &dyn ProgressReporter,
+        opts: &crate::cleaner::CleanOptions,
+    ) -> Result<CleanResult> {
+        self.0.clean(dry_run, reporter, opts)
     }
 }
 
@@ -162,7 +167,9 @@ mod tests {
         fs::write(hub.join("model.bin"), b"dummy").unwrap();
 
         let cleaner = HuggingFaceCleaner::new(tmp.path(), Box::new(NoToolRunner));
-        cleaner.clean(true, &reporter).unwrap();
+        cleaner
+            .clean(true, &reporter, &crate::cleaner::CleanOptions::default())
+            .unwrap();
         assert!(hub.exists(), "dry-run must not delete");
         assert!(
             hub.join("model.bin").exists(),
@@ -179,7 +186,9 @@ mod tests {
         fs::write(hub.join("model.bin"), b"dummy").unwrap();
 
         let cleaner = HuggingFaceCleaner::new(tmp.path(), Box::new(NoToolRunner));
-        let result = cleaner.clean(false, &reporter).unwrap();
+        let result = cleaner
+            .clean(false, &reporter, &crate::cleaner::CleanOptions::default())
+            .unwrap();
         assert!(result.bytes_freed > 0);
         // hub/ should be recreated (empty)
         assert!(hub.exists(), "hub/ should be recreated");
@@ -198,7 +207,9 @@ mod tests {
         fs::write(hub.join("model.bin"), b"dummy").unwrap();
 
         let cleaner = HuggingFaceCleaner::new(tmp.path(), Box::new(CliToolRunner));
-        let result = cleaner.clean(false, &reporter).unwrap();
+        let result = cleaner
+            .clean(false, &reporter, &crate::cleaner::CleanOptions::default())
+            .unwrap();
         assert!(result.bytes_freed > 0, "CLI path should report freed bytes");
     }
 
@@ -211,7 +222,9 @@ mod tests {
         fs::write(hub.join("model.bin"), b"dummy").unwrap();
 
         let cleaner = HuggingFaceCleaner::new(tmp.path(), Box::new(CliToolRunner));
-        let result = cleaner.clean(true, &reporter).unwrap();
+        let result = cleaner
+            .clean(true, &reporter, &crate::cleaner::CleanOptions::default())
+            .unwrap();
         assert_eq!(result.bytes_freed, 0, "dry-run must report 0 freed");
         assert!(
             hub.join("model.bin").exists(),
@@ -328,7 +341,7 @@ mod tests {
         fs::write(hub.join("model.bin"), b"dummy").unwrap();
 
         let cleaner = HuggingFaceCleaner::new(tmp.path(), Box::new(CliToolRunnerFailing));
-        let result = cleaner.clean(false, &reporter);
+        let result = cleaner.clean(false, &reporter, &crate::cleaner::CleanOptions::default());
         assert!(result.is_err(), "CLI failure should propagate as error");
         let msg = format!("{:#}", result.unwrap_err());
         assert!(

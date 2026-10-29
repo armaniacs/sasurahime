@@ -160,7 +160,12 @@ impl Cleaner for XcodeCleaner {
         r
     }
 
-    fn clean(&self, dry_run: bool, reporter: &dyn ProgressReporter) -> Result<CleanResult> {
+    fn clean(
+        &self,
+        dry_run: bool,
+        reporter: &dyn ProgressReporter,
+        _opts: &crate::cleaner::CleanOptions,
+    ) -> Result<CleanResult> {
         let subs: Vec<XcodeSubcategory> = match self.subs {
             Some(ref s) => s.clone(),
             None => vec![XcodeSubcategory::DerivedData],
@@ -429,7 +434,9 @@ mod tests {
         let cleaner = XcodeCleaner::new(tmp.path(), Box::new(PgrepRunner { running: false }))
             .with_subcategories(vec![XcodeSubcategory::DerivedData]);
         let reporter = crate::progress::VerboseProgress::new();
-        let result = cleaner.clean(false, &reporter).unwrap();
+        let result = cleaner
+            .clean(false, &reporter, &crate::cleaner::CleanOptions::default())
+            .unwrap();
         assert!(result.bytes_freed > 0, "should have freed bytes");
         assert!(
             !dd.join("P").exists(),

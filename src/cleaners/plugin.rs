@@ -409,6 +409,7 @@ impl Cleaner for PluginCleaner {
         &self,
         dry_run: bool,
         _reporter: &dyn crate::progress::ProgressReporter,
+        _opts: &crate::cleaner::CleanOptions,
     ) -> Result<CleanResult> {
         let mut args = vec!["clean"];
         if dry_run {
@@ -658,7 +659,9 @@ mod tests {
         assert!(matches!(cleaner.detect().status, ScanStatus::Unavailable));
         // clean() reports the failure without taking the process down.
         let reporter = crate::progress::DeepSuppressReporter;
-        assert!(cleaner.clean(false, &reporter).is_err());
+        assert!(cleaner
+            .clean(false, &reporter, &crate::cleaner::CleanOptions::default())
+            .is_err());
     }
 
     #[test]
@@ -697,7 +700,9 @@ mod tests {
             ScanStatus::Pruneable(512)
         ));
         let reporter = crate::progress::DeepSuppressReporter;
-        let result = cleaner.clean(true, &reporter).unwrap();
+        let result = cleaner
+            .clean(true, &reporter, &crate::cleaner::CleanOptions::default())
+            .unwrap();
         assert_eq!(result.bytes_freed, 0);
         assert_eq!(cleaner.name(), "good");
     }
@@ -796,7 +801,9 @@ mod tests {
         }
         let cleaner = PluginCleaner::new("reporting", plugin);
         let reporter = crate::progress::DeepSuppressReporter;
-        let result = cleaner.clean(false, &reporter).unwrap();
+        let result = cleaner
+            .clean(false, &reporter, &crate::cleaner::CleanOptions::default())
+            .unwrap();
         assert_eq!(result.bytes_freed, 1234);
         assert!(!result.uses_trash);
     }
@@ -817,7 +824,9 @@ mod tests {
         }
         let cleaner = PluginCleaner::new("trasher", plugin);
         let reporter = crate::progress::DeepSuppressReporter;
-        let result = cleaner.clean(false, &reporter).unwrap();
+        let result = cleaner
+            .clean(false, &reporter, &crate::cleaner::CleanOptions::default())
+            .unwrap();
         assert_eq!(result.bytes_freed, 10);
         assert!(result.uses_trash);
     }
@@ -836,7 +845,9 @@ mod tests {
         }
         let cleaner = PluginCleaner::new("silent", silent);
         let reporter = crate::progress::DeepSuppressReporter;
-        let result = cleaner.clean(false, &reporter).unwrap();
+        let result = cleaner
+            .clean(false, &reporter, &crate::cleaner::CleanOptions::default())
+            .unwrap();
         assert_eq!(result.bytes_freed, 0);
         assert!(!result.uses_trash);
     }
@@ -857,7 +868,9 @@ mod tests {
         }
         let cleaner = PluginCleaner::new("brokenjson", broken);
         let reporter = crate::progress::DeepSuppressReporter;
-        let result = cleaner.clean(false, &reporter).unwrap();
+        let result = cleaner
+            .clean(false, &reporter, &crate::cleaner::CleanOptions::default())
+            .unwrap();
         assert_eq!(result.bytes_freed, 0);
         assert!(!result.uses_trash);
     }
@@ -934,7 +947,9 @@ mod tests {
         let verified = crate::format::dir_size(&plugin);
         let cleaner = PluginCleaner::new("liar", plugin);
         let reporter = crate::progress::DeepSuppressReporter;
-        let result = cleaner.clean(false, &reporter).unwrap();
+        let result = cleaner
+            .clean(false, &reporter, &crate::cleaner::CleanOptions::default())
+            .unwrap();
         assert_ne!(
             result.bytes_freed, 1000000,
             "the forged freed claim must never be reported"

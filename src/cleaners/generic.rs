@@ -468,15 +468,11 @@ impl Cleaner for CliCleaner {
         }
     }
 
-    fn clean(&self, dry_run: bool, _reporter: &dyn ProgressReporter) -> Result<CleanResult> {
-        // Plain clean keeps the process-global trash mode (compat path).
-        self.clean_with_mode(dry_run, _reporter, crate::trash::TrashMode::Global)
-    }
-
-    /// Cleans with `opts`, pinning `opts.trash_mode` when set so `uses_trash`
-    /// and the actual deletion can never disagree (the `CleanOptions`
-    /// contract). `None` keeps the process-global mode (compat).
-    fn clean_with_opts(
+    /// Cleans with the run's options: `opts.trash_mode` pins the deletion
+    /// mode for the fallback delete when set so the seam outcome and the
+    /// actual deletion can never disagree (the `CleanOptions` contract).
+    /// `None` keeps the process-global mode (compat).
+    fn clean(
         &self,
         dry_run: bool,
         reporter: &dyn ProgressReporter,
@@ -812,24 +808,11 @@ impl Cleaner for PathCleaner {
         })
     }
 
-    fn clean(&self, dry_run: bool, reporter: &dyn ProgressReporter) -> Result<CleanResult> {
-        let any_filter = self.older_than_days.is_some() || self.larger_than_mb.is_some();
-        // Plain clean keeps the process-global trash mode (compat path).
-        self.clean_filtered(
-            dry_run,
-            reporter,
-            self.older_than_days,
-            self.larger_than_mb,
-            any_filter,
-            crate::trash::TrashMode::Global,
-        )
-    }
-
     /// Applies the combined per-cleaner + global filters. Global filters are
     /// the user's explicit intent and combine with the cleaner's own config
     /// (the stricter value wins). Out-of-condition entries are reported with
     /// a skip reason when global filters are active.
-    fn clean_with_opts(
+    fn clean(
         &self,
         dry_run: bool,
         reporter: &dyn ProgressReporter,
@@ -987,7 +970,7 @@ mod tests {
             trash_mode: Some(crate::trash::TrashMode::Permanent),
         };
         let reporter = crate::progress::DeepSuppressReporter;
-        let result = cleaner.clean_with_opts(false, &reporter, &opts).unwrap();
+        let result = cleaner.clean(false, &reporter, &opts).unwrap();
         assert!(
             !dir.exists(),
             "the pinned permanent mode must delete for real"
@@ -1028,7 +1011,11 @@ mod tests {
         // clean deletes the dir.
         let real_size = crate::format::dir_size(&real);
         let result = cleaner
-            .clean(false, &crate::progress::DeepSuppressReporter)
+            .clean(
+                false,
+                &crate::progress::DeepSuppressReporter,
+                &crate::cleaner::CleanOptions::default(),
+            )
             .unwrap();
         assert_eq!(result.skipped.len(), 1, "the unsafe path is recorded");
         assert_eq!(
@@ -1083,7 +1070,7 @@ mod tests {
             trash_mode: Some(crate::trash::TrashMode::Permanent),
         };
         let reporter = crate::progress::DeepSuppressReporter;
-        let result = cleaner.clean_with_opts(false, &reporter, &opts).unwrap();
+        let result = cleaner.clean(false, &reporter, &opts).unwrap();
         assert!(
             !dir.exists(),
             "the pinned permanent mode must delete for real"
@@ -1117,7 +1104,7 @@ mod tests {
             trash_mode: Some(crate::trash::TrashMode::Trash),
         };
         let reporter = crate::progress::DeepSuppressReporter;
-        let result = cleaner.clean_with_opts(false, &reporter, &opts).unwrap();
+        let result = cleaner.clean(false, &reporter, &opts).unwrap();
         if result.bytes_freed > 0 {
             assert!(
                 result.uses_trash,
@@ -1155,7 +1142,7 @@ mod tests {
             trash_mode: None,
         };
         let reporter = crate::progress::DeepSuppressReporter;
-        let result = cleaner.clean_with_opts(false, &reporter, &opts).unwrap();
+        let result = cleaner.clean(false, &reporter, &opts).unwrap();
         assert!(
             !dir.exists(),
             "the global permanent mode must delete for real"
@@ -1246,7 +1233,9 @@ mod tests {
             Some("start the VM to trim"),
         )]);
         let reporter = crate::progress::DeepSuppressReporter;
-        let result = cleaner.clean(false, &reporter).unwrap();
+        let result = cleaner
+            .clean(false, &reporter, &crate::cleaner::CleanOptions::default())
+            .unwrap();
         assert!(
             result.bytes_freed > 0,
             "the extra command's effect must count in the freed bytes"
@@ -1271,7 +1260,7 @@ mod tests {
             Some("start the VM to trim"),
         )]);
         let reporter = crate::progress::DeepSuppressReporter;
-        let result = cleaner.clean(false, &reporter);
+        let result = cleaner.clean(false, &reporter, &crate::cleaner::CleanOptions::default());
         assert!(
             result.is_ok(),
             "a failed extra command must not fail the clean"
@@ -1749,7 +1738,11 @@ mod tests {
         fs::write(&disk, b"vm disk bytes").unwrap();
         let cleaner = CliCleaner::colima_prune(tmp.path(), Box::new(MissingToolRunner));
         let result = cleaner
-            .clean(false, &crate::progress::DeepSuppressReporter)
+            .clean(
+                false,
+                &crate::progress::DeepSuppressReporter,
+                &crate::cleaner::CleanOptions::default(),
+            )
             .expect("the refusal is a skip, not an error");
         assert_eq!(
             result.bytes_freed, 0,
@@ -1825,7 +1818,7 @@ mod tests {
             trash_mode: Some(crate::trash::TrashMode::Trash),
         };
         let reporter = crate::progress::DeepSuppressReporter;
-        let result = cleaner.clean_with_opts(false, &reporter, &opts).unwrap();
+        let result = cleaner.clean(false, &reporter, &opts).unwrap();
         assert!(dir.exists(), "a permission-denied dir must survive");
         assert_eq!(
             result.skipped.len(),
@@ -1860,7 +1853,9 @@ mod tests {
         let tmp = tempfile::TempDir::new().unwrap();
         let cleaner = PathCleaner::node_gyp(tmp.path(), Box::new(MissingToolRunner));
         let reporter = crate::progress::DeepSuppressReporter;
-        let result = cleaner.clean(false, &reporter).unwrap();
+        let result = cleaner
+            .clean(false, &reporter, &crate::cleaner::CleanOptions::default())
+            .unwrap();
         assert!(
             !result.uses_trash,
             "a run where nothing was deleted must not claim Trash"

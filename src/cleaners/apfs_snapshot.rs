@@ -212,7 +212,12 @@ impl Cleaner for ApfsSnapshotCleaner {
         ScanResult::new(self.name(), ScanStatus::Pruneable(size))
     }
 
-    fn clean(&self, dry_run: bool, reporter: &dyn ProgressReporter) -> Result<CleanResult> {
+    fn clean(
+        &self,
+        dry_run: bool,
+        reporter: &dyn ProgressReporter,
+        _opts: &crate::cleaner::CleanOptions,
+    ) -> Result<CleanResult> {
         match self.mode {
             SnapshotMode::Delete { all } => self.clean_delete(all, dry_run, reporter),
             SnapshotMode::Thin {
@@ -570,7 +575,9 @@ mod tests {
     fn clean_dry_run_returns_zero_bytes_freed() {
         let cleaner = ApfsSnapshotCleaner::new(Box::new(TwoSnapshots));
         let reporter = crate::progress::VerboseProgress::new();
-        let result = cleaner.clean(true, &reporter).unwrap();
+        let result = cleaner
+            .clean(true, &reporter, &crate::cleaner::CleanOptions::default())
+            .unwrap();
         assert_eq!(result.bytes_freed, 0);
     }
 
@@ -578,7 +585,9 @@ mod tests {
     fn clean_dry_run_when_no_snapshots_returns_zero() {
         let cleaner = ApfsSnapshotCleaner::new(Box::new(NoSnapshots));
         let reporter = crate::progress::VerboseProgress::new();
-        let result = cleaner.clean(true, &reporter).unwrap();
+        let result = cleaner
+            .clean(true, &reporter, &crate::cleaner::CleanOptions::default())
+            .unwrap();
         assert_eq!(result.bytes_freed, 0);
     }
 
@@ -586,7 +595,9 @@ mod tests {
     fn clean_when_tmutil_missing_returns_zero() {
         let cleaner = ApfsSnapshotCleaner::new(Box::new(TmutilMissing));
         let reporter = crate::progress::VerboseProgress::new();
-        let result = cleaner.clean(true, &reporter).unwrap();
+        let result = cleaner
+            .clean(true, &reporter, &crate::cleaner::CleanOptions::default())
+            .unwrap();
         assert_eq!(result.bytes_freed, 0);
     }
 
@@ -772,7 +783,9 @@ mod tests {
             .with_mode(SnapshotMode::Delete { all: true })
             .with_free_space(probe);
         let reporter = crate::progress::VerboseProgress::new();
-        let result = cleaner.clean(false, &reporter).unwrap();
+        let result = cleaner
+            .clean(false, &reporter, &crate::cleaner::CleanOptions::default())
+            .unwrap();
         assert_eq!(result.bytes_freed, 250);
     }
 
@@ -788,7 +801,9 @@ mod tests {
             .with_mode(SnapshotMode::Delete { all: true })
             .with_free_space(probe);
         let reporter = crate::progress::VerboseProgress::new();
-        let result = cleaner.clean(false, &reporter).unwrap();
+        let result = cleaner
+            .clean(false, &reporter, &crate::cleaner::CleanOptions::default())
+            .unwrap();
         assert_eq!(result.bytes_freed, 0);
     }
 
@@ -827,7 +842,9 @@ mod tests {
             .with_mode(SnapshotMode::Delete { all: true })
             .with_free_space(probe);
         let reporter = crate::progress::VerboseProgress::new();
-        let result = cleaner.clean(false, &reporter).unwrap();
+        let result = cleaner
+            .clean(false, &reporter, &crate::cleaner::CleanOptions::default())
+            .unwrap();
         assert_eq!(result.bytes_freed, 0);
         assert_eq!(result.skipped.len(), 1);
         assert_eq!(result.exit_code(), 1);
@@ -840,7 +857,9 @@ mod tests {
             .with_mode(SnapshotMode::Delete { all: true })
             .with_free_space(probe);
         let reporter = crate::progress::VerboseProgress::new();
-        let result = cleaner.clean(false, &reporter).unwrap();
+        let result = cleaner
+            .clean(false, &reporter, &crate::cleaner::CleanOptions::default())
+            .unwrap();
         assert_eq!(result.bytes_freed, 300);
         assert_eq!(result.skipped.len(), 1);
         // The date lives in the path; the reason reports what tmutil said.
@@ -873,7 +892,9 @@ mod tests {
             .with_mode(SnapshotMode::Delete { all: true })
             .with_free_space(probe);
         let reporter = crate::progress::VerboseProgress::new();
-        let result = cleaner.clean(true, &reporter).unwrap();
+        let result = cleaner
+            .clean(true, &reporter, &crate::cleaner::CleanOptions::default())
+            .unwrap();
         assert_eq!(result.bytes_freed, 0);
         assert_eq!(probe_calls.load(Ordering::SeqCst), 0);
     }
@@ -927,7 +948,9 @@ mod tests {
             .with_mode(SnapshotMode::Delete { all: true });
         let reporter = crate::progress::VerboseProgress::new();
         // Non-TTY under `cargo test`: the deletion path must run, not the skip path.
-        let result = cleaner.clean(false, &reporter).unwrap();
+        let result = cleaner
+            .clean(false, &reporter, &crate::cleaner::CleanOptions::default())
+            .unwrap();
         assert_eq!(result.name, "apfs-snapshot");
         assert_eq!(
             *calls.lock().unwrap(),
@@ -951,7 +974,9 @@ mod tests {
         let cleaner = ApfsSnapshotCleaner::new(Box::new(runner))
             .with_mode(SnapshotMode::Delete { all: true });
         let reporter = crate::progress::VerboseProgress::new();
-        cleaner.clean(true, &reporter).unwrap();
+        cleaner
+            .clean(true, &reporter, &crate::cleaner::CleanOptions::default())
+            .unwrap();
         assert!(!calls
             .lock()
             .unwrap()
@@ -1032,7 +1057,11 @@ mod tests {
             .with_mode(SnapshotMode::Delete { all: true })
             .with_free_space(probe);
         let result = cleaner
-            .clean(false, &crate::progress::DeepSuppressReporter)
+            .clean(
+                false,
+                &crate::progress::DeepSuppressReporter,
+                &crate::cleaner::CleanOptions::default(),
+            )
             .unwrap();
         assert_eq!(result.skipped.len(), 1);
         assert!(
@@ -1072,7 +1101,9 @@ mod tests {
                 urgency: 2,
             });
         let reporter = crate::progress::DeepSuppressReporter;
-        let result = cleaner.clean(true, &reporter).unwrap();
+        let result = cleaner
+            .clean(true, &reporter, &crate::cleaner::CleanOptions::default())
+            .unwrap();
         assert_eq!(result.bytes_freed, 0);
         assert!(!result.uses_trash);
     }
@@ -1087,7 +1118,9 @@ mod tests {
             urgency: 2,
         });
         let reporter = crate::progress::DeepSuppressReporter;
-        let result = cleaner.clean(false, &reporter).unwrap();
+        let result = cleaner
+            .clean(false, &reporter, &crate::cleaner::CleanOptions::default())
+            .unwrap();
         assert_eq!(result.bytes_freed, 0);
     }
 
@@ -1104,7 +1137,9 @@ mod tests {
         })
         .with_free_space(|| None);
         let reporter = crate::progress::DeepSuppressReporter;
-        let result = cleaner.clean(false, &reporter).unwrap();
+        let result = cleaner
+            .clean(false, &reporter, &crate::cleaner::CleanOptions::default())
+            .unwrap();
         assert_eq!(result.bytes_freed, 0, "missing readings stay at 0");
         assert!(!result.uses_trash);
     }
@@ -1119,7 +1154,9 @@ mod tests {
             urgency: 5,
         });
         let reporter = crate::progress::DeepSuppressReporter;
-        assert!(cleaner.clean(false, &reporter).is_err());
+        assert!(cleaner
+            .clean(false, &reporter, &crate::cleaner::CleanOptions::default())
+            .is_err());
     }
 
     #[test]
@@ -1191,7 +1228,9 @@ mod tests {
             }
         });
         let reporter = crate::progress::DeepSuppressReporter;
-        let result = cleaner.clean(false, &reporter).unwrap();
+        let result = cleaner
+            .clean(false, &reporter, &crate::cleaner::CleanOptions::default())
+            .unwrap();
         assert_eq!(
             result.bytes_freed, 0,
             "a missing before-reading must not report the free space as freed"
@@ -1213,7 +1252,9 @@ mod tests {
         })
         .with_free_space(probe);
         let reporter = crate::progress::DeepSuppressReporter;
-        let result = cleaner.clean(false, &reporter).unwrap();
+        let result = cleaner
+            .clean(false, &reporter, &crate::cleaner::CleanOptions::default())
+            .unwrap();
         assert_eq!(result.bytes_freed, 0, "a failed thinning reclaims nothing");
         assert!(!result.uses_trash);
     }

@@ -545,15 +545,11 @@ impl Cleaner for OrphanContainersCleaner {
         r
     }
 
-    fn clean(&self, dry_run: bool, reporter: &dyn ProgressReporter) -> Result<CleanResult> {
-        // Plain clean keeps the process-global trash mode (compat path).
-        self.clean_with_mode(dry_run, reporter, crate::trash::TrashMode::Global)
-    }
-
-    /// Cleans with `opts`, pinning `opts.trash_mode` when set so `uses_trash`
-    /// and the actual deletion can never disagree (the `CleanOptions`
-    /// contract). `None` keeps the process-global mode (compat).
-    fn clean_with_opts(
+    /// Cleans with the run's options: `opts.trash_mode` pins the deletion
+    /// mode when set so `uses_trash` and the actual deletion can never
+    /// disagree (the `CleanOptions` contract). `None` keeps the
+    /// process-global mode (compat).
+    fn clean(
         &self,
         dry_run: bool,
         reporter: &dyn ProgressReporter,
@@ -1270,7 +1266,13 @@ mod tests {
     fn dry_run_lists_without_deleting() {
         let tmp = TempDir::new().unwrap();
         let gone = write_container(tmp.path(), "Containers", "com.example.gone");
-        let result = cleaner_for(&tmp).clean(true, &SuppressReporter).unwrap();
+        let result = cleaner_for(&tmp)
+            .clean(
+                true,
+                &SuppressReporter,
+                &crate::cleaner::CleanOptions::default(),
+            )
+            .unwrap();
         assert_eq!(result.bytes_freed, 0);
         assert!(result.skipped.is_empty());
         assert!(gone.join("Data/blob.bin").exists());
@@ -1279,7 +1281,13 @@ mod tests {
     #[test]
     fn clean_without_roots_is_empty_success() {
         let tmp = TempDir::new().unwrap();
-        let result = cleaner_for(&tmp).clean(false, &SuppressReporter).unwrap();
+        let result = cleaner_for(&tmp)
+            .clean(
+                false,
+                &SuppressReporter,
+                &crate::cleaner::CleanOptions::default(),
+            )
+            .unwrap();
         assert_eq!(result.bytes_freed, 0);
         assert_eq!(result.exit_code(), 0);
     }

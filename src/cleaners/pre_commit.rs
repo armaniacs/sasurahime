@@ -61,8 +61,13 @@ impl Cleaner for PreCommitCleaner {
         self.0.detect()
     }
 
-    fn clean(&self, dry_run: bool, reporter: &dyn ProgressReporter) -> Result<CleanResult> {
-        self.0.clean(dry_run, reporter)
+    fn clean(
+        &self,
+        dry_run: bool,
+        reporter: &dyn ProgressReporter,
+        opts: &crate::cleaner::CleanOptions,
+    ) -> Result<CleanResult> {
+        self.0.clean(dry_run, reporter, opts)
     }
 }
 
@@ -174,7 +179,9 @@ mod tests {
         fs::write(cache.join("hook.pck"), b"x".repeat(4096)).unwrap();
 
         let cleaner = PreCommitCleaner::new(tmp.path(), Box::new(SystemCommandRunner));
-        cleaner.clean(true, &reporter).unwrap();
+        cleaner
+            .clean(true, &reporter, &crate::cleaner::CleanOptions::default())
+            .unwrap();
         assert!(cache.exists(), "dry-run must not delete");
         assert!(
             cache.join("hook.pck").exists(),
@@ -191,7 +198,9 @@ mod tests {
         fs::write(cache.join("hook.pck"), b"x".repeat(4096)).unwrap();
 
         let cleaner = PreCommitCleaner::new(tmp.path(), Box::new(NoToolRunner));
-        let result = cleaner.clean(false, &reporter).unwrap();
+        let result = cleaner
+            .clean(false, &reporter, &crate::cleaner::CleanOptions::default())
+            .unwrap();
         assert!(result.bytes_freed > 0);
         assert!(
             !cache.exists(),
@@ -208,7 +217,9 @@ mod tests {
         fs::write(cache.join("hook.pck"), b"x".repeat(4096)).unwrap();
 
         let cleaner = PreCommitCleaner::new(tmp.path(), Box::new(CliToolRunner));
-        let result = cleaner.clean(false, &reporter).unwrap();
+        let result = cleaner
+            .clean(false, &reporter, &crate::cleaner::CleanOptions::default())
+            .unwrap();
         assert!(result.bytes_freed > 0, "CLI path should report freed bytes");
     }
 
@@ -221,7 +232,9 @@ mod tests {
         fs::write(cache.join("hook.pck"), b"x".repeat(4096)).unwrap();
 
         let cleaner = PreCommitCleaner::new(tmp.path(), Box::new(CliToolRunner));
-        let result = cleaner.clean(true, &reporter).unwrap();
+        let result = cleaner
+            .clean(true, &reporter, &crate::cleaner::CleanOptions::default())
+            .unwrap();
         assert_eq!(result.bytes_freed, 0, "dry-run must report 0 freed");
         assert!(
             cache.join("hook.pck").exists(),
@@ -238,7 +251,7 @@ mod tests {
         fs::write(cache.join("hook.pck"), b"x".repeat(4096)).unwrap();
 
         let cleaner = PreCommitCleaner::new(tmp.path(), Box::new(CliToolRunnerFailing));
-        let result = cleaner.clean(false, &reporter);
+        let result = cleaner.clean(false, &reporter, &crate::cleaner::CleanOptions::default());
         assert!(result.is_err(), "CLI failure should propagate as error");
         let err = result.unwrap_err();
         let msg = format!("{err:#}");

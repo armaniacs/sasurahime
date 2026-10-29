@@ -4,7 +4,7 @@ use sasurahime::{
 };
 
 use clap::{Parser, Subcommand};
-use cleaner::{CleanCancelled, CleanResult, Cleaner};
+use cleaner::{CleanCancelled, CleanOptions, CleanResult, Cleaner};
 use command::SystemCommandRunner;
 use config::Config;
 use progress::{build_reporter_from_flags, merge_suppress_flags, ProgressReporter};
@@ -66,10 +66,11 @@ macro_rules! define_cleaners {
             target: &CleanTarget,
             dry_run: bool,
             reporter: &dyn ProgressReporter,
+            opts: &CleanOptions,
         ) -> anyhow::Result<CleanResult> {
             match target {
                 $(
-                    CleanTarget::$variant { .. } => ($factory)(home, config).clean(dry_run, reporter),
+                    CleanTarget::$variant { .. } => ($factory)(home, config).clean(dry_run, reporter, opts),
                 )*
                 _ => unreachable!("dispatch_clean: unexpected special variant"),
             }
@@ -720,9 +721,10 @@ fn run_clean_target<F>(
     cleaner_fn: F,
     dry_run: bool,
     reporter: &dyn ProgressReporter,
+    opts: &CleanOptions,
 ) -> anyhow::Result<CleanResult>
 where
-    F: FnOnce(bool, &dyn ProgressReporter) -> anyhow::Result<CleanResult>,
+    F: FnOnce(bool, &dyn ProgressReporter, &CleanOptions) -> anyhow::Result<CleanResult>,
 {
     let msg = format!("Cleaning {label}...");
     let result = if reporter.show_spinner() {
@@ -731,7 +733,7 @@ where
         // steady tick: an in-cleaner confirmation prompt must not compete
         // with animation, but ticks still redraw the line.
         let spinner = sasurahime::progress::SharedSpinner::start(&msg, false);
-        let r = cleaner_fn(dry_run, &spinner.reporter());
+        let r = cleaner_fn(dry_run, &spinner.reporter(), opts);
         spinner.finish();
         match r {
             Ok(v) => {
@@ -755,7 +757,7 @@ where
             }
         }
     } else {
-        let r = cleaner_fn(dry_run, reporter);
+        let r = cleaner_fn(dry_run, reporter, opts);
         match r {
             Ok(v) => v,
             Err(e) if e.is::<CleanCancelled>() => {
@@ -819,11 +821,12 @@ fn run_and_exit<F>(
     cleaner_fn: F,
     dry_run: bool,
     reporter: &dyn ProgressReporter,
+    opts: &CleanOptions,
 ) -> anyhow::Result<CleanResult>
 where
-    F: FnOnce(bool, &dyn ProgressReporter) -> anyhow::Result<CleanResult>,
+    F: FnOnce(bool, &dyn ProgressReporter, &CleanOptions) -> anyhow::Result<CleanResult>,
 {
-    let result = run_clean_target(label, cleaner_fn, dry_run, reporter)?;
+    let result = run_clean_target(label, cleaner_fn, dry_run, reporter, opts)?;
     if result.exit_code() != 0 {
         std::process::exit(1);
     }
@@ -872,6 +875,7 @@ fn clean_by_name(
     sub: Option<&str>,
     dry_run: bool,
     reporter: &dyn ProgressReporter,
+    opts: &CleanOptions,
 ) -> anyhow::Result<CleanResult> {
     if name == "xcode" {
         if let Some(sub) = sub {
@@ -882,7 +886,13 @@ fn clean_by_name(
             })?;
             let cleaner = cleaners::xcode::XcodeCleaner::new(home, Box::new(SystemCommandRunner))
                 .with_subcategories(vec![parsed]);
-            return run_clean_target(name, |dry, rep| cleaner.clean(dry, rep), dry_run, reporter);
+            return run_clean_target(
+                name,
+                |dry, rep, opts| cleaner.clean(dry, rep, opts),
+                dry_run,
+                reporter,
+                opts,
+            );
         }
         // sub = None falls through to the registry resolution below, which
         // builds the same `XcodeCleaner::new` the `CleanTarget::Xcode` arm
@@ -904,9 +914,10 @@ fn clean_by_name(
         .ok_or_else(|| anyhow::anyhow!("unknown clean target: {name}"))?;
     run_clean_target(
         cleaner.name(),
-        |dry, rep| cleaner.clean(dry, rep),
+        |dry, rep, opts| cleaner.clean(dry, rep, opts),
         dry_run,
         reporter,
+        opts,
     )
 }
 
@@ -1091,8 +1102,9 @@ fn main() -> anyhow::Result<()> {
             if cli.yes {
                 interactive::run_auto(&cleaners)?;
             } else {
+                let opts = CleanOptions::default();
                 interactive::run_interactive(&cleaners, &|name, sub, dry, rep| {
-                    clean_by_name(&home, &config, name, sub, dry, rep)
+                    clean_by_name(&home, &config, name, sub, dry, rep, &opts)
                 })?;
             }
             let runner = SystemCommandRunner;
@@ -1111,6 +1123,7 @@ fn main() -> anyhow::Result<()> {
             // (the CLI reporter keeps the "Cleaning ... [OK] / Freed:" output
             // the old re-exec'd child printed) instead of spawning this
             // binary resolved through current_exe / PATH.
+            let opts = CleanOptions::default();
             explorer::run_explore(
                 &home,
                 explorer::ExploreOptions {
@@ -1119,7 +1132,7 @@ fn main() -> anyhow::Result<()> {
                     dry_run: cli.dry_run,
                 },
                 reporter.as_ref(),
-                &|name, sub, dry, rep| clean_by_name(&home, &config, name, sub, dry, rep),
+                &|name, sub, dry, rep| clean_by_name(&home, &config, name, sub, dry, rep, &opts),
             )?;
         }
         Some(Commands::Clean { target }) => {
@@ -1201,11 +1214,13 @@ fn main() -> anyhow::Result<()> {
                     CleanTarget::Logs { dry_run, keep_days } => {
                         run_and_exit(
                             "logs",
-                            |dry, rep| {
-                                log_cleaner_from_config(&home, &config, keep_days).clean(dry, rep)
+                            |dry, rep, opts| {
+                                log_cleaner_from_config(&home, &config, keep_days)
+                                    .clean(dry, rep, opts)
                             },
                             dry_run,
                             reporter.as_ref(),
+                            &CleanOptions::default(),
                         )?;
                     }
                     CleanTarget::Xcode { dry_run, sub } => {
@@ -1236,9 +1251,10 @@ fn main() -> anyhow::Result<()> {
                         }
                         run_and_exit(
                             "xcode",
-                            |dry, rep| xcode_cleaner.clean(dry, rep),
+                            |dry, rep, opts| xcode_cleaner.clean(dry, rep, opts),
                             dry_run,
                             reporter.as_ref(),
+                            &CleanOptions::default(),
                         )?;
                     }
                     CleanTarget::Trash { dry_run } => {
@@ -1249,7 +1265,8 @@ fn main() -> anyhow::Result<()> {
                         // Report-only in both modes: sasurahime never empties
                         // the Trash itself.
                         let _ = dry_run;
-                        let result = cleaner.clean(true, reporter.as_ref())?;
+                        let result =
+                            cleaner.clean(true, reporter.as_ref(), &CleanOptions::default())?;
                         println!("Trash holds: {}", format::format_bytes(result.bytes_freed));
                         eprintln!(
                             "Warning: sasurahime cannot safely empty ~/.Trash. Open it in Finder (or run `open ~/.Trash`) and empty it there."
@@ -1262,9 +1279,10 @@ fn main() -> anyhow::Result<()> {
                         );
                         run_and_exit(
                             "ollama",
-                            move |dry, rep| cleaner.clean(dry, rep),
+                            move |dry, rep, opts| cleaner.clean(dry, rep, opts),
                             dry_run,
                             reporter.as_ref(),
+                            &CleanOptions::default(),
                         )?;
                     }
                     CleanTarget::LibraryLogs { dry_run, all } => {
@@ -1278,9 +1296,10 @@ fn main() -> anyhow::Result<()> {
                         };
                         run_and_exit(
                             "library-logs",
-                            move |dry, rep| cleaner.clean_with_opts(dry, rep, &opts),
+                            move |dry, rep, opts| cleaner.clean(dry, rep, opts),
                             dry_run,
                             reporter.as_ref(),
+                            &opts,
                         )?;
                     }
                     CleanTarget::DeviceSupport { dry_run, keep } => {
@@ -1291,9 +1310,10 @@ fn main() -> anyhow::Result<()> {
                         );
                         run_and_exit(
                             "device-support",
-                            move |dry, rep| cleaner.clean(dry, rep),
+                            move |dry, rep, opts| cleaner.clean(dry, rep, opts),
                             dry_run,
                             reporter.as_ref(),
+                            &CleanOptions::default(),
                         )?;
                     }
                     CleanTarget::IosBackup { dry_run } => {
@@ -1303,9 +1323,10 @@ fn main() -> anyhow::Result<()> {
                         );
                         run_and_exit(
                             "ios-backup",
-                            move |dry, rep| cleaner.clean(dry, rep),
+                            move |dry, rep, opts| cleaner.clean(dry, rep, opts),
                             dry_run,
                             reporter.as_ref(),
+                            &CleanOptions::default(),
                         )?;
                     }
                     CleanTarget::ApfsSnapshot {
@@ -1343,9 +1364,10 @@ fn main() -> anyhow::Result<()> {
                         .with_mode(mode);
                         run_and_exit(
                             "apfs-snapshot",
-                            move |dry, rep| cleaner.clean(dry, rep),
+                            move |dry, rep, opts| cleaner.clean(dry, rep, opts),
                             dry_run,
                             reporter.as_ref(),
+                            &CleanOptions::default(),
                         )?;
                     }
                     CleanTarget::VmSwap { dry_run } => {
@@ -1360,9 +1382,10 @@ fn main() -> anyhow::Result<()> {
                         );
                         run_and_exit(
                             "vm-swap",
-                            move |dry, rep| cleaner.clean(dry, rep),
+                            move |dry, rep, opts| cleaner.clean(dry, rep, opts),
                             dry_run,
                             reporter.as_ref(),
+                            &CleanOptions::default(),
                         )?;
                     }
                     CleanTarget::All {
@@ -1431,9 +1454,10 @@ fn main() -> anyhow::Result<()> {
                                 .with_recency_days(config.project_artifacts.recency_days);
                         run_and_exit(
                             "project-artifacts",
-                            move |dry, rep| cleaner.clean(dry, rep),
+                            move |dry, rep, opts| cleaner.clean(dry, rep, opts),
                             dry_run,
                             reporter.as_ref(),
+                            &CleanOptions::default(),
                         )?;
                     }
                     CleanTarget::External(args) => {
@@ -1479,9 +1503,10 @@ fn main() -> anyhow::Result<()> {
                             let dry_run = cli.dry_run || args.iter().any(|a| a == "--dry-run");
                             run_and_exit(
                                 cleaner.name(),
-                                move |dry, rep| cleaner.clean(dry, rep),
+                                move |dry, rep, opts| cleaner.clean(dry, rep, opts),
                                 dry_run,
                                 reporter.as_ref(),
+                                &CleanOptions::default(),
                             )?;
                         } else {
                             let Some(plugin) =
@@ -1501,9 +1526,10 @@ fn main() -> anyhow::Result<()> {
                             let dry_run = cli.dry_run || args.iter().any(|a| a == "--dry-run");
                             run_and_exit(
                                 plugin.name(),
-                                move |dry, rep| plugin.clean(dry, rep),
+                                move |dry, rep, opts| plugin.clean(dry, rep, opts),
                                 dry_run,
                                 reporter.as_ref(),
+                                &CleanOptions::default(),
                             )?;
                         }
                     }
@@ -1513,9 +1539,10 @@ fn main() -> anyhow::Result<()> {
                 // --- Standard targets: dispatch through macro-generated handler ---
                 run_and_exit(
                     target.command_name(),
-                    |dry, rep| dispatch_clean(&home, &config, &target, dry, rep),
+                    |dry, rep, opts| dispatch_clean(&home, &config, &target, dry, rep, opts),
                     target.dry_run(),
                     reporter.as_ref(),
+                    &CleanOptions::default(),
                 )?;
             }
         }
@@ -1578,9 +1605,10 @@ mod tests {
         let reporter = sasurahime::progress::VerboseProgress::new();
         let result = run_clean_target(
             "cancelled-test",
-            |_dry_run, _reporter| Err(anyhow::Error::from(CleanCancelled)),
+            |_dry_run, _reporter, _opts| Err(anyhow::Error::from(CleanCancelled)),
             false,
             &reporter,
+            &CleanOptions::default(),
         );
         assert!(result.is_ok(), "CleanCancelled should be converted to Ok");
         let clean_result = result.unwrap();
@@ -1593,7 +1621,7 @@ mod tests {
         let reporter = sasurahime::progress::VerboseProgress::new();
         let result = run_clean_target(
             "skipped-test",
-            |_dry_run, _reporter| {
+            |_dry_run, _reporter, _opts| {
                 Ok(CleanResult {
                     name: "mock-cleaner",
                     bytes_freed: 100,
@@ -1609,6 +1637,7 @@ mod tests {
             },
             false,
             &reporter,
+            &CleanOptions::default(),
         );
         assert!(result.is_ok());
         let clean_result = result.unwrap();
@@ -2309,6 +2338,7 @@ mod tests {
             Some("Archives"),
             false,
             &sasurahime::progress::DeepSuppressReporter,
+            &CleanOptions::default(),
         );
         // Restored while the lock is still held, then the lock is released.
         sasurahime::trash::set_trash_mode(previous_trash);
@@ -2343,6 +2373,7 @@ mod tests {
             Some("Archives"),
             true,
             &sasurahime::progress::DeepSuppressReporter,
+            &CleanOptions::default(),
         )
         .expect("dry-run through the seam must succeed");
         assert_eq!(result.bytes_freed, 0, "dry run must not report freed bytes");
@@ -2365,6 +2396,7 @@ mod tests {
             None,
             true,
             &sasurahime::progress::DeepSuppressReporter,
+            &CleanOptions::default(),
         )
         .expect("the seam must resolve the whole-target xcode entry");
         assert_eq!(result.name, "xcode");
@@ -2381,6 +2413,7 @@ mod tests {
             None,
             false,
             &sasurahime::progress::DeepSuppressReporter,
+            &CleanOptions::default(),
         )
         .unwrap_err();
         assert!(
@@ -2394,6 +2427,7 @@ mod tests {
             Some("no-such-sub"),
             false,
             &sasurahime::progress::DeepSuppressReporter,
+            &CleanOptions::default(),
         )
         .unwrap_err();
         assert!(

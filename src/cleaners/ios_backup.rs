@@ -61,7 +61,12 @@ impl Cleaner for IosCleaner {
         r
     }
 
-    fn clean(&self, dry_run: bool, reporter: &dyn ProgressReporter) -> Result<CleanResult> {
+    fn clean(
+        &self,
+        dry_run: bool,
+        reporter: &dyn ProgressReporter,
+        _opts: &crate::cleaner::CleanOptions,
+    ) -> Result<CleanResult> {
         if !self.backup_dir.exists() {
             return Ok(CleanResult::empty(self.name()));
         }
@@ -234,7 +239,9 @@ mod tests {
         fs::create_dir_all(&entry).unwrap();
         fs::write(entry.join("Manifest.db"), b"fakedata").unwrap();
         let reporter = crate::progress::VerboseProgress::new();
-        let result = make_cleaner(&tmp).clean(true, &reporter).unwrap();
+        let result = make_cleaner(&tmp)
+            .clean(true, &reporter, &crate::cleaner::CleanOptions::default())
+            .unwrap();
         assert_eq!(result.bytes_freed, 0);
     }
 
@@ -246,7 +253,9 @@ mod tests {
         fs::create_dir_all(&entry).unwrap();
         fs::write(entry.join("Manifest.db"), b"fakedata").unwrap();
         let reporter = crate::progress::VerboseProgress::new();
-        make_cleaner(&tmp).clean(true, &reporter).unwrap();
+        make_cleaner(&tmp)
+            .clean(true, &reporter, &crate::cleaner::CleanOptions::default())
+            .unwrap();
         assert!(
             entry.exists(),
             "dry-run must not delete the backup directory"
@@ -257,7 +266,9 @@ mod tests {
     fn clean_when_backup_dir_absent_returns_zero() {
         let tmp = TempDir::new().unwrap();
         let reporter = crate::progress::VerboseProgress::new();
-        let result = make_cleaner(&tmp).clean(true, &reporter).unwrap();
+        let result = make_cleaner(&tmp)
+            .clean(true, &reporter, &crate::cleaner::CleanOptions::default())
+            .unwrap();
         assert_eq!(result.bytes_freed, 0);
     }
 
