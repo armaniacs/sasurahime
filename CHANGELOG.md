@@ -95,6 +95,17 @@ All notable changes to sasurahime will be documented in this file. The format is
   one, so "not a terminal" and "nothing selected" can never print
   together. `clean apfs-snapshot --all` still skips the TTY check (an
   explicit opt-in) and the colima fallback refusal is unchanged.
+- The unattended target selection has one owner: `UnattendedPolicy
+  { Auto, All, Yes { results } }` with `select()` in the new
+  `unattended` module. `sasurahime auto`, `clean all` and `--yes` used to
+  hand-write three intentionally different filter loops; they now
+  classify through one function, and skipped targets carry a typed
+  `SkipReason` (NeverUnattended / NeedsOptIn / NeedsExplicitSelection)
+  with the target's risk. `Yes` carries its scan results in the variant,
+  so the scan-driven flow cannot grow a registry-driven filter (and
+  vice versa). Wording, output streams, the `auto` `[policy].present`
+  gate and the interactive-gate notice are unchanged, and a matrix unit
+  test pins all 48 cells (3 policies x 4 risks x opt-in x scan status).
 
 ## [0.4.3] - 2026-10-29
 
