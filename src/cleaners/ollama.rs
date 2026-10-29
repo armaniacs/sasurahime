@@ -2,8 +2,8 @@ use crate::cleaner::{CleanResult, Cleaner, ScanResult, ScanStatus};
 use crate::command::CommandRunner;
 use crate::format::{dir_size, parse_size_str, SizeUnits};
 use crate::progress::ProgressReporter;
+use crate::prompt::PromptPort;
 use anyhow::Result;
-use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 
 pub struct OllamaCleaner {
@@ -141,15 +141,9 @@ impl Cleaner for OllamaCleaner {
             // for unattended cleaning, but the `MultiSelect::interact()` below
             // fails on a non-TTY stdin with an obscure dialoguer error - a
             // Safe-classified target could never be cleaned by `--yes`. This
-            // is the same "not a terminal" gate the other interactive cleaners
-            // carry (library-caches, app-support, ...): in a non-TTY, ask for
-            // no selection and skip. Prompt ownership stays per-cleaner until
-            // the unified prompt port (PBI 55) replaces this gate.
-            if !std::io::stdin().is_terminal() {
-                eprintln!(
-                    "[ollama] not a terminal - skipping. \
-                     Run `sasurahime clean ollama` interactively."
-                );
+            // is the standardized "not a terminal" gate (PBI 55): in a
+            // non-TTY, ask for no selection and skip.
+            if !crate::prompt::gate_interactive("ollama") {
                 return Ok(CleanResult {
                     name: self.name(),
                     bytes_freed: 0,
@@ -166,10 +160,8 @@ impl Cleaner for OllamaCleaner {
             let defaults: Vec<bool> = vec![true; models.len()];
 
             println!("\nOllama models in ~/.ollama/models/:\n");
-            let selections = dialoguer::MultiSelect::new()
-                .items(&items)
-                .defaults(&defaults)
-                .interact()?;
+            let selections =
+                crate::prompt::TtyPrompt.multi_select(reporter, None, &items, &defaults)?;
 
             if selections.is_empty() {
                 println!("[ollama] nothing selected");

@@ -2,9 +2,9 @@ use crate::cleaner::{CleanResult, Cleaner, ScanResult, ScanStatus, SkippedEntry}
 use crate::command::CommandRunner;
 use crate::format::dir_size;
 use crate::progress::ProgressReporter;
+use crate::prompt::PromptPort;
 use anyhow::Result;
 use std::fs;
-use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
@@ -287,11 +287,7 @@ impl Cleaner for LibraryLogsCleaner {
         } else {
             // The interactive select is the only prompt this cleaner has:
             // without a terminal, skip instead of hanging on a hidden prompt.
-            if !std::io::stdin().is_terminal() {
-                eprintln!(
-                    "[library-logs] not a terminal - skipping. \
-                     Run `sasurahime clean library-logs` interactively."
-                );
+            if !crate::prompt::gate_interactive("library-logs") {
                 return Ok(CleanResult::empty(self.name()));
             }
             let selected = self.interactive_select(&entries)?;
@@ -313,8 +309,6 @@ impl Cleaner for LibraryLogsCleaner {
 
 impl LibraryLogsCleaner {
     fn interactive_select(&self, entries: &[LogEntry]) -> Result<Vec<LogEntry>> {
-        use dialoguer::MultiSelect;
-
         let items: Vec<String> = entries
             .iter()
             .map(|e| {
@@ -341,10 +335,12 @@ impl LibraryLogsCleaner {
         let defaults: Vec<bool> = vec![true; entries.len()];
 
         println!("\nCleanable log directories in ~/Library/Logs/:\n");
-        let selections = MultiSelect::new()
-            .items(&items)
-            .defaults(&defaults)
-            .interact()?;
+        let selections = crate::prompt::TtyPrompt.multi_select(
+            &crate::progress::DeepSuppressReporter,
+            None,
+            &items,
+            &defaults,
+        )?;
 
         Ok(selections.into_iter().map(|i| entries[i].clone()).collect())
     }
@@ -355,6 +351,7 @@ mod tests {
     use super::*;
     use filetime::{set_file_mtime, FileTime};
     use std::fs;
+    use std::io::IsTerminal;
     use std::time::Duration;
     use tempfile::TempDir;
 

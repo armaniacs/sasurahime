@@ -110,15 +110,15 @@ pub(crate) fn confirm(prompt: &str, out: &mut dyn Write) -> std::io::Result<bool
 }
 
 /// RAII bracket for the secondary-confirmation suppression inside cleaners:
-/// sets `generic::set_skip_confirm(true)` on creation and restores `false`
-/// on drop, so both interactive entry points share one bracket semantics.
-/// Bind it to a named local (`let _skip_confirm = ...`); `let _ = ...`
-/// would drop it at once.
+/// sets `prompt::set_confirm_suppressed(true)` on creation and restores
+/// `false` on drop, so both interactive entry points share one bracket
+/// semantics. Bind it to a named local (`let _skip_confirm = ...`);
+/// `let _ = ...` would drop it at once.
 pub(crate) struct SkipConfirmGuard;
 
 impl SkipConfirmGuard {
     pub(crate) fn new() -> Self {
-        crate::cleaners::generic::set_skip_confirm(true);
+        crate::prompt::set_confirm_suppressed(true);
         Self
     }
 }
@@ -131,7 +131,7 @@ impl Default for SkipConfirmGuard {
 
 impl Drop for SkipConfirmGuard {
     fn drop(&mut self) {
-        crate::cleaners::generic::set_skip_confirm(false);
+        crate::prompt::set_confirm_suppressed(false);
     }
 }
 

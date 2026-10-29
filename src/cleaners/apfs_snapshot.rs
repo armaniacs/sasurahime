@@ -1,8 +1,8 @@
 use crate::cleaner::{CleanResult, Cleaner, ScanResult, ScanStatus, SkippedEntry};
 use crate::command::CommandRunner;
 use crate::progress::ProgressReporter;
+use crate::prompt::PromptPort;
 use anyhow::Result;
-use std::io::IsTerminal;
 
 pub struct ApfsSnapshotCleaner {
     pub runner: Box<dyn CommandRunner>,
@@ -236,11 +236,8 @@ impl Cleaner for ApfsSnapshotCleaner {
 
         // `--all` is an explicit opt-in, so it skips the TTY guard that exists
         // only to stop an interactive prompt from being hit in a pipeline.
-        if !self.all && !std::io::stdin().is_terminal() {
-            eprintln!(
-                "[apfs-snapshot] not a terminal — skipping. Use `sasurahime clean apfs-snapshot` \
-                 for interactive selection, or `--all` to delete everything."
-            );
+        // The `--all` alternative is documented in the command help.
+        if !self.all && !crate::prompt::gate_interactive("apfs-snapshot") {
             return Ok(CleanResult {
                 name: self.name(),
                 bytes_freed: 0,
@@ -361,13 +358,14 @@ impl ApfsSnapshotCleaner {
     }
 
     fn interactive_select(&self, names: &[String]) -> Result<Vec<String>> {
-        use dialoguer::MultiSelect;
         let defaults = vec![true; names.len()];
         println!("\nLocal APFS Time Machine snapshots:\n");
-        let selections = MultiSelect::new()
-            .items(names)
-            .defaults(&defaults)
-            .interact()?;
+        let selections = crate::prompt::TtyPrompt.multi_select(
+            &crate::progress::DeepSuppressReporter,
+            None,
+            names,
+            &defaults,
+        )?;
         Ok(selections.into_iter().map(|i| names[i].clone()).collect())
     }
 
@@ -402,12 +400,13 @@ impl ApfsSnapshotCleaner {
                 "⚠  Urgency 4 interrupts running backups: data written while thinning runs may be lost."
             );
             // Extra confirmation, TTY only; a pipeline cannot confirm, so
-            // urgency 4 never runs unattended.
-            if !std::io::stdin().is_terminal()
-                || !dialoguer::Confirm::new()
-                    .with_prompt("Interrupt running backups and thin with urgency 4?")
-                    .default(false)
-                    .interact()?
+            // urgency 4 never runs unattended. The port owns the suspension
+            // and the one-line Confirm prompt.
+            if !crate::prompt::is_interactive()
+                || !crate::prompt::TtyPrompt.confirm(
+                    &crate::progress::DeepSuppressReporter,
+                    "Interrupt running backups and thin with urgency 4?",
+                )?
             {
                 println!("[apfs-snapshot] cancelled");
                 return Ok(zero);

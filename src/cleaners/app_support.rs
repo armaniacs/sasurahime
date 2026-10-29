@@ -4,10 +4,10 @@ use crate::format::{dir_size, format_bytes};
 use crate::hint::apps::KNOWN_ENTRIES;
 use crate::hint::{is_running, quit_app_and_wait, relaunch_app, BaseDir, HintEntry};
 use crate::progress::ProgressReporter;
+use crate::prompt::PromptPort;
 use anyhow::Result;
 use std::collections::HashSet;
 use std::fs;
-use std::io::IsTerminal;
 use std::path::{Component, Path, PathBuf};
 use std::time::SystemTime;
 
@@ -298,11 +298,10 @@ impl AppSupportCleaner {
 
     /// Display only. Selected entries are opened in Finder; nothing is deleted.
     fn show_leftovers(&self, dry_run: bool) -> Result<()> {
-        use dialoguer::{Confirm, MultiSelect};
         if !self.base().exists() {
             return Ok(());
         }
-        if !dry_run && !std::io::stdin().is_terminal() {
+        if !dry_run && !crate::prompt::is_interactive() {
             return Ok(());
         }
         let left = self.leftovers();
@@ -320,22 +319,20 @@ impl AppSupportCleaner {
         }
         let items: Vec<String> = left.iter().map(format_leftover_line).collect();
         let defaults = vec![false; items.len()];
-        let picked = MultiSelect::new()
-            .with_prompt("Select leftovers to reveal in Finder (space to toggle, enter to confirm)")
-            .items(&items)
-            .defaults(&defaults)
-            .interact()?;
+        let picked = crate::prompt::TtyPrompt.multi_select(
+            &crate::progress::DeepSuppressReporter,
+            Some("Select leftovers to reveal in Finder (space to toggle, enter to confirm)"),
+            &items,
+            &defaults,
+        )?;
         if picked.is_empty() {
             return Ok(());
         }
         if open_needs_confirmation(picked.len()) {
-            let ok = Confirm::new()
-                .with_prompt(format!(
-                    "This opens {} Finder windows. Continue?",
-                    picked.len()
-                ))
-                .default(false)
-                .interact()?;
+            let ok = crate::prompt::TtyPrompt.confirm(
+                &crate::progress::DeepSuppressReporter,
+                &format!("This opens {} Finder windows. Continue?", picked.len()),
+            )?;
             if !ok {
                 println!("[{NAME}] nothing opened");
                 return Ok(());
@@ -405,17 +402,18 @@ impl AppSupportCleaner {
         cands: &[Candidate],
         running: &HashSet<&'static str>,
     ) -> Result<Vec<Candidate>> {
-        use dialoguer::MultiSelect;
         let items: Vec<String> = cands
             .iter()
             .map(|c| format_candidate_label(c, running.contains(c.target.hint_name)))
             .collect();
         let defaults = vec![false; items.len()];
         println!("\nCache directories under ~/Library/Application Support/ (none selected by default):\n");
-        let picked = MultiSelect::new()
-            .items(&items)
-            .defaults(&defaults)
-            .interact()?;
+        let picked = crate::prompt::TtyPrompt.multi_select(
+            &crate::progress::DeepSuppressReporter,
+            None,
+            &items,
+            &defaults,
+        )?;
         Ok(picked.into_iter().map(|i| cands[i].clone()).collect())
     }
 
@@ -424,19 +422,16 @@ impl AppSupportCleaner {
         selected: &[Candidate],
         running: &HashSet<&'static str>,
     ) -> Result<HashSet<&'static str>> {
-        use dialoguer::Confirm;
         let mut approved = HashSet::new();
         for c in selected {
             let name = c.target.hint_name;
             if !running.contains(name) || approved.contains(name) {
                 continue;
             }
-            let ok = Confirm::new()
-                .with_prompt(format!(
-                    "{name} is running. Quit it now? (its own save dialogs apply)"
-                ))
-                .default(false)
-                .interact()?;
+            let ok = crate::prompt::TtyPrompt.confirm(
+                &crate::progress::DeepSuppressReporter,
+                &format!("{name} is running. Quit it now? (its own save dialogs apply)"),
+            )?;
             if ok {
                 approved.insert(name);
             }
@@ -606,11 +601,7 @@ impl AppSupportCleaner {
             println!("[{NAME}] nothing to clean");
             return Ok(Self::empty_result());
         }
-        if !std::io::stdin().is_terminal() {
-            eprintln!(
-                "[{NAME}] not a terminal - skipping. Run `sasurahime clean app-support` \
-                 interactively to choose what to remove."
-            );
+        if !crate::prompt::gate_interactive(NAME) {
             return Ok(Self::empty_result());
         }
         let running = self.running_apps(&cands);

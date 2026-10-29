@@ -8,6 +8,15 @@ All notable changes to sasurahime will be documented in this file. The format is
 
 ### Changed
 
+- Interactive prompts now run through a single prompt port
+  (`crate::prompt`): the TTY gating, the live-output suspension, and the
+  dialoguer calls are owned in one place instead of 8 cleaner files, so
+  the dialoguer-redraw fix (one short prompt line under a suspended
+  progress line) can no longer resurface per call site. The hand-rolled
+  "not a terminal" guards were replaced by one standardized gate, and the
+  TUI's confirmation suppression moved into the port.
+### Changed
+
 - Plugins can report what they removed by printing a JSON object
   (`{"freed": N, "uses_trash": B}`) as the last line of stdout. Plugins that
   do not print JSON keep working through the exit-code-only protocol.

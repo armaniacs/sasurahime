@@ -2,10 +2,10 @@ use crate::cleaner::{CleanOptions, CleanResult, Cleaner, ScanResult, ScanStatus,
 use crate::command::CommandRunner;
 use crate::format::{dir_size, format_bytes};
 use crate::progress::ProgressReporter;
+use crate::prompt::PromptPort;
 use anyhow::Result;
 use std::collections::HashSet;
 use std::fs;
-use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 
 /// Vendors whose containers are never reported as orphans. Apple data is
@@ -423,33 +423,21 @@ impl OrphanContainersCleaner {
         reporter: &dyn ProgressReporter,
         candidates: &[OrphanCandidate],
     ) -> Result<Vec<OrphanCandidate>> {
-        use dialoguer::MultiSelect;
-
         let items: Vec<String> = candidates.iter().map(format_item).collect();
         println!("\nContainers of apps that are not installed (nothing is selected by default):\n");
         println!(
             "Moved items may not show \"Put Back\" in Finder's context menu. \
              Restore by dragging out of the Trash.\n"
         );
-        // The prompt owns the screen: the live progress line (the TUI's
-        // animated wrapper, the CLI's frozen spinner) must not redraw under
-        // it. suspend hides the line for the prompt and redraws it after.
-        let mut picks = None;
-        let mut prompt = || {
-            picks = Some(
-                MultiSelect::new()
-                    .with_prompt(
-                        "Select folders to move to Trash  [space to toggle, enter to confirm]",
-                    )
-                    .items(&items)
-                    .interact(),
-            )
-        };
-        reporter.suspend_live_output(&mut prompt);
-        let picks = match picks {
-            Some(picks) => picks?,
-            None => anyhow::bail!("the selection prompt did not run"),
-        };
+        // The prompt owns the screen (suspension and the dialoguer call are
+        // owned by the port, so the live progress line never redraws under
+        // it). No defaults: nothing is selected by default.
+        let picks = crate::prompt::TtyPrompt.multi_select(
+            reporter,
+            Some("Select folders to move to Trash  [space to toggle, enter to confirm]"),
+            &items,
+            &[],
+        )?;
         Ok(picks.into_iter().map(|i| candidates[i].clone()).collect())
     }
 
@@ -493,11 +481,7 @@ impl OrphanContainersCleaner {
 
         // Which folders are safe to remove is a judgement call that only the
         // user can make, so there is no non-interactive path (no `--all`).
-        if !std::io::stdin().is_terminal() {
-            eprintln!(
-                "[orphan-containers] not a terminal - skipping. Run \
-                 `sasurahime clean orphan-containers` to choose folders interactively."
-            );
+        if !crate::prompt::gate_interactive("orphan-containers") {
             return Ok(empty_result(self.name()));
         }
 
@@ -1377,13 +1361,14 @@ mod tests {
 
     #[test]
     fn selection_runs_without_a_live_spinner_and_deletion_ticks_per_second() {
-        // The selection prompt owns the screen: interactive_select hands the
-        // dialoguer prompt to suspend_live_output, so no live spinner redraws
-        // under it and the frozen `Cleaning...` label never labels the
-        // selection phase. The live per-second elapsed tick is enabled only
-        // in delete_selected, where no prompt can occur. dialoguer needs a
-        // real TTY, so this pins the source (the same style as progress.rs's
-        // steady-tick pins).
+        // The selection prompt's contracts (suspension, the dialoguer call)
+        // are owned by the prompt port (PBI 55): interactive_select passes
+        // the live reporter to the port, so the suspension follows the
+        // caller's reporter (the TUI's animated wrapper, the CLI's frozen
+        // spinner) and the frozen `Cleaning...` label never labels the
+        // selection phase. The suspension contract is behaviorally tested
+        // in prompt::tests; this pins the seam shape and the delete-phase
+        // tick.
         let src = include_str!("orphan_containers.rs");
         let select_start = src
             .find("fn interactive_select(")
@@ -1394,8 +1379,12 @@ mod tests {
             .unwrap_or(src.len());
         let select_body = &src[select_start..select_end];
         assert!(
-            select_body.contains("suspend_live_output"),
-            "the selection prompt must run under suspend_live_output (no live spinner during prompting)"
+            select_body.contains("TtyPrompt.multi_select("),
+            "the selection prompt must run through the port with the caller's reporter (the suspension follows it)"
+        );
+        assert!(
+            !select_body.contains("dialoguer::"),
+            "the cleaner must not call dialoguer directly (the port owns the prompt)"
         );
         assert!(
             !select_body.contains("enable_live_elapsed"),

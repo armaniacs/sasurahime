@@ -11,23 +11,11 @@ use crate::disk_image::{
 };
 use crate::format::dir_size;
 use crate::progress::ProgressReporter;
+use crate::prompt::{self, PromptPort, TtyPrompt};
 use anyhow::Result;
 use std::fs;
-use std::io::{stdin, IsTerminal};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, SystemTime};
-
-/// When set, skip the interactive `confirm_message` prompt inside `clean()`.
-/// Used by the TUI (interactive.rs) which already asks the user for confirmation
-/// before the cleaning loop, avoiding a redundant second prompt.
-static SKIP_CONFIRM: AtomicBool = AtomicBool::new(false);
-
-/// Globally suppress the secondary confirmation prompt in `CliCleaner::clean()`.
-/// Call before the TUI cleaning loop and restore with `set_skip_confirm(false)` after.
-pub fn set_skip_confirm(skip: bool) {
-    SKIP_CONFIRM.store(skip, Ordering::Relaxed);
-}
 
 /// A cleaner that delegates the actual cleaning to an external CLI tool
 /// (`program args`). When constructed with a `detect_dir`, the size is
@@ -553,30 +541,16 @@ impl CliCleaner {
                 // Skipped when running under the interactive TUI (which already
                 // asked for confirmation) or when stdin is not a terminal.
                 if let Some(msg) = &self.confirm_message {
-                    if !SKIP_CONFIRM.load(Ordering::Relaxed) && stdin().is_terminal() {
-                        // The prompt owns the screen: the live progress line
-                        // must not redraw under it (same as the
-                        // orphan-containers selection prompt). The long
-                        // explanation prints as normal output — a Confirm
-                        // prompt that wraps is only cleared one line deep by
-                        // dialoguer, so the first render's lines would stay
-                        // behind and the message would appear twice. The
-                        // Confirm prompt itself stays one short line.
-                        let mut answer = None;
-                        let mut prompt = || {
-                            println!("\n{msg}");
-                            answer = Some(
-                                dialoguer::Confirm::new()
-                                    .with_prompt("Proceed?")
-                                    .default(false)
-                                    .interact(),
-                            )
-                        };
-                        reporter.suspend_live_output(&mut prompt);
-                        let confirmed = match answer {
-                            Some(confirmed) => confirmed?,
-                            None => anyhow::bail!("the confirmation prompt did not run"),
-                        };
+                    if !prompt::confirm_suppressed() && prompt::is_interactive() {
+                        // The long explanation prints as normal output and
+                        // the Confirm prompt stays one short line: dialoguer
+                        // clears one line deep, so a wrapped prompt would
+                        // double the message (the confirm-duplication fix).
+                        println!("\n{msg}");
+                        // The prompt owns the screen (suspension and the
+                        // one-line Confirm prompt are owned by the port, so
+                        // the live progress line never redraws under it).
+                        let confirmed = TtyPrompt.confirm(reporter, "Proceed?")?;
                         if !confirmed {
                             println!("{}: cancelled", self.display_name);
                             eprintln!("  $ {program} {}", args.join(" "));
@@ -1268,6 +1242,7 @@ pub fn clean_cli_or_fallback(
 mod tests {
     use super::*;
     use crate::command::CommandRunner;
+    use std::sync::atomic::Ordering;
 
     #[test]
     fn clean_with_opts_trash_mode_overrides_the_global() {
@@ -2550,13 +2525,14 @@ mod tests {
     }
 
     #[test]
-    fn confirm_prompt_runs_without_a_live_spinner() {
-        // The confirm prompt owns the screen: the confirm branch hands the
-        // dialoguer prompt to suspend_live_output, so the live progress line
-        // never redraws under it — dialoguer's re-render leaves wrapped-line
-        // debris on a long prompt otherwise. dialoguer needs a real TTY, so
-        // this pins the source (the same style as the orphan-containers
-        // selection prompt pin).
+    fn confirm_prompt_ownership_lives_in_the_port() {
+        // The confirm branch's prompt contracts (suspension, the one-line
+        // Confirm prompt) are owned by the prompt port (PBI 55): the
+        // cleaner calls the port instead of running dialoguer itself, so
+        // the dialoguer-redraw fix cannot resurface per call site. The
+        // suspension contract is behaviorally tested in the port's own
+        // tests (prompt::tests::tty_prompt_suspends_live_output_*); this
+        // pins the seam shape.
         let src = include_str!("generic.rs");
         let start = src
             .find("fn clean_with_mode(")
@@ -2567,8 +2543,12 @@ mod tests {
             .unwrap_or(src.len());
         let body = &src[start..end];
         assert!(
-            body.contains("suspend_live_output"),
-            "the confirm prompt must run under suspend_live_output (no live spinner during prompting)"
+            body.contains("TtyPrompt.confirm"),
+            "the confirm prompt must run through the prompt port"
+        );
+        assert!(
+            !body.contains("dialoguer::"),
+            "the cleaner must not call dialoguer directly (the port owns the prompt)"
         );
         assert!(
             !body.contains("with_prompt(*msg)"),

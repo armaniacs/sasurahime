@@ -1,9 +1,9 @@
 use crate::cleaner::{CleanResult, Cleaner, ScanResult, ScanStatus};
 use crate::command::CommandRunner;
 use crate::progress::ProgressReporter;
+use crate::prompt::PromptPort;
 use anyhow::Result;
 use std::fs;
-use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 
 pub struct IosCleaner {
@@ -102,11 +102,7 @@ impl Cleaner for IosCleaner {
 
         // Safety: iOS backups are irreversible and must only be deleted
         // interactively. If stdin is not a terminal (e.g. via --yes), refuse.
-        if !std::io::stdin().is_terminal() {
-            eprintln!(
-                "[ios-backup] not a terminal — skipping. Use `sasurahime clean ios-backup` \
-                 for interactive selection."
-            );
+        if !crate::prompt::gate_interactive("ios-backup") {
             return Ok(CleanResult::empty(self.name()));
         }
 
@@ -149,7 +145,6 @@ impl Cleaner for IosCleaner {
 
 impl IosCleaner {
     fn interactive_select(&self, entries: &[(PathBuf, u64)]) -> Result<Vec<(PathBuf, u64)>> {
-        use dialoguer::MultiSelect;
         let items: Vec<String> = entries
             .iter()
             .map(|(path, size)| {
@@ -159,10 +154,12 @@ impl IosCleaner {
             .collect();
         let defaults = vec![true; entries.len()];
         println!("\niOS device backups in ~/Library/Application Support/MobileSync/Backup/:\n");
-        let selections = MultiSelect::new()
-            .items(&items)
-            .defaults(&defaults)
-            .interact()?;
+        let selections = crate::prompt::TtyPrompt.multi_select(
+            &crate::progress::DeepSuppressReporter,
+            None,
+            &items,
+            &defaults,
+        )?;
         Ok(selections.into_iter().map(|i| entries[i].clone()).collect())
     }
 }

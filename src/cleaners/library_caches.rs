@@ -3,9 +3,9 @@ use crate::command::CommandRunner;
 use crate::format::format_bytes;
 use crate::hint::{apps::KNOWN_ENTRIES, BaseDir, HintEntry};
 use crate::progress::ProgressReporter;
+use crate::prompt::PromptPort;
 use anyhow::Result;
 use std::fs;
-use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 
 pub const EXCLUDED_NAMES: &[(&str, &str)] = &[
@@ -282,14 +282,15 @@ impl LibraryCachesCleaner {
     }
 
     fn interactive_select(&self, entries: &[CacheEntry]) -> Result<Vec<CacheEntry>> {
-        use dialoguer::MultiSelect;
         let items: Vec<String> = entries.iter().map(render_item).collect();
         let defaults = vec![false; entries.len()];
         println!("\nSelect known app caches to move to Trash:\n");
-        let picked = MultiSelect::new()
-            .items(&items)
-            .defaults(&defaults)
-            .interact()?;
+        let picked = crate::prompt::TtyPrompt.multi_select(
+            &crate::progress::DeepSuppressReporter,
+            None,
+            &items,
+            &defaults,
+        )?;
         Ok(picked.into_iter().map(|i| entries[i].clone()).collect())
     }
 
@@ -336,11 +337,7 @@ impl LibraryCachesCleaner {
             println!("\n[library-caches] no deletable known caches");
             return Ok(empty_result(self.name()));
         }
-        if !std::io::stdin().is_terminal() {
-            eprintln!(
-                "[library-caches] not a terminal - skipping. \
-                 Run `sasurahime clean library-caches` interactively."
-            );
+        if !crate::prompt::gate_interactive("library-caches") {
             return Ok(empty_result(self.name()));
         }
 

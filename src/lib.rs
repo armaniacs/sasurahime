@@ -26,6 +26,7 @@ pub mod hint;
 pub mod history;
 pub mod interactive;
 pub mod progress;
+pub mod prompt;
 pub mod scan_cache;
 pub mod scanner;
 #[cfg(test)]
