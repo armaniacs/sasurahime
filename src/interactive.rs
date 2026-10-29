@@ -164,13 +164,13 @@ impl Drop for SkipConfirmGuard {
     }
 }
 
-/// Line shapes for the post-batch report. Both interactive entry points
-/// print the same failure and skip facts; run_auto's multi-target batch
+/// Line shapes for the post-batch report. Every batch entry point prints
+/// the same failure and skip facts; the `auto` batch (CLI arm and TUI)
 /// names the cleaner in every line, while the TUI whole-target branch runs
 /// one batch call per target and omits the name (the selection context
 /// already named it).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum ReportShape {
+pub enum ReportShape {
     /// `Error cleaning {name}: {e}` and `  - {name}: {detail}`.
     Named,
     /// `Error: {e}` and `  - {detail}`.
@@ -181,7 +181,7 @@ pub(crate) enum ReportShape {
 /// Failure output is deliberately not a run_batch callback (PBI-33 recorded
 /// decision, option b): run_batch only collects, and every caller reports
 /// after the batch — one shared path wins over per-failure immediacy.
-pub(crate) fn report_batch_failures(
+pub fn report_batch_failures(
     out: &mut dyn Write,
     summary: &crate::batch::BatchSummary,
     shape: ReportShape,
@@ -209,7 +209,7 @@ pub(crate) fn report_batch_failures(
 }
 
 /// Print the closing "Total freed" line after a clean run.
-pub(crate) fn report_total_freed(out: &mut dyn Write, total_freed: u64) -> std::io::Result<()> {
+pub fn report_total_freed(out: &mut dyn Write, total_freed: u64) -> std::io::Result<()> {
     writeln!(out, "\nTotal freed: {}", format_bytes(total_freed))
 }
 

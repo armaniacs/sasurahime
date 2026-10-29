@@ -788,7 +788,9 @@ where
     }
 
     // The single-target path keeps its own flow (CleanCancelled, per-target
-    // freed_message) but funnels the history write through the one guard in
+    // freed_message, and the CleanResult-shaped skip report above — PBI 73's
+    // shared report_batch_failures takes a BatchSummary, so this report is
+    // out of scope) but funnels the history write through the one guard in
     // batch.rs, so `!dry_run && bytes_freed > 0` has exactly one owner.
     batch::write_history_entry_if_needed(
         label,
@@ -1035,18 +1037,13 @@ fn main() -> anyhow::Result<()> {
                 false,
                 true,
             );
-            for (name, e) in &summary.failures {
-                eprintln!("Error cleaning {name}: {e}");
-            }
-            if !summary.skipped.is_empty() {
-                eprintln!(
-                    "{} file(s) skipped due to errors (permission/lock):",
-                    summary.skipped.len()
-                );
-                for (name, detail) in &summary.skipped {
-                    eprintln!("  - {name}: {detail}");
-                }
-            }
+            interactive::report_batch_failures(
+                &mut std::io::stderr(),
+                &summary,
+                interactive::ReportShape::Named,
+            )?;
+            // The target-skip guidance stays at the call site: the wording is
+            // specific to `auto`.
             if !skipped.is_empty() {
                 eprintln!("Skipped {} target(s):", skipped.len());
                 for s in &skipped {
@@ -1054,7 +1051,7 @@ fn main() -> anyhow::Result<()> {
                 }
                 eprintln!("Run `sasurahime clean <target>` explicitly for those.");
             }
-            println!("Total freed: {}", format::format_bytes(summary.total_freed));
+            interactive::report_total_freed(&mut std::io::stdout(), summary.total_freed)?;
         }
         Some(Commands::Scan { json }) => {
             let cleaners = all_cleaners(&home, &config);
@@ -1196,19 +1193,15 @@ fn main() -> anyhow::Result<()> {
                             false,
                             false,
                         );
-                        for (name, e) in &summary.failures {
-                            eprintln!("Error cleaning {name}: {e}");
-                        }
-                        if !summary.skipped.is_empty() {
-                            eprintln!(
-                                "{} file(s) skipped due to errors (permission/lock):",
-                                summary.skipped.len()
-                            );
-                            for (name, detail) in &summary.skipped {
-                                eprintln!("  - {name}: {detail}");
-                            }
-                        }
-                        println!("Total freed: {}", format::format_bytes(summary.total_freed));
+                        interactive::report_batch_failures(
+                            &mut std::io::stderr(),
+                            &summary,
+                            interactive::ReportShape::Named,
+                        )?;
+                        interactive::report_total_freed(
+                            &mut std::io::stdout(),
+                            summary.total_freed,
+                        )?;
                     }
                     CleanTarget::Logs { dry_run, keep_days } => {
                         run_and_exit(
@@ -1427,24 +1420,20 @@ fn main() -> anyhow::Result<()> {
                             false,
                             true,
                         );
-                        for (name, e) in &summary.failures {
-                            eprintln!("Error cleaning {name}: {e}");
-                        }
-                        if !summary.skipped.is_empty() {
-                            eprintln!(
-                                "{} file(s) skipped due to errors (permission/lock):",
-                                summary.skipped.len()
-                            );
-                            for (name, detail) in &summary.skipped {
-                                eprintln!("  - {name}: {detail}");
-                            }
-                        }
+                        interactive::report_batch_failures(
+                            &mut std::io::stderr(),
+                            &summary,
+                            interactive::ReportShape::Named,
+                        )?;
                         if skipped_targets > 0 {
                             eprintln!(
                                 "Skipped {skipped_targets} target(s) that need --include-manual."
                             );
                         }
-                        println!("Total freed: {}", format::format_bytes(summary.total_freed));
+                        interactive::report_total_freed(
+                            &mut std::io::stdout(),
+                            summary.total_freed,
+                        )?;
                     }
                     CleanTarget::ProjectArtifacts { dry_run } => {
                         let roots = project_artifact_roots(&home, &config);
@@ -2274,6 +2263,34 @@ mod tests {
     #[test]
     fn colliding_custom_names_empty_without_custom_config() {
         assert!(colliding_custom_names(&config::Config::default()).is_empty());
+    }
+
+    // ── PBI 73: the batch arms ride the shared reporters ───────────────────
+
+    #[test]
+    fn batch_arms_report_through_the_shared_helpers() {
+        // The three batch arms (auto, caches, all) adopt the shared
+        // report_batch_failures + report_total_freed instead of hand-writing
+        // the failure, skipped, and "Total freed" lines. The single-target
+        // run_clean_target path keeps its own report (its input type is
+        // CleanResult, not the BatchSummary the shared reporter takes), so
+        // the hand-written forms below must stay gone.
+        let src = include_str!("main.rs");
+        assert!(
+            src.contains("interactive::report_batch_failures(")
+                && src.contains("interactive::report_total_freed("),
+            "the batch arms must route failures, skips, and the Total freed line through the shared reporters"
+        );
+        assert!(
+            !src.contains("eprintln!(\"Error cleaning {name}: {e}\");"),
+            "a hand-written batch failure report is back in main.rs"
+        );
+        assert!(
+            !src.contains(
+                "println!(\"Total freed: {}\", format::format_bytes(summary.total_freed));"
+            ),
+            "a hand-written Total freed line is back in main.rs"
+        );
     }
 
     // ── PBI-50: the in-process clean seam ──────────────────────────────────

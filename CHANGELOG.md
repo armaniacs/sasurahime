@@ -82,6 +82,11 @@ All notable changes to sasurahime will be documented in this file. The format is
   `delete_path` (zero callers, bypassed the scope tripwire) and the
   orphaned `is_skippable_error` (its ErrorKind list lived only in
   `classify_io_error`). Deletions reach the scanner through one seam.
+- The batch arms (`auto`, `clean caches`, `clean all`) print their
+  failures, skipped files, and closing line through the same reporters
+  the TUI already used. One visible consequence: "Total freed" now has
+  the leading blank line every batch arm prints (the three CLI arms
+  dropped it). Line wording and output streams are unchanged.
 
 ## [0.4.3] - 2026-10-29
 
