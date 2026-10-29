@@ -1,6 +1,6 @@
 use crate::cleaner::{
     CleanCancelled, CleanOptions, CleanResult, Cleaner, PerCleanerFilters, Risk, ScanResult,
-    ScanStatus, SkipCause, SkippedEntry,
+    ScanStatus,
 };
 use crate::command::CommandRunner;
 #[cfg(test)]
@@ -12,7 +12,7 @@ use crate::disk_image::{
 use crate::format::dir_size;
 use crate::progress::ProgressReporter;
 use crate::prompt::{self, PromptPort, TtyPrompt};
-use crate::safety::{is_safe_delete_target, resolve_env_dir};
+use crate::safety::resolve_env_dir;
 use anyhow::Result;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -595,45 +595,18 @@ impl CliCleaner {
                             );
                             return Ok(CleanResult::empty(self.name()));
                         }
-                        // TOCTOU mitigation: re-validate fallback delete path.
-                        if !is_safe_delete_target(detect_dir) {
-                            eprintln!(
-                                "[{}] warning: unsafe fallback path, skipping: {}",
-                                self.display_name,
-                                detect_dir.display()
-                            );
-                            // The fallback was refused before any deletion: the
-                            // seam was never invoked, so no Trash claim may be
-                            // made (same as the free `clean_cli_or_fallback`'s
-                            // unsafe-path return).
-                            return Ok(CleanResult::empty(self.name()));
-                        }
-                        let outcome =
-                            crate::trash::safe_delete(self.runner.as_ref(), detect_dir, mode)?;
-                        if let Some(reason) = outcome.skip_reason {
-                            // The seam classified the failure as skippable: the
-                            // entry was NOT deleted, so no Trash claim may be
-                            // made even though the seam resolved the mode (same
-                            // as the unsafe-path return above).
-                            return Ok(CleanResult {
-                                name: self.name(),
-                                bytes_freed: 0,
-                                uses_trash: false,
-                                skipped: vec![SkippedEntry {
-                                    path: detect_dir.to_path_buf(),
-                                    reason: SkipCause::Delete(reason),
-                                }],
-                            });
-                        }
-                        println!(
-                            "[{}] removed cache: {}",
+                        // There is no caller-side unsafe-path guard here anymore: the
+                        // seam's scope tripwire refuses the same paths at deletion
+                        // time, and the ledger records the refusal as a skipped
+                        // entry (prose reason) and continues — the skip channel
+                        // and the deleted-path audit trail stay consistent with
+                        // every other ledger user.
+                        return Ok(crate::trash::delete_entries(
                             self.display_name,
-                            detect_dir.display()
-                        );
-                        return Ok(CleanResult::freed(
-                            self.name(),
-                            size_before,
-                            outcome.uses_trash,
+                            self.runner.as_ref(),
+                            reporter,
+                            mode,
+                            &[(detect_dir.to_path_buf(), size_before)],
                         ));
                     }
                     println!("{}: not found, skipping", self.display_name);
@@ -919,6 +892,7 @@ pub fn meets_size_filter(size: u64, larger_than_mb: Option<u64>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cleaner::SkipCause;
     use crate::command::CommandRunner;
     use std::sync::atomic::Ordering;
 
@@ -1008,6 +982,111 @@ mod tests {
         );
         assert!(!real.exists(), "the safe dir still deletes");
         assert_eq!(result.bytes_freed, real_size, "the safe dir is summed");
+    }
+
+    // ── CliCleaner fallback ledger migration (PBI 77) ──
+
+    /// A reporter that records the progress calls, so the threading of the
+    /// reporter into the fallback delete ledger is observable.
+    struct RecordingReporter {
+        inits: std::sync::Mutex<Vec<(String, usize)>>,
+        ticks: std::sync::Mutex<Vec<(PathBuf, usize, u64)>>,
+    }
+
+    impl Default for RecordingReporter {
+        fn default() -> Self {
+            Self {
+                inits: std::sync::Mutex::new(Vec::new()),
+                ticks: std::sync::Mutex::new(Vec::new()),
+            }
+        }
+    }
+
+    impl crate::progress::ProgressReporter for RecordingReporter {
+        fn show_spinner(&self) -> bool {
+            false
+        }
+        fn progress_init(&self, label: &str, total: usize) {
+            self.inits.lock().unwrap().push((label.to_string(), total));
+        }
+        fn progress_tick(&self, path: &Path, current: usize, size_bytes: u64) {
+            self.ticks
+                .lock()
+                .unwrap()
+                .push((path.to_path_buf(), current, size_bytes));
+        }
+        fn progress_finish(&self) {}
+    }
+
+    #[test]
+    fn cli_fallback_threads_the_reporter_into_the_ledger() {
+        // The fallback delete rides the delete ledger: progress_init carries
+        // the label and items.len() (PBI 68) and the deletion ticks. Before
+        // the ledger migration the reporter had no path into the fallback
+        // branch, so the progress tick was structurally absent.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let dir = tmp.path().join("cache");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("data.bin"), vec![0u8; 1024]).unwrap();
+        let cleaner = fallback_cli_cleaner(&dir);
+        let reporter = RecordingReporter::default();
+        let opts = CleanOptions {
+            trash_mode: crate::trash::TrashMode::Permanent,
+            ..Default::default()
+        };
+        cleaner.clean(false, &reporter, &opts).unwrap();
+        let inits = reporter.inits.lock().unwrap();
+        assert_eq!(
+            *inits,
+            vec![("test-cli-pin".to_string(), 1)],
+            "progress_init runs once with the label and items.len()"
+        );
+        let ticks = reporter.ticks.lock().unwrap();
+        assert_eq!(ticks.len(), 1, "one tick per deleted entry: {ticks:?}");
+        assert_eq!(ticks[0].0, dir);
+    }
+
+    #[test]
+    fn cli_fallback_records_an_unsafe_detect_dir_as_a_skipped_entry() {
+        // The TOCTOU pre-check warned without recording: the skip channel
+        // and the exit code could not see the refusal. The seam's scope
+        // tripwire refuses the same path at deletion time and the ledger
+        // records it as a skipped entry (prose reason) — same as every
+        // other ledger user. A tempdir under /tmp never passes
+        // is_safe_delete_target (the canonicalized path starts with
+        // /private/tmp).
+        let tmp = tempfile::TempDir::new_in("/tmp").unwrap();
+        std::fs::write(tmp.path().join("keep.txt"), b"data").unwrap();
+        let cleaner = fallback_cli_cleaner(tmp.path());
+        let opts = CleanOptions {
+            trash_mode: crate::trash::TrashMode::Permanent,
+            ..Default::default()
+        };
+        let result = cleaner
+            .clean(false, &crate::progress::DeepSuppressReporter, &opts)
+            .unwrap();
+        assert_eq!(result.bytes_freed, 0, "a refused dir frees nothing");
+        assert!(
+            tmp.path().join("keep.txt").exists(),
+            "the unsafe dir must survive"
+        );
+        assert_eq!(
+            result.skipped.len(),
+            1,
+            "the refusal must be recorded as a SkippedEntry: {:?}",
+            result.skipped
+        );
+        assert_eq!(result.skipped[0].path, tmp.path());
+        assert!(
+            matches!(&result.skipped[0].reason, SkipCause::Reason(reason) if reason.contains("refusing to delete unsafe path")),
+            "the seam refusal rides as prose: {:?}",
+            result.skipped[0].reason
+        );
+        assert_eq!(
+            result.exit_code(),
+            1,
+            "the refusal must surface through the exit code"
+        );
     }
 
     // ── CliCleaner trash_mode pin contract ──
