@@ -238,7 +238,7 @@ define_cleaners! {
     Xcode {
         #[arg(long)]
         dry_run: bool,
-        /// Subcategories to clean: derived-data, archives (default: all)
+        /// Subcategories to clean: derived-data, archives (default: derived-data only)
         #[arg(long, value_delimiter = ',')]
         sub: Option<Vec<String>>,
     },
@@ -1211,13 +1211,22 @@ fn main() -> anyhow::Result<()> {
                             Box::new(SystemCommandRunner),
                         );
                         if let Some(ref subs) = sub {
+                            // PBI 63: an unknown spelling is an error, not a
+                            // silent drop — the old filter_map narrowed the
+                            // run to DerivedData and left Archives behind.
                             let parsed: Vec<_> = subs
                                 .iter()
-                                .filter_map(|s| cleaners::xcode::XcodeSubcategory::parse(s))
-                                .collect();
-                            if !parsed.is_empty() {
-                                xcode_cleaner = xcode_cleaner.with_subcategories(parsed);
-                            }
+                                .map(|s| {
+                                    xcode_subcategory(s).ok_or_else(|| {
+                                        anyhow::anyhow!(
+                                            "unknown xcode subcategory: {s} \
+                                             (expected derived-data, deriveddata, \
+                                             archives, DerivedData, Archives)"
+                                        )
+                                    })
+                                })
+                                .collect::<Result<Vec<_>, _>>()?;
+                            xcode_cleaner = xcode_cleaner.with_subcategories(parsed);
                         }
                         if cli.yes && xcode_cleaner.is_xcode_running() {
                             eprintln!("Note: Xcode is running. Proceeding with --yes anyway.");
