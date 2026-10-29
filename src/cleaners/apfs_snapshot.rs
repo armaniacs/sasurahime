@@ -1162,4 +1162,21 @@ mod tests {
             "a missing before-reading must not report the free space as freed"
         );
     }
+
+    #[test]
+    fn thin_reports_zero_freed_when_tmutil_exits_nonzero() {
+        // PBI 53 pin: a failed thinning must not be read as a successful run
+        // whose before/after delta happens to be 0. The scripted probe would
+        // report a 250-byte delta if the non-zero exit were not checked.
+        let (probe, _) = scripted_free_space(vec![Some(100), Some(350)]);
+        let cleaner = ApfsSnapshotCleaner::new(Box::new(
+            crate::test_helpers::MockRunner::new().with_exit_code("tmutil", 1 << 8),
+        ))
+        .with_thin(10_000_000_000, 2)
+        .with_free_space(probe);
+        let reporter = crate::progress::DeepSuppressReporter;
+        let result = cleaner.clean(false, &reporter).unwrap();
+        assert_eq!(result.bytes_freed, 0, "a failed thinning reclaims nothing");
+        assert!(!result.uses_trash);
+    }
 }

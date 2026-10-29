@@ -277,4 +277,27 @@ mod tests {
             result.status
         );
     }
+
+    #[test]
+    fn clean_reports_zero_freed_when_prune_exits_nonzero() {
+        // PBI 53 pin: a failed `uv cache prune --force` silently contributes
+        // 0 to `freed` (the warn branch). The failure must not bubble up as
+        // an error and must not fabricate freed bytes.
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".cache/uv/simple-v21")).unwrap();
+
+        let cleaner = UvCleaner::new(
+            tmp.path(),
+            Box::new(MockRunner::new().with_exit_code("uv", 1 << 8)),
+        );
+        let result = cleaner
+            .clean(false, &crate::progress::DeepSuppressReporter)
+            .expect("a failed prune must not fail the run");
+        assert_eq!(
+            result.bytes_freed, 0,
+            "a failed prune must not report freed bytes"
+        );
+        assert!(result.skipped.is_empty(), "nothing was deleted");
+        assert!(!result.uses_trash);
+    }
 }

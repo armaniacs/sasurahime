@@ -322,6 +322,9 @@ mod tests {
         calls: Mutex<Vec<(String, Vec<String>)>>,
         initially_running: Vec<String>,
         gone_after_pgrep_calls: usize,
+        /// Programs whose `run` exits non-zero with the given code (PBI 65:
+        /// exit-code injection for the quit/relaunch failure branches).
+        failure_codes: Vec<(String, i32)>,
     }
 
     impl RecordingRunner {
@@ -330,7 +333,15 @@ mod tests {
                 calls: Mutex::new(vec![]),
                 initially_running: running.iter().map(|s| s.to_string()).collect(),
                 gone_after_pgrep_calls: gone_after,
+                failure_codes: vec![],
             }
+        }
+
+        /// Make every call to `program` exit with `code` (a real exit code,
+        /// encoded as the raw wait status).
+        fn with_exit_code(mut self, program: &str, code: i32) -> Self {
+            self.failure_codes.push((program.to_string(), code));
+            self
         }
 
         fn recorded_calls(&self) -> Vec<(String, Vec<String>)> {
@@ -362,7 +373,15 @@ mod tests {
                     let still_running = is_running && pgrep_count <= self.gone_after_pgrep_calls;
                     Ok(make_output(if still_running { 0 } else { 1 }, ""))
                 }
-                "osascript" | "open" | "rm" => Ok(make_output(0, "")),
+                "osascript" | "open" | "rm" => {
+                    let code = self
+                        .failure_codes
+                        .iter()
+                        .find(|(p, _)| p == program)
+                        .map(|(_, c)| *c)
+                        .unwrap_or(0);
+                    Ok(make_output(code << 8, ""))
+                }
                 _ => anyhow::bail!("RecordingRunner: unexpected {program} (call #{call_count})"),
             }
         }
@@ -626,5 +645,49 @@ mod tests {
         let runner = RecordingRunner::new(&[], 0);
         cleaner::relaunch_app(&SLACK_ENTRY, &runner).unwrap();
         assert!(runner.recorded_calls().is_empty());
+    }
+
+    #[test]
+    fn quit_app_and_wait_bails_when_osascript_exits_nonzero() {
+        // PBI 53 pin: a failed osascript is the real reason the app will not
+        // quit, so the bail must surface it instead of falling through to the
+        // 10s quit poll (the pgrep fixtures report the app as still running).
+        let runner = RecordingRunner::new(&["Code"], usize::MAX).with_exit_code("osascript", 1);
+        let err = cleaner::quit_app_and_wait(&VSCODE_ENTRY, &runner).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("osascript failed to quit"),
+            "the osascript failure must surface in the reason, got: {msg}"
+        );
+        assert!(
+            msg.contains("(exit 1)"),
+            "the osascript exit code must surface in the reason, got: {msg}"
+        );
+        let calls = runner.recorded_calls();
+        assert!(
+            calls.iter().any(|(p, _)| p == "osascript"),
+            "osascript must have been invoked"
+        );
+        assert!(
+            !calls.iter().any(|(p, _)| p == "pgrep"),
+            "the osascript failure must bail before the quit poll, got: {calls:?}"
+        );
+    }
+
+    #[test]
+    fn relaunch_app_warns_without_ok_when_open_exits_nonzero() {
+        // PBI 53 pin: a failed `open -a` relaunch must not fail the run and
+        // must take the warn branch (no success line) instead of bubbling up
+        // as an error. The open call itself must still have been attempted.
+        let runner = RecordingRunner::new(&[], 0).with_exit_code("open", 1);
+        cleaner::relaunch_app(&VSCODE_ENTRY, &runner)
+            .expect("a failed relaunch must not fail the run");
+        let calls = runner.recorded_calls();
+        let open_calls: Vec<_> = calls.iter().filter(|(p, _)| p == "open").collect();
+        assert_eq!(
+            open_calls.len(),
+            1,
+            "the relaunch must still be attempted, got: {calls:?}"
+        );
     }
 }
