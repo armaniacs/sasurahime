@@ -47,41 +47,60 @@ pub struct ProtocolStatus {
 }
 
 /// Extracts the last balanced top-level JSON object from noisy stdout: real
-/// plugins print log lines around the object. Returns the whole trimmed input
-/// when no balanced object is found (the caller's parse then fails closed).
+/// plugins print log lines around the object. JSON string literals are
+/// tracked (quotes and backslash escapes), so braces inside a string value
+/// are data, not structure: a legal `}` in a file name no longer truncates
+/// the object. Outside strings the depth-counting contract holds: the last
+/// balanced object wins. Returns the whole trimmed input when no balanced
+/// object is found (the caller's parse then fails closed).
 /// ```
 /// use sasurahime::cleaners::plugin::extract_last_json_object;
 /// assert_eq!(
 ///     extract_last_json_object("[kilo] ok\n{\"status\":\"clean\",\"bytes\":10}"),
 ///     "{\"status\":\"clean\",\"bytes\":10}"
 /// );
-/// // A brace inside a JSON string truncates the extraction: the region is
-/// // invalid JSON (unterminated string), so the caller's parse fails closed.
+/// // A brace inside a JSON string is data: the object stays intact.
 /// assert_eq!(
 ///     extract_last_json_object("{\"status\":\"clean\"} {\"note\":\"a}b\"}"),
-///     "{\"note\":\"a}"
+///     "{\"note\":\"a}b\"}"
 /// );
 /// ```
 pub fn extract_last_json_object(s: &str) -> &str {
     let bytes = s.as_bytes();
     let (mut depth, mut start, mut last) = (0i32, None, None);
+    // String-literal state: quotes and backslash escapes are tracked so
+    // braces inside a string value never move the depth counter.
+    let (mut in_string, mut escaped) = (false, false);
     for (i, &b) in bytes.iter().enumerate() {
-        match b {
-            b'{' => {
-                if depth == 0 {
-                    start = Some(i);
+        if in_string {
+            if escaped {
+                escaped = false; // this byte was consumed by the backslash
+            } else {
+                match b {
+                    b'\\' => escaped = true,
+                    b'"' => in_string = false,
+                    _ => {}
                 }
-                depth += 1;
             }
-            b'}' if depth > 0 => {
-                depth -= 1;
-                if depth == 0 {
-                    if let Some(s0) = start {
-                        last = Some((s0, i + 1));
+        } else {
+            match b {
+                b'"' => in_string = true,
+                b'{' => {
+                    if depth == 0 {
+                        start = Some(i);
+                    }
+                    depth += 1;
+                }
+                b'}' if depth > 0 => {
+                    depth -= 1;
+                    if depth == 0 {
+                        if let Some(s0) = start {
+                            last = Some((s0, i + 1));
+                        }
                     }
                 }
+                _ => {}
             }
-            _ => {}
         }
     }
     match last {
@@ -679,6 +698,47 @@ mod tests {
         // Negative or fractional freed is not a byte count: ignored.
         assert_eq!(parse_clean_output("{\"freed\": -1}"), None);
         assert_eq!(parse_clean_output("{\"freed\": 1.5}"), None);
+    }
+
+    #[test]
+    fn parse_clean_output_keeps_braces_inside_string_values() {
+        // PBI 61: a `{`/`}` in a JSON string value is legal file-name data,
+        // not structure. It must not truncate the plugin's report.
+        let braces = parse_clean_output(r#"{"freed": 100, "note": "tmp/{a}/x"}"#).unwrap();
+        assert_eq!(braces.freed, Some(100));
+        assert_eq!(braces.uses_trash, None);
+
+        // An escaped backslash before the brace stays inside the string too.
+        let escaped = parse_clean_output(r#"{"freed": 100, "note": "a\\}b"}"#).unwrap();
+        assert_eq!(escaped.freed, Some(100));
+    }
+
+    #[test]
+    fn extract_last_json_object_tracks_string_state() {
+        // A `}` inside a string no longer truncates the object.
+        assert_eq!(
+            extract_last_json_object(r#"{"status":"clean"} {"note":"a}b"}"#),
+            r#"{"note":"a}b"}"#
+        );
+        // An escaped quote inside a string does not close it early, so a
+        // later in-string `}` is still data.
+        assert_eq!(
+            extract_last_json_object(r#"{"status": "clean", "note": "say \"} hi\""}"#),
+            r#"{"status": "clean", "note": "say \"} hi\""}"#
+        );
+        // The scan path benefits the same way.
+        let scan = parse_protocol_output(r#"{"status": "pruneable", "bytes": 512, "note": "x}y"}"#)
+            .unwrap();
+        assert_eq!(scan.status, "pruneable");
+        assert_eq!(scan.bytes, 512);
+    }
+
+    #[test]
+    fn parse_clean_output_takes_the_last_json_object() {
+        // Noisy stdout: the trailing object is the report (existing contract).
+        let report = parse_clean_output("removing...\n{\"freed\": 100}").unwrap();
+        assert_eq!(report.freed, Some(100));
+        assert_eq!(report.uses_trash, None);
     }
 
     #[test]
