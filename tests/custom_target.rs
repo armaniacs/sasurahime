@@ -60,8 +60,8 @@ fn clean_custom_target_reaches_the_configured_path() {
         "a [[custom]] target must be reachable via clean <name>, got:\n{combined}"
     );
     assert!(
-        combined.contains("Removed: data.bin"),
-        "the deletion path must run, got:\n{combined}"
+        combined.contains("removed:") && combined.contains("data.bin"),
+        "the deletion path must run (the ledger's per-entry line names the path), got:\n{combined}"
     );
     assert!(
         !cache.join("data.bin").exists(),

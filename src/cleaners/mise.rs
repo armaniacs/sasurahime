@@ -212,21 +212,8 @@ impl MiseCleaner {
         }
     }
 
-    /// Deletes the directory through the [`crate::trash::safe_delete`] seam:
-    /// the seam clears macOS `uchg` immutable flags before a permanent remove
-    /// (warning and continuing when the clear fails, the PBI-20 decided
-    /// semantic), then deletes according to `mode` and classifies failures
-    /// into skippable vs fatal.
-    fn remove_with_uchg(
-        path: &Path,
-        runner: &dyn CommandRunner,
-        mode: crate::trash::TrashMode,
-    ) -> Result<crate::trash::DeleteOutcome> {
-        crate::trash::safe_delete(runner, path, mode)
-    }
-
     /// The shared clean body. `mode` is the deletion mode for every
-    /// `remove_with_uchg` call (one per unused tool version): `Global` reads
+    /// per-item deletion (one per unused tool version): `Global` reads
     /// the process-global mode; `Trash` / `Permanent` pin it so the seam
     /// outcome and the deletion agree.
     fn clean_with_mode(
@@ -266,47 +253,34 @@ impl MiseCleaner {
             );
         }
 
-        if !dry_run && !unused.is_empty() {
-            reporter.progress_init(self.name(), unused.len());
-        }
+        // The caller owns the per-item size computation; the ledger owns
+        // the per-item contracts (progress, skip records, freed sums,
+        // CleanResult assembly). The `{tool} {version}` display label is
+        // the path itself, so the ledger's standard per-entry line names
+        // the same runtime.
+        let items: Vec<(std::path::PathBuf, u64)> = unused
+            .iter()
+            .map(|(_, _, path)| (path.clone(), dir_size(path)))
+            .collect();
 
-        let mut freed: u64 = 0;
-        let mut uses_trash = false;
-        for (i, (tool, version, path)) in unused.iter().enumerate() {
-            let size = dir_size(path);
-            if dry_run {
+        if dry_run {
+            for ((tool, version, _), (_, size)) in unused.iter().zip(items.iter()) {
                 println!(
                     "[dry-run] would remove: {tool} {version} ({})",
-                    crate::format::format_bytes(size)
+                    crate::format::format_bytes(*size)
                 );
-            } else {
-                reporter.progress_tick(path, i + 1, size);
-                let outcome = match Self::remove_with_uchg(path, self.runner.as_ref(), mode) {
-                    Ok(outcome) => outcome,
-                    // A fatal per-entry error (e.g. the runtime vanished
-                    // between scan and delete) must not abort the run:
-                    // report it and continue with the remaining items.
-                    Err(err) => {
-                        eprintln!("Error removing {tool} {version}: {err:#}");
-                        // Continue with remaining items on error
-                        continue;
-                    }
-                };
-                if let Some(reason) = outcome.skip_reason {
-                    eprintln!("Error removing {tool} {version}: {reason}");
-                    // Continue with remaining items on error
-                    continue;
-                }
-                uses_trash |= outcome.uses_trash;
-                freed += size;
-                println!("Removed: {tool} {version}");
             }
+            return Ok(CleanResult::empty(self.name()));
         }
 
-        if !dry_run && !unused.is_empty() {
-            reporter.progress_finish();
-        }
-        Ok(CleanResult::freed(self.name(), freed, uses_trash))
+        // The seam adapter fixes safe_delete as the per-item deletion, so
+        // the uchg rule and the scope tripwire stay the seam's job.
+        Ok(crate::trash::delete_ledger(
+            self.name(),
+            reporter,
+            &items,
+            crate::trash::seam_delete(self.runner.as_ref(), mode),
+        ))
     }
 }
 
@@ -877,5 +851,35 @@ mod tests {
             !result.uses_trash,
             "uses_trash must come from the global mode"
         );
+    }
+
+    #[test]
+    fn clean_all_skipped_reports_exit_code_one() {
+        // Ledger pin (PBI 70, the same contract as delete_entries'
+        // all-skipped pin): with the test-only backend refusing every trash
+        // move, the ledger records the deletion as a skip and the clean
+        // reports failure (exit 1). The pre-ledger loop assembled a bare
+        // freed result that could not express the failure, and its fatal
+        // branch recorded no skip at all.
+        let _mode = crate::test_helpers::TrashModeGuard::set(true);
+        let _backend = crate::trash::TrashBackendOverrideGuard::set();
+        let tmp = TempDir::new().unwrap();
+        let (cleaner, version) = unused_version_cleaner(&tmp);
+        let result = cleaner
+            .clean(false, &crate::progress::DeepSuppressReporter)
+            .unwrap();
+        assert_eq!(result.bytes_freed, 0, "a skipped entry is never summed");
+        assert_eq!(result.skipped.len(), 1, "the refused move is a skip");
+        assert!(
+            matches!(
+                &result.skipped[0].reason,
+                crate::cleaner::SkipCause::Delete(_)
+            ),
+            "the seam's typed refusal rides in the skip: {:?}",
+            result.skipped[0].reason
+        );
+        assert!(version.exists(), "the refused runtime is untouched");
+        assert!(!result.uses_trash, "a skipped move never claims Trash");
+        assert_eq!(result.exit_code(), 1, "all-skipped reports failure");
     }
 }

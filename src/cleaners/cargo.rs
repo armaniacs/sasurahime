@@ -1,4 +1,4 @@
-use crate::cleaner::{CleanResult, Cleaner, ScanResult, ScanStatus, SkipCause};
+use crate::cleaner::{CleanResult, Cleaner, ScanResult, ScanStatus};
 use crate::command::CommandRunner;
 use crate::format::dir_size;
 use crate::progress::ProgressReporter;
@@ -86,84 +86,45 @@ impl Cleaner for CargoCleaner {
     }
 
     fn clean(&self, dry_run: bool, reporter: &dyn ProgressReporter) -> Result<CleanResult> {
-        let mut skipped: Vec<crate::cleaner::SkippedEntry> = vec![];
-        let mut freed: u64 = 0;
-        // OR-in across every deletion: the seam's resolved mode is the truth.
-        let mut uses_trash = false;
-
         let reg = self.home.join(".cargo/registry/cache");
+        // Registry first, then the target dirs, in one ledger call: the
+        // registry's single delete rides the same per-entry contracts as
+        // the target dirs, and now gets the standard progress too.
+        let mut items: Vec<(PathBuf, u64)> = Vec::new();
         if reg.exists() {
-            let size = dir_size(&reg);
-            if dry_run {
+            items.push((reg.clone(), dir_size(&reg)));
+        }
+        let targets = self.get_target_dirs();
+        items.extend(targets.iter().cloned());
+
+        if dry_run {
+            if reg.exists() {
+                let size = dir_size(&reg);
                 println!(
                     "[dry-run] [cargo] would remove registry cache: {} ({})",
                     reg.display(),
                     crate::format::format_bytes(size)
                 );
-            } else {
-                let outcome = crate::trash::safe_delete(
-                    self.runner.as_ref(),
-                    &reg,
-                    crate::trash::TrashMode::Global,
-                )?;
-                if let Some(reason) = outcome.skip_reason {
-                    skipped.push(crate::cleaner::SkippedEntry {
-                        path: reg.to_path_buf(),
-                        reason: SkipCause::Delete(reason),
-                    });
-                } else {
-                    // OR-in only when the deletion actually happened: a
-                    // skipped Trash move never claims Trash.
-                    uses_trash |= outcome.uses_trash;
-                    freed += size;
-                    println!("[cargo] removed registry cache: {}", reg.display());
-                }
             }
-        }
-
-        let targets = self.get_target_dirs();
-        if !dry_run && !targets.is_empty() {
-            reporter.progress_init(self.name(), targets.len());
-        }
-        for (i, (path, size)) in targets.iter().enumerate() {
-            if dry_run {
+            for (path, size) in targets {
                 println!(
                     "[dry-run] [cargo] would remove target dir: {} ({})",
                     path.display(),
                     crate::format::format_bytes(*size)
                 );
-            } else {
-                reporter.progress_tick(path, i + 1, *size);
-                let outcome = crate::trash::safe_delete(
-                    self.runner.as_ref(),
-                    path,
-                    crate::trash::TrashMode::Global,
-                )?;
-                if let Some(reason) = outcome.skip_reason {
-                    skipped.push(crate::cleaner::SkippedEntry {
-                        path: path.to_path_buf(),
-                        reason: SkipCause::Delete(reason),
-                    });
-                } else {
-                    // OR-in only when the deletion actually happened: a
-                    // skipped Trash move never claims Trash.
-                    uses_trash |= outcome.uses_trash;
-                    freed += size;
-                    println!("[cargo] removed target dir: {}", path.display());
-                }
             }
-        }
-        if !dry_run && !targets.is_empty() {
-            reporter.progress_finish();
+            return Ok(CleanResult::empty(self.name()));
         }
 
-        Ok(CleanResult {
-            name: self.name(),
-            bytes_freed: freed,
-            uses_trash,
-            skipped,
-            deleted_paths: vec![],
-        })
+        // The delete ledger owns the per-item contracts (progress, skip
+        // records, freed sums, deleted paths, CleanResult assembly); a
+        // fatal per-item error no longer aborts the remaining deletions.
+        Ok(crate::trash::delete_ledger(
+            self.name(),
+            reporter,
+            &items,
+            crate::trash::seam_delete(self.runner.as_ref(), crate::trash::TrashMode::Global),
+        ))
     }
 }
 

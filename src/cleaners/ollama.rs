@@ -182,42 +182,37 @@ impl Cleaner for OllamaCleaner {
                 });
             }
 
-            let mut total: u64 = 0;
-            let mut skipped: Vec<crate::cleaner::SkippedEntry> = vec![];
-            if !selections.is_empty() {
-                reporter.progress_init(self.name(), selections.len());
-            }
-            for (j, &i) in selections.iter().enumerate() {
-                let m = &models[i];
-                reporter.progress_tick(Path::new(&m.name), j + 1, m.size);
-                // A failed `ollama rm` must not claim the model's bytes:
-                // record a SkippedEntry and continue with the remaining
-                // models (PBI 53).
-                if let Err(reason) = Self::remove_model(self.runner.as_ref(), &m.name) {
-                    eprintln!("[ollama] failed to remove {}: {reason}", m.name);
-                    skipped.push(crate::cleaner::SkippedEntry {
-                        path: self.models_dir.join(&m.name),
-                        reason: SkipCause::Reason(reason),
-                    });
-                    continue;
-                }
-                total += m.size;
-                println!(
-                    "[ollama] removed: {} (freed {})",
-                    m.name,
-                    crate::format::format_bytes(m.size)
-                );
-            }
-            if !selections.is_empty() {
-                reporter.progress_finish();
-            }
-            return Ok(CleanResult {
-                name: self.name(),
-                bytes_freed: total,
-                uses_trash: false,
-                skipped,
-                deleted_paths: vec![],
-            });
+            let items: Vec<(PathBuf, u64)> = selections
+                .iter()
+                .map(|&i| {
+                    let m = &models[i];
+                    (self.models_dir.join(&m.name), m.size)
+                })
+                .collect();
+
+            // The CLI deletion rides the same delete ledger as the
+            // path-based cleaners: this closure is the CLI adapter
+            // (`ollama rm`), and a failure keeps its prose reason — never
+            // disguised as a DeleteError (the ledger records it as
+            // SkippedEntry(SkipCause::Reason)). `ollama rm` never uses the
+            // Trash, so a successful deletion reports uses_trash false
+            // (PBI 43 truth).
+            return Ok(crate::trash::delete_ledger(
+                self.name(),
+                reporter,
+                &items,
+                |path: &Path, _size: u64| {
+                    let name = path
+                        .strip_prefix(&self.models_dir)
+                        .unwrap_or(path)
+                        .to_string_lossy()
+                        .to_string();
+                    match Self::remove_model(self.runner.as_ref(), &name) {
+                        Ok(()) => Ok(crate::trash::DeletionOutcome::Deleted { uses_trash: false }),
+                        Err(reason) => Ok(crate::trash::DeletionOutcome::SkippedReason(reason)),
+                    }
+                },
+            ));
         }
 
         self.clean_fallback(dry_run)

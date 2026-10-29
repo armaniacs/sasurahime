@@ -1,4 +1,4 @@
-use crate::cleaner::{CleanResult, Cleaner, ScanResult, ScanStatus, SkipCause};
+use crate::cleaner::{CleanResult, Cleaner, ScanResult, ScanStatus};
 use crate::command::CommandRunner;
 use crate::format::dir_size;
 use crate::progress::ProgressReporter;
@@ -109,57 +109,38 @@ impl Cleaner for GradleCleaner {
         r
     }
 
-    fn clean(&self, dry_run: bool, _reporter: &dyn ProgressReporter) -> Result<CleanResult> {
+    fn clean(&self, dry_run: bool, reporter: &dyn ProgressReporter) -> Result<CleanResult> {
         let caches = self.home.join(".gradle/caches");
         if !caches.exists() {
             // Nothing is deleted on this path: the seam is never invoked, so
             // no Trash claim may be made.
-            return Ok(CleanResult {
-                name: self.name(),
-                bytes_freed: 0,
-                uses_trash: false,
-                skipped: vec![],
-                deleted_paths: vec![],
-            });
+            return Ok(CleanResult::empty(self.name()));
         }
         let old = Self::find_old_caches(&caches);
-        let mut freed: u64 = 0;
-        let mut skipped: Vec<crate::cleaner::SkippedEntry> = vec![];
-        // The seam outcome is the one owner of the Trash claim.
-        let mut uses_trash = false;
-        for path in &old {
-            let size = dir_size(path);
-            if dry_run {
+        // The caller owns the per-item size computation; the ledger owns
+        // the per-item contracts (progress — new for this cleaner, skip
+        // records, freed sums, deleted paths).
+        let items: Vec<(PathBuf, u64)> = old.iter().map(|p| (p.clone(), dir_size(p))).collect();
+
+        if dry_run {
+            for (path, size) in &items {
                 println!(
                     "[dry-run] [gradle] would remove: {} ({})",
                     path.display(),
-                    crate::format::format_bytes(size)
+                    crate::format::format_bytes(*size)
                 );
-            } else {
-                let outcome = crate::trash::safe_delete(
-                    self.runner.as_ref(),
-                    path,
-                    crate::trash::TrashMode::Global,
-                )?;
-                if let Some(reason) = outcome.skip_reason {
-                    skipped.push(crate::cleaner::SkippedEntry {
-                        path: path.to_path_buf(),
-                        reason: SkipCause::Delete(reason),
-                    });
-                } else {
-                    uses_trash |= outcome.uses_trash;
-                    freed += size;
-                    println!("[gradle] removed: {}", path.display());
-                }
             }
+            return Ok(CleanResult::empty(self.name()));
         }
-        Ok(CleanResult {
-            name: self.name(),
-            bytes_freed: freed,
-            uses_trash,
-            skipped,
-            deleted_paths: vec![],
-        })
+
+        // The seam adapter's Global mode keeps the process-global deletion
+        // mode; a fatal per-item error no longer aborts the run.
+        Ok(crate::trash::delete_ledger(
+            self.name(),
+            reporter,
+            &items,
+            crate::trash::seam_delete(self.runner.as_ref(), crate::trash::TrashMode::Global),
+        ))
     }
 }
 
@@ -248,57 +229,38 @@ impl Cleaner for JetBrainsCleaner {
         r
     }
 
-    fn clean(&self, dry_run: bool, _reporter: &dyn ProgressReporter) -> Result<CleanResult> {
+    fn clean(&self, dry_run: bool, reporter: &dyn ProgressReporter) -> Result<CleanResult> {
         let dir = self.home.join("Library/Caches/JetBrains");
         if !dir.exists() {
             // Nothing is deleted on this path: the seam is never invoked, so
             // no Trash claim may be made.
-            return Ok(CleanResult {
-                name: self.name(),
-                bytes_freed: 0,
-                uses_trash: false,
-                skipped: vec![],
-                deleted_paths: vec![],
-            });
+            return Ok(CleanResult::empty(self.name()));
         }
         let old = Self::find_old_caches(&dir);
-        let mut freed: u64 = 0;
-        let mut skipped: Vec<crate::cleaner::SkippedEntry> = vec![];
-        // The seam outcome is the one owner of the Trash claim.
-        let mut uses_trash = false;
-        for path in &old {
-            let size = dir_size(path);
-            if dry_run {
+        // The caller owns the per-item size computation; the ledger owns
+        // the per-item contracts (progress — new for this cleaner, skip
+        // records, freed sums, deleted paths).
+        let items: Vec<(PathBuf, u64)> = old.iter().map(|p| (p.clone(), dir_size(p))).collect();
+
+        if dry_run {
+            for (path, size) in &items {
                 println!(
                     "[dry-run] [jetbrains] would remove: {} ({})",
                     path.display(),
-                    crate::format::format_bytes(size)
+                    crate::format::format_bytes(*size)
                 );
-            } else {
-                let outcome = crate::trash::safe_delete(
-                    self.runner.as_ref(),
-                    path,
-                    crate::trash::TrashMode::Global,
-                )?;
-                if let Some(reason) = outcome.skip_reason {
-                    skipped.push(crate::cleaner::SkippedEntry {
-                        path: path.to_path_buf(),
-                        reason: SkipCause::Delete(reason),
-                    });
-                } else {
-                    uses_trash |= outcome.uses_trash;
-                    freed += size;
-                    println!("[jetbrains] removed: {}", path.display());
-                }
             }
+            return Ok(CleanResult::empty(self.name()));
         }
-        Ok(CleanResult {
-            name: self.name(),
-            bytes_freed: freed,
-            uses_trash,
-            skipped,
-            deleted_paths: vec![],
-        })
+
+        // The seam adapter's Global mode keeps the process-global deletion
+        // mode; a fatal per-item error no longer aborts the run.
+        Ok(crate::trash::delete_ledger(
+            self.name(),
+            reporter,
+            &items,
+            crate::trash::seam_delete(self.runner.as_ref(), crate::trash::TrashMode::Global),
+        ))
     }
 }
 

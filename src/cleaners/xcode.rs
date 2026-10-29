@@ -1,4 +1,4 @@
-use crate::cleaner::{CleanResult, Cleaner, ScanResult, ScanStatus, SkipCause};
+use crate::cleaner::{CleanResult, Cleaner, ScanResult, ScanStatus};
 use crate::command::CommandRunner;
 use crate::format::dir_size;
 use crate::progress::ProgressReporter;
@@ -187,14 +187,18 @@ impl Cleaner for XcodeCleaner {
         }
 
         let mut total_freed = 0u64;
-        let mut all_skipped = vec![];
-        // OR-in across every deletion: the seam's resolved mode is the truth.
+        // OR-in across every deletion: the ledger's outcomes carry the
+        // seam-resolved truth.
         let mut uses_trash = false;
+        let mut all_skipped: Vec<crate::cleaner::SkippedEntry> = Vec::new();
+        let mut deleted_paths: Vec<PathBuf> = Vec::new();
 
         for sub in subs {
-            let (dir, label) = match sub {
-                XcodeSubcategory::DerivedData => (&self.derived_data, "DerivedData"),
-                XcodeSubcategory::Archives => (&self.archives, "Archives"),
+            let (dir, label, ledger_label) = match sub {
+                XcodeSubcategory::DerivedData => {
+                    (&self.derived_data, "DerivedData", "xcode/DerivedData")
+                }
+                XcodeSubcategory::Archives => (&self.archives, "Archives", "xcode/Archives"),
             };
 
             if !dir.exists() {
@@ -207,53 +211,47 @@ impl Cleaner for XcodeCleaner {
                 Err(_) => continue,
             };
 
-            let dirs: Vec<PathBuf> = entries
+            // The caller owns the per-item size computation; the ledger
+            // owns the per-item contracts (progress, skip records, freed
+            // sums, deleted paths).
+            let items: Vec<(PathBuf, u64)> = entries
                 .filter_map(|e| e.ok())
                 .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
-                .map(|e| e.path())
+                .map(|e| {
+                    let p = e.path();
+                    (p.clone(), dir_size(&p))
+                })
                 .collect();
 
-            if dirs.is_empty() {
+            if items.is_empty() {
                 continue;
             }
 
-            if !dry_run {
-                reporter.progress_init(&format!("xcode/{label}"), dirs.len());
-            }
-
-            for (i, entry) in dirs.iter().enumerate() {
-                let size = dir_size(entry);
-                let entry_name = entry.file_name().unwrap_or_default().to_string_lossy();
-                if dry_run {
+            if dry_run {
+                for (path, size) in &items {
+                    let entry_name = path.file_name().unwrap_or_default().to_string_lossy();
                     println!(
                         "[dry-run] would remove: {label}/{entry_name} ({})",
-                        crate::format::format_bytes(size)
+                        crate::format::format_bytes(*size)
                     );
-                } else {
-                    reporter.progress_tick(entry, i + 1, size);
-                    let outcome = crate::trash::safe_delete(
-                        self.runner.as_ref(),
-                        entry,
-                        crate::trash::TrashMode::Global,
-                    )?;
-                    if let Some(reason) = outcome.skip_reason {
-                        all_skipped.push(crate::cleaner::SkippedEntry {
-                            path: entry.to_path_buf(),
-                            reason: SkipCause::Delete(reason),
-                        });
-                    } else {
-                        // OR-in only when the deletion actually happened: a
-                        // skipped Trash move never claims Trash.
-                        uses_trash |= outcome.uses_trash;
-                        total_freed += size;
-                        println!("Removed: {label}/{entry_name}");
-                    }
                 }
+                continue;
             }
 
-            if !dry_run {
-                reporter.progress_finish();
-            }
+            // One ledger call per subcategory, so the progress label and
+            // total stay per-subcategory; the caller merges the results
+            // into the single xcode CleanResult. A fatal per-item error no
+            // longer aborts the remaining deletions.
+            let result = crate::trash::delete_ledger(
+                ledger_label,
+                reporter,
+                &items,
+                crate::trash::seam_delete(self.runner.as_ref(), crate::trash::TrashMode::Global),
+            );
+            total_freed += result.bytes_freed;
+            uses_trash |= result.uses_trash;
+            all_skipped.extend(result.skipped);
+            deleted_paths.extend(result.deleted_paths);
         }
 
         Ok(CleanResult {
@@ -261,7 +259,7 @@ impl Cleaner for XcodeCleaner {
             bytes_freed: total_freed,
             uses_trash,
             skipped: all_skipped,
-            deleted_paths: vec![],
+            deleted_paths,
         })
     }
 }

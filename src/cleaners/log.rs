@@ -1,4 +1,4 @@
-use crate::cleaner::{CleanResult, Cleaner, ScanResult, ScanStatus, SkipCause};
+use crate::cleaner::{CleanResult, Cleaner, ScanResult, ScanStatus};
 use crate::progress::ProgressReporter;
 use anyhow::Result;
 use std::fs;
@@ -167,9 +167,6 @@ impl Cleaner for LogCleaner {
             }
         }
 
-        let mut freed: u64 = 0;
-        let mut deleted: u32 = 0;
-
         if dry_run {
             for (target_name, path) in &all_old {
                 println!("[dry-run] [{target_name}] would remove: {}", path.display());
@@ -177,44 +174,32 @@ impl Cleaner for LogCleaner {
             return Ok(CleanResult::empty(self.name()));
         }
 
-        let mut skipped: Vec<crate::cleaner::SkippedEntry> = vec![];
-        // OR-in across every deletion: the seam's resolved mode is the truth.
-        let mut uses_trash = false;
-        reporter.progress_init(self.name(), all_old.len());
-        for (i, (target_name, path)) in all_old.iter().enumerate() {
-            let size = fs::metadata(path).map(|m| m.blocks() * 512).unwrap_or(0);
-            reporter.progress_tick(path, i + 1, size);
-            // The cleaner has no runner field: the seam only needs one for the
-            // permanent-mode uchg clear, which the system runner performs.
-            let outcome = crate::trash::safe_delete(
-                &crate::command::SystemCommandRunner,
-                path,
-                crate::trash::TrashMode::Global,
-            )?;
-            if let Some(reason) = outcome.skip_reason {
-                skipped.push(crate::cleaner::SkippedEntry {
-                    path: path.to_path_buf(),
-                    reason: SkipCause::Delete(reason),
-                });
-            } else {
-                // OR-in only when the deletion actually happened: a skipped
-                // Trash move never claims Trash.
-                uses_trash |= outcome.uses_trash;
-                freed += size;
-                deleted += 1;
-                println!("[{target_name}] Removed: {}", path.display());
-            }
-        }
-        reporter.progress_finish();
+        // The caller owns the per-item size computation (the metadata
+        // blocks*512 accounting this cleaner reports); the ledger owns the
+        // per-item contracts. The per-target prefix in the removed line is
+        // folded into the ledger's standard `[logs]` line (documented in
+        // the CHANGELOG).
+        let items: Vec<(PathBuf, u64)> = all_old
+            .iter()
+            .map(|(_, path)| {
+                let size = fs::metadata(path).map(|m| m.blocks() * 512).unwrap_or(0);
+                (path.clone(), size)
+            })
+            .collect();
 
-        println!("Removed {deleted} log files");
-        Ok(CleanResult {
-            name: self.name(),
-            bytes_freed: freed,
-            uses_trash,
-            skipped,
-            deleted_paths: vec![],
-        })
+        // The cleaner has no runner field: the seam only needs one for the
+        // permanent-mode uchg clear, which the system runner performs.
+        let result = crate::trash::delete_ledger(
+            self.name(),
+            reporter,
+            &items,
+            crate::trash::seam_delete(
+                &crate::command::SystemCommandRunner,
+                crate::trash::TrashMode::Global,
+            ),
+        );
+        println!("Removed {} log files", result.deleted_paths.len());
+        Ok(result)
     }
 }
 
