@@ -787,10 +787,17 @@ where
         }
     }
 
-    // The single-target path keeps its own flow (CleanCancelled, per-target
-    // freed_message, and the CleanResult-shaped skip report above — PBI 73's
-    // shared report_batch_failures takes a BatchSummary, so this report is
-    // out of scope) but funnels the history write through the one guard in
+    // Aligned contract (PBI 78): both engines treat CleanCancelled as a
+    // run-level decision, not an error — this path returns Ok(cancelled)
+    // (exit 0), run_batch collects the target name into
+    // BatchSummary.cancelled and the caller reports a neutral
+    // `cancelled by user` line. The [OK]/[FAILED] status line is owned by
+    // the reporter kind on both engines: it prints only when
+    // reporter.show_spinner(), and `animated` stays the caller's flag
+    // (no-tick-while-prompting). What stays single-target here is only the
+    // CleanResult-shaped report (per-target freed_message and the skip
+    // lines above — PBI 73's shared report_batch_failures takes a
+    // BatchSummary); the history write funnels through the one guard in
     // batch.rs, so `!dry_run && bytes_freed > 0` has exactly one owner.
     batch::write_history_entry_if_needed(
         label,
@@ -1396,7 +1403,13 @@ fn main() -> anyhow::Result<()> {
                     } => {
                         // Explicit full clean: the user picked every target on
                         // purpose. Safe targets run without --include-manual;
-                        // Moderate/Risky/Manual need it.
+                        // Moderate/Risky/Manual need it. No skip-confirm guard
+                        // here — skip policies stay at the call sites
+                        // (batch.rs): confirm_suppressed() must stay false so
+                        // a cleaner that gates on a prompt (colima's fallback
+                        // full delete, generic.rs) still asks before deleting;
+                        // moving the guard into run_batch would delete
+                        // without asking.
                         let opts = cleaner::CleanOptions {
                             all: true,
                             include_manual,
@@ -1620,6 +1633,40 @@ mod tests {
     }
 
     #[test]
+    fn clean_all_arm_leaves_the_confirm_prompts_live() {
+        // The skip-confirm guard stays at the call sites (batch.rs doc:
+        // skip policies stay at the call sites): the All arm must never
+        // install it, so confirm_suppressed() stays false and a cleaner
+        // that gates on a prompt (colima's fallback full delete,
+        // generic.rs) still asks before deleting. Hoisting the guard into
+        // run_batch would make `clean all --include-manual` delete without
+        // confirmation — the colima no-unconfirmed-delete safety regression.
+        let src = include_str!("main.rs");
+        // The All ARM (not the macro-generated dispatch helpers): the only
+        // "CleanTarget::All {" head that carries `include_manual`, and the
+        // first such occurrence in the file.
+        let start = src
+            .match_indices("CleanTarget::All {")
+            .find(|(i, _)| src[*i..src.len().min(i + 160)].contains("include_manual"))
+            .map(|(i, _)| i)
+            .expect("the All arm must be present");
+        let end = src[start..]
+            .find("CleanTarget::ProjectArtifacts")
+            .map(|i| start + i)
+            .unwrap_or(src.len());
+        let arm = &src[start..end];
+        assert!(
+            !arm.contains("SkipConfirmGuard::new()")
+                && !arm.contains("set_confirm_suppressed(true)"),
+            "the All arm must not suppress the confirm prompts: confirm_suppressed() must stay false so colima's fallback prompt still fires"
+        );
+        assert!(
+            !sasurahime::prompt::confirm_suppressed(),
+            "outside any guard the confirm prompts must be live"
+        );
+    }
+
+    #[test]
     fn run_clean_target_skipped_entries_do_not_panic() {
         let reporter = sasurahime::progress::VerboseProgress::new();
         let result = run_clean_target(
@@ -1754,6 +1801,107 @@ mod tests {
             assert!(
                 resolved.contains(cli),
                 "clean target {cli} is missing from the variant pin list"
+            );
+        }
+    }
+
+    #[test]
+    fn special_arm_labels_match_the_cleaner_names() {
+        // Correspondence pin: every special arm passes a history-label
+        // literal to run_and_exit; the corresponding Cleaner::name() must
+        // equal it, or `clean <target>` and the batch paths would write
+        // history rows under two different names. Rename the cleaner side
+        // only and this pin fails (each literal below mirrors the matching
+        // special arm's run_and_exit argument).
+        let tmp = tempfile::TempDir::new().unwrap();
+        let home = tmp.path();
+        let cfg = config::Config::default();
+        let pairs: Vec<(&str, Box<dyn cleaner::Cleaner>)> = vec![
+            ("logs", Box::new(log_cleaner_from_config(home, &cfg, None))),
+            (
+                "xcode",
+                Box::new(cleaners::xcode::XcodeCleaner::new(
+                    home,
+                    Box::new(SystemCommandRunner),
+                )),
+            ),
+            (
+                "ollama",
+                Box::new(cleaners::ollama::OllamaCleaner::new(
+                    home,
+                    Box::new(SystemCommandRunner),
+                )),
+            ),
+            (
+                "library-logs",
+                Box::new(cleaners::library_logs::LibraryLogsCleaner::new(
+                    home,
+                    Box::new(SystemCommandRunner),
+                )),
+            ),
+            (
+                "device-support",
+                Box::new(cleaners::device_support::DeviceSupportCleaner::new(
+                    home,
+                    2,
+                    Box::new(SystemCommandRunner),
+                )),
+            ),
+            (
+                "ios-backup",
+                Box::new(cleaners::ios_backup::IosCleaner::new(
+                    home,
+                    Box::new(SystemCommandRunner),
+                )),
+            ),
+            (
+                "apfs-snapshot",
+                Box::new(
+                    cleaners::apfs_snapshot::ApfsSnapshotCleaner::new(Box::new(
+                        SystemCommandRunner,
+                    ))
+                    .with_mode(cleaners::apfs_snapshot::SnapshotMode::Delete { all: false }),
+                ),
+            ),
+            (
+                "vm-swap",
+                Box::new(cleaners::vm_swap::VmSwapCleaner::new(
+                    std::path::PathBuf::from("/private/var/vm"),
+                    Box::new(SystemCommandRunner),
+                )),
+            ),
+            (
+                "project-artifacts",
+                Box::new(cleaners::project_artifacts::ProjectArtifactsCleaner::new(
+                    Vec::new(),
+                )),
+            ),
+        ];
+        for (label, cleaner) in pairs {
+            assert_eq!(
+                cleaner.name(),
+                label,
+                "history label {label} must match the cleaner's own name(): the history rows would silently fork"
+            );
+        }
+    }
+
+    #[test]
+    fn standard_arm_labels_match_the_cleaner_names() {
+        // Correspondence pin: the standard arm passes target.command_name()
+        // (the macro table's cli name) to run_and_exit; the dispatched
+        // cleaner's own name() must equal it, or `clean <target>` and
+        // `clean all` would write history rows under two names. Rename the
+        // cleaner side only and this pin fails. extra_targets() is
+        // deliberately not chained: its names are the special targets,
+        // which carry no cleaner in standard_cleaners().
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cleaners = standard_cleaners(tmp.path(), &config::Config::default());
+        let names: std::collections::HashSet<&str> = cleaners.iter().map(|c| c.name()).collect();
+        for (cli, _) in SUPPORTED_TARGETS.iter() {
+            assert!(
+                names.contains(cli),
+                "standard target {cli} has no cleaner with the same name(): the history label would silently fork"
             );
         }
     }

@@ -177,6 +177,15 @@ pub fn report_batch_failures(
             ReportShape::Bare => writeln!(out, "Error: {e}")?,
         }
     }
+    // Cancelled targets come after the failures and stay neutral: a decline
+    // is the user's run-level choice, not an error, so the line never says
+    // `Error cleaning` (PBI 78).
+    for name in &summary.cancelled {
+        match shape {
+            ReportShape::Named => writeln!(out, "{name}: cancelled by user")?,
+            ReportShape::Bare => writeln!(out, "cancelled by user")?,
+        }
+    }
     if !summary.skipped.is_empty() {
         writeln!(
             out,
@@ -659,6 +668,7 @@ mod tests {
         let summary = crate::batch::BatchSummary {
             total_freed: 0,
             failures: vec![("brew".to_string(), "boom".to_string())],
+            cancelled: vec![],
             skipped: vec![("a.log".to_string(), "locked".to_string())],
         };
         let mut out: Vec<u8> = Vec::new();
@@ -674,6 +684,7 @@ mod tests {
         let summary = crate::batch::BatchSummary {
             total_freed: 0,
             failures: vec![("brew".to_string(), "boom".to_string())],
+            cancelled: vec![],
             skipped: vec![("a.log".to_string(), "locked".to_string())],
         };
         let mut out: Vec<u8> = Vec::new();
@@ -685,10 +696,45 @@ mod tests {
     }
 
     #[test]
+    fn report_batch_failures_reports_cancelled_after_failures() {
+        // A cancel is a run-level decision, not an error: the cancelled
+        // line is neutral (`{name}: cancelled by user`), comes after the
+        // failures, and never says `Error cleaning` (PBI 78).
+        let summary = crate::batch::BatchSummary {
+            total_freed: 0,
+            failures: vec![("brew".to_string(), "boom".to_string())],
+            cancelled: vec!["colima".to_string()],
+            skipped: vec![],
+        };
+        let mut out: Vec<u8> = Vec::new();
+        report_batch_failures(&mut out, &summary, ReportShape::Named).unwrap();
+        assert_eq!(
+            String::from_utf8(out).unwrap(),
+            "Error cleaning brew: boom\ncolima: cancelled by user\n"
+        );
+    }
+
+    #[test]
+    fn report_batch_failures_cancelled_bare_shape_omits_the_name() {
+        // Bare shape (the TUI whole-target branch) names no cleaner: the
+        // selection context already did, so the cancelled line stays bare.
+        let summary = crate::batch::BatchSummary {
+            total_freed: 0,
+            failures: vec![],
+            cancelled: vec!["colima".to_string()],
+            skipped: vec![],
+        };
+        let mut out: Vec<u8> = Vec::new();
+        report_batch_failures(&mut out, &summary, ReportShape::Bare).unwrap();
+        assert_eq!(String::from_utf8(out).unwrap(), "cancelled by user\n");
+    }
+
+    #[test]
     fn report_batch_failures_silent_when_nothing_failed() {
         let summary = crate::batch::BatchSummary {
             total_freed: 0,
             failures: vec![],
+            cancelled: vec![],
             skipped: vec![],
         };
         let mut out: Vec<u8> = Vec::new();
