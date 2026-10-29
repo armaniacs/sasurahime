@@ -212,8 +212,8 @@ impl Cleaner for LibraryLogsCleaner {
     /// One body for both entry points. `opts.all` switches between the
     /// interactive selection and the non-interactive process-everything run.
     /// The global `older_than_days` combines with the cleaner's own recency
-    /// heuristic (the stricter wins: the LARGER day count) and `trash_mode`
-    /// pins the deletion mode when set (`None` reads the process-global mode).
+    /// heuristic (the stricter wins: the LARGER day count) and `opts.trash_mode`
+    /// is the resolved deletion mode.
     fn clean(
         &self,
         dry_run: bool,
@@ -241,7 +241,7 @@ impl Cleaner for LibraryLogsCleaner {
             return Ok(CleanResult::empty(self.name()));
         }
 
-        let mode = opts.trash_mode.unwrap_or(crate::trash::TrashMode::Global);
+        let mode = opts.trash_mode;
 
         if opts.all {
             // Non-interactive run: process every scanned entry.
@@ -439,10 +439,10 @@ mod tests {
 
     #[test]
     fn clean_all_via_opts_processes_all_entries() {
-        // Pin the global trash pin: the cleaner's Global mode resolves the
-        // process-global pin, so the claim is only deterministic when the
-        // run is actually in trash mode.
-        let _mode = crate::test_helpers::TrashModeGuard::set(true);
+        // The default opts carry the Trash mode, so the claim is only
+        // deterministic when the run actually deletes (in a TCC-restricted
+        // sandbox the Trash move is denied and every deletion comes back
+        // skipped, which is what the assertion then checks).
         let tmp = TempDir::new().unwrap();
         let logs = logs_dir(&tmp);
         fs::write(logs.join("test.log"), b"x").unwrap();
@@ -498,7 +498,7 @@ mod tests {
         let opts = crate::cleaner::CleanOptions {
             all: true,
             older_than_days: Some(300),
-            trash_mode: Some(crate::trash::TrashMode::Permanent),
+            trash_mode: crate::trash::TrashMode::Permanent,
             ..Default::default()
         };
         let result = cleaner
@@ -526,7 +526,7 @@ mod tests {
         let cleaner = LibraryLogsCleaner::new(tmp.path(), Box::new(runner));
         let opts = crate::cleaner::CleanOptions {
             all: true,
-            trash_mode: Some(crate::trash::TrashMode::Permanent),
+            trash_mode: crate::trash::TrashMode::Permanent,
             ..Default::default()
         };
         let result = cleaner

@@ -1,38 +1,33 @@
 use anyhow::Result;
 use std::fs;
 use std::path::Path;
+#[cfg(test)]
 use std::sync::atomic::{AtomicBool, Ordering};
 use trash::macos::{DeleteMethod, TrashContextExtMacos};
 
-static TRASH_MODE: AtomicBool = AtomicBool::new(true);
-
-/// Deletion mode carried through the clean flow. `Global` reads the
-/// process-global mode that `main` pins once per run; `Trash` and `Permanent`
-/// pin the mode so `uses_trash` and the actual deletion can never disagree.
+/// Deletion mode carried through the clean flow. `main` resolves it once
+/// per run (`--permanent` or config.trash_mode = false pins `Permanent`)
+/// and the resolved value flows down as an argument from there on, so
+/// `uses_trash` and the actual deletion can never disagree.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TrashMode {
-    /// Read the process-global mode (pinned once per run by `main`).
-    Global,
     /// Move to Trash.
     Trash,
     /// Delete permanently.
     Permanent,
 }
 
-impl TrashMode {
-    /// Resolves `Global` against the process-global mode.
-    pub fn resolve(self) -> bool {
-        match self {
-            TrashMode::Global => TRASH_MODE.load(Ordering::Relaxed),
-            TrashMode::Trash => true,
-            TrashMode::Permanent => false,
-        }
+impl Default for TrashMode {
+    /// The historical default: move to Trash (the static's
+    /// `AtomicBool::new(true)`).
+    fn default() -> Self {
+        TrashMode::Trash
     }
 }
 
-/// Deletion context: carries the deletion mode as an argument instead of
-/// reading process-global state, so parallel tests never leak modes into each
-/// other. New code should prefer this over the global wrapper.
+/// Deletion context: carries the resolved deletion mode as an argument
+/// instead of reading process-global state, so parallel tests never leak
+/// modes into each other. New code should prefer this over any global.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DeleteCtx {
     pub trash_mode: TrashMode,
@@ -43,12 +38,13 @@ impl DeleteCtx {
         Self { trash_mode }
     }
 
-    /// Deletes `path` according to this context: macOS Trash when trash mode
-    /// is on, otherwise a permanent remove. Failures are typed
-    /// ([`crate::cleaner::DeleteError`]) so the skip/fatal classification
-    /// matches on variant, never on message text (PBI 59).
+    /// Deletes `path` according to this context: macOS Trash when this
+    /// context carries the trash mode, otherwise a permanent remove.
+    /// Failures are typed ([`crate::cleaner::DeleteError`]) so the
+    /// skip/fatal classification matches on variant, never on message
+    /// text (PBI 59).
     pub fn delete_path(&self, path: &Path) -> Result<(), crate::cleaner::DeleteError> {
-        if self.trash_mode.resolve() {
+        if self.trash_mode == TrashMode::Trash {
             #[cfg(test)]
             if trash_backend_override_enabled() {
                 return Err(crate::cleaner::DeleteError::TrashRefused(
@@ -70,14 +66,6 @@ impl DeleteCtx {
             fs::remove_file(path).map_err(crate::cleaner::classify_io_error)
         }
     }
-}
-
-pub fn set_trash_mode(enabled: bool) {
-    TRASH_MODE.store(enabled, Ordering::Relaxed);
-}
-
-pub fn is_trash_mode() -> bool {
-    TRASH_MODE.load(Ordering::Relaxed)
 }
 
 // ── test-only backend override ──
@@ -102,20 +90,35 @@ fn trash_backend_override_enabled() -> bool {
 }
 
 /// Installs the test-only override and restores the default backend on drop.
+/// `set` takes TEST_LOCK and holds it until Drop: two parallel tests can
+/// never install the override at the same time, so one guard's release can
+/// never clear the flag under another test's run (the lock-free release
+/// window that flaked under `cargo test --lib`).
 #[cfg(test)]
-pub struct TrashBackendOverrideGuard;
+pub struct TrashBackendOverrideGuard {
+    /// Held for the guard's whole lifetime: the override is installed and
+    /// cleared while the lock is held, so a parallel override user blocks
+    /// on `set` instead of racing the flag.
+    _lock: std::sync::MutexGuard<'static, ()>,
+}
 
 #[cfg(test)]
 impl TrashBackendOverrideGuard {
     pub fn set() -> Self {
+        let lock = crate::context::TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         set_trash_backend_override(true);
-        Self
+        Self { _lock: lock }
     }
 }
 
 #[cfg(test)]
 impl Drop for TrashBackendOverrideGuard {
     fn drop(&mut self) {
+        // Cleared while the struct's lock field is still alive: a parallel
+        // test cannot acquire TEST_LOCK between the clear and the release,
+        // so it never observes the cleared flag as its own install.
         set_trash_backend_override(false);
     }
 }
@@ -177,13 +180,13 @@ pub fn safe_delete(
     // crate as the typed [`DeleteError::TrashRefused`] variant, which
     // [`DeleteError::is_skippable`] classifies as skippable: the locked
     // entry is skipped and the clean run continues.
-    if !mode.resolve() {
+    if mode == TrashMode::Permanent {
         let path_str = path.to_string_lossy();
         if let Err(e) = runner.run("chflags", &["-R", "nouchg", &path_str]) {
             log::warn!("chflags -R nouchg {} failed: {e}", path.display());
         }
     }
-    let uses_trash = mode.resolve();
+    let uses_trash = mode == TrashMode::Trash;
     match DeleteCtx::new(mode).delete_path(path) {
         Ok(()) => Ok(DeleteOutcome {
             uses_trash,
@@ -420,18 +423,11 @@ mod tests {
     }
 
     #[test]
-    fn global_trash_mode_pin_round_trips() {
-        // The process-global pin is read by `TrashMode::Global` (the seam's
-        // compat path); one locked test covers the setter/getter pair.
-        let _lock = crate::context::TEST_LOCK
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
-        set_trash_mode(true);
-        assert!(is_trash_mode());
-        set_trash_mode(false);
-        assert!(!is_trash_mode());
-        set_trash_mode(true);
-        assert!(is_trash_mode());
+    fn trash_mode_default_is_trash() {
+        // The Default contract (PBI 71): the concrete mode defaults to
+        // Trash, matching the static's historical AtomicBool::new(true).
+        assert_eq!(TrashMode::default(), TrashMode::Trash);
+        assert_ne!(TrashMode::default(), TrashMode::Permanent);
     }
 
     // ── safe_delete seam tests ──
@@ -557,23 +553,6 @@ mod tests {
         // actually moves are the documented TCC-environmental test's job.
     }
 
-    #[test]
-    fn safe_delete_global_mode_resolves_global_pin() {
-        // Global defers to the process-global pin, so a locked test is needed.
-        let _lock = crate::context::TEST_LOCK
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
-        let tmp = TempDir::new().unwrap();
-        let d = tmp.path().join("dir");
-        fs::create_dir_all(&d).unwrap();
-        let runner = RecordingRunner::new();
-        set_trash_mode(true);
-        let outcome = safe_delete(&runner, &d, TrashMode::Global).unwrap();
-        assert!(outcome.uses_trash);
-        // The trash move's success is TCC-environment-dependent; the seam's
-        // contract under test is only the resolved truth.
-    }
-
     // ── safe_delete scope tripwire (PBI 28) ──
 
     #[test]
@@ -651,7 +630,7 @@ mod tests {
             .find("pub fn delete_path(&self, path: &Path)")
             .expect("DeleteCtx::delete_path source present");
         let end = src[start..]
-            .find("pub fn set_trash_mode")
+            .find("// ── test-only backend override ──")
             .map(|i| start + i)
             .unwrap_or(src.len());
         let body = &src[start..end];
@@ -673,9 +652,8 @@ mod tests {
         // vanished between scan and delete) is reported as a SkippedEntry and
         // the remaining entries still delete; the freed sum and the seam's
         // uses_trash truth come out of the same loop every cleaner uses.
-        // The global pin is permanent here: a Permanent resolve must never
+        // The mode is pinned permanent here: a Permanent resolve must never
         // claim Trash.
-        let _guard = crate::test_helpers::TrashModeGuard::set(false);
         let tmp = TempDir::new().unwrap();
         let (a, b) = (tmp.path().join("a"), tmp.path().join("b"));
         for d in [&a, &b] {
@@ -708,7 +686,7 @@ mod tests {
             "loop-test",
             &runner,
             &crate::progress::DeepSuppressReporter,
-            TrashMode::Global,
+            TrashMode::Trash,
             &[],
         );
         assert_eq!(r.bytes_freed, 0);
@@ -747,7 +725,6 @@ mod tests {
         // continues. v0.4.2's ios-backup/device-support loops propagated the
         // fatal error with `?` and aborted the whole clean; the shared loop
         // converges on continue (the same contract every other cleaner uses).
-        let _guard = crate::test_helpers::TrashModeGuard::set(false);
         let tmp = TempDir::new().unwrap();
         let real = tmp.path().join("real");
         fs::create_dir_all(&real).unwrap();

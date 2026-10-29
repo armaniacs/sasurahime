@@ -256,9 +256,9 @@ impl LibraryCachesCleaner {
         Ok(picked.into_iter().map(|i| entries[i].clone()).collect())
     }
 
-    /// The shared clean body. `mode` is the deletion mode threaded into
-    /// `delete_entries`: `Global` reads the process-global mode; `Trash` /
-    /// `Permanent` pin it so the seam outcome and the deletion agree.
+    /// The shared clean body. `mode` is the resolved deletion mode threaded
+    /// into `delete_entries`: the seam outcome and the deletion agree by
+    /// construction.
     fn clean_with_mode(
         &self,
         dry_run: bool,
@@ -353,21 +353,16 @@ impl Cleaner for LibraryCachesCleaner {
         r
     }
 
-    /// Cleans with the run's options: `opts.trash_mode` pins the deletion
-    /// mode when set so `uses_trash` and the actual deletion can never
-    /// disagree (the `CleanOptions` contract). `None` keeps the
-    /// process-global mode (compat).
+    /// Cleans with the run's options: `opts.trash_mode` is the resolved
+    /// deletion mode, so `uses_trash` and the actual deletion can never
+    /// disagree (the `CleanOptions` contract).
     fn clean(
         &self,
         dry_run: bool,
         reporter: &dyn ProgressReporter,
         opts: &CleanOptions,
     ) -> Result<CleanResult> {
-        self.clean_with_mode(
-            dry_run,
-            reporter,
-            opts.trash_mode.unwrap_or(crate::trash::TrashMode::Global),
-        )
+        self.clean_with_mode(dry_run, reporter, opts.trash_mode)
     }
 
     // Removing an app cache is an explicit per-app choice; `--yes` must never pick it.
@@ -513,7 +508,7 @@ mod tests {
     }
 
     use crate::cleaner::{Cleaner, ScanStatus};
-    use crate::test_helpers::{MockRunner, TrashModeGuard};
+    use crate::test_helpers::MockRunner;
 
     fn entry(name: &str, size: u64, d: Disposition, proc_name: Option<&'static str>) -> CacheEntry {
         CacheEntry {
@@ -667,8 +662,6 @@ mod tests {
 
     #[test]
     fn delete_entries_removes_and_sums_bytes() {
-        // Panic-safe pin: the guard restores the previous mode on drop.
-        let _mode = TrashModeGuard::set(false);
         let tmp = TempDir::new().unwrap();
         let c = caches(&tmp);
         put(&c, "typescript", 20_000);
@@ -683,7 +676,7 @@ mod tests {
             .delete_entries(
                 &entries,
                 &crate::progress::DeepSuppressReporter,
-                crate::trash::TrashMode::Global,
+                crate::trash::TrashMode::Permanent,
             )
             .unwrap();
         assert!(!c.join("typescript").exists());
@@ -698,8 +691,6 @@ mod tests {
     fn delete_entries_records_failures_as_skipped() {
         // A Trash-mode delete failure is skippable and must be recorded as a
         // skipped entry; pin the global mode to Trash for determinism.
-        // Panic-safe pin: the guard restores the previous mode on drop.
-        let _mode = TrashModeGuard::set(true);
         let tmp = TempDir::new().unwrap();
         let ghost = entry("ghost", 100, Disposition::Deletable, None);
         let mut ghost = ghost;
@@ -709,7 +700,7 @@ mod tests {
             .delete_entries(
                 &[ghost],
                 &crate::progress::DeepSuppressReporter,
-                crate::trash::TrashMode::Global,
+                crate::trash::TrashMode::Trash,
             )
             .unwrap();
         assert_eq!(r.bytes_freed, 0);
@@ -723,8 +714,6 @@ mod tests {
         // between scan and delete fails at the seam with a fatal NotFound
         // (by design). The per-entry loop must catch it, report it and still
         // process the remaining entries instead of aborting the whole run.
-        // Panic-safe pin: the guard restores the previous mode on drop.
-        let _mode = TrashModeGuard::set(false);
         let tmp = TempDir::new().unwrap();
         let c = caches(&tmp);
         put(&c, "gopls", 20_000);
@@ -744,7 +733,7 @@ mod tests {
             .delete_entries(
                 &entries,
                 &crate::progress::DeepSuppressReporter,
-                crate::trash::TrashMode::Global,
+                crate::trash::TrashMode::Permanent,
             )
             .unwrap();
         // The surviving entry was still processed...
@@ -804,9 +793,8 @@ mod tests {
 
     /// One deletable known cache plus its cleaner. The interactive select is
     /// gated on a real terminal, so the pin tests drive the deletion body
-    /// `clean_with_opts` threads its resolved mode into (`clean_with_opts`
-    /// resolves `opts.trash_mode.unwrap_or(Global)` and passes the result to
-    /// `delete_entries` via `clean_with_mode`).
+    /// `clean` threads its resolved mode into (`clean` passes
+    /// `opts.trash_mode` to `delete_entries` via `clean_with_mode`).
     fn deletable_entry_cleaner(tmp: &TempDir) -> (LibraryCachesCleaner, PathBuf) {
         let c = caches(tmp);
         put(&c, "typescript", 20_000);
@@ -819,11 +807,9 @@ mod tests {
     }
 
     #[test]
-    fn clean_with_opts_pinned_permanent_overrides_the_global() {
-        // The CleanOptions.trash_mode pin contract: a pinned Some(Permanent)
-        // must delete for real and claim no Trash, even when the
-        // process-global mode is trash.
-        let _mode = TrashModeGuard::set(true);
+    fn clean_with_opts_pinned_permanent_deletes_for_real() {
+        // The CleanOptions.trash_mode pin contract: a pinned Permanent must
+        // delete for real and claim no Trash.
         let tmp = TempDir::new().unwrap();
         let (cl, dir) = deletable_entry_cleaner(&tmp);
         let entries = cl.scan(false);
@@ -833,32 +819,29 @@ mod tests {
             include_manual: true,
             older_than_days: None,
             larger_than_mb: None,
-            trash_mode: Some(crate::trash::TrashMode::Permanent),
+            trash_mode: crate::trash::TrashMode::Permanent,
         };
-        // The mode clean_with_opts resolves for this pin.
-        let mode = opts.trash_mode.unwrap_or(crate::trash::TrashMode::Global);
         let r = cl
-            .delete_entries(&entries, &crate::progress::DeepSuppressReporter, mode)
+            .delete_entries(
+                &entries,
+                &crate::progress::DeepSuppressReporter,
+                opts.trash_mode,
+            )
             .unwrap();
         assert!(
             !dir.exists(),
             "the pinned permanent mode must delete for real"
         );
-        assert!(
-            !r.uses_trash,
-            "uses_trash must come from the pinned mode, not the global"
-        );
+        assert!(!r.uses_trash, "uses_trash must come from the pinned mode");
     }
 
     #[test]
     fn clean_with_opts_pinned_trash_claims_trash() {
-        // A pinned Some(Trash) must resolve the deletion seam to trash. The
-        // global is pinned to permanent so only the pin can claim Trash.
-        // The skip branch drops the seam outcome's claim (uses_trash only
-        // accumulates for successful deletions), so the assertion follows
-        // the seam truth: a landed Trash move claims Trash, a TCC-skipped
-        // one (this sandbox) does not.
-        let _mode = TrashModeGuard::set(false);
+        // A pinned Trash must resolve the deletion seam to trash. The skip
+        // branch drops the seam outcome's claim (uses_trash only accumulates
+        // for successful deletions), so the assertion follows the seam
+        // truth: a landed Trash move claims Trash, a TCC-skipped one (this
+        // sandbox) does not.
         let tmp = TempDir::new().unwrap();
         let (cl, _dir) = deletable_entry_cleaner(&tmp);
         let entries = cl.scan(false);
@@ -867,12 +850,14 @@ mod tests {
             include_manual: true,
             older_than_days: None,
             larger_than_mb: None,
-            trash_mode: Some(crate::trash::TrashMode::Trash),
+            trash_mode: crate::trash::TrashMode::Trash,
         };
-        // The mode clean_with_opts resolves for this pin.
-        let mode = opts.trash_mode.unwrap_or(crate::trash::TrashMode::Global);
         let r = cl
-            .delete_entries(&entries, &crate::progress::DeepSuppressReporter, mode)
+            .delete_entries(
+                &entries,
+                &crate::progress::DeepSuppressReporter,
+                opts.trash_mode,
+            )
             .unwrap();
         let deletions_happened = r.skipped.is_empty();
         assert_eq!(
@@ -882,30 +867,26 @@ mod tests {
     }
 
     #[test]
-    fn clean_with_opts_none_keeps_the_global_mode() {
-        // trash_mode: None is the compat path: the deletion reads the
-        // process-global mode. Global permanent deletes for real and claims
-        // no Trash.
-        let _mode = TrashModeGuard::set(false);
+    fn clean_options_default_carries_trash() {
+        // The CleanOptions default carries the concrete Trash mode (the
+        // historical default). The skip branch drops the seam outcome's
+        // claim, so the assertion follows the seam truth: a landed Trash
+        // move claims Trash, a TCC-skipped one (this sandbox) does not.
         let tmp = TempDir::new().unwrap();
-        let (cl, dir) = deletable_entry_cleaner(&tmp);
+        let (cl, _dir) = deletable_entry_cleaner(&tmp);
         let entries = cl.scan(false);
-        let opts = crate::cleaner::CleanOptions {
-            all: true,
-            include_manual: true,
-            older_than_days: None,
-            larger_than_mb: None,
-            trash_mode: None,
-        };
-        // The mode clean_with_opts resolves for this pin.
-        let mode = opts.trash_mode.unwrap_or(crate::trash::TrashMode::Global);
+        let opts = crate::cleaner::CleanOptions::default();
         let r = cl
-            .delete_entries(&entries, &crate::progress::DeepSuppressReporter, mode)
+            .delete_entries(
+                &entries,
+                &crate::progress::DeepSuppressReporter,
+                opts.trash_mode,
+            )
             .unwrap();
-        assert!(
-            !dir.exists(),
-            "the global permanent mode must delete for real"
+        let deletions_happened = r.skipped.is_empty();
+        assert_eq!(
+            r.uses_trash, deletions_happened,
+            "uses_trash must come from the deletion outcomes' seam truth"
         );
-        assert!(!r.uses_trash, "uses_trash must come from the global mode");
     }
 }

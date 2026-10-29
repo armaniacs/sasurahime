@@ -59,10 +59,7 @@ pub fn run_batch(
                     ));
                 }
                 if with_notes {
-                    let trash_mode = opts
-                        .trash_mode
-                        .map(|m| m.resolve())
-                        .unwrap_or_else(crate::trash::is_trash_mode);
+                    let trash_mode = opts.trash_mode == crate::trash::TrashMode::Trash;
                     if let Some(note) = post_clean_note(r.bytes_freed, r.uses_trash, trash_mode) {
                         println!("{note}");
                     }

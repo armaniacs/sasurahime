@@ -115,7 +115,7 @@ impl Cleaner for BrowserCleaner {
         &self,
         dry_run: bool,
         reporter: &dyn ProgressReporter,
-        _opts: &crate::cleaner::CleanOptions,
+        opts: &crate::cleaner::CleanOptions,
     ) -> Result<CleanResult> {
         let any_found = self.groups.iter().any(|g| g.parent.exists());
         if !any_found {
@@ -144,13 +144,13 @@ impl Cleaner for BrowserCleaner {
 
         // The delete ledger owns the per-entry contracts (progress, skip
         // records, freed sums, deleted paths, CleanResult assembly); a
-        // fatal per-entry error no longer aborts the run. The seam
-        // adapter's Global mode keeps the process-global deletion mode.
+        // fatal per-entry error no longer aborts the run. The seam adapter
+        // gets the resolved deletion mode from the caller.
         Ok(crate::trash::delete_ledger(
             self.name(),
             reporter,
             &candidates,
-            crate::trash::seam_delete(self.runner.as_ref(), crate::trash::TrashMode::Global),
+            crate::trash::seam_delete(self.runner.as_ref(), opts.trash_mode),
         ))
     }
 }

@@ -90,7 +90,7 @@ impl Cleaner for UvCleaner {
         &self,
         dry_run: bool,
         _reporter: &dyn ProgressReporter,
-        _opts: &crate::cleaner::CleanOptions,
+        opts: &crate::cleaner::CleanOptions,
     ) -> Result<CleanResult> {
         if !self.runner.exists("uv") {
             println!("uv: not found, skipping");
@@ -108,11 +108,8 @@ impl Cleaner for UvCleaner {
             if dry_run {
                 println!("[dry-run] would remove: {}", old.display());
             } else {
-                let outcome = crate::trash::safe_delete(
-                    self.runner.as_ref(),
-                    &old,
-                    crate::trash::TrashMode::Global,
-                )?;
+                let outcome =
+                    crate::trash::safe_delete(self.runner.as_ref(), &old, opts.trash_mode)?;
                 if let Some(reason) = outcome.skip_reason {
                     skipped.push(crate::cleaner::SkippedEntry {
                         path: old.clone(),

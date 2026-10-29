@@ -231,8 +231,8 @@ impl Cleaner for ProjectArtifactsCleaner {
         };
         // The pinned `opts.trash_mode` must reach the deletion seam so
         // `uses_trash` and the actual deletion can never disagree; `None`
-        // keeps the process-global mode (compat).
-        let mode = opts.trash_mode.unwrap_or(crate::trash::TrashMode::Global);
+        // keeps the resolved mode.
+        let mode = opts.trash_mode;
         effective.clean_with_mode(dry_run, mode)
     }
 
@@ -435,10 +435,11 @@ mod tests {
         crate::scan_cache::init(&cache_path);
         let cleaner = ProjectArtifactsCleaner::new(vec![tmp.path().to_path_buf()]);
         let reporter = crate::progress::DeepSuppressReporter;
-        let _mode = crate::test_helpers::TrashModeGuard::set(false);
-        let result = cleaner
-            .clean(false, &reporter, &crate::cleaner::CleanOptions::default())
-            .unwrap();
+        let opts = crate::cleaner::CleanOptions {
+            trash_mode: crate::trash::TrashMode::Permanent,
+            ..Default::default()
+        };
+        let result = cleaner.clean(false, &reporter, &opts).unwrap();
         assert!(
             !project.join("node_modules").exists(),
             "the stale artifact must be removed even with a poisoned cache"
@@ -508,11 +509,14 @@ mod tests {
 
         let cleaner = ProjectArtifactsCleaner::new(vec![tmp.path().to_path_buf()]);
         let reporter = crate::progress::DeepSuppressReporter;
-        let _mode = crate::test_helpers::TrashModeGuard::set(false);
-        // Plain clean (recency_days=7): the project is deletable.
-        cleaner
-            .clean(false, &reporter, &crate::cleaner::CleanOptions::default())
-            .unwrap();
+        let permanent = crate::cleaner::CleanOptions {
+            trash_mode: crate::trash::TrashMode::Permanent,
+            ..Default::default()
+        };
+        // Plain clean (recency_days=7): the project is deletable. The opts
+        // pin Permanent: the deletion must land regardless of the sandbox's
+        // TCC stance on the trash backend.
+        cleaner.clean(false, &reporter, &permanent).unwrap();
         assert!(
             !project.join("node_modules").exists(),
             "recency_days=7 deletes a 10-day-old project"
@@ -534,12 +538,9 @@ mod tests {
             include_manual: true,
             older_than_days: Some(30),
             larger_than_mb: None,
-            trash_mode: None,
+            trash_mode: crate::trash::TrashMode::Permanent,
         };
         cleaner.clean(false, &reporter, &opts).unwrap();
-        // Restore the mode while still holding the lock so a parallel test
-        // cannot pin its own mode between the restore and the unlock.
-        drop(_mode);
         assert!(
             project.join("node_modules").exists(),
             "the global older_than_days=30 must keep a 10-day-old project"
@@ -561,11 +562,9 @@ mod tests {
     }
 
     #[test]
-    fn clean_with_opts_pinned_permanent_overrides_the_global() {
-        // The CleanOptions.trash_mode pin contract: a pinned Some(Permanent)
-        // must delete for real and claim no Trash, even when the
-        // process-global mode is trash.
-        let _mode = crate::test_helpers::TrashModeGuard::set(true);
+    fn clean_with_opts_pinned_permanent_deletes_for_real() {
+        // The CleanOptions.trash_mode pin contract: a pinned Permanent must
+        // delete for real and claim no Trash.
         let tmp = tempfile::TempDir::new().unwrap();
         let cleaner = old_artifact_cleaner(&tmp);
         let opts = crate::cleaner::CleanOptions {
@@ -573,7 +572,7 @@ mod tests {
             include_manual: true,
             older_than_days: None,
             larger_than_mb: None,
-            trash_mode: Some(crate::trash::TrashMode::Permanent),
+            trash_mode: crate::trash::TrashMode::Permanent,
         };
         let reporter = crate::progress::DeepSuppressReporter;
         let result = cleaner.clean(false, &reporter, &opts).unwrap();
@@ -589,12 +588,11 @@ mod tests {
 
     #[test]
     fn clean_with_opts_pinned_trash_claims_trash() {
-        // A pinned Some(Trash) must resolve the deletion seam to trash. The
+        // A pinned Trash must resolve the deletion seam to trash. The
         // global is pinned to permanent so only the pin can claim Trash.
         // The seam outcome is the one owner of the claim: a deleted outcome
         // claims Trash, a skipped one (the TCC-denied move in this sandbox)
         // does not — either way the assertion follows the seam truth.
-        let _mode = crate::test_helpers::TrashModeGuard::set(false);
         let tmp = tempfile::TempDir::new().unwrap();
         let cleaner = old_artifact_cleaner(&tmp);
         let opts = crate::cleaner::CleanOptions {
@@ -602,7 +600,7 @@ mod tests {
             include_manual: true,
             older_than_days: None,
             larger_than_mb: None,
-            trash_mode: Some(crate::trash::TrashMode::Trash),
+            trash_mode: crate::trash::TrashMode::Trash,
         };
         let reporter = crate::progress::DeepSuppressReporter;
         let result = cleaner.clean(false, &reporter, &opts).unwrap();
@@ -614,29 +612,21 @@ mod tests {
     }
 
     #[test]
-    fn clean_with_opts_none_keeps_the_global_mode() {
-        // trash_mode: None is the compat path: the deletion reads the
-        // process-global mode. Global permanent deletes for real and claims
-        // no Trash.
-        let _mode = crate::test_helpers::TrashModeGuard::set(false);
+    fn clean_options_default_carries_trash() {
+        // The CleanOptions default carries the concrete Trash mode (the
+        // historical default). The seam outcome is the one owner of the
+        // claim: a deleted outcome claims Trash, a skipped one (the
+        // TCC-denied move in this sandbox) does not — either way the
+        // assertion follows the seam truth.
         let tmp = tempfile::TempDir::new().unwrap();
         let cleaner = old_artifact_cleaner(&tmp);
-        let opts = crate::cleaner::CleanOptions {
-            all: true,
-            include_manual: true,
-            older_than_days: None,
-            larger_than_mb: None,
-            trash_mode: None,
-        };
+        let opts = crate::cleaner::CleanOptions::default();
         let reporter = crate::progress::DeepSuppressReporter;
         let result = cleaner.clean(false, &reporter, &opts).unwrap();
-        assert!(
-            !tmp.path().join("proj/node_modules").exists(),
-            "the global permanent mode must delete for real"
-        );
-        assert!(
-            !result.uses_trash,
-            "uses_trash must come from the global mode"
+        let deletions_happened = result.skipped.is_empty();
+        assert_eq!(
+            result.uses_trash, deletions_happened,
+            "uses_trash must come from the deletion outcomes' seam truth"
         );
     }
 

@@ -404,7 +404,7 @@ mod tests {
             running: true,
         };
 
-        let result = auto_clean_hint(&hint, home, &runner);
+        let result = auto_clean_hint(&hint, home, &runner, crate::trash::TrashMode::Permanent);
         assert!(result.is_err());
         let calls = runner.recorded_calls();
         assert!(calls.iter().any(|(p, _)| p == "osascript"));
@@ -421,14 +421,9 @@ mod tests {
             &["Code/Cache", "Code/CachedExtensionVSIXs", "Code/CachedData"],
         );
 
-        // Pin the global mode to permanent: the seam's Trash move is
-        // TCC-environment-dependent, but the permanent path (uchg clear + fs
-        // removal) is deterministic here. TrashModeGuard::set holds TEST_LOCK
-        // until Drop, so parallel trash-mode mutators serialize with this
-        // read, and the guard restores the previous mode on drop even when an
-        // assert fails, so the global can never stay pinned to permanent.
-        let _mode = crate::test_helpers::TrashModeGuard::set(false);
-
+        // Pin permanent: the seam's Trash move is TCC-environment-dependent,
+        // but the permanent path (uchg clear + fs removal) is deterministic
+        // here.
         let runner = RecordingRunner::new(&["Code"], 1);
         let hint = ProcessHint {
             entry: &VSCODE_ENTRY,
@@ -436,7 +431,8 @@ mod tests {
             running: true,
         };
 
-        auto_clean_hint(&hint, home, &runner).expect("should succeed");
+        auto_clean_hint(&hint, home, &runner, crate::trash::TrashMode::Permanent)
+            .expect("should succeed");
         // The seam attempted one uchg clear per deleted path (the recording
         // runner rejects `chflags`, which exercises the warn-and-continue
         // contract), and the permanent removal actually deleted the dirs.
@@ -474,7 +470,8 @@ mod tests {
             running: true,
         };
 
-        auto_clean_hint(&hint, home, &runner).expect("should succeed");
+        auto_clean_hint(&hint, home, &runner, crate::trash::TrashMode::Permanent)
+            .expect("should succeed");
         let calls = runner.recorded_calls();
         let open_calls: Vec<_> = calls.iter().filter(|(p, _)| p == "open").collect();
         assert_eq!(open_calls.len(), 1);
@@ -497,7 +494,8 @@ mod tests {
             running: true,
         };
 
-        auto_clean_hint(&hint, home, &runner).expect("should succeed");
+        auto_clean_hint(&hint, home, &runner, crate::trash::TrashMode::Permanent)
+            .expect("should succeed");
         let calls = runner.recorded_calls();
         assert!(!calls.iter().any(|(p, _)| p == "open"));
     }
@@ -536,7 +534,13 @@ mod tests {
             running: true,
         };
 
-        offer_auto_clean(&[hint], home, &runner, &prompt);
+        offer_auto_clean(
+            &[hint],
+            home,
+            &runner,
+            &prompt,
+            crate::trash::TrashMode::Permanent,
+        );
         let calls = runner.recorded_calls();
         assert!(calls.iter().any(|(p, _)| p == "osascript"));
     }
@@ -555,7 +559,13 @@ mod tests {
             running: true,
         };
 
-        offer_auto_clean(&[hint], home, &runner, &prompt);
+        offer_auto_clean(
+            &[hint],
+            home,
+            &runner,
+            &prompt,
+            crate::trash::TrashMode::Permanent,
+        );
         let calls = runner.recorded_calls();
         assert!(!calls.iter().any(|(p, _)| p == "osascript"));
     }
@@ -574,7 +584,13 @@ mod tests {
             running: false,
         };
 
-        offer_auto_clean(&[hint], home, &runner, &prompt);
+        offer_auto_clean(
+            &[hint],
+            home,
+            &runner,
+            &prompt,
+            crate::trash::TrashMode::Permanent,
+        );
         let calls = runner.recorded_calls();
         assert!(!calls.iter().any(|(p, _)| p == "osascript"));
         assert!(!calls.iter().any(|(p, _)| p == "open"));

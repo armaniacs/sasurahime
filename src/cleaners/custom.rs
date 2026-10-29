@@ -54,7 +54,7 @@ impl Cleaner for CustomPathCleaner {
         &self,
         dry_run: bool,
         reporter: &dyn ProgressReporter,
-        _opts: &crate::cleaner::CleanOptions,
+        opts: &crate::cleaner::CleanOptions,
     ) -> Result<CleanResult> {
         let path = &self.path;
         if !crate::safety::is_safe_delete_target(path) {
@@ -98,15 +98,12 @@ impl Cleaner for CustomPathCleaner {
 
         // The cleaner has no runner field: the seam only needs one for the
         // permanent-mode uchg clear, which the system runner performs. The
-        // ledger's Global mode keeps the process-global deletion mode.
+        // ledger gets the resolved deletion mode from the caller.
         Ok(crate::trash::delete_ledger(
             self.name,
             reporter,
             &items,
-            crate::trash::seam_delete(
-                &crate::command::SystemCommandRunner,
-                crate::trash::TrashMode::Global,
-            ),
+            crate::trash::seam_delete(&crate::command::SystemCommandRunner, opts.trash_mode),
         ))
     }
 }
@@ -164,12 +161,9 @@ mod tests {
 
     #[test]
     fn clean_deletes_contents_not_root() {
-        // Pin permanent deletion: the Global compat delegator resolves to the
-        // default trash mode otherwise, whose backend is TCC-blocked in this
-        // sandbox (bytes_freed 0). The test must pin the mode it needs instead
-        // of depending on ambient global state (PBI 46 guard scoping removed
-        // the accidental leaks this test used to rely on).
-        let _mode = crate::test_helpers::TrashModeGuard::set(false);
+        // Pin permanent deletion: the opts carry the mode the test needs
+        // instead of depending on ambient state; the default trash mode's
+        // backend is TCC-blocked in this sandbox (bytes_freed 0).
         let tmp = TempDir::new().unwrap();
         let cache_dir = tmp.path().join("my-cache");
         fs::create_dir_all(&cache_dir).unwrap();
@@ -177,9 +171,11 @@ mod tests {
 
         let reporter = DeepSuppressReporter;
         let cleaner = CustomPathCleaner::new("my-cache".to_string(), cache_dir.clone());
-        cleaner
-            .clean(false, &reporter, &crate::cleaner::CleanOptions::default())
-            .unwrap();
+        let opts = crate::cleaner::CleanOptions {
+            trash_mode: crate::trash::TrashMode::Permanent,
+            ..Default::default()
+        };
+        cleaner.clean(false, &reporter, &opts).unwrap();
 
         // Root dir must still exist
         assert!(cache_dir.exists(), "root dir must survive clean");

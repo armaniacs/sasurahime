@@ -113,7 +113,7 @@ impl Cleaner for GradleCleaner {
         &self,
         dry_run: bool,
         reporter: &dyn ProgressReporter,
-        _opts: &crate::cleaner::CleanOptions,
+        opts: &crate::cleaner::CleanOptions,
     ) -> Result<CleanResult> {
         let caches = self.home.join(".gradle/caches");
         if !caches.exists() {
@@ -144,7 +144,7 @@ impl Cleaner for GradleCleaner {
             self.name(),
             reporter,
             &items,
-            crate::trash::seam_delete(self.runner.as_ref(), crate::trash::TrashMode::Global),
+            crate::trash::seam_delete(self.runner.as_ref(), opts.trash_mode),
         ))
     }
 }
@@ -238,7 +238,7 @@ impl Cleaner for JetBrainsCleaner {
         &self,
         dry_run: bool,
         reporter: &dyn ProgressReporter,
-        _opts: &crate::cleaner::CleanOptions,
+        opts: &crate::cleaner::CleanOptions,
     ) -> Result<CleanResult> {
         let dir = self.home.join("Library/Caches/JetBrains");
         if !dir.exists() {
@@ -269,7 +269,7 @@ impl Cleaner for JetBrainsCleaner {
             self.name(),
             reporter,
             &items,
-            crate::trash::seam_delete(self.runner.as_ref(), crate::trash::TrashMode::Global),
+            crate::trash::seam_delete(self.runner.as_ref(), opts.trash_mode),
         ))
     }
 }
@@ -301,10 +301,8 @@ mod tests {
 
     #[test]
     fn gradle_clean_uses_trash_true() {
-        // TrashModeGuard::set holds TEST_LOCK until Drop, so parallel
-        // trash-mode mutators serialize with this read; the pin makes the
-        // seam resolution deterministic.
-        let _mode = crate::test_helpers::TrashModeGuard::set(true);
+        // The default opts carry the Trash mode, so the deletion seam runs
+        // the trash path and the assertion is deterministic.
         let tmp = TempDir::new().unwrap();
         let caches = tmp.path().join(".gradle/caches");
         fs::create_dir_all(caches.join("8.12.0")).unwrap();
@@ -335,8 +333,7 @@ mod tests {
     #[test]
     fn gradle_clean_without_deletion_candidates_reports_uses_trash_false() {
         // Zero deletions: the seam is never invoked, so no Trash claim may be
-        // made, even with the global pinned to trash.
-        let _mode = crate::test_helpers::TrashModeGuard::set(true);
+        // made.
         let tmp = TempDir::new().unwrap();
         let caches = tmp.path().join(".gradle/caches");
         // Only non-version names: find_old_caches returns no candidate.
@@ -366,8 +363,7 @@ mod tests {
         // via osascript, trashItemAtURL via trashd) move entries out of
         // read-only parents on modern macOS, so a chmod alone no longer
         // forces the deterministic failure. A run where nothing was deleted
-        // must not claim Trash, even with the global pinned to trash.
-        let _mode = crate::test_helpers::TrashModeGuard::set(true);
+        // must not claim Trash.
         let _backend = crate::trash::TrashBackendOverrideGuard::set();
         let tmp = TempDir::new().unwrap();
         let caches = tmp.path().join(".gradle/caches");
@@ -552,9 +548,9 @@ mod tests {
 
     #[test]
     fn jetbrains_clean_uses_trash_true() {
-        // TrashModeGuard::set holds TEST_LOCK until Drop, same as the gradle
-        // test; the pin makes the seam resolution deterministic.
-        let _mode = crate::test_helpers::TrashModeGuard::set(true);
+        // The default opts carry the Trash mode, same as the gradle test, so
+        // the deletion seam runs the trash path and the claim is
+        // deterministic.
         let tmp = TempDir::new().unwrap();
         let jb = tmp.path().join("Library/Caches/JetBrains");
         fs::create_dir_all(jb.join("GoLand2024.2")).unwrap();

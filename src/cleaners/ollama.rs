@@ -114,13 +114,13 @@ impl Cleaner for OllamaCleaner {
         &self,
         dry_run: bool,
         reporter: &dyn ProgressReporter,
-        _opts: &crate::cleaner::CleanOptions,
+        opts: &crate::cleaner::CleanOptions,
     ) -> Result<CleanResult> {
         if self.runner.exists("ollama") {
             let models = self.list_models()?;
             if models.is_empty() {
                 if self.models_dir.exists() && dir_size(&self.models_dir) > 0 {
-                    return self.clean_fallback(dry_run);
+                    return self.clean_fallback(dry_run, opts.trash_mode);
                 }
                 println!("[ollama] no models found");
                 return Ok(CleanResult {
@@ -220,7 +220,7 @@ impl Cleaner for OllamaCleaner {
             ));
         }
 
-        self.clean_fallback(dry_run)
+        self.clean_fallback(dry_run, opts.trash_mode)
     }
 }
 
@@ -238,7 +238,7 @@ impl OllamaCleaner {
         }
     }
 
-    fn clean_fallback(&self, dry_run: bool) -> Result<CleanResult> {
+    fn clean_fallback(&self, dry_run: bool, mode: crate::trash::TrashMode) -> Result<CleanResult> {
         let dir = &self.models_dir;
         if !dir.exists() {
             return Ok(CleanResult {
@@ -264,8 +264,7 @@ impl OllamaCleaner {
                 deleted_paths: vec![],
             });
         }
-        let outcome =
-            crate::trash::safe_delete(self.runner.as_ref(), dir, crate::trash::TrashMode::Global)?;
+        let outcome = crate::trash::safe_delete(self.runner.as_ref(), dir, mode)?;
         let mut skipped: Vec<crate::cleaner::SkippedEntry> = vec![];
         let mut freed = size;
         if let Some(reason) = outcome.skip_reason {

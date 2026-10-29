@@ -65,7 +65,7 @@ impl Cleaner for IosCleaner {
         &self,
         dry_run: bool,
         reporter: &dyn ProgressReporter,
-        _opts: &crate::cleaner::CleanOptions,
+        opts: &crate::cleaner::CleanOptions,
     ) -> Result<CleanResult> {
         if !self.backup_dir.exists() {
             return Ok(CleanResult::empty(self.name()));
@@ -123,7 +123,7 @@ impl Cleaner for IosCleaner {
             self.name(),
             self.runner.as_ref(),
             reporter,
-            crate::trash::TrashMode::Global,
+            opts.trash_mode,
             &selected,
         );
         println!(

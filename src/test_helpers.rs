@@ -138,39 +138,6 @@ pub fn write_aged_file(path: &Path, days_old: u64, content: &[u8]) {
 
 // ── EnvGuard ──
 
-/// A panic-safe guard that sets the process-global trash mode for the
-/// duration of a test and restores the previous mode on `Drop`, even when
-/// the test panics, so a failed test cannot leave the global mutated for
-/// parallel tests.
-///
-/// Uses the global [`crate::context::TEST_LOCK`] to synchronize access to
-/// the trash mode across parallel tests. The lock is held until `Drop`, so
-/// the restore happens while the global is still serialized.
-pub struct TrashModeGuard {
-    previous: bool,
-    _lock: std::sync::MutexGuard<'static, ()>,
-}
-
-impl TrashModeGuard {
-    pub fn set(enabled: bool) -> Self {
-        let lock = crate::context::TEST_LOCK
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
-        let previous = crate::trash::is_trash_mode();
-        crate::trash::set_trash_mode(enabled);
-        Self {
-            previous,
-            _lock: lock,
-        }
-    }
-}
-
-impl Drop for TrashModeGuard {
-    fn drop(&mut self) {
-        crate::trash::set_trash_mode(self.previous);
-    }
-}
-
 pub struct EnvGuard {
     key: &'static str,
     previous: Option<String>,

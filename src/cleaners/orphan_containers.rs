@@ -441,9 +441,9 @@ impl OrphanContainersCleaner {
         Ok(picks.into_iter().map(|i| candidates[i].clone()).collect())
     }
 
-    /// The shared clean body. `mode` is the deletion mode threaded into
-    /// `delete_selected`: `Global` reads the process-global mode; `Trash` /
-    /// `Permanent` pin it so the seam outcome and the deletion agree.
+    /// The shared clean body. `mode` is the resolved deletion mode threaded
+    /// into `delete_selected`: the seam outcome and the deletion agree by
+    /// construction.
     fn clean_with_mode(
         &self,
         dry_run: bool,
@@ -545,21 +545,16 @@ impl Cleaner for OrphanContainersCleaner {
         r
     }
 
-    /// Cleans with the run's options: `opts.trash_mode` pins the deletion
-    /// mode when set so `uses_trash` and the actual deletion can never
-    /// disagree (the `CleanOptions` contract). `None` keeps the
-    /// process-global mode (compat).
+    /// Cleans with the run's options: `opts.trash_mode` is the resolved
+    /// deletion mode, so `uses_trash` and the actual deletion can never
+    /// disagree (the `CleanOptions` contract).
     fn clean(
         &self,
         dry_run: bool,
         reporter: &dyn ProgressReporter,
         opts: &CleanOptions,
     ) -> Result<CleanResult> {
-        self.clean_with_mode(
-            dry_run,
-            reporter,
-            opts.trash_mode.unwrap_or(crate::trash::TrashMode::Global),
-        )
+        self.clean_with_mode(dry_run, reporter, opts.trash_mode)
     }
 
     // Which folders are leftovers is a human judgement, so `--yes` must skip this
@@ -1299,7 +1294,6 @@ mod tests {
         // against parallel tests that flip the global pin (the guard holds
         // TEST_LOCK until Drop). Panic-safe pin: the guard restores the
         // previous mode on drop, even when an assert fails mid-test.
-        let _mode = crate::test_helpers::TrashModeGuard::set(true);
         let tmp = TempDir::new().unwrap();
         let missing = OrphanCandidate {
             path: tmp.path().join("does-not-exist"),
@@ -1311,7 +1305,7 @@ mod tests {
             .delete_selected(
                 &[missing],
                 &SuppressReporter,
-                crate::trash::TrashMode::Global,
+                crate::trash::TrashMode::Trash,
             )
             .unwrap();
         assert_eq!(result.bytes_freed, 0);
@@ -1391,11 +1385,9 @@ mod tests {
     }
 
     #[test]
-    fn clean_with_opts_pinned_permanent_overrides_the_global() {
-        // The CleanOptions.trash_mode pin contract: a pinned Some(Permanent)
-        // must delete for real and claim no Trash, even when the
-        // process-global mode is trash.
-        let _mode = crate::test_helpers::TrashModeGuard::set(true);
+    fn clean_with_opts_pinned_permanent_deletes_for_real() {
+        // The CleanOptions.trash_mode pin contract: a pinned Permanent must
+        // delete for real and claim no Trash.
         let tmp = TempDir::new().unwrap();
         let (cl, selected, dir) = orphan_candidate_cleaner(&tmp);
         let opts = crate::cleaner::CleanOptions {
@@ -1403,10 +1395,10 @@ mod tests {
             include_manual: true,
             older_than_days: None,
             larger_than_mb: None,
-            trash_mode: Some(crate::trash::TrashMode::Permanent),
+            trash_mode: crate::trash::TrashMode::Permanent,
         };
         // The mode clean_with_opts resolves for this pin.
-        let mode = opts.trash_mode.unwrap_or(crate::trash::TrashMode::Global);
+        let mode = opts.trash_mode;
         let r = cl
             .delete_selected(&selected, &SuppressReporter, mode)
             .unwrap();
@@ -1422,13 +1414,12 @@ mod tests {
 
     #[test]
     fn clean_with_opts_pinned_trash_claims_trash() {
-        // A pinned Some(Trash) must resolve the deletion seam to trash. The
+        // A pinned Trash must resolve the deletion seam to trash. The
         // global is pinned to permanent so only the pin can claim Trash.
         // The skip branch drops the seam outcome's claim (uses_trash only
         // accumulates for successful deletions), so the assertion follows
         // the seam truth: a landed Trash move claims Trash, a TCC-skipped
         // one (this sandbox) does not.
-        let _mode = crate::test_helpers::TrashModeGuard::set(false);
         let tmp = TempDir::new().unwrap();
         let (cl, selected, _dir) = orphan_candidate_cleaner(&tmp);
         let opts = crate::cleaner::CleanOptions {
@@ -1436,10 +1427,10 @@ mod tests {
             include_manual: true,
             older_than_days: None,
             larger_than_mb: None,
-            trash_mode: Some(crate::trash::TrashMode::Trash),
+            trash_mode: crate::trash::TrashMode::Trash,
         };
         // The mode clean_with_opts resolves for this pin.
-        let mode = opts.trash_mode.unwrap_or(crate::trash::TrashMode::Global);
+        let mode = opts.trash_mode;
         let r = cl
             .delete_selected(&selected, &SuppressReporter, mode)
             .unwrap();
@@ -1451,29 +1442,21 @@ mod tests {
     }
 
     #[test]
-    fn clean_with_opts_none_keeps_the_global_mode() {
-        // trash_mode: None is the compat path: the deletion reads the
-        // process-global mode. Global permanent deletes for real and claims
-        // no Trash.
-        let _mode = crate::test_helpers::TrashModeGuard::set(false);
+    fn clean_options_default_carries_trash() {
+        // The CleanOptions default carries the concrete Trash mode (the
+        // historical default). The skip branch drops the seam outcome's
+        // claim, so the assertion follows the seam truth: a landed Trash
+        // move claims Trash, a TCC-skipped one (this sandbox) does not.
         let tmp = TempDir::new().unwrap();
-        let (cl, selected, dir) = orphan_candidate_cleaner(&tmp);
-        let opts = crate::cleaner::CleanOptions {
-            all: true,
-            include_manual: true,
-            older_than_days: None,
-            larger_than_mb: None,
-            trash_mode: None,
-        };
-        // The mode clean_with_opts resolves for this pin.
-        let mode = opts.trash_mode.unwrap_or(crate::trash::TrashMode::Global);
+        let (cl, selected, _dir) = orphan_candidate_cleaner(&tmp);
+        let opts = crate::cleaner::CleanOptions::default();
         let r = cl
-            .delete_selected(&selected, &SuppressReporter, mode)
+            .delete_selected(&selected, &SuppressReporter, opts.trash_mode)
             .unwrap();
-        assert!(
-            !dir.exists(),
-            "the global permanent mode must delete for real"
+        let deletions_happened = r.skipped.is_empty();
+        assert_eq!(
+            r.uses_trash, deletions_happened,
+            "uses_trash must come from the deletion outcomes' seam truth"
         );
-        assert!(!r.uses_trash, "uses_trash must come from the global mode");
     }
 }

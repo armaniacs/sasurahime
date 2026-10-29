@@ -238,8 +238,9 @@ pub(crate) fn clean_sub_target(
 }
 
 /// Non-interactive: clean every pruneable cleaner without prompting.
-/// Used by `--yes` flag.
-pub fn run_auto(cleaners: &[Box<dyn Cleaner>]) -> Result<()> {
+/// Used by `--yes` flag. `mode` is the run's resolved deletion mode,
+/// resolved once in `main` and passed down as an argument.
+pub fn run_auto(cleaners: &[Box<dyn Cleaner>], mode: crate::trash::TrashMode) -> Result<()> {
     let (results, _available) = crate::scanner::detect_all(cleaners);
 
     let pruneable_indices = auto_clean_indices(&results, cleaners);
@@ -283,7 +284,7 @@ pub fn run_auto(cleaners: &[Box<dyn Cleaner>]) -> Result<()> {
         return Ok(());
     }
 
-    if !crate::trash::is_trash_mode() {
+    if mode == crate::trash::TrashMode::Permanent {
         let total_reclaimable: u64 = pruneable_indices
             .iter()
             .filter_map(|&i| {
@@ -324,9 +325,13 @@ pub fn run_auto(cleaners: &[Box<dyn Cleaner>]) -> Result<()> {
         .iter()
         .map(|&i| cleaners[i].as_ref())
         .collect();
+    let opts = crate::cleaner::CleanOptions {
+        trash_mode: mode,
+        ..Default::default()
+    };
     let summary = crate::batch::run_batch(
         &selected,
-        &crate::cleaner::CleanOptions::default(),
+        &opts,
         &crate::progress::SuppressReporter,
         false, // dry_run: interactive always deletes
         true,  // animated
@@ -354,7 +359,11 @@ pub fn run_auto(cleaners: &[Box<dyn Cleaner>]) -> Result<()> {
 /// in-process clean seam ([`CleanByName`], PBI-50) wired by the binary:
 /// sub-target selections dispatch through it instead of re-exec'ing this
 /// binary, and its REAL CleanResult is what `Total freed` reports.
-pub fn run_interactive(cleaners: &[Box<dyn Cleaner>], clean_fn: &CleanByName) -> Result<()> {
+pub fn run_interactive(
+    cleaners: &[Box<dyn Cleaner>],
+    clean_fn: &CleanByName,
+    mode: crate::trash::TrashMode,
+) -> Result<()> {
     if !std::io::stdin().is_terminal() {
         eprintln!("sasurahime: not a terminal. Use --yes for non-interactive mode.");
         std::process::exit(1);
@@ -421,9 +430,13 @@ pub fn run_interactive(cleaners: &[Box<dyn Cleaner>], clean_fn: &CleanByName) ->
             // interleaved with the sub-target seam branch above.
             // with_notes=false: this flow never printed notes.
             let batch_targets = [cleaners[*cleaner_idx].as_ref()];
+            let opts = crate::cleaner::CleanOptions {
+                trash_mode: mode,
+                ..Default::default()
+            };
             let summary = crate::batch::run_batch(
                 &batch_targets,
-                &crate::cleaner::CleanOptions::default(),
+                &opts,
                 &crate::progress::SuppressReporter,
                 false, // dry_run: interactive always deletes
                 true,  // animated
@@ -669,7 +682,7 @@ mod tests {
             Arc::clone(&calls),
         ))))];
 
-        run_auto(&cleaners).unwrap();
+        run_auto(&cleaners, crate::trash::TrashMode::Trash).unwrap();
 
         assert_eq!(calls.load(Ordering::SeqCst), 0);
     }

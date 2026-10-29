@@ -89,7 +89,7 @@ impl Cleaner for CargoCleaner {
         &self,
         dry_run: bool,
         reporter: &dyn ProgressReporter,
-        _opts: &crate::cleaner::CleanOptions,
+        opts: &crate::cleaner::CleanOptions,
     ) -> Result<CleanResult> {
         let reg = self.home.join(".cargo/registry/cache");
         // Registry first, then the target dirs, in one ledger call: the
@@ -128,7 +128,7 @@ impl Cleaner for CargoCleaner {
             self.name(),
             reporter,
             &items,
-            crate::trash::seam_delete(self.runner.as_ref(), crate::trash::TrashMode::Global),
+            crate::trash::seam_delete(self.runner.as_ref(), opts.trash_mode),
         ))
     }
 }
@@ -249,7 +249,6 @@ mod tests {
         // a SkippedEntry and never summed - the same PBI 53/59 convention
         // the command cleaners pin. The trash backend override makes the
         // platform move refuse deterministically.
-        let _mode = crate::test_helpers::TrashModeGuard::set(true);
         let _backend = crate::trash::TrashBackendOverrideGuard::set();
         let tmp = TempDir::new().unwrap();
         let reg = tmp.path().join(".cargo/registry/cache/pkg");

@@ -115,7 +115,7 @@ impl Cleaner for DeviceSupportCleaner {
         &self,
         dry_run: bool,
         reporter: &dyn ProgressReporter,
-        _opts: &crate::cleaner::CleanOptions,
+        opts: &crate::cleaner::CleanOptions,
     ) -> Result<CleanResult> {
         let to_delete = self.versions_to_delete();
         if to_delete.is_empty() {
@@ -138,7 +138,7 @@ impl Cleaner for DeviceSupportCleaner {
         // The shared delete loop owns the per-entry contracts (progress,
         // skip classification, freed sums). Sizes are measured here, once
         // per path, the same way the old inline loop measured them. The
-        // mode is Global: the CLI pins the process-global mode per run.
+        // mode is the resolved deletion mode from the caller.
         let items: Vec<(std::path::PathBuf, u64)> = to_delete
             .iter()
             .map(|p| (p.to_path_buf(), dir_size(p)))
@@ -147,7 +147,7 @@ impl Cleaner for DeviceSupportCleaner {
             self.name(),
             self.runner.as_ref(),
             reporter,
-            crate::trash::TrashMode::Global,
+            opts.trash_mode,
             &items,
         );
         Ok(result)

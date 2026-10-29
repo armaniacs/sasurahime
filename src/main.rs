@@ -779,13 +779,13 @@ where
             freed_message(
                 result.bytes_freed,
                 result.uses_trash,
-                sasurahime::trash::is_trash_mode()
+                opts.trash_mode == sasurahime::trash::TrashMode::Trash,
             )
         );
         if let Some(note) = batch::post_clean_note(
             result.bytes_freed,
             result.uses_trash,
-            sasurahime::trash::is_trash_mode(),
+            opts.trash_mode == sasurahime::trash::TrashMode::Trash,
         ) {
             println!("{note}");
         }
@@ -965,11 +965,20 @@ fn main() -> anyhow::Result<()> {
     // Set global context flags before any subcommand runs.
     sasurahime::context::set_verbose(cli.verbose);
 
-    // Default: trash mode enabled.
-    // --permanent flag overrides to permanent deletion.
-    // Config trash_mode = false also overrides to permanent deletion.
-    let trash_mode = !cli.permanent && config.trash_mode;
-    sasurahime::trash::set_trash_mode(trash_mode);
+    // The one mode resolution (PBI 71): --permanent or config.trash_mode =
+    // false pins permanent deletion, everything else moves to the Trash.
+    // The AND expression and its evaluation order are unchanged; the
+    // resolved value flows down as an argument from here on, and nothing
+    // re-reads a process-global mode.
+    let trash_mode = if !cli.permanent && config.trash_mode {
+        sasurahime::trash::TrashMode::Trash
+    } else {
+        sasurahime::trash::TrashMode::Permanent
+    };
+    let clean_opts = CleanOptions {
+        trash_mode,
+        ..Default::default()
+    };
 
     if cli.no_unicode {
         format::set_use_unicode(false);
@@ -999,7 +1008,7 @@ fn main() -> anyhow::Result<()> {
                 include_manual: config.policy.include_manual,
                 older_than_days: config.policy.older_than_days,
                 larger_than_mb: config.policy.larger_than_mb,
-                trash_mode: Some(sasurahime::trash::TrashMode::Global),
+                trash_mode,
             };
             let cleaners_list = all_cleaners(&home, &config);
             let mut skipped: Vec<String> = Vec::new();
@@ -1078,7 +1087,7 @@ fn main() -> anyhow::Result<()> {
             let runner = SystemCommandRunner;
             let hints = hint::collect_hints(&home, &runner);
             hint::print_hints(&hints);
-            hint::offer_auto_clean(&hints, &home, &runner, &hint::StdinPrompt);
+            hint::offer_auto_clean(&hints, &home, &runner, &hint::StdinPrompt, trash_mode);
         }
         Some(Commands::Targets) => {
             let mut targets: Vec<&(&str, &str)> =
@@ -1100,17 +1109,20 @@ fn main() -> anyhow::Result<()> {
             // under-count of the old self re-exec, and the TUI process's own
             // flags (trash mode, config path) now apply to the clean.
             if cli.yes {
-                interactive::run_auto(&cleaners)?;
+                interactive::run_auto(&cleaners, trash_mode)?;
             } else {
-                let opts = CleanOptions::default();
-                interactive::run_interactive(&cleaners, &|name, sub, dry, rep| {
-                    clean_by_name(&home, &config, name, sub, dry, rep, &opts)
-                })?;
+                interactive::run_interactive(
+                    &cleaners,
+                    &|name, sub, dry, rep| {
+                        clean_by_name(&home, &config, name, sub, dry, rep, &clean_opts)
+                    },
+                    trash_mode,
+                )?;
             }
             let runner = SystemCommandRunner;
             let hints = hint::collect_hints(&home, &runner);
             hint::print_hints(&hints);
-            hint::offer_auto_clean(&hints, &home, &runner, &hint::StdinPrompt);
+            hint::offer_auto_clean(&hints, &home, &runner, &hint::StdinPrompt, trash_mode);
         }
         Some(Commands::Explore { top, all, dirs }) => {
             let roots = if dirs.is_empty() {
@@ -1123,7 +1135,6 @@ fn main() -> anyhow::Result<()> {
             // (the CLI reporter keeps the "Cleaning ... [OK] / Freed:" output
             // the old re-exec'd child printed) instead of spawning this
             // binary resolved through current_exe / PATH.
-            let opts = CleanOptions::default();
             explorer::run_explore(
                 &home,
                 explorer::ExploreOptions {
@@ -1132,7 +1143,9 @@ fn main() -> anyhow::Result<()> {
                     dry_run: cli.dry_run,
                 },
                 reporter.as_ref(),
-                &|name, sub, dry, rep| clean_by_name(&home, &config, name, sub, dry, rep, &opts),
+                &|name, sub, dry, rep| {
+                    clean_by_name(&home, &config, name, sub, dry, rep, &clean_opts)
+                },
             )?;
         }
         Some(Commands::Clean { target }) => {
@@ -1220,7 +1233,7 @@ fn main() -> anyhow::Result<()> {
                             },
                             dry_run,
                             reporter.as_ref(),
-                            &CleanOptions::default(),
+                            &clean_opts,
                         )?;
                     }
                     CleanTarget::Xcode { dry_run, sub } => {
@@ -1254,7 +1267,7 @@ fn main() -> anyhow::Result<()> {
                             |dry, rep, opts| xcode_cleaner.clean(dry, rep, opts),
                             dry_run,
                             reporter.as_ref(),
-                            &CleanOptions::default(),
+                            &clean_opts,
                         )?;
                     }
                     CleanTarget::Trash { dry_run } => {
@@ -1282,7 +1295,7 @@ fn main() -> anyhow::Result<()> {
                             move |dry, rep, opts| cleaner.clean(dry, rep, opts),
                             dry_run,
                             reporter.as_ref(),
-                            &CleanOptions::default(),
+                            &clean_opts,
                         )?;
                     }
                     CleanTarget::LibraryLogs { dry_run, all } => {
@@ -1292,6 +1305,7 @@ fn main() -> anyhow::Result<()> {
                         );
                         let opts = sasurahime::cleaner::CleanOptions {
                             all,
+                            trash_mode,
                             ..Default::default()
                         };
                         run_and_exit(
@@ -1313,7 +1327,7 @@ fn main() -> anyhow::Result<()> {
                             move |dry, rep, opts| cleaner.clean(dry, rep, opts),
                             dry_run,
                             reporter.as_ref(),
-                            &CleanOptions::default(),
+                            &clean_opts,
                         )?;
                     }
                     CleanTarget::IosBackup { dry_run } => {
@@ -1326,7 +1340,7 @@ fn main() -> anyhow::Result<()> {
                             move |dry, rep, opts| cleaner.clean(dry, rep, opts),
                             dry_run,
                             reporter.as_ref(),
-                            &CleanOptions::default(),
+                            &clean_opts,
                         )?;
                     }
                     CleanTarget::ApfsSnapshot {
@@ -1367,7 +1381,7 @@ fn main() -> anyhow::Result<()> {
                             move |dry, rep, opts| cleaner.clean(dry, rep, opts),
                             dry_run,
                             reporter.as_ref(),
-                            &CleanOptions::default(),
+                            &clean_opts,
                         )?;
                     }
                     CleanTarget::VmSwap { dry_run } => {
@@ -1385,7 +1399,7 @@ fn main() -> anyhow::Result<()> {
                             move |dry, rep, opts| cleaner.clean(dry, rep, opts),
                             dry_run,
                             reporter.as_ref(),
-                            &CleanOptions::default(),
+                            &clean_opts,
                         )?;
                     }
                     CleanTarget::All {
@@ -1400,7 +1414,7 @@ fn main() -> anyhow::Result<()> {
                             include_manual,
                             older_than_days: cli.older_than,
                             larger_than_mb: cli.larger_than,
-                            trash_mode: Some(sasurahime::trash::TrashMode::Global),
+                            trash_mode,
                         };
                         let cleaners_list = all_cleaners(&home, &config);
                         let mut skipped_targets: usize = 0;
@@ -1457,7 +1471,7 @@ fn main() -> anyhow::Result<()> {
                             move |dry, rep, opts| cleaner.clean(dry, rep, opts),
                             dry_run,
                             reporter.as_ref(),
-                            &CleanOptions::default(),
+                            &clean_opts,
                         )?;
                     }
                     CleanTarget::External(args) => {
@@ -1506,7 +1520,7 @@ fn main() -> anyhow::Result<()> {
                                 move |dry, rep, opts| cleaner.clean(dry, rep, opts),
                                 dry_run,
                                 reporter.as_ref(),
-                                &CleanOptions::default(),
+                                &clean_opts,
                             )?;
                         } else {
                             let Some(plugin) =
@@ -1529,7 +1543,7 @@ fn main() -> anyhow::Result<()> {
                                 move |dry, rep, opts| plugin.clean(dry, rep, opts),
                                 dry_run,
                                 reporter.as_ref(),
-                                &CleanOptions::default(),
+                                &clean_opts,
                             )?;
                         }
                     }
@@ -1542,7 +1556,7 @@ fn main() -> anyhow::Result<()> {
                     |dry, rep, opts| dispatch_clean(&home, &config, &target, dry, rep, opts),
                     target.dry_run(),
                     reporter.as_ref(),
-                    &CleanOptions::default(),
+                    &clean_opts,
                 )?;
             }
         }
@@ -2327,8 +2341,10 @@ mod tests {
         // deletion so the seam's real clean actually deletes. History writes
         // resolve HOME internally: point it at the tempdir so the row lands
         // there instead of the developer HOME.
-        let previous_trash = sasurahime::trash::is_trash_mode();
-        sasurahime::trash::set_trash_mode(false);
+        let opts = CleanOptions {
+            trash_mode: sasurahime::trash::TrashMode::Permanent,
+            ..Default::default()
+        };
         let previous_home = std::env::var("HOME").ok();
         std::env::set_var("HOME", tmp.path());
         let result = clean_by_name(
@@ -2338,10 +2354,8 @@ mod tests {
             Some("Archives"),
             false,
             &sasurahime::progress::DeepSuppressReporter,
-            &CleanOptions::default(),
+            &opts,
         );
-        // Restored while the lock is still held, then the lock is released.
-        sasurahime::trash::set_trash_mode(previous_trash);
         match previous_home {
             Some(v) => std::env::set_var("HOME", v),
             None => std::env::remove_var("HOME"),

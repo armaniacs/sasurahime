@@ -162,7 +162,7 @@ impl Cleaner for LogCleaner {
         &self,
         dry_run: bool,
         reporter: &dyn ProgressReporter,
-        _opts: &crate::cleaner::CleanOptions,
+        opts: &crate::cleaner::CleanOptions,
     ) -> Result<CleanResult> {
         let mut all_old: Vec<(String, PathBuf)> = Vec::new();
         for target in self.all_targets() {
@@ -198,10 +198,7 @@ impl Cleaner for LogCleaner {
             self.name(),
             reporter,
             &items,
-            crate::trash::seam_delete(
-                &crate::command::SystemCommandRunner,
-                crate::trash::TrashMode::Global,
-            ),
+            crate::trash::seam_delete(&crate::command::SystemCommandRunner, opts.trash_mode),
         );
         println!("Removed {} log files", result.deleted_paths.len());
         Ok(result)

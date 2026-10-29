@@ -90,11 +90,14 @@ pub(crate) fn relaunch_app(entry: &HintEntry, runner: &dyn CommandRunner) -> any
     Ok(())
 }
 
-/// Quit the app, delete caches, optionally relaunch. Returns Err if quit timed out.
+/// Quit the app, delete caches, optionally relaunch. Returns Err if quit
+/// timed out. `mode` is the run's resolved deletion mode, passed down from
+/// `main` through `offer_auto_clean`.
 pub fn auto_clean_hint(
     hint: &ProcessHint,
     home: &Path,
     runner: &dyn CommandRunner,
+    mode: crate::trash::TrashMode,
 ) -> anyhow::Result<()> {
     let entry = hint.entry;
     quit_app_and_wait(entry, runner)?;
@@ -106,9 +109,8 @@ pub fn auto_clean_hint(
         let path = base.join(suffix);
         if path.exists() {
             // The seam clears uchg flags in permanent mode and honors the
-            // trash-mode decision instead of a blind `rm -rf`.
-            let outcome =
-                crate::trash::safe_delete(runner, &path, crate::trash::TrashMode::Global)?;
+            // resolved deletion mode instead of a blind `rm -rf`.
+            let outcome = crate::trash::safe_delete(runner, &path, mode)?;
             if let Some(reason) = outcome.skip_reason {
                 log::warn!("failed to delete {}: {reason}", path.display());
                 skip_reasons.push(reason.to_string());
@@ -120,11 +122,13 @@ pub fn auto_clean_hint(
     relaunch_app(entry, runner)
 }
 
-/// Delete cache directories for a hint without quitting or relaunching the app.
+/// Delete cache directories for a hint without quitting or relaunching the
+/// app. `mode` is the run's resolved deletion mode.
 fn clean_hint_dirs(
     hint: &ProcessHint,
     home: &Path,
     runner: &dyn CommandRunner,
+    mode: crate::trash::TrashMode,
 ) -> anyhow::Result<()> {
     let entry = hint.entry;
     let base = base_path(home, entry.base_dir);
@@ -134,9 +138,8 @@ fn clean_hint_dirs(
         let path = base.join(suffix);
         if path.exists() {
             // The seam clears uchg flags in permanent mode and honors the
-            // trash-mode decision instead of a blind `rm -rf`.
-            let outcome =
-                crate::trash::safe_delete(runner, &path, crate::trash::TrashMode::Global)?;
+            // resolved deletion mode instead of a blind `rm -rf`.
+            let outcome = crate::trash::safe_delete(runner, &path, mode)?;
             if let Some(reason) = outcome.skip_reason {
                 log::warn!("failed to delete {}: {reason}", path.display());
                 skip_reasons.push(reason.to_string());
@@ -157,6 +160,7 @@ pub fn offer_auto_clean(
     home: &Path,
     runner: &dyn CommandRunner,
     prompt: &dyn PromptReader,
+    mode: crate::trash::TrashMode,
 ) {
     let actionable: Vec<_> = hints
         .iter()
@@ -183,10 +187,10 @@ pub fn offer_auto_clean(
         match prompt.read_line() {
             Some(input) if input.trim().eq_ignore_ascii_case("y") => {
                 if hint.running {
-                    if let Err(e) = auto_clean_hint(hint, home, runner) {
+                    if let Err(e) = auto_clean_hint(hint, home, runner, mode) {
                         eprintln!("  Error: {e}");
                     }
-                } else if let Err(e) = clean_hint_dirs(hint, home, runner) {
+                } else if let Err(e) = clean_hint_dirs(hint, home, runner, mode) {
                     eprintln!("  Error: {e}");
                 }
             }

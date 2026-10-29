@@ -92,7 +92,7 @@ impl Cleaner for CliFallbackCleaner {
         &self,
         dry_run: bool,
         _reporter: &dyn ProgressReporter,
-        _opts: &crate::cleaner::CleanOptions,
+        opts: &crate::cleaner::CleanOptions,
     ) -> Result<CleanResult> {
         clean_cli_or_fallback(
             self.name(),
@@ -100,6 +100,7 @@ impl Cleaner for CliFallbackCleaner {
             &*self.runner,
             &self.config,
             dry_run,
+            opts.trash_mode,
         )
     }
 }
@@ -115,6 +116,7 @@ pub fn clean_cli_or_fallback(
     runner: &dyn CommandRunner,
     config: &CliFallbackConfig,
     dry_run: bool,
+    mode: crate::trash::TrashMode,
 ) -> Result<CleanResult> {
     if !dir.exists() {
         return Ok(CleanResult::empty(name));
@@ -173,7 +175,7 @@ pub fn clean_cli_or_fallback(
         return Ok(CleanResult::empty(name));
     }
 
-    let outcome = crate::trash::safe_delete(runner, dir, crate::trash::TrashMode::Global)?;
+    let outcome = crate::trash::safe_delete(runner, dir, mode)?;
     if let Some(reason) = outcome.skip_reason {
         // The seam classified the failure as skippable: the entry was NOT
         // deleted, so nothing is in the Trash and the run must not claim
@@ -237,6 +239,7 @@ mod tests {
             &crate::command::SystemCommandRunner,
             &config,
             false,
+            crate::trash::TrashMode::Permanent,
         )
         .unwrap();
         assert_eq!(
@@ -258,7 +261,6 @@ mod tests {
         // entries out of read-only parents on modern macOS, so a chmod alone
         // no longer forces the deterministic failure. The pinned Trash mode
         // keeps the claim out of the global pin.
-        let _mode = crate::test_helpers::TrashModeGuard::set(true);
         let _backend = crate::trash::TrashBackendOverrideGuard::set();
         let tmp = tempfile::TempDir::new().unwrap();
         let parent = tmp.path().join("locked");
@@ -270,9 +272,15 @@ mod tests {
             args: &[],
             recreate: false,
         };
-        let result =
-            clean_cli_or_fallback("test-fallback", &dir, &MissingToolRunner, &config, false)
-                .unwrap();
+        let result = clean_cli_or_fallback(
+            "test-fallback",
+            &dir,
+            &MissingToolRunner,
+            &config,
+            false,
+            crate::trash::TrashMode::Trash,
+        )
+        .unwrap();
         assert!(dir.exists(), "a seam-skipped entry must survive");
         assert_eq!(
             result.skipped.len(),

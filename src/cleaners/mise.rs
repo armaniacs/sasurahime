@@ -212,10 +212,9 @@ impl MiseCleaner {
         }
     }
 
-    /// The shared clean body. `mode` is the deletion mode for every
-    /// per-item deletion (one per unused tool version): `Global` reads
-    /// the process-global mode; `Trash` / `Permanent` pin it so the seam
-    /// outcome and the deletion agree.
+    /// The shared clean body. `mode` is the resolved deletion mode for every
+    /// per-item deletion (one per unused tool version): the seam outcome and
+    /// the deletion agree by construction.
     fn clean_with_mode(
         &self,
         dry_run: bool,
@@ -330,21 +329,16 @@ impl Cleaner for MiseCleaner {
         r
     }
 
-    /// Cleans with the run's options: `opts.trash_mode` pins the deletion
-    /// mode when set so `uses_trash` and the actual deletion can never
-    /// disagree (the `CleanOptions` contract). `None` keeps the
-    /// process-global mode (compat).
+    /// Cleans with the run's options: `opts.trash_mode` is the resolved
+    /// deletion mode, so `uses_trash` and the actual deletion can never
+    /// disagree (the `CleanOptions` contract).
     fn clean(
         &self,
         dry_run: bool,
         reporter: &dyn ProgressReporter,
         opts: &CleanOptions,
     ) -> Result<CleanResult> {
-        self.clean_with_mode(
-            dry_run,
-            reporter,
-            opts.trash_mode.unwrap_or(crate::trash::TrashMode::Global),
-        )
+        self.clean_with_mode(dry_run, reporter, opts.trash_mode)
     }
 }
 
@@ -715,10 +709,9 @@ mod tests {
     fn clean_still_deletes_when_mise_ls_prints_nothing() {
         // Empty stdout is the legitimate "no active versions" case: the
         // fail-closed guard must not trip and installed versions stay
-        // deletable (the trash_mode pin tests rely on this). The global
-        // mode is pinned permanent so the sandboxed trashItemAtURL TCC
-        // limit cannot interfere with the deletion assertion.
-        let _mode = crate::test_helpers::TrashModeGuard::set(false);
+        // deletable (the trash_mode pin tests rely on this). The opts pin
+        // Permanent so the sandboxed trashItemAtURL TCC limit cannot
+        // interfere with the deletion assertion.
         let tmp = TempDir::new().unwrap();
         let version = tmp.path().join(".local/share/mise/installs/node/20.11.0");
         fs::create_dir_all(&version).unwrap();
@@ -727,12 +720,12 @@ mod tests {
             .with_success("mise")
             .with_success("chflags");
         let cleaner = MiseCleaner::new(tmp.path(), Box::new(runner));
+        let opts = crate::cleaner::CleanOptions {
+            trash_mode: crate::trash::TrashMode::Permanent,
+            ..Default::default()
+        };
         let result = cleaner
-            .clean(
-                false,
-                &crate::progress::DeepSuppressReporter,
-                &crate::cleaner::CleanOptions::default(),
-            )
+            .clean(false, &crate::progress::DeepSuppressReporter, &opts)
             .unwrap();
         assert!(!version.exists(), "an unused runtime stays deletable");
         assert!(result.bytes_freed > 0);
@@ -784,7 +777,7 @@ mod tests {
         (cleaner, version)
     }
 
-    fn pin_opts(trash_mode: Option<crate::trash::TrashMode>) -> crate::cleaner::CleanOptions {
+    fn pin_opts(trash_mode: crate::trash::TrashMode) -> crate::cleaner::CleanOptions {
         crate::cleaner::CleanOptions {
             all: true,
             include_manual: true,
@@ -795,14 +788,12 @@ mod tests {
     }
 
     #[test]
-    fn clean_with_opts_pinned_permanent_overrides_the_global() {
-        // The CleanOptions.trash_mode pin contract: a pinned Some(Permanent)
-        // must delete for real and claim no Trash, even when the
-        // process-global mode is trash.
-        let _mode = crate::test_helpers::TrashModeGuard::set(true);
+    fn clean_with_opts_pinned_permanent_deletes_for_real() {
+        // The CleanOptions.trash_mode pin contract: a pinned Permanent must
+        // delete for real and claim no Trash.
         let tmp = TempDir::new().unwrap();
         let (cleaner, version) = unused_version_cleaner(&tmp);
-        let opts = pin_opts(Some(crate::trash::TrashMode::Permanent));
+        let opts = pin_opts(crate::trash::TrashMode::Permanent);
         let result = cleaner
             .clean(false, &crate::progress::DeepSuppressReporter, &opts)
             .unwrap();
@@ -822,17 +813,16 @@ mod tests {
 
     #[test]
     fn clean_with_opts_pinned_trash_claims_trash() {
-        // A pinned Some(Trash) must resolve the deletion seam to trash. The
+        // A pinned Trash must resolve the deletion seam to trash. The
         // global is pinned to permanent so only the pin can claim Trash.
         // mise drops the seam outcome's claim on a skip (uses_trash only
         // accumulates for successful deletions and `skipped` stays empty),
         // so the assertion follows the seam truth: a landed Trash move
         // claims Trash and counts bytes, a TCC-skipped one (this sandbox)
         // claims neither.
-        let _mode = crate::test_helpers::TrashModeGuard::set(false);
         let tmp = TempDir::new().unwrap();
         let (cleaner, _version) = unused_version_cleaner(&tmp);
-        let opts = pin_opts(Some(crate::trash::TrashMode::Trash));
+        let opts = pin_opts(crate::trash::TrashMode::Trash);
         let result = cleaner
             .clean(false, &crate::progress::DeepSuppressReporter, &opts)
             .unwrap();
@@ -844,24 +834,22 @@ mod tests {
     }
 
     #[test]
-    fn clean_with_opts_none_keeps_the_global_mode() {
-        // trash_mode: None is the compat path: the deletion reads the
-        // process-global mode. Global permanent deletes for real and claims
-        // no Trash.
-        let _mode = crate::test_helpers::TrashModeGuard::set(false);
+    fn clean_options_default_carries_trash() {
+        // The CleanOptions default carries the concrete Trash mode (the
+        // historical default). The seam outcome is the one owner of the
+        // claim: a deleted outcome claims Trash, a skipped one (the
+        // TCC-denied move in this sandbox) does not — either way the
+        // assertion follows the seam truth.
         let tmp = TempDir::new().unwrap();
-        let (cleaner, version) = unused_version_cleaner(&tmp);
-        let opts = pin_opts(None);
+        let (cleaner, _version) = unused_version_cleaner(&tmp);
+        let opts = pin_opts(crate::trash::TrashMode::default());
         let result = cleaner
             .clean(false, &crate::progress::DeepSuppressReporter, &opts)
             .unwrap();
-        assert!(
-            !version.exists(),
-            "the global permanent mode must delete for real"
-        );
-        assert!(
-            !result.uses_trash,
-            "uses_trash must come from the global mode"
+        let deletions_happened = result.bytes_freed > 0;
+        assert_eq!(
+            result.uses_trash, deletions_happened,
+            "uses_trash must come from the deletion outcomes' seam truth"
         );
     }
 
@@ -873,7 +861,6 @@ mod tests {
         // reports failure (exit 1). The pre-ledger loop assembled a bare
         // freed result that could not express the failure, and its fatal
         // branch recorded no skip at all.
-        let _mode = crate::test_helpers::TrashModeGuard::set(true);
         let _backend = crate::trash::TrashBackendOverrideGuard::set();
         let tmp = TempDir::new().unwrap();
         let (cleaner, version) = unused_version_cleaner(&tmp);
