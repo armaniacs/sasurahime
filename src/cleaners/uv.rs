@@ -1,4 +1,5 @@
 use crate::cleaner::{CleanResult, Cleaner, ScanResult, ScanStatus};
+use crate::cleaners::gradle::{is_version_dir, keep_highest};
 use crate::command::CommandRunner;
 use crate::format::dir_size;
 use crate::progress::ProgressReporter;
@@ -33,24 +34,33 @@ impl UvCleaner {
             Err(_) => return vec![],
         };
 
-        let mut versions: Vec<(u32, PathBuf)> = entries
+        // design-it-twice (PBI-85): keep-highest was duplicated here as a
+        // hand-rolled len() <= 1 short-circuit + max + retain. Plan A
+        // (adopted) borrows gradle.rs's pub(crate) keep_highest — the one
+        // helper already shared by gradle, browsers and JetBrains (the
+        // browsers.rs precedent) — so gradle keeps every line and the
+        // gradle/browser regression surface stays zero. A single u32 key
+        // wraps in vec![n]: a one-element lexicographic comparison equals the
+        // numeric one, and the helper's "single candidate → empty" contract
+        // absorbs the old short-circuit. Plan B (moving the helper into a
+        // common retention module) is deferred to its own PBI once all
+        // consumers line up.
+        let candidates: Vec<(Vec<u32>, PathBuf)> = entries
             .filter_map(|e| e.ok())
-            // GAP-006: skip symlinks to avoid following stale / shared links
-            .filter(|e| !e.file_type().map(|t| t.is_symlink()).unwrap_or(true))
+            // GAP-006 (PBI-85): only real directories may become deletion
+            // candidates. A regular file named simple-vN is never an index
+            // dir, a symlink is a stale / shared link, and an unreadable file
+            // type is never touched — gradle.rs's is_version_dir owns all
+            // three rules (the browsers cleaner's rule, borrowed the same way).
+            .filter(is_version_dir)
             .filter_map(|e| {
                 let name = e.file_name();
                 let n = Self::parse_simple_version(&name.to_string_lossy())?;
-                Some((n, e.path()))
+                Some((vec![n], e.path()))
             })
             .collect();
 
-        if versions.len() <= 1 {
-            return vec![];
-        }
-
-        let max = versions.iter().map(|(n, _)| *n).max().unwrap();
-        versions.retain(|(n, _)| *n < max);
-        versions.into_iter().map(|(_, p)| p).collect()
+        keep_highest(candidates)
     }
 }
 
@@ -337,15 +347,67 @@ mod tests {
 
     #[test]
     fn detect_old_indexes_skips_regular_files() {
+        // PBI-85: a regular file named simple-vN must never become a deletion
+        // candidate. The former single-entry version of this test was vacuous
+        // (the len() <= 1 short-circuit returned empty before the file ever
+        // mattered), so it is rewritten into this 3-way coexistence: on the
+        // pre-fix code the file enters the candidate set through the
+        // parse_simple_version name match and this fails.
+        let tmp = TempDir::new().unwrap();
+        let cache = tmp.path().join(".cache/uv");
+        std::fs::create_dir_all(cache.join("simple-v16")).unwrap();
+        std::fs::create_dir_all(cache.join("simple-v21")).unwrap();
+        std::fs::write(cache.join("simple-v17"), b"not a dir").unwrap();
+
+        let cleaner = UvCleaner::new(tmp.path(), Box::new(MockRunner::new().with_not_found()));
+        let old = cleaner.detect_old_indexes();
+        let names: Vec<_> = old
+            .iter()
+            .map(|p| p.file_name().unwrap().to_string_lossy().to_string())
+            .collect();
+        assert!(
+            !names.contains(&"simple-v17".to_string()),
+            "a regular file named simple-vN is never a deletion candidate: {names:?}"
+        );
+        assert!(
+            names.contains(&"simple-v16".to_string()),
+            "the older real index stays a deletion candidate: {names:?}"
+        );
+        assert!(
+            !names.contains(&"simple-v21".to_string()),
+            "the newest real index is kept: {names:?}"
+        );
+    }
+
+    #[test]
+    fn detect_old_indexes_regular_file_alone_returns_empty() {
+        // Detection edge (PBI-85): a lone regular file named simple-vN yields
+        // no candidates — the keep-highest contract returns empty for a
+        // single candidate.
         let tmp = TempDir::new().unwrap();
         let cache = tmp.path().join(".cache/uv");
         std::fs::create_dir_all(&cache).unwrap();
         std::fs::write(cache.join("simple-v21"), b"not a dir").unwrap();
 
         let cleaner = UvCleaner::new(tmp.path(), Box::new(MockRunner::new().with_not_found()));
-        // The .to_owned() returns None (not a dir), so the entry is skipped by
-        // filter_map. But we test explicitly here for clarity.
         assert!(cleaner.detect_old_indexes().is_empty());
+    }
+
+    #[test]
+    fn detect_old_indexes_file_as_fake_highest_keeps_real_index() {
+        // BDD scenario (PBI-85): a regular file simple-v99 posing as the
+        // highest generation must not mark the real index simple-v21 as old —
+        // the file is filtered out before the keep-highest computation.
+        let tmp = TempDir::new().unwrap();
+        let cache = tmp.path().join(".cache/uv");
+        std::fs::create_dir_all(cache.join("simple-v21")).unwrap();
+        std::fs::write(cache.join("simple-v99"), b"not a dir").unwrap();
+
+        let cleaner = UvCleaner::new(tmp.path(), Box::new(MockRunner::new().with_not_found()));
+        assert!(
+            cleaner.detect_old_indexes().is_empty(),
+            "a fake-highest file must not put the real index into the candidates"
+        );
     }
 
     #[test]
