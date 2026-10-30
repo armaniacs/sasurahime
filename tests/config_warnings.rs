@@ -97,6 +97,50 @@ fn unknown_cleaner_name_gets_its_own_line() {
     );
 }
 
+// --- PBI-86: a plugin name is a known cleaner name ---
+
+fn install_plugin(dir: &Path, name: &str, body: &str) {
+    use std::os::unix::fs::PermissionsExt;
+    let plugin = dir.join(name);
+    fs::write(&plugin, body).unwrap();
+    fs::set_permissions(&plugin, fs::Permissions::from_mode(0o755)).unwrap();
+}
+
+#[test]
+fn plugin_name_is_not_warned_about_as_unknown() {
+    // A `sasurahime-*` executable on PATH makes its name a known cleaner, so
+    // `[cleaner.<plugin>]` must not report `unknown cleaner name`. `auto`
+    // needs the [policy] section to get past the unattended gate; the
+    // startup warning fires before any subcommand either way.
+    let tmp = TempDir::new().unwrap();
+    let bin_dir = tmp.path().join("bin");
+    fs::create_dir_all(&bin_dir).unwrap();
+    install_plugin(&bin_dir, "sasurahime-foo", "#!/bin/sh\nexit 0\n");
+    write_config(
+        tmp.path(),
+        "[cleaner.foo]\n\n[policy]\nolder_than_days = 30\n",
+    );
+
+    let mut cmd = Command::cargo_bin("sasurahime").unwrap();
+    cmd.env("HOME", tmp.path())
+        .env("PATH", format!("{}:/usr/bin:/bin", bin_dir.display()));
+    let output = cmd.arg("auto").output().unwrap();
+
+    assert!(output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    // Self-validation: the plugin really was discovered in this run (a
+    // Moderate target is listed among the unattended skips).
+    assert!(stderr.contains("foo"), "stderr:\n{stderr}");
+    assert!(
+        !stderr.contains("[foo] unknown cleaner name"),
+        "a plugin name must not be an unknown cleaner, stderr:\n{stderr}"
+    );
+    assert!(
+        !stderr.contains("[config]"),
+        "a fieldless [cleaner.foo] section must stay fully silent, stderr:\n{stderr}"
+    );
+}
+
 // --- PBI-39: [[custom]] names colliding with built-in targets ---
 
 #[test]
