@@ -21,6 +21,45 @@ fn install_fake_uv(bin_dir: &std::path::Path) {
 }
 
 #[test]
+fn clean_uv_spares_regular_file_named_simple_index() {
+    // PBI-85: a regular file named simple-vN in ~/.cache/uv must never
+    // become a deletion candidate — on the pre-fix code it entered the
+    // candidates and was deleted by `--permanent clean uv`.
+    let tmp = TempDir::new().unwrap();
+    let bin_dir = tmp.path().join("bin");
+    fs::create_dir_all(&bin_dir).unwrap();
+    install_fake_uv(&bin_dir);
+
+    let uv_cache = tmp.path().join(".cache/uv");
+    fs::create_dir_all(uv_cache.join("simple-v16")).unwrap();
+    fs::create_dir_all(uv_cache.join("simple-v21")).unwrap();
+    fs::write(uv_cache.join("simple-v17"), b"not a dir").unwrap();
+
+    let original_path = std::env::var("PATH").unwrap_or_default();
+    let new_path = format!("{}:{}", bin_dir.display(), original_path);
+
+    let output = sasurahime(tmp.path())
+        .env("PATH", &new_path)
+        .args(["--permanent", "clean", "uv"])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    assert!(
+        !uv_cache.join("simple-v16").exists(),
+        "simple-v16 (old index) should have been deleted"
+    );
+    assert!(
+        uv_cache.join("simple-v21").exists(),
+        "simple-v21 (newest index) should remain"
+    );
+    assert!(
+        uv_cache.join("simple-v17").exists(),
+        "the regular file simple-v17 must never be deleted"
+    );
+}
+
+#[test]
 fn clean_uv_dry_run_does_not_delete_old_indexes() {
     let tmp = TempDir::new().unwrap();
     let bin_dir = tmp.path().join("bin");
