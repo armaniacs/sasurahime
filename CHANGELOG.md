@@ -65,6 +65,15 @@ All notable changes to sasurahime will be documented in this file. The format is
 - `--permanent clean caches` dropped the resolved clean options, so the
   node-gyp fallback delete used the default `Trash` mode; the caches arm
   now forwards the resolved options and the permanent promise holds.
+- `clean uv` accepted a regular file named `simple-vN` inside the uv
+  cache as an old index: the file itself was a deletion candidate (and
+  was deleted), and a fake-highest file (say `simple-v99`) pushed the
+  real newest index into the candidates. Only real directories are
+  candidates now, and the keep-highest judgment is shared with gradle.
+- A `[cleaner.<plugin>]` section in the config was reported as
+  `unknown cleaner name` even though the plugin was discovered on PATH
+  and ran; plugin names now count among the known per-cleaner settings,
+  so the warning only fires for names nothing can resolve.
 
 ### Changed
 
@@ -137,6 +146,13 @@ All notable changes to sasurahime will be documented in this file. The format is
   vice versa). Wording, output streams, the `auto` `[policy].present`
   gate and the interactive-gate notice are unchanged, and a matrix unit
   test pins all 48 cells (3 policies x 4 risks x opt-in x scan status).
+- Unattended runs never quit your apps: `sasurahime auto` and
+  `clean all --include-manual` used to select quit-based cleaners (the
+  hint-table candidates, which run `quit app` and relaunch) because
+  their risk is Moderate; the selection now classifies a cleaner that
+  quits running apps as `never runs unattended` even with the
+  include-manual opt-in, and the interactive offer still prompts for
+  them on a TTY. `--yes` is unchanged (it never selected them).
 - `CliCleaner::clean_with_mode` is split into two internal seams
   (`run_tool` and `fallback_delete_dir`), the warning for a tool that
   exited non-zero has one owner (`warn_tool_failure`), and the colima
