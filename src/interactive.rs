@@ -385,7 +385,7 @@ pub fn run_interactive(
 
     let (selection_mapping, items) = build_selection_items(&results, cleaners, &pruneable_indices);
 
-    // dialoguer 0.11: MultiSelect::interact() writes to and reads from the process terminal.
+    // MultiSelect::interact() writes to and reads from the process terminal.
     let selected = dialoguer::MultiSelect::new()
         .with_prompt("Select caches to clean  [space to toggle, enter to confirm]")
         .items(&items)
