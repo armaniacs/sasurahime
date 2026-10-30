@@ -4,6 +4,12 @@ on:
   push:
   pull_request:
 
+# Same-ref pushes (e.g. PR branch updates) supersede the queued run instead of
+# stacking paid macOS runner minutes.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: macos-latest
