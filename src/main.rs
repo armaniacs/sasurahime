@@ -480,6 +480,20 @@ define_cleaners! {
     } ;
     "Stale project artifacts (node_modules / target / .build with manifests)" ;
     dry_run,
+
+    Hints : "hints"
+        => "Quit app, clean known app hint caches, relaunch app" ;
+    special ;
+    {
+        #[arg(long)]
+        dry_run: bool,
+        /// Sub-targets to clean: display names from the scan tip (e.g.
+        /// "Claude logs"). Default: every hint above its threshold
+        #[arg(long, value_delimiter = ',')]
+        sub: Option<Vec<String>>,
+    } ;
+    "Known app hint caches (quit app / clean / relaunch)" ;
+    dry_run,
     ;
     External : "external"
         => "Catch-all for external plugin targets (sasurahime-* on PATH)" ;
@@ -685,6 +699,13 @@ fn special_cleaners(
             .with_max_depth(config.project_artifacts.max_depth)
             .with_recency_days(config.project_artifacts.recency_days),
         ),
+        // PBI-83: the KNOWN_ENTRIES hint table as ONE registry entry, so
+        // hint cleaning shows in scan, the TUI and `targets` like every
+        // other cleaner. Moderate: never runs unattended.
+        Box::new(hint::KnownAppHintsCleaner::new(
+            home,
+            Box::new(SystemCommandRunner),
+        )),
     ]
 }
 
@@ -1031,6 +1052,48 @@ fn run_xcode_clean(
     )
 }
 
+/// The one hints clean runner (PBI-83): validates the requested sub-targets
+/// against the KNOWN_ENTRIES display names, rebuilds the cleaner with them
+/// and runs it through `run_clean_target`. Shared by the `clean hints` CLI
+/// arm and the `clean_by_name` seam, so the validation and the unknown-name
+/// error have one owner. An unknown spelling is an error, not a silent
+/// no-op clean (the PBI 63 shape `run_xcode_clean` pins for xcode). `subs =
+/// None` builds the bare cleaner, whose `clean()` cleans every hint above
+/// its threshold.
+fn run_hints_clean(
+    home: &std::path::Path,
+    subs: Option<&[String]>,
+    dry_run: bool,
+    reporter: &dyn ProgressReporter,
+    opts: &CleanOptions,
+) -> anyhow::Result<CleanResult> {
+    let mut hints_cleaner = hint::KnownAppHintsCleaner::new(home, Box::new(SystemCommandRunner));
+    if let Some(subs) = subs {
+        let unknown: Vec<&String> = subs
+            .iter()
+            .filter(|s| !hint::is_known_hint_name(s))
+            .collect();
+        if !unknown.is_empty() {
+            anyhow::bail!(
+                "unknown hints sub-target: {} (run `sasurahime scan` for the hint names)",
+                unknown
+                    .iter()
+                    .map(|s| s.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+        }
+        hints_cleaner = hints_cleaner.with_sub_names(subs.to_vec());
+    }
+    run_clean_target(
+        "hints",
+        |dry, rep, opts| hints_cleaner.clean(dry, rep, opts),
+        dry_run,
+        reporter,
+        opts,
+    )
+}
+
 /// PBI-50 in-process clean seam: resolves a clean target name (plus an
 /// optional sub-target) to the same dispatch the `clean <target>` CLI arm
 /// uses, and returns the REAL CleanResult instead of a fabricated zero.
@@ -1078,6 +1141,15 @@ fn clean_by_name(
         // builds the same `XcodeCleaner::new` the `CleanTarget::Xcode` arm
         // builds for a no-`--sub` run (clean() then defaults to DerivedData).
     }
+    if name == "hints" {
+        // The seam shares the CLI arm's runner: the sub-target validation,
+        // the unknown-name error and the cleaner construction have one
+        // owner (run_hints_clean). `sub = Some(display_name)` is the TUI's
+        // selection from `sub_targets()`; `sub = None` is the whole
+        // hints target, exactly like the `CleanTarget::Hints` arm.
+        let subs = sub.map(|s| vec![s.to_string()]);
+        return run_hints_clean(home, subs.as_deref(), dry_run, reporter, opts);
+    }
     let registry = core_cleaners(home, config);
     // Identity boundary (PBI 59): the standard targets' typed identity is the
     // `CleanTarget` enum the CLI dispatches through. A parallel `CleanerId`
@@ -1111,37 +1183,49 @@ fn build_reporter(cli: &Cli, config: &Config) -> Box<dyn ProgressReporter> {
 }
 
 /// The one hint-flow entry point, shared by `scan` and the interactive arm:
-/// collect, print, then offer. `dry_run` is the run's global `--dry-run` —
-/// the offer never prompts and never deletes when it is set (PBI 80), and
-/// the resolved deletion mode flows down as an argument (PBI 71).
+/// collect, print, then offer (selection collection). `dry_run` is the
+/// run's global `--dry-run` — the offer never prompts and never deletes
+/// when it is set (PBI 80).
 ///
-/// What the hints path actually freed rides the same history guard as every
-/// batch (label = "hints", 1 cleaner = 1 name), and an all-skipped offer —
-/// every attempted deletion failed with a skippable error — reports failure
-/// through the exit code (PBI 70 contract). A quit timeout frees zero
-/// bytes, so the guard records nothing for it.
-fn run_hint_flow(home: &Path, trash_mode: sasurahime::trash::TrashMode, dry_run: bool) {
+/// PBI-83: the offer is reduced to selection collection — the accepted
+/// entries are executed through the same CleanByName seam the TUI uses
+/// (`clean_by_name("hints", Some(display_name), ...)`), so the deletion and
+/// the history guard follow the Cleaner-trait flow contract. Each seam call
+/// writes its own history row (label = "hints", 1 cleaner = 1 name), so no
+/// aggregate row is written here, and an all-skipped offer — every
+/// attempted deletion failed with a skippable error — reports failure
+/// through the exit code (PBI 70 contract). A quit timeout frees zero bytes
+/// and records no skip, so it stays exit 0.
+fn run_hint_flow(
+    home: &Path,
+    config: &Config,
+    dry_run: bool,
+    reporter: &dyn ProgressReporter,
+    clean_opts: &CleanOptions,
+) -> anyhow::Result<()> {
     let runner = SystemCommandRunner;
     let hints = hint::collect_hints(home, &runner);
     hint::print_hints(&hints);
-    let result = hint::offer_auto_clean(
-        &hints,
-        home,
-        &runner,
-        &hint::StdinPrompt,
-        trash_mode,
-        dry_run,
-    );
-    batch::write_history_entry_if_needed(
-        result.name,
-        dry_run,
-        result.bytes_freed,
-        result.skipped.len(),
-        result.uses_trash,
-    );
-    if result.exit_code() == 1 {
+    let selection = hint::offer_auto_clean(&hints, dry_run, &hint::StdinPrompt);
+    let mut aggregate = cleaner::CleanResult::empty("hints");
+    for entry in &selection {
+        let result = clean_by_name(
+            home,
+            config,
+            "hints",
+            Some(entry.display_name),
+            dry_run,
+            reporter,
+            clean_opts,
+        )?;
+        aggregate.bytes_freed += result.bytes_freed;
+        aggregate.uses_trash |= result.uses_trash;
+        aggregate.skipped.extend(result.skipped);
+    }
+    if aggregate.exit_code() == 1 {
         std::process::exit(1);
     }
+    Ok(())
 }
 
 fn main() -> anyhow::Result<()> {
@@ -1301,7 +1385,7 @@ fn main() -> anyhow::Result<()> {
                 return Ok(());
             }
             scanner::run_scan(&cleaners, &home);
-            run_hint_flow(&home, trash_mode, cli.dry_run);
+            run_hint_flow(&home, &config, cli.dry_run, reporter.as_ref(), &clean_opts)?;
         }
         Some(Commands::Targets) => {
             let mut targets: Vec<&(&str, &str)> = ALL_TARGETS.iter().collect();
@@ -1332,7 +1416,7 @@ fn main() -> anyhow::Result<()> {
                     trash_mode,
                 )?;
             }
-            run_hint_flow(&home, trash_mode, cli.dry_run);
+            run_hint_flow(&home, &config, cli.dry_run, reporter.as_ref(), &clean_opts)?;
         }
         Some(Commands::Explore { top, all, dirs }) => {
             let roots = if dirs.is_empty() {
@@ -1620,6 +1704,28 @@ fn main() -> anyhow::Result<()> {
                             reporter.as_ref(),
                             &clean_opts,
                         )?;
+                    }
+                    CleanTarget::Hints { dry_run, sub } => {
+                        // PBI-83: the hints target is an explicit selection —
+                        // the cleaner carries no prompt (interactive_gated()
+                        // is false, the prompt is the scan tip's offer). The
+                        // shared runner validates the --sub names and runs
+                        // the quit → ledger → relaunch flow through
+                        // run_clean_target, so dry_run and the history guard
+                        // follow the Cleaner-trait flow contract. The arm
+                        // calls it directly (like the Xcode arm): the runner
+                        // already wraps run_clean_target, so a run_and_exit
+                        // wrap would write the history row twice.
+                        let result = run_hints_clean(
+                            &home,
+                            sub.as_deref(),
+                            dry_run,
+                            reporter.as_ref(),
+                            &clean_opts,
+                        )?;
+                        if result.exit_code() != 0 {
+                            std::process::exit(1);
+                        }
                     }
                     CleanTarget::External(args) => {
                         let Some(name) = args.first().cloned() else {
@@ -1940,6 +2046,13 @@ mod tests {
                     Vec::new(),
                 )),
             ),
+            (
+                "hints",
+                Box::new(hint::KnownAppHintsCleaner::new(
+                    home,
+                    Box::new(SystemCommandRunner),
+                )),
+            ),
         ];
         for (label, cleaner) in pairs {
             assert_eq!(
@@ -2079,6 +2192,10 @@ mod tests {
         ("volta", cleaner::Risk::Moderate),
         ("sbt", cleaner::Risk::Moderate),
         ("tree-sitter", cleaner::Risk::Moderate),
+        // PBI-83: the KNOWN_ENTRIES hint table as one target. Moderate on
+        // purpose (never Safe): hint cleaning quits running apps and removes
+        // their caches, so it never runs unattended.
+        ("hints", cleaner::Risk::Moderate),
     ];
 
     #[test]
@@ -2644,6 +2761,76 @@ mod tests {
         assert!(
             archives.join("MyApp-2026").exists(),
             "dry run must not delete anything"
+        );
+    }
+
+    #[test]
+    fn seam_resolves_the_hints_sub_target_through_the_shared_runner() {
+        // PBI-83: the TUI's sub-target selection (display names from
+        // `sub_targets()`) rides the CleanByName seam. The seam shares the
+        // `clean hints` CLI arm's runner (run_hints_clean), so the
+        // validation and the cleaner construction have one owner.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let dir = tmp.path().join("Library/Logs/DiagnosticReports");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("crash-report.ips"), vec![0u8; 2_097_152]).unwrap();
+
+        let _lock = SEAM_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        // The trash backend is TCC-blocked in this sandbox: pin permanent
+        // deletion so the seam's real clean actually deletes. History
+        // writes resolve HOME internally: point it at the tempdir so the
+        // row lands there instead of the developer HOME.
+        let opts = CleanOptions {
+            trash_mode: sasurahime::trash::TrashMode::Permanent,
+            ..Default::default()
+        };
+        let previous_home = std::env::var("HOME").ok();
+        std::env::set_var("HOME", tmp.path());
+        let result = clean_by_name(
+            tmp.path(),
+            &config::Config::default(),
+            "hints",
+            Some("Diagnostic Reports"),
+            false,
+            &sasurahime::progress::DeepSuppressReporter,
+            &opts,
+        );
+        match previous_home {
+            Some(v) => std::env::set_var("HOME", v),
+            None => std::env::remove_var("HOME"),
+        }
+        let result = result.expect("the seam must resolve hints + Diagnostic Reports");
+        assert_eq!(result.name, "hints");
+        assert!(
+            result.bytes_freed > 0,
+            "the seam must return the REAL bytes freed, got {}",
+            result.bytes_freed
+        );
+        assert!(
+            !dir.exists(),
+            "the in-process clean must have deleted the content"
+        );
+    }
+
+    #[test]
+    fn seam_rejects_an_unknown_hints_sub_target() {
+        // PBI 63 shape: an unknown sub-target spelling is an error, not a
+        // silent no-op clean. The validation lives in the shared runner,
+        // so the CLI arm and the seam refuse identically.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let err = clean_by_name(
+            tmp.path(),
+            &config::Config::default(),
+            "hints",
+            Some("No Such App"),
+            true,
+            &sasurahime::progress::DeepSuppressReporter,
+            &CleanOptions::default(),
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("unknown hints sub-target"),
+            "got: {err}"
         );
     }
 

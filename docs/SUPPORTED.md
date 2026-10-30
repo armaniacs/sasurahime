@@ -7,7 +7,7 @@ permalink: /SUPPORTED
 <details open markdown="1">
 <summary markdown="0"><strong>🇺🇸 English</strong></summary>
 
-sasurahime provides **54 clean targets**. Every target supports both `detect`
+sasurahime provides **55 clean targets**. Every target supports both `detect`
 (read-only, no side effects) and `clean` (removal). All `clean` subcommands
 accept `--dry-run`. Only caches and old versions are removed ― active runtimes
 and packages are never touched.
@@ -1517,7 +1517,7 @@ modifies, or deletes files.
 <details markdown="1">
 <summary markdown="0"><strong>🇯🇵 日本語</strong></summary>
 
-sasurahime は **54 のクリーンターゲット** を提供しています。すべてのターゲットは
+sasurahime は **55 のクリーンターゲット** を提供しています。すべてのターゲットは
 `detect`（読み取り専用、副作用なし）と `clean`（削除）の両方に対応しており、
 すべての `clean` サブコマンドは `--dry-run` をサポートしています。
 削除されるのはキャッシュや古いバージョンのみで、現在使用中のランタイムやパッケージには触れません。
