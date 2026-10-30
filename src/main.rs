@@ -777,19 +777,27 @@ fn freed_message(bytes_freed: u64, uses_trash: bool, trash_mode: bool) -> String
 
 /// Cleaners that accept `[cleaner.<name>]` filters, keyed by `Cleaner::name()`.
 ///
-/// Plugin cleaners are deliberately excluded (only the core cleaners plus
-/// user-defined `[[custom]]` targets are listed): a `[cleaner.<plugin>]`
-/// block therefore reports `unknown cleaner name` instead of being silently
-/// applied to a plugin that may not honor the field. Widening this to
-/// plugins is a semantic decision left to a separate PBI (PBI-82 Phase 4
-/// records the exclusion on purpose, it is not an oversight).
+/// The set matches what actually runs: the core cleaners (the macro table's
+/// two sections), the discovered plugin cleaners (`plugins`, discovered with
+/// the same reserved exclusion as all_cleaners) and user-defined `[[custom]]`
+/// targets. A `[cleaner.<plugin>]` block is therefore a known name; the
+/// capability stays trait-owned (PBI-82 fence), and plugins keep the trait
+/// default `PerCleanerFilters::None` because the plugin protocol has no
+/// per-cleaner filter mechanism, so a field on one warns with the existing
+/// no-per-cleaner-filters wording.
 fn filter_support(
     home: &std::path::Path,
     config: &config::Config,
+    plugins: &[cleaners::plugin::PluginCleaner],
 ) -> Vec<(String, cleaner::PerCleanerFilters)> {
     let mut support: Vec<(String, cleaner::PerCleanerFilters)> = core_cleaners(home, config)
         .into_iter()
         .map(|c| (c.name().to_string(), c.per_cleaner_filters()))
+        .chain(
+            plugins
+                .iter()
+                .map(|p| (p.name().to_string(), p.per_cleaner_filters())),
+        )
         .collect();
     for ct in &config.custom {
         support.push((ct.name.clone(), cleaner::PerCleanerFilters::None));
@@ -832,8 +840,12 @@ fn ineffective_per_cleaner_settings(
     out
 }
 
-fn warn_ineffective_per_cleaner_settings(home: &std::path::Path, config: &config::Config) {
-    let lines = ineffective_per_cleaner_settings(config, &filter_support(home, config));
+fn warn_ineffective_per_cleaner_settings(
+    home: &std::path::Path,
+    config: &config::Config,
+    plugins: &[cleaners::plugin::PluginCleaner],
+) {
+    let lines = ineffective_per_cleaner_settings(config, &filter_support(home, config, plugins));
     if lines.is_empty() {
         return;
     }
@@ -1253,7 +1265,11 @@ fn main() -> anyhow::Result<()> {
         }
     };
     if !config.per_cleaner.is_empty() {
-        warn_ineffective_per_cleaner_settings(&home, &config);
+        warn_ineffective_per_cleaner_settings(
+            &home,
+            &config,
+            &cleaners::plugin::PluginCleaner::discover_excluding(&builtin_target_names()),
+        );
     }
     warn_custom_name_collisions(&config);
 
@@ -2555,10 +2571,60 @@ mod tests {
             ("act", pcc(Some(30), None)),
             ("docker", pcc(Some(30), None)),
         ]);
-        let lines = ineffective_per_cleaner_settings(&cfg, &filter_support(tmp.path(), &cfg));
+        let lines = ineffective_per_cleaner_settings(&cfg, &filter_support(tmp.path(), &cfg, &[]));
         assert_eq!(lines.len(), 2, "{lines:?}");
         assert!(lines[0].starts_with("[docker]"), "{lines:?}");
         assert!(lines[1].starts_with("[logs]"), "{lines:?}");
+    }
+
+    // --- PBI-86: plugin names are known per-cleaner settings ---
+
+    fn plugin_named(name: &str) -> cleaners::plugin::PluginCleaner {
+        // The plugin set rides in as an argument on purpose (PBI-86 案 A):
+        // these unit tests must never scan the real PATH, where development
+        // `sasurahime-*` binaries would leak into the result.
+        cleaners::plugin::PluginCleaner::new(name, PathBuf::from("/usr/bin/true"))
+    }
+
+    #[test]
+    fn filter_support_carries_plugin_names_with_their_capability() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cfg = config::Config::default();
+        let plugins = vec![plugin_named("foo")];
+        let got = filter_support(tmp.path(), &cfg, &plugins);
+        let foo = got
+            .iter()
+            .find(|(n, _)| n == "foo")
+            .map(|(_, capability)| *capability);
+        // The capability stays trait-owned (PBI-82 fence): the plugin
+        // protocol has no per-cleaner filter mechanism, so the trait default
+        // None must surface unchanged.
+        assert_eq!(foo, Some(cleaner::PerCleanerFilters::None));
+    }
+
+    #[test]
+    fn ineffective_settings_plugin_name_without_fields_is_silent() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let plugins = vec![plugin_named("foo")];
+        let cfg = cfg_with(&[("foo", pcc(None, None))]);
+        let lines =
+            ineffective_per_cleaner_settings(&cfg, &filter_support(tmp.path(), &cfg, &plugins));
+        assert!(lines.is_empty(), "{lines:?}");
+    }
+
+    #[test]
+    fn ineffective_settings_plugin_name_with_fields_warns_no_per_cleaner_filters() {
+        // A field on a plugin name must not report `unknown cleaner name`:
+        // it warns with the existing no-per-cleaner-filters wording instead.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let plugins = vec![plugin_named("foo")];
+        let cfg = cfg_with(&[("foo", pcc(Some(30), None))]);
+        let lines =
+            ineffective_per_cleaner_settings(&cfg, &filter_support(tmp.path(), &cfg, &plugins));
+        assert_eq!(
+            lines,
+            vec!["[foo] older_than_days: this cleaner has no per-cleaner filters"]
+        );
     }
 
     #[test]
