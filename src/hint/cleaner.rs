@@ -221,10 +221,24 @@ impl Cleaner for KnownAppHintsCleaner {
     }
 
     /// Moderate (never Safe): hint cleaning quits running apps and removes
-    /// their caches, so it never runs unattended and needs an explicit
-    /// selection (`clean hints`, `--sub`, or the TUI).
+    /// their caches. It therefore never runs unattended — `--yes` excludes it
+    /// as a Moderate scan-driven leftover, and `auto` / `clean all` exclude
+    /// it even when `[policy] include_manual` or `--include-manual` is set
+    /// (PBI 87, via [`Cleaner::quits_running_apps`]). Only an explicit
+    /// selection runs it (`clean hints`, `--sub`, or the TUI); the
+    /// interactive offer keeps its `Quit ... and clear cache? [y/N]` prompt.
     fn risk(&self) -> Risk {
         Risk::Moderate
+    }
+
+    /// PBI 87: clean() sends osascript `quit app "..."` to running apps with
+    /// a configured `quit_app` and relaunches them with `open -a` — it
+    /// interferes with the user's live desktop whether or not the run has a
+    /// TTY. Reporting true keeps this cleaner out of the registry-driven
+    /// unattended runs (`auto`, `clean all`) even with their opt-ins;
+    /// `--yes` is scan-driven and already excludes it as Moderate.
+    fn quits_running_apps(&self) -> bool {
+        true
     }
 
     /// No prompt inside the cleaner: the prompt is the entry point's job

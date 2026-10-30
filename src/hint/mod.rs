@@ -654,6 +654,13 @@ mod tests {
             !c.interactive_gated(),
             "the cleaner must not gate on a prompt"
         );
+        // PBI 87: clean() quits and relaunches running apps, so the cleaner
+        // must report the quit-based predicate — the registry-driven
+        // unattended runs (`auto`, `clean all`) exclude it on that report.
+        assert!(
+            c.quits_running_apps(),
+            "hints must report that it quits running apps"
+        );
     }
 
     #[test]

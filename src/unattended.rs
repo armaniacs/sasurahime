@@ -11,13 +11,20 @@
 //!   Registry-driven: every cleaner is classified by risk alone, nothing is
 //!   scanned first. `Risky` (destructive/irreversible) and `Manual`
 //!   (review-first, whole-dir removals) never run unattended
-//!   ([`SkipReason::NeverUnattended`]) — no opt-in can unlock them;
-//!   `Moderate` runs only when the `[policy] include_manual` opt-in is set
+//!   ([`SkipReason::NeverUnattended`]) — no opt-in can unlock them; a
+//!   cleaner whose clean path quits running apps never runs unattended
+//!   either (PBI 87, the same [`SkipReason::NeverUnattended`] report —
+//!   `[policy] include_manual` is written into config ahead of the run, so
+//!   it cannot speak for an unattended run's live desktop); `Moderate` runs
+//!   only when the `[policy] include_manual` opt-in is set
 //!   ([`SkipReason::NeedsOptIn`]); `Safe` always runs.
 //! * [`UnattendedPolicy::All`] — `sasurahime clean all`. Registry-driven.
 //!   The `--include-manual` opt-in unlocks EVERY non-Safe risk (`Moderate`,
 //!   `Risky` and `Manual` — unlike auto, where it frees `Moderate` only);
-//!   without it they are skipped ([`SkipReason::NeedsOptIn`]).
+//!   without it they are skipped ([`SkipReason::NeedsOptIn`]). The same PBI
+//!   87 quit-based exclusion applies: a cleaner that quits running apps is
+//!   skipped with [`SkipReason::NeverUnattended`] even with
+//!   `--include-manual`.
 //! * [`UnattendedPolicy::Yes`] — `sasurahime --yes`. Scan-driven: the
 //!   variant carries the `detect_all` results of the same `cleaners` slice
 //!   the selection runs over, so the scan asymmetry is typed — Auto/All
@@ -79,7 +86,11 @@ pub type RunEntry = (usize, u64);
 pub enum SkipReason {
     /// No opt-in can ever unlock it in this flow: auto's `Risky`
     /// (destructive/irreversible) and `Manual` (review-first, whole-dir
-    /// removals) targets stay skipped even with `include_manual`.
+    /// removals) targets stay skipped even with `include_manual`, and so do
+    /// quit-based cleaners — a cleaner whose clean path quits running apps
+    /// stays skipped in auto and clean all even with the arm's opt-in
+    /// (PBI 87), because the opt-in is written into config ahead of the run
+    /// and cannot speak for an unattended run's live desktop.
     NeverUnattended(Risk),
     /// A flag opt-in unlocks it: `[policy] include_manual` in auto
     /// (`Moderate` only) or `--include-manual` in all (every non-Safe
@@ -132,12 +143,23 @@ impl UnattendedPolicy {
             UnattendedPolicy::Auto => {
                 // The auto arm's classification, moved verbatim: Risky and
                 // Manual never run unattended even with include_manual
-                // (whole-dir removals must never happen without a human);
-                // Moderate honors the [policy] include_manual opt-in; only
-                // Safe runs without it.
+                // (whole-dir removals must never happen without a human); a
+                // quit-based cleaner never runs unattended either (PBI 87:
+                // the opt-in is written into config ahead of the run, so it
+                // cannot speak for an unattended run's desktop); Moderate
+                // honors the [policy] include_manual opt-in; only Safe runs
+                // without it.
                 for (i, c) in cleaners.iter().enumerate() {
                     let risk = c.risk();
-                    if matches!(risk, Risk::Risky | Risk::Manual) {
+                    // Risky and Manual never run unattended even with
+                    // include_manual (whole-dir removals must never happen
+                    // without a human); a quit-based cleaner never runs
+                    // unattended either (PBI 87: the opt-in is written into
+                    // config ahead of the run, so it cannot speak for an
+                    // unattended run's desktop).
+                    let never_unattended = matches!(risk, Risk::Risky | Risk::Manual)
+                        || (c.quits_running_apps() && risk != Risk::Safe);
+                    if never_unattended {
                         skipped.push((i, SkipReason::NeverUnattended(risk)));
                     } else if !c.auto_clean_allowed()
                         && !(opts.include_manual && risk == Risk::Moderate)
@@ -151,10 +173,15 @@ impl UnattendedPolicy {
             UnattendedPolicy::All => {
                 // The clean-all arm's classification, moved verbatim: the
                 // user picked every target on purpose, so --include-manual
-                // unlocks EVERY non-Safe risk (Moderate, Risky, Manual).
+                // unlocks EVERY non-Safe risk (Moderate, Risky, Manual) —
+                // except a quit-based cleaner, which never runs unattended
+                // regardless of the opt-in (PBI 87).
                 for (i, c) in cleaners.iter().enumerate() {
-                    if !opts.include_manual && !c.auto_clean_allowed() {
-                        skipped.push((i, SkipReason::NeedsOptIn(c.risk())));
+                    let risk = c.risk();
+                    if c.quits_running_apps() && risk != Risk::Safe {
+                        skipped.push((i, SkipReason::NeverUnattended(risk)));
+                    } else if !opts.include_manual && !c.auto_clean_allowed() {
+                        skipped.push((i, SkipReason::NeedsOptIn(risk)));
                     } else {
                         run.push((i, 0));
                     }
@@ -202,6 +229,9 @@ mod tests {
         name: &'static str,
         risk: Risk,
         status: ScanStatus,
+        /// PBI 87: whether the stub reports a quit-based clean path (a clean
+        /// that quits and relaunches running apps).
+        quits: bool,
     }
 
     impl StubCleaner {
@@ -210,6 +240,7 @@ mod tests {
                 name,
                 risk,
                 status: ScanStatus::Pruneable(bytes),
+                quits: false,
             }
         }
     }
@@ -231,6 +262,9 @@ mod tests {
         }
         fn risk(&self) -> Risk {
             self.risk
+        }
+        fn quits_running_apps(&self) -> bool {
+            self.quits
         }
     }
 
@@ -266,6 +300,7 @@ mod tests {
                 name: "mise",
                 risk: Risk::Moderate,
                 status: ScanStatus::Unavailable,
+                quits: false,
             }),
         ];
         let results: Vec<ScanResult> = cleaners.iter().map(|c| c.detect()).collect();
@@ -299,33 +334,44 @@ mod tests {
 
     /// The one expectation table for the matrix. The [policy].present entry
     /// gate is upstream of select (arm-owned, PBI 74), so the include_manual
-    /// opt-in present/absent is the only policy input select sees.
+    /// opt-in present/absent is the only policy input select sees. `quits`
+    /// is the PBI 87 quit-based predicate: a cleaner whose clean path quits
+    /// running apps never runs unattended in the registry-driven flows, with
+    /// or without the arm's opt-in.
     fn expected(
         variant: Variant,
         risk: Risk,
         include_manual: bool,
         status: &ScanStatus,
+        quits: bool,
     ) -> Expected {
         match variant {
             // Auto classifies by risk alone: scan status is irrelevant (the
-            // registry-driven flow scans nothing).
+            // registry-driven flow scans nothing). A quit-based cleaner is
+            // skipped with NeverUnattended (PBI 87), opt-in or not.
             Variant::Auto => match risk {
                 Risk::Safe => Expected::Run(0),
+                _ if quits => Expected::Skipped(SkipReason::NeverUnattended(risk)),
                 Risk::Moderate if include_manual => Expected::Run(0),
                 Risk::Moderate => Expected::Skipped(SkipReason::NeedsOptIn(Risk::Moderate)),
                 Risk::Risky => Expected::Skipped(SkipReason::NeverUnattended(Risk::Risky)),
                 Risk::Manual => Expected::Skipped(SkipReason::NeverUnattended(Risk::Manual)),
             },
-            // All releases EVERY non-Safe risk with the opt-in.
+            // All releases EVERY non-Safe risk with the opt-in — except a
+            // quit-based cleaner (PBI 87), which the opt-in cannot unlock.
             Variant::All => {
-                if !include_manual && risk != Risk::Safe {
+                if quits && risk != Risk::Safe {
+                    Expected::Skipped(SkipReason::NeverUnattended(risk))
+                } else if !include_manual && risk != Risk::Safe {
                     Expected::Skipped(SkipReason::NeedsOptIn(risk))
                 } else {
                     Expected::Run(0)
                 }
             }
             // Yes is scan-driven: only Pruneable candidates exist, and the
-            // opt-in cannot change the outcome (--yes has no flag).
+            // opt-in cannot change the outcome (--yes has no flag). The quit
+            // predicate is not consulted: the scan asymmetry already excludes
+            // non-Safe targets (PBI 87 keeps --yes unchanged).
             Variant::Yes => match status {
                 ScanStatus::Pruneable(bytes) => {
                     if risk == Risk::Safe {
@@ -346,11 +392,13 @@ mod tests {
         risk: Risk,
         include_manual: bool,
         status: &ScanStatus,
+        quits: bool,
     ) -> UnattendedSelection {
         let cleaners: Vec<Box<dyn Cleaner>> = vec![Box::new(StubCleaner {
             name: "t",
             risk,
             status: status.clone(),
+            quits,
         })];
         let opts = CleanOptions {
             include_manual,
@@ -368,54 +416,60 @@ mod tests {
 
     #[test]
     fn selection_matrix_pins_the_three_policies() {
-        // The 3 x 4 x 2 x 2 matrix: policy variant x Risk x include_manual
-        // present/absent x Pruneable/Unknown scan status. Every cell of the
-        // unattended decision is pinned here, so a mis-integration of the
-        // three flows fails in a unit test before it can reach a real run.
+        // The 3 x 4 x 2 x 2 x 2 matrix: policy variant x Risk x include_manual
+        // present/absent x Pruneable/Unknown scan status x the quit-based
+        // predicate absent/present (PBI 87). Every cell of the unattended
+        // decision is pinned here, so a mis-integration of the three flows
+        // fails in a unit test before it can reach a real run. The
+        // quits = false side is the pre-PBI-87 48 cells with the expectations
+        // unchanged.
         for variant in [Variant::Auto, Variant::All, Variant::Yes] {
             for risk in [Risk::Safe, Risk::Moderate, Risk::Risky, Risk::Manual] {
                 for include_manual in [false, true] {
                     for status in [ScanStatus::Pruneable(4096), ScanStatus::Unknown] {
-                        let selection = selection_for(variant, risk, include_manual, &status);
-                        let cell = format!(
-                            "{variant:?} risk {risk:?} include_manual {include_manual} status {status:?}"
-                        );
-                        match expected(variant, risk, include_manual, &status) {
-                            Expected::Run(bytes) => {
-                                assert_eq!(
-                                    selection.run,
-                                    vec![(0usize, bytes)],
-                                    "{cell}: must run"
-                                );
-                                assert!(
-                                    selection.skipped.is_empty(),
-                                    "{cell}: must not skip, got {:?}",
-                                    selection.skipped
-                                );
-                            }
-                            Expected::Skipped(reason) => {
-                                assert!(
-                                    selection.run.is_empty(),
-                                    "{cell}: must not run, got {:?}",
-                                    selection.run
-                                );
-                                assert_eq!(
-                                    selection.skipped,
-                                    vec![(0usize, reason)],
-                                    "{cell}: skip reason"
-                                );
-                            }
-                            Expected::Neither => {
-                                assert!(
-                                    selection.run.is_empty(),
-                                    "{cell}: must not run, got {:?}",
-                                    selection.run
-                                );
-                                assert!(
-                                    selection.skipped.is_empty(),
-                                    "{cell}: must not report, got {:?}",
-                                    selection.skipped
-                                );
+                        for quits in [false, true] {
+                            let selection =
+                                selection_for(variant, risk, include_manual, &status, quits);
+                            let cell = format!(
+                                "{variant:?} risk {risk:?} include_manual {include_manual} status {status:?} quits {quits}"
+                            );
+                            match expected(variant, risk, include_manual, &status, quits) {
+                                Expected::Run(bytes) => {
+                                    assert_eq!(
+                                        selection.run,
+                                        vec![(0usize, bytes)],
+                                        "{cell}: must run"
+                                    );
+                                    assert!(
+                                        selection.skipped.is_empty(),
+                                        "{cell}: must not skip, got {:?}",
+                                        selection.skipped
+                                    );
+                                }
+                                Expected::Skipped(reason) => {
+                                    assert!(
+                                        selection.run.is_empty(),
+                                        "{cell}: must not run, got {:?}",
+                                        selection.run
+                                    );
+                                    assert_eq!(
+                                        selection.skipped,
+                                        vec![(0usize, reason)],
+                                        "{cell}: skip reason"
+                                    );
+                                }
+                                Expected::Neither => {
+                                    assert!(
+                                        selection.run.is_empty(),
+                                        "{cell}: must not run, got {:?}",
+                                        selection.run
+                                    );
+                                    assert!(
+                                        selection.skipped.is_empty(),
+                                        "{cell}: must not report, got {:?}",
+                                        selection.skipped
+                                    );
+                                }
                             }
                         }
                     }
@@ -431,7 +485,13 @@ mod tests {
         // freed. This spells out include_manual's two meanings: in All it
         // releases every non-Safe risk, in auto only Moderate.
         for risk in [Risk::Risky, Risk::Manual] {
-            let selection = selection_for(Variant::Auto, risk, true, &ScanStatus::Pruneable(4096));
+            let selection = selection_for(
+                Variant::Auto,
+                risk,
+                true,
+                &ScanStatus::Pruneable(4096),
+                false,
+            );
             assert_eq!(
                 selection.skipped,
                 vec![(0, SkipReason::NeverUnattended(risk))],
@@ -441,11 +501,117 @@ mod tests {
     }
 
     #[test]
+    fn auto_never_runs_quit_based_cleaners_even_with_include_manual() {
+        // BDD (PBI 87): TTY なしの auto は include_manual があっても
+        // quit 系クリーナーを選ばない. An opt-in written into config ahead of
+        // the run cannot speak for an unattended run's live desktop: a
+        // Moderate cleaner whose clean() quits running apps is skipped with
+        // NeverUnattended, opt-in or not.
+        for include_manual in [false, true] {
+            let selection = selection_for(
+                Variant::Auto,
+                Risk::Moderate,
+                include_manual,
+                &ScanStatus::Pruneable(4096),
+                true,
+            );
+            assert!(
+                selection.run.is_empty(),
+                "a quit-based Moderate must never run in auto, got {:?}",
+                selection.run
+            );
+            assert_eq!(
+                selection.skipped,
+                vec![(0, SkipReason::NeverUnattended(Risk::Moderate))],
+                "the opt-in cannot unlock a quit-based cleaner in auto"
+            );
+        }
+    }
+
+    #[test]
+    fn all_never_runs_quit_based_cleaners_even_with_include_manual() {
+        // BDD (PBI 87): clean all --include-manual も quit 系クリーナーを
+        // 選ばない. The opt-in that frees every other non-Safe risk cannot
+        // unlock a cleaner whose clean() quits running apps.
+        for include_manual in [false, true] {
+            for risk in [Risk::Moderate, Risk::Risky, Risk::Manual] {
+                let selection = selection_for(
+                    Variant::All,
+                    risk,
+                    include_manual,
+                    &ScanStatus::Pruneable(4096),
+                    true,
+                );
+                assert!(
+                    selection.run.is_empty(),
+                    "a quit-based {risk:?} must never run in clean all, got {:?}",
+                    selection.run
+                );
+                assert_eq!(
+                    selection.skipped,
+                    vec![(0, SkipReason::NeverUnattended(risk))],
+                    "the opt-in cannot unlock a quit-based cleaner in clean all"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn yes_ignores_the_quit_based_predicate() {
+        // BDD (PBI 87): --yes は scan-driven 除外の現状維持. Yes never
+        // consults the quit predicate: a Moderate Pruneable target is
+        // NeedsExplicitSelection with the predicate false or true.
+        for quits in [false, true] {
+            let selection = selection_for(
+                Variant::Yes,
+                Risk::Moderate,
+                false,
+                &ScanStatus::Pruneable(4096),
+                quits,
+            );
+            assert_eq!(
+                selection.skipped,
+                vec![(0, SkipReason::NeedsExplicitSelection(Risk::Moderate))],
+                "--yes must keep the scan-driven exclusion regardless of the predicate"
+            );
+        }
+    }
+
+    #[test]
+    fn safe_quit_based_targets_keep_the_current_classification() {
+        // PBI 87 design decision: no Safe quit-based target exists today, and
+        // the current classification (Safe runs) is kept — the quit exclusion
+        // applies to non-Safe risks only. A future Safe quitter is a separate
+        // PBI's call.
+        for variant in [Variant::Auto, Variant::All] {
+            let selection = selection_for(
+                variant,
+                Risk::Safe,
+                false,
+                &ScanStatus::Pruneable(4096),
+                true,
+            );
+            assert_eq!(
+                selection.run,
+                vec![(0, 0)],
+                "a Safe quit-based target keeps the current run classification"
+            );
+            assert!(selection.skipped.is_empty());
+        }
+    }
+
+    #[test]
     fn all_releases_every_non_safe_risk_with_include_manual() {
         // BDD: all は include_manual で Risky を解放する. The same opt-in
         // that frees only Moderate in auto frees every non-Safe risk here.
         for risk in [Risk::Moderate, Risk::Risky, Risk::Manual] {
-            let selection = selection_for(Variant::All, risk, true, &ScanStatus::Pruneable(4096));
+            let selection = selection_for(
+                Variant::All,
+                risk,
+                true,
+                &ScanStatus::Pruneable(4096),
+                false,
+            );
             assert!(
                 selection.skipped.is_empty(),
                 "{risk:?} must run with the opt-in, got {:?}",
@@ -461,7 +627,7 @@ mod tests {
         // cleaner that detect cannot measure is Unknown: it must not run,
         // and it has nothing to report.
         for risk in [Risk::Safe, Risk::Moderate, Risk::Risky, Risk::Manual] {
-            let selection = selection_for(Variant::Yes, risk, false, &ScanStatus::Unknown);
+            let selection = selection_for(Variant::Yes, risk, false, &ScanStatus::Unknown, false);
             assert!(
                 selection.run.is_empty(),
                 "Unknown {risk:?} must not run, got {:?}",
@@ -480,8 +646,20 @@ mod tests {
         // The --yes flow has no --include-manual flag: the scan results, not
         // an opt-in, decide. Both opt-in settings classify identically.
         for risk in [Risk::Safe, Risk::Moderate, Risk::Risky, Risk::Manual] {
-            let without = selection_for(Variant::Yes, risk, false, &ScanStatus::Pruneable(4096));
-            let with = selection_for(Variant::Yes, risk, true, &ScanStatus::Pruneable(4096));
+            let without = selection_for(
+                Variant::Yes,
+                risk,
+                false,
+                &ScanStatus::Pruneable(4096),
+                false,
+            );
+            let with = selection_for(
+                Variant::Yes,
+                risk,
+                true,
+                &ScanStatus::Pruneable(4096),
+                false,
+            );
             assert_eq!(without, with, "include_manual must not change --yes");
         }
     }
@@ -492,13 +670,20 @@ mod tests {
         // still cleans); with bytes == 0 a non-Safe target lands in NEITHER
         // list — the explicit-selection notice only names targets that have
         // something to reclaim.
-        let safe = selection_for(Variant::Yes, Risk::Safe, false, &ScanStatus::Pruneable(0));
+        let safe = selection_for(
+            Variant::Yes,
+            Risk::Safe,
+            false,
+            &ScanStatus::Pruneable(0),
+            false,
+        );
         assert_eq!(safe.run, vec![(0, 0)]);
         let moderate = selection_for(
             Variant::Yes,
             Risk::Moderate,
             false,
             &ScanStatus::Pruneable(0),
+            false,
         );
         assert!(moderate.run.is_empty());
         assert!(moderate.skipped.is_empty());

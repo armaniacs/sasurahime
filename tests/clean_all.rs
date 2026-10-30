@@ -213,3 +213,50 @@ fn per_cleaner_config_filters_apply_in_clean_all() {
         "effective settings must not be warned about, got:\n{scan_out}"
     );
 }
+
+/// 2 MB of debris in a KNOWN_ENTRIES directory, a multiple of the 4096-byte
+/// APFS page so `format::dir_size` (st_blocks × 512) measures it exactly —
+/// comfortably above the 1 MB log threshold.
+const HINTS_DEBRIS_BYTES: usize = 2_097_152;
+
+/// Creates debris for the no-quit "Diagnostic Reports" hint entry
+/// (~/Library/Logs/DiagnosticReports, threshold 1 MB). The no-quit
+/// KNOWN_ENTRIES keep the run deterministic in a tempdir HOME (no osascript,
+/// no relaunch — the quit path itself is pinned by the RecordingRunner tests
+/// in src/hint/mod.rs), and the directory is in the library_logs cleaner's
+/// SKIP_DIRS, so only the hints cleaner could ever touch it here.
+fn make_hint_debris(home: &std::path::Path) -> std::path::PathBuf {
+    let dir = home.join("Library/Logs/DiagnosticReports");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("crash-report.ips"), vec![0u8; HINTS_DEBRIS_BYTES]).unwrap();
+    dir
+}
+
+#[test]
+fn clean_all_include_manual_never_runs_hints() {
+    // BDD (PBI 87): clean all --include-manual も hints を選ばない. The
+    // opt-in that frees every other non-Safe risk cannot unlock a cleaner
+    // whose clean() quits and relaunches running apps; the debris survives
+    // untouched.
+    let tmp = TempDir::new().unwrap();
+    let debris = make_hint_debris(tmp.path());
+
+    let output = sasurahime(tmp.path())
+        .args(["--permanent", "clean", "all", "--include-manual"])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "clean all must exit 0");
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        combined.contains("Skipped hints (Moderate): never runs unattended"),
+        "the skipped hints target must be reported with the quit-based guidance, got:\n{combined}"
+    );
+    assert!(
+        debris.exists(),
+        "the hints debris must survive --include-manual, got:\n{combined}"
+    );
+}
