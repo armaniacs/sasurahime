@@ -145,6 +145,11 @@ mod tests {
 
     #[test]
     fn detect_returns_not_found_when_dir_missing() {
+        let _lock = crate::context::TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let _pre_guard = EnvGuard::unset("PRE_COMMIT_HOME");
+        let _xdg_guard = EnvGuard::unset("XDG_CACHE_HOME");
         let tmp = TempDir::new().unwrap();
         let cleaner = PreCommitCleaner::new(tmp.path(), Box::new(SystemCommandRunner));
         let result = cleaner.detect();
