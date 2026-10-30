@@ -297,3 +297,55 @@ fn auto_never_runs_colima_even_with_include_manual() {
         "colima must never be deleted by auto, even with include_manual, got:\n{combined}"
     );
 }
+
+/// 2 MB of debris in a KNOWN_ENTRIES directory, a multiple of the 4096-byte
+/// APFS page so `format::dir_size` (st_blocks × 512) measures it exactly —
+/// comfortably above the 1 MB log threshold.
+const HINTS_DEBRIS_BYTES: usize = 2_097_152;
+
+/// Creates debris for the no-quit "Diagnostic Reports" hint entry
+/// (~/Library/Logs/DiagnosticReports, threshold 1 MB). The no-quit
+/// KNOWN_ENTRIES keep the run deterministic in a tempdir HOME (no osascript,
+/// no relaunch — the quit path itself is pinned by the RecordingRunner tests
+/// in src/hint/mod.rs), and the directory is in the library_logs cleaner's
+/// SKIP_DIRS, so only the hints cleaner could ever touch it here.
+fn make_hint_debris(home: &std::path::Path) -> std::path::PathBuf {
+    let dir = home.join("Library/Logs/DiagnosticReports");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("crash-report.ips"), vec![0u8; HINTS_DEBRIS_BYTES]).unwrap();
+    dir
+}
+
+#[test]
+fn auto_never_runs_hints_even_with_include_manual() {
+    // BDD (PBI 87): TTY なしの auto は [policy] include_manual = true が
+    // あっても hints を選ばない. hints is Moderate, which the opt-in frees,
+    // but its clean() quits and relaunches running apps — the quit-based
+    // exclusion keeps it out of the unattended run, and the debris survives
+    // untouched.
+    let tmp = TempDir::new().unwrap();
+    write_policy(
+        tmp.path(),
+        "[policy]\nolder_than_days = 30\ninclude_manual = true\n",
+    );
+    let debris = make_hint_debris(tmp.path());
+
+    let output = sasurahime(tmp.path())
+        .args(["--permanent", "auto"])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "auto must succeed");
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        combined.contains("hints (Moderate): never runs unattended"),
+        "the skipped hints target must be reported with the quit-based guidance, got:\n{combined}"
+    );
+    assert!(
+        debris.exists(),
+        "the hints debris must survive an unattended run, got:\n{combined}"
+    );
+}

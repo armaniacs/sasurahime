@@ -1666,17 +1666,40 @@ fn main() -> anyhow::Result<()> {
                         // PBI 74: the classification is owned by
                         // UnattendedPolicy::All — the opt-in unlocks EVERY
                         // non-Safe risk here (unlike auto, where Risky and
-                        // Manual stay locked). The wording stays at the call
-                        // site: it is specific to `clean all`.
+                        // Manual stay locked), except quit-based cleaners,
+                        // which stay skipped even with --include-manual
+                        // (PBI 87). The wording stays at the call site: it
+                        // is specific to `clean all`.
                         let selection =
                             unattended::UnattendedPolicy::All.select(&cleaners_list, &opts);
                         for (i, reason) in &selection.skipped {
                             let c = &cleaners_list[*i];
-                            println!(
-                                "Skipped {} ({}): needs --include-manual",
-                                c.name(),
-                                reason.risk().label()
-                            );
+                            match reason {
+                                // PBI 87: a quit-based cleaner is skipped even
+                                // with --include-manual; the wording matches
+                                // the auto arm's NeverUnattended line.
+                                unattended::SkipReason::NeverUnattended(risk) => {
+                                    println!(
+                                        "Skipped {} ({}): never runs unattended",
+                                        c.name(),
+                                        risk.label()
+                                    );
+                                }
+                                unattended::SkipReason::NeedsOptIn(risk) => println!(
+                                    "Skipped {} ({}): needs --include-manual",
+                                    c.name(),
+                                    risk.label()
+                                ),
+                                // All is registry-driven and never classifies
+                                // a target as explicit-selection-only; the
+                                // arm renders it truthfully if wiring ever
+                                // changes.
+                                unattended::SkipReason::NeedsExplicitSelection(risk) => println!(
+                                    "Skipped {} ({}): needs an explicit selection",
+                                    c.name(),
+                                    risk.label()
+                                ),
+                            }
                         }
                         let batch_cleaners: Vec<&dyn cleaner::Cleaner> = selection
                             .run

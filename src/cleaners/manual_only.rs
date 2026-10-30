@@ -53,6 +53,15 @@ impl Cleaner for ManualOnly {
     fn auto_clean_allowed(&self) -> bool {
         false
     }
+
+    fn quits_running_apps(&self) -> bool {
+        // Predicate passthrough: the wrapper is transparent for the quit
+        // predicate too (PBI 87) — the registry wraps every non-Safe target
+        // in this wrapper, so a quit-based inner cleaner must reach the
+        // unattended selection through it, or `auto` / `clean all` would run
+        // it behind the wrapper.
+        self.inner.quits_running_apps()
+    }
 }
 
 #[cfg(test)]
@@ -105,6 +114,47 @@ mod tests {
             Stub.risk(),
             c.risk(),
             "wrapper must pass the inner risk through"
+        );
+    }
+
+    #[test]
+    fn manual_only_delegates_the_quit_based_predicate() {
+        // PBI 87: the wrapper is transparent for the quit predicate too —
+        // the registry wraps every non-Safe target in ManualOnly, so a
+        // quit-based inner cleaner must reach the unattended selection
+        // through it, or `auto` / `clean all` would run it behind the
+        // wrapper.
+        struct Quitter;
+
+        impl Cleaner for Quitter {
+            fn name(&self) -> &'static str {
+                "quitter"
+            }
+            fn detect(&self) -> ScanResult {
+                ScanResult::new("quitter", ScanStatus::NotFound)
+            }
+            fn clean(
+                &self,
+                _: bool,
+                _: &dyn ProgressReporter,
+                _: &CleanOptions,
+            ) -> Result<CleanResult> {
+                unimplemented!()
+            }
+            fn quits_running_apps(&self) -> bool {
+                true
+            }
+        }
+
+        let quitter = ManualOnly::new(Box::new(Quitter));
+        assert!(
+            quitter.quits_running_apps(),
+            "wrapper must pass the quit predicate through"
+        );
+        let plain = ManualOnly::new(Box::new(Stub));
+        assert!(
+            !plain.quits_running_apps(),
+            "a non-quitting inner cleaner keeps the default"
         );
     }
 

@@ -336,6 +336,21 @@ pub trait Cleaner: Send + Sync {
         false
     }
 
+    /// Whether this cleaner's clean path interferes with the user's live
+    /// desktop environment: it may quit and relaunch GUI apps the user is
+    /// working in (osascript `quit app ...` then `open -a`), TTY or not.
+    /// Quit-based cleaners are excluded from the registry-driven unattended
+    /// runs (`auto`, `clean all`) even when the arm's opt-in
+    /// (`[policy] include_manual`, `--include-manual`) would otherwise unlock
+    /// them (PBI 87): the opt-in is written into config ahead of the run, so
+    /// it cannot speak for an unattended run's desktop. Defaults to false;
+    /// the cleaner whose clean path quits running apps overrides it.
+    /// `--yes` does not consult this predicate — it is scan-driven and
+    /// already excludes non-Safe targets.
+    fn quits_running_apps(&self) -> bool {
+        false
+    }
+
     /// Read-only note shown under the scan table. Must not run external commands.
     fn advisory(&self) -> Option<String> {
         None
@@ -432,6 +447,21 @@ mod tests {
         ] {
             let c = StubCleaner { risk: Some(risk) };
             assert_eq!(c.auto_clean_allowed(), allowed, "risk {risk:?}");
+        }
+    }
+
+    #[test]
+    fn quits_running_apps_defaults_to_false() {
+        // PBI 87: the additive predicate is opt-in per cleaner — no impl
+        // quits the user's running apps unless it overrides the default, so
+        // every unclassified cleaner keeps its current unattended
+        // classification.
+        for risk in [Risk::Safe, Risk::Moderate, Risk::Risky, Risk::Manual] {
+            let c = StubCleaner { risk: Some(risk) };
+            assert!(
+                !c.quits_running_apps(),
+                "the default must not report quitting apps (risk {risk:?})"
+            );
         }
     }
 
