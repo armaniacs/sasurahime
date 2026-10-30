@@ -1,4 +1,5 @@
 use crate::cleaner::{CleanResult, Cleaner, ScanResult, ScanStatus};
+use crate::cleaners::retention::{is_version_dir, keep_highest};
 use crate::command::CommandRunner;
 use crate::format::dir_size;
 use crate::progress::ProgressReporter;
@@ -10,38 +11,6 @@ use std::path::{Path, PathBuf};
 pub struct GradleCleaner {
     home: PathBuf,
     runner: Box<dyn CommandRunner>,
-}
-
-/// A version subdirectory that may become a deletion candidate: a real
-/// directory, never a symlink. Symlinked versions are stale or shared links —
-/// never deletion candidates (the browsers cleaner's rule). An unreadable file
-/// type is treated as a symlink: never touch what we cannot classify.
-pub(crate) fn is_version_dir(e: &fs::DirEntry) -> bool {
-    match e.file_type() {
-        Ok(t) => t.is_dir() && !t.is_symlink(),
-        Err(_) => false,
-    }
-}
-
-/// One owner of the "keep all but the highest version" retention rule shared
-/// by the browsers, gradle and JetBrains cleaners. Groups `candidates` by
-/// their numeric version key and returns the paths whose key is not the
-/// highest in the group. A candidate without a numeric key (a name with no
-/// digits) is never a deletion candidate.
-pub(crate) fn keep_highest(candidates: Vec<(Vec<u32>, PathBuf)>) -> Vec<PathBuf> {
-    // A name without digits has no version key: never a deletion candidate.
-    let versioned: Vec<(Vec<u32>, PathBuf)> = candidates
-        .into_iter()
-        .filter(|(k, _)| !k.is_empty())
-        .collect();
-    let Some(max) = versioned.iter().map(|(k, _)| k.clone()).max() else {
-        return vec![];
-    };
-    versioned
-        .into_iter()
-        .filter(|(k, _)| *k != max)
-        .map(|(_, p)| p)
-        .collect()
 }
 
 impl GradleCleaner {
@@ -473,58 +442,6 @@ mod tests {
             "a symlinked older version must not be a deletion candidate"
         );
         assert!(result.iter().any(|p| p.ends_with("8.8.0")));
-    }
-
-    // ── shared retention helpers ──
-
-    #[test]
-    fn keep_highest_returns_all_but_highest_key() {
-        let candidates = vec![
-            (vec![8, 8, 0], PathBuf::from("/c/8.8.0")),
-            (vec![8, 12, 0], PathBuf::from("/c/8.12.0")),
-            (vec![8, 10, 0], PathBuf::from("/c/8.10.0")),
-        ];
-        let old = keep_highest(candidates);
-        assert_eq!(
-            old,
-            vec![PathBuf::from("/c/8.8.0"), PathBuf::from("/c/8.10.0"),]
-        );
-    }
-
-    #[test]
-    fn keep_highest_skips_candidates_without_a_numeric_key() {
-        // A name with no digits has no version key: never a deletion
-        // candidate, even when it is the only entry in its group.
-        let candidates = vec![
-            (vec![], PathBuf::from("/c/nightly")),
-            (vec![1], PathBuf::from("/c/journal-1")),
-        ];
-        let old = keep_highest(candidates);
-        assert!(old.is_empty(), "empty-key candidates must never be deleted");
-    }
-
-    #[test]
-    fn keep_highest_single_candidate_returns_empty() {
-        let candidates = vec![(vec![8, 12, 0], PathBuf::from("/c/8.12.0"))];
-        assert!(keep_highest(candidates).is_empty());
-    }
-
-    #[test]
-    fn is_version_dir_rejects_symlinks() {
-        let tmp = TempDir::new().unwrap();
-        let target = tmp.path().join("8.12.0");
-        fs::create_dir_all(&target).unwrap();
-        let link = tmp.path().join("8.10.0");
-        #[cfg(unix)]
-        std::os::unix::fs::symlink(&target, &link).unwrap();
-        let entries: Vec<std::fs::DirEntry> = fs::read_dir(tmp.path()).unwrap().flatten().collect();
-        let linked = entries.iter().find(|e| e.file_name() == "8.10.0").unwrap();
-        let real = entries.iter().find(|e| e.file_name() == "8.12.0").unwrap();
-        assert!(
-            !is_version_dir(linked),
-            "a symlinked version is never a deletion candidate"
-        );
-        assert!(is_version_dir(real));
     }
 
     // ── JetBrainsCleaner (H01) ──
