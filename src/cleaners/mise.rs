@@ -17,7 +17,7 @@ pub struct MiseCleaner {
     pinned_cache: std::sync::OnceLock<HashSet<(String, String)>>,
 }
 
-/// Default max depth for the `.mise.toml` search under HOME (CLAUDE.md rule).
+/// Default max depth for the `.mise.toml` search under HOME (AGENTS.md rule).
 const DEFAULT_PINNED_MAX_DEPTH: usize = 5;
 
 /// Directory names the pinned-version scan never descends into.
@@ -137,7 +137,7 @@ impl MiseCleaner {
     /// `home` (up to `max_depth`) and returns a set of pinned `(tool, version)`
     /// pairs.
     ///
-    /// Respects CLAUDE.md safety rule:
+    /// Respects AGENTS.md safety rule:
     ///   "mise runtime deletion must cross-check global config.toml AND any
     ///    .mise.toml found within HOME (max depth 5)."
     ///

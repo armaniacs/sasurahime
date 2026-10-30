@@ -9,7 +9,7 @@ authors = ["ARAKI Yasuhiro <iron@araki.net>"]
 readme = "README.md"
 keywords = ["macos", "cache", "cleanup", "disk", "cli"]
 categories = ["command-line-utilities", "development-tools"]
-# Keep the crate lean: plans, backlog and site docs stay out of the package.
+# Keep the crate lean: plans, backlog, site docs and agent guides stay out of the package.
 exclude = [
     ".github",
     ".hex-skills",
@@ -19,7 +19,12 @@ exclude = [
     "pbi",
     "plans",
     "Makefile",
+    "AGENTS.md",
     "CLAUDE.md",
+    "src/AGENTS.md",
+    "src/CLAUDE.md",
+    "tests/AGENTS.md",
+    "tests/CLAUDE.md",
 ]
 
 [[bin]]

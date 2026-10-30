@@ -155,7 +155,7 @@ The target list is generated from the `define_cleaners!` definition table in
      3. If `chflags` fails, the error is propagated (not silently ignored).
 3. Reports total freed bytes.
 
-**Safety (per CLAUDE.md §Safety rules):**
+**Safety (per AGENTS.md §Safety rules):**
 - Cross-checks global `~/.config/mise/config.toml` **and** any `.mise.toml`
   found within HOME (max depth 5) before removing any version.
 - Pinned versions are **never** removed even if they are not currently active.

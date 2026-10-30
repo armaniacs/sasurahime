@@ -148,7 +148,7 @@ pub struct DeleteOutcome {
 /// according to `mode`, and classifies failures into skippable vs fatal.
 ///
 /// Every PathCleaner-based deletion in the codebase goes through here so the
-/// CLAUDE.md safety rules concentrate in one module instead of living as
+/// AGENTS.md safety rules concentrate in one module instead of living as
 /// copy-pasted incantations at each call site. External tools delete
 /// themselves outside this seam (`uv cache prune`, `brew cleanup`,
 /// `ollama rm` and friends run their own removals via
