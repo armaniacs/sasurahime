@@ -1,5 +1,5 @@
 use crate::cleaner::{CleanResult, Cleaner, ScanResult, ScanStatus};
-use crate::cleaners::gradle::{is_version_dir, keep_highest};
+use crate::cleaners::retention::{is_version_dir, keep_highest};
 use crate::command::CommandRunner;
 use crate::format::dir_size;
 use crate::progress::ProgressReporter;

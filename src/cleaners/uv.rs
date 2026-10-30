@@ -1,5 +1,5 @@
 use crate::cleaner::{CleanResult, Cleaner, ScanResult, ScanStatus};
-use crate::cleaners::gradle::{is_version_dir, keep_highest};
+use crate::cleaners::retention::{is_version_dir, keep_highest};
 use crate::command::CommandRunner;
 use crate::format::dir_size;
 use crate::progress::ProgressReporter;
@@ -36,22 +36,24 @@ impl UvCleaner {
 
         // design-it-twice (PBI-85): keep-highest was duplicated here as a
         // hand-rolled len() <= 1 short-circuit + max + retain. Plan A
-        // (adopted) borrows gradle.rs's pub(crate) keep_highest — the one
-        // helper already shared by gradle, browsers and JetBrains (the
-        // browsers.rs precedent) — so gradle keeps every line and the
-        // gradle/browser regression surface stays zero. A single u32 key
-        // wraps in vec![n]: a one-element lexicographic comparison equals the
-        // numeric one, and the helper's "single candidate → empty" contract
-        // absorbs the old short-circuit. Plan B (moving the helper into a
-        // common retention module) is deferred to its own PBI once all
+        // (adopted) borrows the shared pub(crate) keep_highest (gradle.rs's
+        // at PBI-85 time; moved to retention.rs by the retention-extract
+        // refactor) — the one helper already shared by gradle, browsers and
+        // JetBrains (the browsers.rs precedent) — so gradle keeps every line
+        // and the gradle/browser regression surface stays zero. A single u32
+        // key wraps in vec![n]: a one-element lexicographic comparison equals
+        // the numeric one, and the helper's "single candidate → empty"
+        // contract absorbs the old short-circuit. Plan B (moving the helper
+        // into a common retention module) is deferred to its own PBI once all
         // consumers line up.
         let candidates: Vec<(Vec<u32>, PathBuf)> = entries
             .filter_map(|e| e.ok())
             // GAP-006 (PBI-85): only real directories may become deletion
             // candidates. A regular file named simple-vN is never an index
             // dir, a symlink is a stale / shared link, and an unreadable file
-            // type is never touched — gradle.rs's is_version_dir owns all
-            // three rules (the browsers cleaner's rule, borrowed the same way).
+            // type is never touched — the shared is_version_dir (retention.rs)
+            // owns all three rules (the browsers cleaner's rule, borrowed the
+            // same way).
             .filter(is_version_dir)
             .filter_map(|e| {
                 let name = e.file_name();

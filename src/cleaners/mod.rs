@@ -19,6 +19,7 @@ pub mod orphan_containers;
 pub mod plugin;
 pub mod pre_commit;
 pub mod project_artifacts;
+pub mod retention;
 pub mod rustup;
 pub mod uv;
 pub mod vm_swap;
