@@ -3,7 +3,7 @@
 <details open>
 <summary><strong>🇺🇸 English</strong></summary>
 
-Scan, select, and remove stale caches from 50+ developer tools including uv, Homebrew, mise, Docker, Cargo, Go, and pip, all from a single command on macOS.
+Scan, select, and remove stale caches from 55 developer tools including uv, Homebrew, mise, Docker, Cargo, Go, and pip, all from a single command on macOS.
 
 sasurahime only removes caches and unused old versions. It never touches runtimes or packages that are currently in use. Every deletion goes to macOS Trash by default; Finder may not offer Put Back for items sasurahime moved there, so restore by dragging them out of the Trash.
 
@@ -243,9 +243,9 @@ For feature proposals, please open an issue first so we can discuss the scope be
 <details>
 <summary><strong>🇯🇵 日本語</strong></summary>
 
-uv・Homebrew・mise・Docker・Cargo・Go・pip など 50 以上のツールの古いキャッシュを、スキャン・選択・削除。macOS 開発者向けキャッシュクリーナー（Rust 製）。
+uv・Homebrew・mise・Docker・Cargo・Go・pip など 55 個のツールの古いキャッシュを、スキャン・選択・削除。macOS 開発者向けキャッシュクリーナー（Rust 製）。
 
-削除するのはキャッシュや古いバージョンのみです。現在使用中のランタイムやパッケージには一切触れません。また、削除したファイルはデフォルトで macOS のゴミ箱に移動されるため、いつでも Finder から復元できます。
+削除するのはキャッシュや古いバージョンのみです。現在使用中のランタイムやパッケージには一切触れません。また、削除したファイルはデフォルトで macOS のゴミ箱に移動されます。sasurahime が移動した項目には Finder の「戻す」が出ないことがあるため、その場合はゴミ箱からドラッグして復元してください。
 
 **44 GB が積み上がるとこうなる:**
 
