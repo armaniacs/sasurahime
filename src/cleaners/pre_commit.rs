@@ -177,6 +177,11 @@ mod tests {
 
     #[test]
     fn clean_dry_run_does_not_delete() {
+        let _lock = crate::context::TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let _pre_guard = EnvGuard::unset("PRE_COMMIT_HOME");
+        let _xdg_guard = EnvGuard::unset("XDG_CACHE_HOME");
         let tmp = TempDir::new().unwrap();
         let reporter = crate::progress::VerboseProgress::new();
         let cache = tmp.path().join(".cache/pre-commit");
@@ -196,6 +201,11 @@ mod tests {
 
     #[test]
     fn clean_fallback_deletes_dir() {
+        let _lock = crate::context::TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let _pre_guard = EnvGuard::unset("PRE_COMMIT_HOME");
+        let _xdg_guard = EnvGuard::unset("XDG_CACHE_HOME");
         let tmp = TempDir::new().unwrap();
         let reporter = crate::progress::VerboseProgress::new();
         let cache = tmp.path().join(".cache/pre-commit");
@@ -215,6 +225,11 @@ mod tests {
 
     #[test]
     fn clean_uses_cli_when_tool_available() {
+        let _lock = crate::context::TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let _pre_guard = EnvGuard::unset("PRE_COMMIT_HOME");
+        let _xdg_guard = EnvGuard::unset("XDG_CACHE_HOME");
         let tmp = TempDir::new().unwrap();
         let reporter = crate::progress::VerboseProgress::new();
         let cache = tmp.path().join(".cache/pre-commit");
@@ -230,6 +245,11 @@ mod tests {
 
     #[test]
     fn clean_dry_run_uses_cli_when_tool_available() {
+        let _lock = crate::context::TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let _pre_guard = EnvGuard::unset("PRE_COMMIT_HOME");
+        let _xdg_guard = EnvGuard::unset("XDG_CACHE_HOME");
         let tmp = TempDir::new().unwrap();
         let reporter = crate::progress::VerboseProgress::new();
         let cache = tmp.path().join(".cache/pre-commit");
@@ -249,6 +269,11 @@ mod tests {
 
     #[test]
     fn clean_returns_error_when_cli_fails() {
+        let _lock = crate::context::TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let _pre_guard = EnvGuard::unset("PRE_COMMIT_HOME");
+        let _xdg_guard = EnvGuard::unset("XDG_CACHE_HOME");
         let tmp = TempDir::new().unwrap();
         let reporter = crate::progress::VerboseProgress::new();
         let cache = tmp.path().join(".cache/pre-commit");

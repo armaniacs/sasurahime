@@ -215,6 +215,10 @@ mod tests {
 
     #[test]
     fn clean_dry_run_uses_cli_when_tool_available() {
+        let _lock = crate::context::TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let _hf_guard = EnvGuard::unset("HF_HOME");
         let tmp = TempDir::new().unwrap();
         let reporter = crate::progress::VerboseProgress::new();
         let hub = tmp.path().join(".cache/huggingface/hub");
