@@ -165,6 +165,32 @@ fn clean_caches_dispatches_every_generic_cache_table_row() {
 }
 
 #[test]
+fn clean_caches_permanent_deletes_the_node_gyp_dirs() {
+    // PBI-82 Phase 0 pin: the `clean caches` arm must forward the run's
+    // resolved `CleanOptions`, so `--permanent` (TrashMode::Permanent)
+    // reaches the node-gyp fallback delete and the two HOME-scoped
+    // node-gyp dirs are deleted, not moved to (or skipped by) the trash
+    // backend. The other caches cleaners only delegate to package-manager
+    // CLIs, which are absent from PATH here.
+    let tmp = TempDir::new().unwrap();
+    let (dot_cache, library_cache) = make_node_gyp_caches(tmp.path());
+
+    let output = sasurahime(tmp.path())
+        .args(["--permanent", "clean", "caches"])
+        .output()
+        .unwrap();
+    let combined = combined_output(&output);
+    assert!(
+        output.status.success(),
+        "--permanent clean caches must succeed, got:\n{combined}"
+    );
+    assert!(
+        !dot_cache.exists() && !library_cache.exists(),
+        "--permanent must delete the node-gyp fallback dirs, got:\n{combined}"
+    );
+}
+
+#[test]
 fn global_dry_run_reaches_standard_clean_target() {
     let tmp = TempDir::new().unwrap();
     let (dot_cache, library_cache) = make_node_gyp_caches(tmp.path());
@@ -288,6 +314,171 @@ fn global_dry_run_before_auto_prints_the_plan_without_deleting() {
     assert!(
         act_cache.exists(),
         "nothing may be deleted in dry-run mode, got:\n{combined}"
+    );
+}
+
+// --- PBI-80: the hint flow honors the global --dry-run ---
+
+/// Fake `scan` hint observable: the Diagnostic Reports hint entry
+/// (Library/Logs/DiagnosticReports, 1 MB log threshold, no process to quit
+/// and no relaunch) deletes this HOME-scoped directory for real when the
+/// hint prompt is answered y without --dry-run. An entry with
+/// `process_name: None` keeps the control free of any osascript side
+/// effect on the machine running the tests.
+fn make_diagnostic_reports(home: &std::path::Path) -> std::path::PathBuf {
+    let dir = home.join("Library/Logs/DiagnosticReports");
+    fs::create_dir_all(&dir).unwrap();
+    // 2 MB, a multiple of the 4096-byte APFS page so `format::dir_size`
+    // (st_blocks × 512) measures it above the 1 MB log threshold.
+    fs::write(dir.join("crash-report.ips"), vec![0u8; 2_097_152]).unwrap();
+    dir
+}
+
+/// Runs sasurahime with a short piped stdin, so a flow that reads the hint
+/// prompt consumes the answer and a flow that never prompts leaves it
+/// unread in the pipe.
+fn run_with_stdin(home: &std::path::Path, args: &[&str], stdin: &str) -> std::process::Output {
+    use std::io::Write;
+    let mut cmd = sasurahime(home);
+    cmd.args(args);
+    // All three streams piped: spawn() inherits stdout/stderr by default,
+    // and wait_with_output only captures the piped handles.
+    cmd.stdin(std::process::Stdio::piped());
+    cmd.stdout(std::process::Stdio::piped());
+    cmd.stderr(std::process::Stdio::piped());
+    let mut child = cmd.spawn().unwrap();
+    child
+        .stdin
+        .as_mut()
+        .expect("stdin must be piped")
+        .write_all(stdin.as_bytes())
+        .unwrap();
+    child.wait_with_output().unwrap()
+}
+
+#[test]
+fn dry_run_scan_answers_y_in_stdin_but_never_deletes_hint_dirs() {
+    let tmp = TempDir::new().unwrap();
+    let dir = make_diagnostic_reports(tmp.path());
+
+    let output = run_with_stdin(tmp.path(), &["--permanent", "--dry-run", "scan"], "y\n");
+    let combined = combined_output(&output);
+    assert!(
+        output.status.success(),
+        "the dry-run scan must succeed, got:\n{combined}"
+    );
+    assert!(
+        combined.contains("[dry-run] would"),
+        "the hint flow must print its dry-run line, got:\n{combined}"
+    );
+    assert!(
+        !combined.contains("Clear Diagnostic Reports cache?"),
+        "a dry run must never print the hint prompt, got:\n{combined}"
+    );
+    assert!(
+        dir.exists(),
+        "--dry-run + y in stdin must never delete the hint dir, got:\n{combined}"
+    );
+}
+
+#[test]
+fn scan_y_without_dry_run_deletes_hint_dirs() {
+    // Control for dry_run_scan_answers_y_in_stdin_but_never_deletes_hint_dirs:
+    // proves the hint flow actually deletes when the prompt is answered y,
+    // so the dry-run assertions are not vacuous.
+    let tmp = TempDir::new().unwrap();
+    let dir = make_diagnostic_reports(tmp.path());
+
+    let output = run_with_stdin(tmp.path(), &["--permanent", "scan"], "y\n");
+    let combined = combined_output(&output);
+    assert!(output.status.success(), "got:\n{combined}");
+    assert!(
+        combined.contains("[OK]"),
+        "the hint deletion must report its completion line, got:\n{combined}"
+    );
+    assert!(
+        !dir.exists(),
+        "the control must delete the hint dir, got:\n{combined}"
+    );
+}
+
+#[test]
+fn scan_y_answers_write_a_hints_history_row_and_stats_reflects_it() {
+    let tmp = TempDir::new().unwrap();
+    let dir = make_diagnostic_reports(tmp.path());
+
+    let output = run_with_stdin(tmp.path(), &["--permanent", "scan"], "y\n");
+    let combined = combined_output(&output);
+    assert!(output.status.success(), "got:\n{combined}");
+    assert!(
+        !dir.exists(),
+        "the hint dir must be deleted, got:\n{combined}"
+    );
+
+    // The hint flow rides the same history guard as every batch: one
+    // "hints" row (1 cleaner = 1 name) for the bytes it actually freed.
+    let history_path = tmp.path().join(".local/share/sasurahime/history.json");
+    let entries = sasurahime::history::load_history(&history_path);
+    assert_eq!(
+        entries.len(),
+        1,
+        "one history row for the hint deletion, got: {entries:?}"
+    );
+    assert_eq!(
+        entries[0].cleaner, "hints",
+        "the row names the hints cleaner"
+    );
+    assert_eq!(
+        entries[0].freed_bytes, 2_097_152,
+        "the freed bytes are recorded"
+    );
+    assert!(
+        !entries[0].moved_to_trash,
+        "a permanent deletion records no trash"
+    );
+
+    // `sasurahime stats` reflects the hint deletion.
+    let stats = sasurahime(tmp.path()).args(["stats"]).output().unwrap();
+    let stats_out = combined_output(&stats);
+    assert!(stats.status.success(), "got:\n{stats_out}");
+    assert!(
+        stats_out.contains("hints"),
+        "stats must show the hints row, got:\n{stats_out}"
+    );
+    assert!(
+        stats_out.contains("2.0 MB"),
+        "stats must show the freed bytes, got:\n{stats_out}"
+    );
+}
+
+#[test]
+fn scan_y_with_undeletable_hint_dir_skips_and_exits_one() {
+    let tmp = TempDir::new().unwrap();
+    let dir = make_diagnostic_reports(tmp.path());
+    // A read-only Library/Logs makes the deletion a skippable failure
+    // (EPERM removing the entry from the locked parent dir), so the hint's
+    // only deletable entry skips: the ledger's all-skipped contract reports
+    // failure and the run exits 1.
+    let logs = tmp.path().join("Library/Logs");
+    fs::set_permissions(&logs, fs::Permissions::from_mode(0o555)).unwrap();
+
+    let output = run_with_stdin(tmp.path(), &["--permanent", "scan"], "y\n");
+    // Restore before the asserts so the tempdir can be dropped cleanly.
+    fs::set_permissions(&logs, fs::Permissions::from_mode(0o755)).unwrap();
+
+    let combined = combined_output(&output);
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "an all-skipped hint clean must exit 1, got:\n{combined}"
+    );
+    assert!(
+        dir.exists(),
+        "the undeletable hint dir must survive, got:\n{combined}"
+    );
+    assert!(
+        combined.contains("[SKIPPED]"),
+        "the skip must be reported, got:\n{combined}"
     );
 }
 

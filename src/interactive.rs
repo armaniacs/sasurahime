@@ -97,6 +97,15 @@ pub(crate) fn gate_skipped_names(
         .collect()
 }
 
+/// The one y/N decision, shared by [`ask_yn`] and the hint prompt
+/// (hint/cleaner.rs): true only for a bare y/Y answer with optional
+/// surrounding whitespace — n, any other word, an empty line and EOF all
+/// decline. Extracted from ask_yn's decision line so the hint flow cannot
+/// drift from the entry-point prompts (PBI 80).
+pub(crate) fn is_yes_answer(answer: &str) -> bool {
+    answer.trim().eq_ignore_ascii_case("y")
+}
+
 /// Ask a y/N question: write `prompt` verbatim to `out`, flush it, then read
 /// one line from `input`. Returns true only for a bare y/Y answer — n, any
 /// other word, an empty line and EOF all decline. The decline branch (print
@@ -113,7 +122,7 @@ pub(crate) fn ask_yn(
     out.flush()?;
     let mut line = String::new();
     input.read_line(&mut line)?;
-    Ok(line.trim().eq_ignore_ascii_case("y"))
+    Ok(is_yes_answer(&line))
 }
 
 /// stdin-backed `ask_yn` used by the interactive entries.
@@ -175,6 +184,15 @@ pub fn report_batch_failures(
         match shape {
             ReportShape::Named => writeln!(out, "Error cleaning {name}: {e}")?,
             ReportShape::Bare => writeln!(out, "Error: {e}")?,
+        }
+    }
+    // Cancelled targets come after the failures and stay neutral: a decline
+    // is the user's run-level choice, not an error, so the line never says
+    // `Error cleaning` (PBI 78).
+    for name in &summary.cancelled {
+        match shape {
+            ReportShape::Named => writeln!(out, "{name}: cancelled by user")?,
+            ReportShape::Bare => writeln!(out, "cancelled by user")?,
         }
     }
     if !summary.skipped.is_empty() {
@@ -654,11 +672,46 @@ mod tests {
         }
     }
 
+    // --- PBI-80: the one y/N decision, shared with the hint prompt ---
+
+    #[test]
+    fn is_yes_answer_judges_the_y_n_table() {
+        // The unit table: a bare y/Y with optional surrounding whitespace is
+        // a yes; n, any other word, an empty line and whitespace-only
+        // decline (EOF declines at the call sites).
+        for yes in ["y", "Y", " y ", "\ty\t", "y\n"] {
+            assert!(is_yes_answer(yes), "{yes:?} must be a yes");
+        }
+        for no in ["n", "N", "", " ", "\n", "yes", "no", "Y y"] {
+            assert!(!is_yes_answer(no), "{no:?} must be a no");
+        }
+    }
+
+    #[test]
+    fn ask_yn_decides_through_the_shared_is_yes_answer() {
+        // The sharing pin: ask_yn's decision line is is_yes_answer, so the
+        // entry-point prompts and the hint prompt cannot drift apart.
+        let src = include_str!("interactive.rs");
+        let start = src
+            .find("pub(crate) fn ask_yn(")
+            .expect("ask_yn source present");
+        let end = src[start..]
+            .find("pub(crate) fn confirm(")
+            .map(|i| start + i)
+            .unwrap_or(src.len());
+        let body = &src[start..end];
+        assert!(
+            body.contains("is_yes_answer(&line)"),
+            "ask_yn must decide through the shared is_yes_answer"
+        );
+    }
+
     #[test]
     fn report_batch_failures_named_shape_names_the_cleaner() {
         let summary = crate::batch::BatchSummary {
             total_freed: 0,
             failures: vec![("brew".to_string(), "boom".to_string())],
+            cancelled: vec![],
             skipped: vec![("a.log".to_string(), "locked".to_string())],
         };
         let mut out: Vec<u8> = Vec::new();
@@ -674,6 +727,7 @@ mod tests {
         let summary = crate::batch::BatchSummary {
             total_freed: 0,
             failures: vec![("brew".to_string(), "boom".to_string())],
+            cancelled: vec![],
             skipped: vec![("a.log".to_string(), "locked".to_string())],
         };
         let mut out: Vec<u8> = Vec::new();
@@ -685,10 +739,45 @@ mod tests {
     }
 
     #[test]
+    fn report_batch_failures_reports_cancelled_after_failures() {
+        // A cancel is a run-level decision, not an error: the cancelled
+        // line is neutral (`{name}: cancelled by user`), comes after the
+        // failures, and never says `Error cleaning` (PBI 78).
+        let summary = crate::batch::BatchSummary {
+            total_freed: 0,
+            failures: vec![("brew".to_string(), "boom".to_string())],
+            cancelled: vec!["colima".to_string()],
+            skipped: vec![],
+        };
+        let mut out: Vec<u8> = Vec::new();
+        report_batch_failures(&mut out, &summary, ReportShape::Named).unwrap();
+        assert_eq!(
+            String::from_utf8(out).unwrap(),
+            "Error cleaning brew: boom\ncolima: cancelled by user\n"
+        );
+    }
+
+    #[test]
+    fn report_batch_failures_cancelled_bare_shape_omits_the_name() {
+        // Bare shape (the TUI whole-target branch) names no cleaner: the
+        // selection context already did, so the cancelled line stays bare.
+        let summary = crate::batch::BatchSummary {
+            total_freed: 0,
+            failures: vec![],
+            cancelled: vec!["colima".to_string()],
+            skipped: vec![],
+        };
+        let mut out: Vec<u8> = Vec::new();
+        report_batch_failures(&mut out, &summary, ReportShape::Bare).unwrap();
+        assert_eq!(String::from_utf8(out).unwrap(), "cancelled by user\n");
+    }
+
+    #[test]
     fn report_batch_failures_silent_when_nothing_failed() {
         let summary = crate::batch::BatchSummary {
             total_freed: 0,
             failures: vec![],
+            cancelled: vec![],
             skipped: vec![],
         };
         let mut out: Vec<u8> = Vec::new();

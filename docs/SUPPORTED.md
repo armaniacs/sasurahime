@@ -7,10 +7,15 @@ permalink: /SUPPORTED
 <details open markdown="1">
 <summary markdown="0"><strong>🇺🇸 English</strong></summary>
 
-sasurahime provides **51 clean targets**. Every target supports both `detect`
+sasurahime provides **54 clean targets**. Every target supports both `detect`
 (read-only, no side effects) and `clean` (removal). All `clean` subcommands
-accept `--dry-run`. Only caches and old versions are removed — active runtimes
+accept `--dry-run`. Only caches and old versions are removed ― active runtimes
 and packages are never touched.
+
+The target list is generated from the `define_cleaners!` definition table in
+`src/main.rs` (single source of truth: `command_name` / `dry_run` /
+`is_special` / `ALL_TARGETS` and this listing all derive from its rows). See
+`docs/HOWTO-ADD-target.md` for how to add one.
 
 ### Quick Reference
 
@@ -61,8 +66,8 @@ and packages are never touched.
 | `logs` | Log files older than N days |
 | `library-logs` | `~/Library/Logs/` (heuristic, interactive) |
 | `downloads` | `~/Downloads/` old files |
-| `ios-backup` | iOS backups — interactive only, never in `--yes` |
-| `apfs-snapshot` | APFS local Time Machine snapshots — interactive, `--all`, or `--thin` |
+| `ios-backup` | iOS backups ― interactive only, never in `--yes` |
+| `apfs-snapshot` | APFS local Time Machine snapshots ― interactive, `--all`, or `--thin` |
 | `orphan-containers` | Leftover `~/Library/Containers` and `~/Library/Group Containers` of uninstalled apps - interactive only, never in `--yes` |
 | `library-caches` | `~/Library/Caches/` per-app listing; known app caches removable - interactive only, never in `--yes` |
 | `app-support` | Cache dirs of known apps in `~/Library/Application Support/` - interactive only, never in `--yes` |
@@ -113,7 +118,7 @@ and packages are never touched.
 3. Parses the freed size from brew's output
    (`"freed approximately <N>GB of disk space"`) using
    `BrewCleaner::parse_brew_freed_bytes`, which in turn uses
-   `BrewCleaner::parse_size_str` (supports `GB`, `MB`, `KB` — case-insensitive
+   `BrewCleaner::parse_size_str` (supports `GB`, `MB`, `KB` ― case-insensitive
    and space-separated variants).
 4. Reports the parsed freed bytes.
 
@@ -150,7 +155,7 @@ and packages are never touched.
      3. If `chflags` fails, the error is propagated (not silently ignored).
 3. Reports total freed bytes.
 
-**Safety (per CLAUDE.md §Safety rules):**
+**Safety (per AGENTS.md §Safety rules):**
 - Cross-checks global `~/.config/mise/config.toml` **and** any `.mise.toml`
   found within HOME (max depth 5) before removing any version.
 - Pinned versions are **never** removed even if they are not currently active.
@@ -206,7 +211,7 @@ Keeps only the highest version per browser family.
 
 ## 5. `sasurahime clean bun`
 
-**Category:** Sprint 3 — Generic caches
+**Category:** Sprint 3 ― Generic caches
 
 **What it removes:** [Bun](https://bun.sh/) package cache.
 
@@ -226,7 +231,7 @@ Checks if `bun` is in `PATH`. Reports as pruneable if found (unknown size).
 
 ## 6. `sasurahime clean go`
 
-**Category:** Sprint 3 — Generic caches
+**Category:** Sprint 3 ― Generic caches
 
 **What it removes:** [Go](https://go.dev/) build cache.
 
@@ -246,7 +251,7 @@ Checks if `go` is in `PATH`. Reports as pruneable if found (unknown size).
 
 ## 7. `sasurahime clean pip`
 
-**Category:** Sprint 3 — Generic caches
+**Category:** Sprint 3 ― Generic caches
 
 **What it removes:** [pip](https://pip.pypa.io/) package cache.
 
@@ -266,7 +271,7 @@ Checks if `pip` is in `PATH`. Reports as pruneable if found (unknown size).
 
 ## 8. `sasurahime clean node-gyp`
 
-**Category:** Sprint 3 — Generic caches
+**Category:** Sprint 3 ― Generic caches
 
 **What it removes:** [node-gyp](https://github.com/nodejs/node-gyp) build
 cache directories.
@@ -291,7 +296,7 @@ cache directories.
 
 ## 9. `sasurahime clean npm`
 
-**Category:** Sprint 3 — Generic caches
+**Category:** Sprint 3 ― Generic caches
 
 **What it removes:** [npm](https://www.npmjs.com/) package cache.
 
@@ -311,7 +316,7 @@ Checks if `npm` is in `PATH`. Reports as pruneable if found (unknown size).
 
 ## 10. `sasurahime clean yarn`
 
-**Category:** Sprint 3 — Generic caches
+**Category:** Sprint 3 ― Generic caches
 
 **What it removes:** [Yarn](https://yarnpkg.com/) package cache.
 
@@ -331,7 +336,7 @@ Checks if `yarn` is in `PATH`. Reports as pruneable if found (unknown size).
 
 ## 11. `sasurahime clean pnpm`
 
-**Category:** Sprint 3 — Generic caches
+**Category:** Sprint 3 ― Generic caches
 
 **What it removes:** [pnpm](https://pnpm.io/) store.
 
@@ -351,7 +356,7 @@ Checks if `pnpm` is in `PATH`. Reports as pruneable if found (unknown size).
 
 ## 12. `sasurahime clean caches`
 
-**Category:** Sprint 3 — Generic caches (aggregate)
+**Category:** Sprint 3 ― Generic caches (aggregate)
 
 **What it removes:** **All** generic caches in a single command.
 Equivalent to running each of `bun`, `go`, `pip`, `node-gyp`, `npm`, `yarn`,
@@ -440,7 +445,7 @@ Xcode's DerivedData folder (`~/Library/Developer/Xcode/DerivedData/`).
 **Safety:**
 - The `DerivedData` root directory is **never** removed.
 - If Xcode is running, you are prompted to confirm (or operation aborts).
-- Project directories are identified by reading `read_dir` — only
+- Project directories are identified by reading `read_dir` ― only
   subdirectories are considered (files at the root are skipped).
 
 ---
@@ -477,7 +482,7 @@ local runner cache (`~/.cache/act/`, or `$ACT_CACHE_DIR` if set).
 (`~/.cargo/registry/cache/`) and `target/` build artifact directories.
 
 **Scanned by `detect`:**
-1. `~/.cargo/registry/cache/` — downloaded crate archives.
+1. `~/.cargo/registry/cache/` ― downloaded crate archives.
 2. User projects under `~/src/`, `~/work/`, `~/dev/` with `target/` dirs.
 
 **How clean works:**
@@ -561,7 +566,7 @@ Checks if `docker` is in `PATH`. Reports as pruneable if found (unknown size).
 
 **How clean works:**
 1. If `docker` not found, prints message and exits (0).
-2. Runs `docker system prune -f` (dangling images only — tagged images are
+2. Runs `docker system prune -f` (dangling images only ― tagged images are
    preserved).
 3. Reports 0 freed bytes.
 
@@ -635,7 +640,7 @@ recent version of each cached artifact.
 1. Attempts CLI first: runs `huggingface-cli delete-cache --yes`.
 2. If `huggingface-cli` is not in PATH, falls back to deleting `hub/` contents
    directly (recreates the `hub/` directory after deletion).
-3. `$HF_HOME` is validated against `is_safe_delete_target` — unsafe paths cause
+3. `$HF_HOME` is validated against `is_safe_delete_target` ― unsafe paths cause
    a fallback to the default.
 
 **Safety:** `$HF_HOME` is validated against a blocklist of system paths.
@@ -651,7 +656,7 @@ CLI takes precedence over direct deletion.
 [JetBrains IDEs](https://www.jetbrains.com/) (IntelliJ IDEA, WebStorm, etc.)
 under `~/Library/Caches/JetBrains/`.
 
-**Method:** Similar to Gradle cache version pruning — keeps the most recent
+**Method:** Similar to Gradle cache version pruning ― keeps the most recent
 version of each IDE cache.
 
 **How detect works:**
@@ -671,7 +676,7 @@ version of each IDE cache.
 **Category:** Sprint 5
 
 **What it removes:** User log files under `~/Library/Logs/`. Uses heuristic
-rules to suggest which entries to delete. **Interactive** — opens a selection
+rules to suggest which entries to delete. **Interactive** ― opens a selection
 prompt unless `--all` is used.
 
 **How detect works:**
@@ -775,7 +780,7 @@ cache (`~/.cache/pre-commit/`, `$PRE_COMMIT_HOME`, or `$XDG_CACHE_HOME/pre-commi
 **How clean works:**
 1. Tries CLI first: runs `pre-commit clean`.
 2. If `pre-commit` not in PATH, deletes the cache directory directly.
-3. Env var paths are validated via `is_safe_delete_target` — unsafe paths
+3. Env var paths are validated via `is_safe_delete_target` ― unsafe paths
    cause a fallback to `~/.cache/pre-commit`.
 
 **Safety:** Env var paths are validated. CLI takes precedence over direct
@@ -833,7 +838,7 @@ build artifacts and cached packages.
 
 **Category:** Sprint 5
 
-**What it removes:** `~/.Trash` — **scan only**. sasurahime reports the size
+**What it removes:** `~/.Trash` ― **scan only**. sasurahime reports the size
 of the Trash directory but will not delete it (users should use Finder to
 empty Trash).
 
@@ -847,7 +852,7 @@ empty Trash).
 2. **Otherwise:** prints a warning instructing the user to empty Trash via
    Finder. No files are deleted.
 
-**Safety:** sasurahime refuses to delete `~/.Trash` contents — this is an
+**Safety:** sasurahime refuses to delete `~/.Trash` contents ― this is an
 intentional safety measure.
 
 ---
@@ -892,7 +897,7 @@ its toolchain binaries are preserved.
 1. Removes `~/.sbt/` and `~/.ivy2/cache/` directories via `fs::remove_dir_all`.
 2. Reports total freed bytes.
 
-**Safety:** Directories are deleted entirely — dependencies will be re-fetched
+**Safety:** Directories are deleted entirely ― dependencies will be re-fetched
 on next `sbt compile`.
 
 ---
@@ -922,7 +927,7 @@ compilation cache (`~/.cache/tree-sitter/`).
 
 **Category:** Sprint 5
 
-**What it removes:** iOS Simulator cache — unavailable simulator runtimes
+**What it removes:** iOS Simulator cache ― unavailable simulator runtimes
 via `xcrun simctl delete unavailable`.
 
 **How detect works:**
@@ -1072,7 +1077,7 @@ cache via `colima prune --all --force`.
 **How detect works:**
 1. Checks if `~/.colima/` exists.
 2. Reports the total `dir_size` as pruneable.
-   *Note: This is an estimated maximum — actual freed space depends on
+   *Note: This is an estimated maximum ― actual freed space depends on
    which VM disk images are pruned.*
 
 **How clean works:**
@@ -1147,7 +1152,7 @@ UUID-named subdirectory containing backup data (Manifest.db, etc.).
 5. Reports total freed bytes.
 
 **Safety:**
-- iOS backups are **irreversible** — once deleted they cannot be restored
+- iOS backups are **irreversible** ― once deleted they cannot be restored
   (Trash only helps locally; backup data is gone).
 - **Interactive only:** never runs in `--yes` mode. Non-TTY invocations are
   safely skipped with a message.
@@ -1413,7 +1418,7 @@ Apple-provided folders and vendor parent folders (`Google`, `Microsoft`,
    exits with code 0 (no crash).
 
 **Supported flags:**
-- `--last N` — show only the most recent N entries (default: 10).
+- `--last N` ― show only the most recent N entries (default: 10).
 
 **Output example:**
 ```
@@ -1439,7 +1444,7 @@ Recent cleanups:
 
 **Category:** Sprint 5
 
-The config file is optional — if absent, sensible defaults are used.
+The config file is optional ― if absent, sensible defaults are used.
 
 **Example:**
 ```toml
@@ -1472,10 +1477,10 @@ keep_days = 14
 | `[[custom]]` | table[] | `[]` | User-defined cache directories |
 | `custom[].name` | string | required | Display name |
 | `custom[].path` | string | required | Path (supports `~`) |
-| `[cleaner.<name>]` | table | — | Per-cleaner filter settings |
+| `[cleaner.<name>]` | table | ― | Per-cleaner filter settings |
 | `cleaner.<name>.older_than_days` | integer | unset | Only delete entries older than N days |
 | `cleaner.<name>.larger_than_mb` | integer | unset | Only delete entries larger than N MB |
-| `[logs]` | table | — | Log retention settings |
+| `[logs]` | table | ― | Log retention settings |
 | `logs.keep_days` | integer | `7` | Global log retention period |
 | `[[logs.targets]]` | table[] | `[]` | Extra log directories |
 | `logs.targets[].name` | string | required | Display name |
@@ -1493,7 +1498,7 @@ sasurahime scan --config /path/to/config.toml
 
 Runs `detect()` on every cleaner and prints a formatted table via
 `comfy_table`. Rows are ordered by size, largest first; targets without a
-size (clean or not found) come last. No side effects — never creates,
+size (clean or not found) come last. No side effects ― never creates,
 modifies, or deletes files.
 
 ---
@@ -1512,10 +1517,14 @@ modifies, or deletes files.
 <details markdown="1">
 <summary markdown="0"><strong>🇯🇵 日本語</strong></summary>
 
-sasurahime は **51 のクリーンターゲット** を提供しています。すべてのターゲットは
+sasurahime は **54 のクリーンターゲット** を提供しています。すべてのターゲットは
 `detect`（読み取り専用、副作用なし）と `clean`（削除）の両方に対応しており、
 すべての `clean` サブコマンドは `--dry-run` をサポートしています。
 削除されるのはキャッシュや古いバージョンのみで、現在使用中のランタイムやパッケージには触れません。
+
+ターゲットの一覧は `src/main.rs` の `define_cleaners!` 定義表から生成されます
+（唯一の源: `command_name` / `dry_run` / `is_special` / `ALL_TARGETS` とこの一覧は
+すべて行から導かれます）。追加方法は `docs/HOWTO-ADD-target.md` を参照してください。
 
 ### クイックリファレンス
 
@@ -1566,8 +1575,8 @@ sasurahime は **51 のクリーンターゲット** を提供しています。
 | `logs` | N 日より古いログファイル |
 | `library-logs` | `~/Library/Logs/`（ヒューリスティック、対話的） |
 | `downloads` | `~/Downloads/` の古いファイル |
-| `ios-backup` | iOS バックアップ — 対話的のみ、`--yes` では非実行 |
-| `apfs-snapshot` | APFS ローカル Time Machine スナップショット — 対話的、`--all`、または `--thin` |
+| `ios-backup` | iOS バックアップ ― 対話的のみ、`--yes` では非実行 |
+| `apfs-snapshot` | APFS ローカル Time Machine スナップショット ― 対話的、`--all`、または `--thin` |
 | `orphan-containers` | アンインストール済みアプリの `~/Library/Containers` と `~/Library/Group Containers` の残骸 - 対話的のみ、`--yes` では実行しない |
 | `library-caches` | `~/Library/Caches/` のアプリ別一覧。既知アプリのキャッシュのみ削除可能 - 対話的のみ、`--yes` では非実行 |
 | `app-support` | `~/Library/Application Support/` 内の既知アプリのキャッシュ、対話的のみ、`--yes` では非実行 |
@@ -1682,7 +1691,7 @@ sasurahime は **51 のクリーンターゲット** を提供しています。
 
 ## 5. `sasurahime clean bun`
 
-**カテゴリ:** Sprint 3 — Generic caches
+**カテゴリ:** Sprint 3 ― Generic caches
 
 **削除対象:** [Bun](https://bun.sh/) のパッケージキャッシュ。
 
@@ -1701,7 +1710,7 @@ sasurahime は **51 のクリーンターゲット** を提供しています。
 
 ## 6. `sasurahime clean go`
 
-**カテゴリ:** Sprint 3 — Generic caches
+**カテゴリ:** Sprint 3 ― Generic caches
 
 **削除対象:** [Go](https://go.dev/) のビルドキャッシュ。
 
@@ -1720,7 +1729,7 @@ sasurahime は **51 のクリーンターゲット** を提供しています。
 
 ## 7. `sasurahime clean pip`
 
-**カテゴリ:** Sprint 3 — Generic caches
+**カテゴリ:** Sprint 3 ― Generic caches
 
 **削除対象:** [pip](https://pip.pypa.io/) のパッケージキャッシュ。
 
@@ -1739,7 +1748,7 @@ sasurahime は **51 のクリーンターゲット** を提供しています。
 
 ## 8. `sasurahime clean node-gyp`
 
-**カテゴリ:** Sprint 3 — Generic caches
+**カテゴリ:** Sprint 3 ― Generic caches
 
 **削除対象:** [node-gyp](https://github.com/nodejs/node-gyp) のビルドキャッシュディレクトリ。
 
@@ -1762,7 +1771,7 @@ sasurahime は **51 のクリーンターゲット** を提供しています。
 
 ## 9. `sasurahime clean npm`
 
-**カテゴリ:** Sprint 3 — Generic caches
+**カテゴリ:** Sprint 3 ― Generic caches
 
 **削除対象:** [npm](https://www.npmjs.com/) のパッケージキャッシュ。
 
@@ -1781,7 +1790,7 @@ sasurahime は **51 のクリーンターゲット** を提供しています。
 
 ## 10. `sasurahime clean yarn`
 
-**カテゴリ:** Sprint 3 — Generic caches
+**カテゴリ:** Sprint 3 ― Generic caches
 
 **削除対象:** [Yarn](https://yarnpkg.com/) のパッケージキャッシュ。
 
@@ -1800,7 +1809,7 @@ sasurahime は **51 のクリーンターゲット** を提供しています。
 
 ## 11. `sasurahime clean pnpm`
 
-**カテゴリ:** Sprint 3 — Generic caches
+**カテゴリ:** Sprint 3 ― Generic caches
 
 **削除対象:** [pnpm](https://pnpm.io/) ストア。
 
@@ -1819,7 +1828,7 @@ sasurahime は **51 のクリーンターゲット** を提供しています。
 
 ## 12. `sasurahime clean caches`
 
-**カテゴリ:** Sprint 3 — Generic caches（集約）
+**カテゴリ:** Sprint 3 ― Generic caches（集約）
 
 **削除対象:** **すべての** ジェネリックキャッシュを 1 コマンドで削除します。
 `bun`、`go`、`pip`、`node-gyp`、`npm`、`yarn`、`pnpm` を順次実行するのと同等です。
@@ -1925,7 +1934,7 @@ sasurahime は **51 のクリーンターゲット** を提供しています。
 **削除対象:** [Cargo](https://doc.rust-lang.org/cargo/) レジストリキャッシュ（`~/.cargo/registry/cache/`）と `target/` ビルドアーティファクトディレクトリ。
 
 **detect のスキャン対象:**
-1. `~/.cargo/registry/cache/` — ダウンロード済みクレートアーカイブ。
+1. `~/.cargo/registry/cache/` ― ダウンロード済みクレートアーカイブ。
 2. `~/src/`、`~/work/`、`~/dev/` 以下のユーザープロジェクトの `target/` ディレクトリ。
 
 **clean の動作:**
@@ -2004,7 +2013,7 @@ sasurahime は **51 のクリーンターゲット** を提供しています。
 
 **clean の動作:**
 1. `docker` が見つからない場合、メッセージを表示して終了します (0)。
-2. `docker system prune -f` を実行します（dangling イメージのみ — タグ付きイメージは保持）。
+2. `docker system prune -f` を実行します（dangling イメージのみ ― タグ付きイメージは保持）。
 3. 解放バイト数として 0 を報告します。
 
 **仮想ディスクの注意:**
@@ -2099,7 +2108,7 @@ image size を小さくするか、Troubleshoot > Clean / Purge data (全イメ�
 
 **カテゴリ:** Sprint 5
 
-**削除対象:** `~/Library/Logs/` 下のユーザーログファイル。ヒューリスティックルールを使用して削除候補を提案します。**インタラクティブ** — `--all` が使用されない限り選択プロンプトが表示されます。
+**削除対象:** `~/Library/Logs/` 下のユーザーログファイル。ヒューリスティックルールを使用して削除候補を提案します。**インタラクティブ** ― `--all` が使用されない限り選択プロンプトが表示されます。
 
 **detect の動作:**
 1. `~/Library/Logs/` の直下の子項目を読み取ります。
@@ -2243,7 +2252,7 @@ image size を小さくするか、Troubleshoot > Clean / Purge data (全イメ�
 
 **カテゴリ:** Sprint 5
 
-**削除対象:** `~/.Trash` — **スキャンのみ**。sasurahime はゴミ箱ディレクトリのサイズを報告しますが、削除は行いません（ユーザーは Finder からゴミ箱を空にしてください）。
+**削除対象:** `~/.Trash` ― **スキャンのみ**。sasurahime はゴミ箱ディレクトリのサイズを報告しますが、削除は行いません（ユーザーは Finder からゴミ箱を空にしてください）。
 
 **detect の動作:**
 1. `~/.Trash` が存在するか確認します。
@@ -2527,7 +2536,7 @@ image size を小さくするか、Troubleshoot > Clean / Purge data (全イメ�
 5. 解放バイト数の合計を報告します。
 
 **安全性:**
-- iOS バックアップは **元に戻せません** — 一度削除すると復元できません。
+- iOS バックアップは **元に戻せません** ― 一度削除すると復元できません。
 - **インタラクティブのみ:** `--yes` モードでは決して実行されません。非 TTY
   の呼び出しは安全にスキップされます。
 - `--dry-run` モードではバックアップが一覧表示されるのみで削除は行われません。
@@ -2769,7 +2778,7 @@ Local Storage、ワークスペースには一切触れません。
 5. 履歴ファイルがない場合や壊れている場合でも、親切なメッセージとともに終了コード 0 で正常終了します。
 
 **オプション:**
-- `--last N` — 直近 N 件のみ表示（デフォルト: 10）。
+- `--last N` ― 直近 N 件のみ表示（デフォルト: 10）。
 
 **出力例:**
 ```
@@ -2824,10 +2833,10 @@ keep_days = 14
 | `[[custom]]` | table[] | `[]` | ユーザー定義キャッシュディレクトリ |
 | `custom[].name` | string | 必須 | 表示名 |
 | `custom[].path` | string | 必須 | パス（`~` 展開対応） |
-| `[cleaner.<name>]` | table | — | クリーナーごとのフィルタ設定 |
+| `[cleaner.<name>]` | table | ― | クリーナーごとのフィルタ設定 |
 | `cleaner.<name>.older_than_days` | integer | 未設定 | N 日より古いエントリのみ削除 |
 | `cleaner.<name>.larger_than_mb` | integer | 未設定 | N MB より大きいエントリのみ削除 |
-| `[logs]` | table | — | ログ保持設定 |
+| `[logs]` | table | ― | ログ保持設定 |
 | `logs.keep_days` | integer | `7` | グローバルログ保持期間 |
 | `[[logs.targets]]` | table[] | `[]` | 追加ログディレクトリ |
 | `logs.targets[].name` | string | 必須 | 表示名 |
@@ -2843,7 +2852,7 @@ sasurahime scan --config /path/to/config.toml
 
 ## スキャン (`sasurahime scan`)
 
-すべてのクリーナーで `detect()` を実行し、`comfy_table` を使ってフォーマットされたテーブルを表示します。行はサイズの大きい順に並び、サイズのない対象（clean または not found）は末尾に表示します。副作用はありません — ファイルの作成、変更、削除は一切行いません。
+すべてのクリーナーで `detect()` を実行し、`comfy_table` を使ってフォーマットされたテーブルを表示します。行はサイズの大きい順に並び、サイズのない対象（clean または not found）は末尾に表示します。副作用はありません ― ファイルの作成、変更、削除は一切行いません。
 
 ---
 

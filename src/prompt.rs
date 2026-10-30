@@ -68,6 +68,34 @@ impl CleanPrompt {
             &NonInteractive
         }
     }
+
+    /// The third confirm semantics (PBI 81): ask the user to proceed ONLY
+    /// when a TTY is attached and the TUI has not suppressed the
+    /// per-cleaner confirms. `Ok(None)` = the confirm could not be shown
+    /// (no TTY, or the TUI already asked): the caller proceeds silently,
+    /// and the destructive action's floor (the PBI 69 refusal gate)
+    /// refuses at the deletion site instead. This is colima's semantics —
+    /// `for_current_run().confirm()` cannot express it, because
+    /// [`NonInteractive::confirm`] bails, which would break a non-TTY
+    /// `clean colima`. The TTY resolution lives here: the cleaner names
+    /// the port, never the adapter.
+    ///
+    /// `explanation` prints as normal output above the Confirm prompt, and
+    /// only when the confirm is actually shown — a run that cannot be
+    /// asked stays silent. The Confirm prompt itself stays the one short
+    /// "Proceed?" line: dialoguer clears one line deep, so a wrapped
+    /// prompt would double the message (the confirm-duplication fix is
+    /// owned here, not per call site).
+    pub fn confirm_on_tty(
+        reporter: &dyn ProgressReporter,
+        explanation: &str,
+    ) -> Result<Option<bool>> {
+        if confirm_suppressed() || !is_interactive() {
+            return Ok(None);
+        }
+        println!("\n{explanation}");
+        Ok(Some(TtyPrompt.confirm(reporter, "Proceed?")?))
+    }
 }
 
 /// How a cleaner asks the user questions. The port owns the TTY resolution,
@@ -317,5 +345,46 @@ mod tests {
         assert!(confirm_suppressed());
         set_confirm_suppressed(false);
         assert!(!confirm_suppressed());
+    }
+
+    #[test]
+    fn confirm_on_tty_returns_none_on_a_non_tty() {
+        // The third semantics (PBI 81): the confirm is asked ONLY when a
+        // TTY is attached and the TUI has not suppressed it. Ok(None) = the
+        // confirm could not be shown — the caller proceeds silently and
+        // the destructive-action floor (the PBI 69 refusal gate) refuses
+        // at the deletion site instead.
+        if is_interactive() {
+            // dialoguer needs a real TTY; an interactive cargo test would
+            // hang on the prompt.
+            return;
+        }
+        let rep = RecordingReporter::new();
+        let answer =
+            CleanPrompt::confirm_on_tty(&rep, "an explanation").expect("None is not an error");
+        assert!(answer.is_none(), "a non-TTY run cannot show the confirm");
+        assert_eq!(
+            rep.suspends.load(AtomicOrdering::Relaxed),
+            0,
+            "nothing to suspend: no dialoguer call happens"
+        );
+    }
+
+    #[test]
+    fn confirm_on_tty_returns_none_while_the_tui_suppresses_confirms() {
+        // The suppression predicate is owned by the port: a suppressed run
+        // never reaches a dialoguer confirm, whichever cleaner asks. On a
+        // TTY this exercises the suppression branch; on a non-TTY the
+        // TTY branch answers None first and the assertion still holds.
+        set_confirm_suppressed(true);
+        let rep = RecordingReporter::new();
+        let answer = CleanPrompt::confirm_on_tty(&rep, "an explanation").unwrap();
+        set_confirm_suppressed(false);
+        assert!(answer.is_none(), "a suppressed run cannot show the confirm");
+        assert_eq!(
+            rep.suspends.load(AtomicOrdering::Relaxed),
+            0,
+            "nothing to suspend: no dialoguer call happens"
+        );
     }
 }

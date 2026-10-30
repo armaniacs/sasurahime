@@ -123,22 +123,48 @@ Some cleaners need custom dispatch logic beyond what the macro provides:
 | Pre-check before cleaning | `Xcode` (running process detection) |
 | Completely different behavior | `Trash` (scan-only, warns on clean) |
 
-For these, follow Path A above plus add **manual dispatch** in `src/main.rs`:
+For these, add a **special row** to the `define_cleaners!` table plus
+**manual dispatch** in `src/main.rs`:
 
-1. The macro handles the enum variant and basic registration
-2. Add a match arm inside the special-targets block in `main()` (see existing
-   handlers for `Logs`, `Xcode`, `Caches`, `Trash`, and `LibraryLogs`)
+1. Add one special row to the table. The row header carries the variant,
+   the CLI name, the clap doc, the `special` marker, the `targets`
+   listing text and the `dry_run` marker; the fields stay verbatim:
 
 ```rust
-// In src/main.rs, inside the if matches!(target, ...) { match target { ... } } block:
+// In src/main.rs, in the special rows section of the define_cleaners! table:
+MySpecialTarget : "my-target"
+    => "Description of what this cleans" ;
+special ;
+{
+    #[arg(long)]
+    dry_run: bool,
+} ;
+"targets listing text" ;
+dry_run,
+```
+
+2. Add a match arm inside the special-targets block in `main()` (see existing
+   handlers for `Logs`, `Xcode`, `Caches`, `Trash`, and `LibraryLogs`):
+
+```rust
+// In src/main.rs, inside the if target.is_special() { match target { ... } } block:
 CleanTarget::MySpecialTarget { dry_run } => {
     let cleaner = cleaners::my_target::MyTargetCleaner::new(&home, Box::new(SystemCommandRunner));
     run_clean_target("my-target", |dry| cleaner.clean(dry), dry_run)?;
 }
 ```
 
-3. Add the variant name to the `matches!()` check and to the `impl CleanTarget`
-   methods (`command_name()`, `dry_run()`).
+That's it. The macro auto-generates from the row:
+- `CleanTarget::MySpecialTarget { ... }` enum variant (clap attrs from the header)
+- `SPECIAL_TARGETS` entry and its `ALL_TARGETS` union (the `targets` output)
+- `command_name()` / `dry_run()` / `is_special()` match arms, exhaustive
+  without a `_` arm: removing the row's CLI name drops the build
+- the `is_special()` gate in `main()` picks the variant up automatically
+
+No manual edits to `impl CleanTarget`, `SUPPORTED_TARGETS`, or the
+`matches!()` check are needed for special cleaners. The run arm stays
+manual: the special bodies are genuinely heterogeneous (validation, exit
+paths), so only the arm body is hand-written.
 
 ### Both paths
 
@@ -238,20 +264,40 @@ MyNewTarget : "my-new-target" => "このクリーナーの説明";
 | クリーン前の事前チェック | `Xcode`（実行中プロセスの検出） |
 | 完全に異なる動作 | `Trash`（スキャンのみ、クリーン時に警告） |
 
-これらの場合は、上記のパス A に従った上で `src/main.rs` に **手動ディスパッチ** を追加します：
+これらの場合は、`define_cleaners!` の表に **special 行** を 1 行追加し、`src/main.rs` に **手動ディスパッチ** を追加します：
 
-1. マクロが列挙子と基本登録を処理します
-2. `main()` の special-targets ブロック内にマッチアームを追加します（`Logs`、`Xcode`、`Caches`、`Trash`、`LibraryLogs` の既存ハンドラを参照）
+1. 表に special 行を 1 行追加します。行ヘッダが列挙子、CLI 名、clap 用の説明、`special` マーカー、`targets` 一覧の説明、`dry_run` マーカーを持ち、フィールドは verbatim で書きます：
 
 ```rust
-// src/main.rs の if matches!(target, ...) { match target { ... } } ブロック内：
+// src/main.rs の define_cleaners! 表の special 行セクション内：
+MySpecialTarget : "my-target"
+    => "このクリーナーの説明" ;
+special ;
+{
+    #[arg(long)]
+    dry_run: bool,
+} ;
+"targets 一覧の説明" ;
+dry_run,
+```
+
+2. `main()` の special-targets ブロック内にマッチアームを追加します（`Logs`、`Xcode`、`Caches`、`Trash`、`LibraryLogs` の既存ハンドラを参照）：
+
+```rust
+// src/main.rs の if target.is_special() { match target { ... } } ブロック内：
 CleanTarget::MySpecialTarget { dry_run } => {
     let cleaner = cleaners::my_target::MyTargetCleaner::new(&home, Box::new(SystemCommandRunner));
     run_clean_target("my-target", |dry| cleaner.clean(dry), dry_run)?;
 }
 ```
 
-3. `matches!()` チェックと `impl CleanTarget` のメソッド（`command_name()`、`dry_run()`）に列挙子名を追加します。
+これだけです。マクロが行から自動生成するもの：
+- `CleanTarget::MySpecialTarget { ... }` 列挙子（clap の属性は行ヘッダから）
+- `SPECIAL_TARGETS` エントリと `ALL_TARGETS` への合流（`targets` の出力）
+- `command_name()` / `dry_run()` / `is_special()` のマッチアーム。`_` 腕なしの完全一致なので、行から CLI 名を削除するとコンパイルが落ちます
+- `main()` の `is_special()` ゲートが自動で列挙子を拾います
+
+special クリーナーでは `impl CleanTarget`、`SUPPORTED_TARGETS`、`matches!()` チェックへの手動編集は不要です。run 腕は手書きのままです。特殊な本体は validation・exit パスが genuinely に異なるため、腕の本体だけ手で書きます。
 
 ### 両方のパスに共通
 

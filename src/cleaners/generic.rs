@@ -1,18 +1,18 @@
 use crate::cleaner::{
     CleanCancelled, CleanOptions, CleanResult, Cleaner, PerCleanerFilters, Risk, ScanResult,
-    ScanStatus, SkipCause, SkippedEntry,
+    ScanStatus,
 };
-use crate::command::CommandRunner;
 #[cfg(test)]
 use crate::command::SystemCommandRunner;
+use crate::command::{warn_tool_failure, CommandRunner};
 use crate::config::Config;
 use crate::disk_image::{
     colima_candidates, docker_desktop_candidates, DiskImageNotice, COLIMA_REMEDY, DOCKER_REMEDY,
 };
 use crate::format::dir_size;
 use crate::progress::ProgressReporter;
-use crate::prompt::{self, PromptPort, TtyPrompt};
-use crate::safety::{is_safe_delete_target, resolve_env_dir};
+use crate::prompt::{self, CleanPrompt};
+use crate::safety::resolve_env_dir;
 use anyhow::Result;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -482,10 +482,26 @@ impl Cleaner for CliCleaner {
 }
 
 impl CliCleaner {
-    /// The shared clean body. `mode` is the resolved deletion mode for the
-    /// fallback delete: the seam outcome and the deletion agree by
-    /// construction. The reporter suspends the live progress line while the
-    /// confirm prompt owns the screen.
+    /// The dispatcher (PBI 81): the confirm gate and the routing between
+    /// the two internal seams below — `run_tool` (the external tool does
+    /// the cleaning) and `fallback_delete_dir` (the tool is gone, delete
+    /// the detect_dir tree). The external seam (`Cleaner::clean` and this
+    /// private body's signature) is unchanged, and the only caller of this
+    /// body is `clean()` above.
+    ///
+    /// The confirm gate runs here, once, before either seam: it covers the
+    /// tool run and the fallback delete alike, and still runs before any
+    /// dry-run print (a TTY `clean colima --dry-run` prompts, unchanged).
+    /// Skipped when running under the interactive TUI (which already
+    /// asked for confirmation) or when stdin is not a terminal.
+    /// PBI 69 (WHY the skip is not enough): the TUI's suppression
+    /// means the user already confirmed on a terminal, but a
+    /// non-TTY stdin means the confirm cannot be shown at all.
+    /// When this cleaner's destructive action (see the fallback
+    /// delete below) is reachable on that non-TTY stdin, the
+    /// refusal gate there stops it instead — colima's full
+    /// deletion may only run on a TTY where the confirm was
+    /// actually answered.
     fn clean_with_mode(
         &self,
         dry_run: bool,
@@ -494,247 +510,223 @@ impl CliCleaner {
     ) -> Result<CleanResult> {
         let program = self.program;
         let args = self.args;
-        match &self.detect_dir {
-            None => {
-                if !self.runner.exists(program) {
-                    println!("{}: not found, skipping", self.display_name);
-                    return Ok(CleanResult::empty(self.name()));
+        if let Some(msg) = &self.confirm_message {
+            // The gate rides the port (PBI 81): the TTY resolution, the
+            // TUI-suppression check, the explanation placement, and the
+            // one-line Confirm prompt are owned by prompt.rs. None = the
+            // confirm could not be shown — proceed silently, and the
+            // non-TTY floor at the fallback delete (below) still refuses
+            // the deletion. PBI 69 (WHY the silent proceed is not
+            // enough): the TUI's suppression means the user already
+            // confirmed on a terminal, but a non-TTY stdin means the
+            // confirm cannot be shown at all. When this cleaner's
+            // destructive action is reachable on that non-TTY stdin, the
+            // refusal gate there stops it instead — colima's full
+            // deletion may only run on a TTY where the confirm was
+            // actually answered.
+            if let Some(confirmed) = CleanPrompt::confirm_on_tty(reporter, msg)? {
+                if !confirmed {
+                    println!("{}: cancelled", self.display_name);
+                    eprintln!("  $ {program} {}", args.join(" "));
+                    return Err(anyhow::Error::from(CleanCancelled));
                 }
-                if dry_run {
-                    println!("[dry-run] would run: {program} {}", args.join(" "));
-                    return Ok(CleanResult::empty(self.name()));
-                }
-                println!("$ {program} {}", args.join(" "));
-                let image_before = self.notice.as_ref().map_or(0, |n| n.physical_total());
-                let output = self.runner.run(program, args)?;
-                if !output.status.success() {
-                    eprintln!(
-                        "[{}] warning: `{} {}` exited with code {:?}",
-                        self.display_name,
-                        program,
-                        args.join(" "),
-                        output.status.code()
-                    );
-                    let stderr = String::from_utf8_lossy(&output.stderr);
-                    if !stderr.is_empty() {
-                        eprintln!("[{}] stderr: {stderr}", self.display_name);
-                    }
-                } else if let Some(msg) = self
-                    .notice
-                    .as_ref()
-                    .and_then(|n| n.after_clean_message(image_before, n.physical_total()))
-                {
-                    println!("{msg}");
-                }
-                Ok(CleanResult::empty(self.name()))
             }
-            Some(detect_dir) => {
+        }
+        match &self.detect_dir {
+            // The tool is gone and the fallback delete is reachable:
+            // concept B.
+            Some(detect_dir)
+                if !self.runner.exists(program) && self.fallback_delete && detect_dir.exists() =>
+            {
+                self.fallback_delete_dir(dry_run, detect_dir, reporter, mode)
+            }
+            // Concept A: the external tool does the cleaning — run_tool
+            // also owns the not-found skip and the dry-run prints for both
+            // shapes.
+            detect_dir => self.run_tool(dry_run, detect_dir.as_deref()),
+        }
+    }
+
+    /// Concept A (PBI 81): the external tool does the cleaning. Nothing is
+    /// deleted here — the freed delta over the detect_dir is filesystem
+    /// measurement only. `detect_dir` is `None` for the plain cache-prune
+    /// cleaners (bun/go/pip/...), `Some` for the ones that measure a delta
+    /// and run the extra follow-up commands: extras run only for cleaners
+    /// constructed with a detect_dir (the `with_extra_commands` contract).
+    /// The seam claims no trash and takes no mode — it never deletes — and
+    /// a non-zero exit is warn+continue (fatal only when the tool cannot
+    /// be spawned). The reporter is not needed either: there is no prompt
+    /// and no delete-ledger progress on this path.
+    fn run_tool(&self, dry_run: bool, detect_dir: Option<&Path>) -> Result<CleanResult> {
+        let program = self.program;
+        let args = self.args;
+        if !self.runner.exists(program) {
+            println!("{}: not found, skipping", self.display_name);
+            return Ok(CleanResult::empty(self.name()));
+        }
+        if dry_run {
+            println!("[dry-run] would run: {program} {}", args.join(" "));
+            if let Some(detect_dir) = detect_dir {
                 let size_before = if detect_dir.exists() {
                     dir_size(detect_dir)
                 } else {
                     0
                 };
-
-                // Interactive confirmation prompt when configured.
-                // Skipped when running under the interactive TUI (which already
-                // asked for confirmation) or when stdin is not a terminal.
-                // PBI 69 (WHY the skip is not enough): the TUI's suppression
-                // means the user already confirmed on a terminal, but a
-                // non-TTY stdin means the confirm cannot be shown at all.
-                // When this cleaner's destructive action (see the fallback
-                // delete below) is reachable on that non-TTY stdin, the
-                // refusal gate there stops it instead — colima's full
-                // deletion may only run on a TTY where the confirm was
-                // actually answered.
-                if let Some(msg) = &self.confirm_message {
-                    if !prompt::confirm_suppressed() && prompt::is_interactive() {
-                        // The long explanation prints as normal output and
-                        // the Confirm prompt stays one short line: dialoguer
-                        // clears one line deep, so a wrapped prompt would
-                        // double the message (the confirm-duplication fix).
-                        println!("\n{msg}");
-                        // The prompt owns the screen (suspension and the
-                        // one-line Confirm prompt are owned by the port, so
-                        // the live progress line never redraws under it).
-                        let confirmed = TtyPrompt.confirm(reporter, "Proceed?")?;
-                        if !confirmed {
-                            println!("{}: cancelled", self.display_name);
-                            eprintln!("  $ {program} {}", args.join(" "));
-                            return Err(anyhow::Error::from(CleanCancelled));
-                        }
-                    }
-                }
-
-                if !self.runner.exists(program) {
-                    if self.fallback_delete && detect_dir.exists() {
-                        if dry_run {
-                            println!(
-                                "[dry-run] would remove: {} ({} bytes)",
-                                detect_dir.display(),
-                                crate::format::format_bytes(size_before)
-                            );
-                            return Ok(CleanResult::empty(self.name()));
-                        }
-                        // PBI 69 (WHY): this fallback delete removes the
-                        // whole detect_dir tree — for colima, ~/.colima
-                        // including the VM's disk images. That full
-                        // deletion is the destructive action this
-                        // cleaner's confirm exists for, and it must only
-                        // run on a TTY: a non-TTY stdin cannot show the
-                        // confirm (the gate above silently skips it), so
-                        // refuse here with the standard remedy instead of
-                        // deleting unconfirmed — the same non-TTY floor
-                        // as ios-backup and apfs-snapshot. Only cleaners
-                        // that declare a confirm are gated: the run-CLI
-                        // path (a real `colima prune`) is a tool
-                        // invocation, not the deletion.
-                        if self.confirm_message.is_some() && !prompt::is_interactive() {
-                            let _ = crate::prompt::write_not_a_terminal_remedy(
-                                &mut std::io::stderr(),
-                                self.display_name,
-                            );
-                            return Ok(CleanResult::empty(self.name()));
-                        }
-                        // TOCTOU mitigation: re-validate fallback delete path.
-                        if !is_safe_delete_target(detect_dir) {
-                            eprintln!(
-                                "[{}] warning: unsafe fallback path, skipping: {}",
-                                self.display_name,
-                                detect_dir.display()
-                            );
-                            // The fallback was refused before any deletion: the
-                            // seam was never invoked, so no Trash claim may be
-                            // made (same as the free `clean_cli_or_fallback`'s
-                            // unsafe-path return).
-                            return Ok(CleanResult::empty(self.name()));
-                        }
-                        let outcome =
-                            crate::trash::safe_delete(self.runner.as_ref(), detect_dir, mode)?;
-                        if let Some(reason) = outcome.skip_reason {
-                            // The seam classified the failure as skippable: the
-                            // entry was NOT deleted, so no Trash claim may be
-                            // made even though the seam resolved the mode (same
-                            // as the unsafe-path return above).
-                            return Ok(CleanResult {
-                                name: self.name(),
-                                bytes_freed: 0,
-                                uses_trash: false,
-                                skipped: vec![SkippedEntry {
-                                    path: detect_dir.to_path_buf(),
-                                    reason: SkipCause::Delete(reason),
-                                }],
-                            });
-                        }
-                        println!(
-                            "[{}] removed cache: {}",
-                            self.display_name,
-                            detect_dir.display()
-                        );
-                        return Ok(CleanResult::freed(
-                            self.name(),
-                            size_before,
-                            outcome.uses_trash,
-                        ));
-                    }
-                    println!("{}: not found, skipping", self.display_name);
-                    return Ok(CleanResult::empty(self.name()));
-                }
-                if dry_run {
-                    println!("[dry-run] would run: {program} {}", args.join(" "));
-                    if size_before > 0 {
-                        println!(
-                            "[dry-run] would free: {}",
-                            crate::format::format_bytes(size_before)
-                        );
-                    }
-                    return Ok(CleanResult::empty(self.name()));
-                }
-                println!("$ {program} {}", args.join(" "));
-                // Measure the sparse disk image before any command runs: the
-                // after-clean message below must diff the pre-clean
-                // allocation, exactly like the no-detect_dir branch.
-                let image_before = self.notice.as_ref().map_or(0, |n| n.physical_total());
-                let output = self.runner.run(program, args)?;
-                if !output.status.success() {
-                    eprintln!(
-                        "[{}] warning: `{} {}` exited with code {:?}",
-                        self.display_name,
-                        program,
-                        args.join(" "),
-                        output.status.code()
+                if size_before > 0 {
+                    println!(
+                        "[dry-run] would free: {}",
+                        crate::format::format_bytes(size_before)
                     );
-                    let stderr = String::from_utf8_lossy(&output.stderr);
-                    if !stderr.is_empty() {
-                        eprintln!("[{}] stderr: {stderr}", self.display_name);
-                    }
                 }
-                for (extra_program, extra_args, remedy) in &self.extra_commands {
-                    println!("$ {extra_program} {}", extra_args.join(" "));
-                    match self.runner.run(extra_program, extra_args) {
-                        Ok(output) if !output.status.success() => {
-                            eprintln!(
-                                "[{}] warning: `{} {}` exited with code {:?}",
-                                self.display_name,
-                                extra_program,
-                                extra_args.join(" "),
-                                output.status.code()
-                            );
-                            let stderr = String::from_utf8_lossy(&output.stderr);
-                            if !stderr.is_empty() {
-                                eprintln!("[{}] stderr: {stderr}", self.display_name);
-                            }
-                            if let Some(remedy) = remedy {
-                                eprintln!("[{}] {remedy}", self.display_name);
-                            }
+            }
+            return Ok(CleanResult::empty(self.name()));
+        }
+        println!("$ {program} {}", args.join(" "));
+        // Measure the sparse disk image before any command runs: the
+        // after-clean notice must diff the pre-clean allocation.
+        let image_before = self.notice.as_ref().map_or(0, |n| n.physical_total());
+        let size_before = match detect_dir {
+            Some(detect_dir) if detect_dir.exists() => dir_size(detect_dir),
+            _ => 0,
+        };
+        let output = self.runner.run(program, args)?;
+        let success = output.status.success();
+        if !success {
+            let _ = warn_tool_failure(
+                &mut std::io::stderr(),
+                self.display_name,
+                program,
+                args,
+                &output,
+                None,
+            );
+        }
+        let mut freed = 0;
+        if let Some(detect_dir) = detect_dir {
+            for (extra_program, extra_args, remedy) in &self.extra_commands {
+                println!("$ {extra_program} {}", extra_args.join(" "));
+                match self.runner.run(extra_program, extra_args) {
+                    Ok(output) if !output.status.success() => {
+                        let _ = warn_tool_failure(
+                            &mut std::io::stderr(),
+                            self.display_name,
+                            extra_program,
+                            extra_args,
+                            &output,
+                            *remedy,
+                        );
+                    }
+                    Ok(_) => {}
+                    Err(e) => {
+                        // A spawn failure has no Output to relay, so this
+                        // wording stays here instead of the shared helper.
+                        eprintln!(
+                            "[{}] warning: `{} {}` failed: {e}",
+                            self.display_name,
+                            extra_program,
+                            extra_args.join(" ")
+                        );
+                        if let Some(remedy) = remedy {
+                            eprintln!("[{}] {remedy}", self.display_name);
                         }
-                        Ok(_) => {}
-                        Err(e) => {
-                            eprintln!(
-                                "[{}] warning: `{} {}` failed: {e}",
-                                self.display_name,
-                                extra_program,
-                                extra_args.join(" ")
-                            );
-                            if let Some(remedy) = remedy {
-                                eprintln!("[{}] {remedy}", self.display_name);
-                            }
-                        }
                     }
                 }
-                let size_after = if detect_dir.exists() {
-                    dir_size(detect_dir)
-                } else {
-                    0
-                };
-                let freed = size_before.saturating_sub(size_after);
-                if freed > 0 {
-                    println!("Freed: {}", crate::format::format_bytes(freed));
-                }
-                // The disk-image notice must stay live on the detect_dir
-                // clean path: `Freed:` above measures the cache directory,
-                // not the VM's sparse disk image, and fstrim only reclaims
-                // unused blocks — the image file itself often does not
-                // shrink, which is exactly what the message reports (with
-                // the remedy when it does not). Success-only, same as the
-                // no-detect_dir branch; colima is the only cleaner with
-                // both a detect_dir and a notice.
-                if output.status.success() {
-                    if let Some(msg) = self
-                        .notice
-                        .as_ref()
-                        .and_then(|n| n.after_clean_message(image_before, n.physical_total()))
-                    {
-                        println!("{msg}");
-                    }
-                }
-                Ok(CleanResult {
-                    name: self.name(),
-                    bytes_freed: freed,
-                    uses_trash: false,
-                    skipped: vec![],
-                })
+            }
+            let size_after = if detect_dir.exists() {
+                dir_size(detect_dir)
+            } else {
+                0
+            };
+            freed = size_before.saturating_sub(size_after);
+            if freed > 0 {
+                println!("Freed: {}", crate::format::format_bytes(freed));
             }
         }
+        self.maybe_print_after_clean_notice(success, image_before);
+        Ok(CleanResult::freed(self.name(), freed, false))
+    }
+
+    /// The success-only after-clean notice (PBI 81): the disk-image notice
+    /// diffs the pre-clean allocation (`image_before`, measured before any
+    /// command runs) against the current physical total. The notice must
+    /// stay live on the detect_dir clean path: `Freed:` measures the cache
+    /// directory, not the VM's sparse disk image, and fstrim only reclaims
+    /// unused blocks — the image file itself often does not shrink, which
+    /// is exactly what the message reports (with the remedy when it does
+    /// not). Success-only, same on both former branches; colima is the
+    /// only cleaner with both a detect_dir and a notice.
+    fn maybe_print_after_clean_notice(&self, success: bool, image_before: u64) {
+        if !success {
+            return;
+        }
+        if let Some(msg) = self
+            .notice
+            .as_ref()
+            .and_then(|n| n.after_clean_message(image_before, n.physical_total()))
+        {
+            println!("{msg}");
+        }
+    }
+
+    /// Concept B (PBI 81): the tool is gone — delete the detect_dir tree.
+    /// Carries the PBI 69 non-TTY refusal gate (below), the TOCTOU
+    /// revalidation, and the seam-truth CleanResult. `mode` is the run's
+    /// resolved deletion mode (the CleanOptions contract): only this seam
+    /// receives it, so the seam outcome and the actual deletion can never
+    /// disagree.
+    fn fallback_delete_dir(
+        &self,
+        dry_run: bool,
+        detect_dir: &Path,
+        reporter: &dyn ProgressReporter,
+        mode: crate::trash::TrashMode,
+    ) -> Result<CleanResult> {
+        let size_before = if detect_dir.exists() {
+            dir_size(detect_dir)
+        } else {
+            0
+        };
+        if dry_run {
+            println!(
+                "[dry-run] would remove: {} ({} bytes)",
+                detect_dir.display(),
+                crate::format::format_bytes(size_before)
+            );
+            return Ok(CleanResult::empty(self.name()));
+        }
+        // PBI 69 (WHY): this fallback delete removes the
+        // whole detect_dir tree — for colima, ~/.colima
+        // including the VM's disk images. That full
+        // deletion is the destructive action this
+        // cleaner's confirm exists for, and it must only
+        // run on a TTY: a non-TTY stdin cannot show the
+        // confirm (the gate above silently skips it), so
+        // refuse here with the standard remedy instead of
+        // deleting unconfirmed — the same non-TTY floor
+        // as ios-backup and apfs-snapshot. Only cleaners
+        // that declare a confirm are gated: the run-CLI
+        // path (a real `colima prune`) is a tool
+        // invocation, not the deletion.
+        if self.confirm_message.is_some() && !prompt::is_interactive() {
+            let _ = crate::prompt::write_not_a_terminal_remedy(
+                &mut std::io::stderr(),
+                self.display_name,
+            );
+            return Ok(CleanResult::empty(self.name()));
+        }
+        // There is no caller-side unsafe-path guard here anymore: the
+        // seam's scope tripwire refuses the same paths at deletion
+        // time, and the ledger records the refusal as a skipped
+        // entry (prose reason) and continues — the skip channel
+        // and the deleted-path audit trail stay consistent with
+        // every other ledger user.
+        Ok(crate::trash::delete_entries(
+            self.display_name,
+            self.runner.as_ref(),
+            reporter,
+            mode,
+            &[(detect_dir.to_path_buf(), size_before)],
+        ))
     }
 }
 
@@ -919,6 +911,7 @@ pub fn meets_size_filter(size: u64, larger_than_mb: Option<u64>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cleaner::SkipCause;
     use crate::command::CommandRunner;
     use std::sync::atomic::Ordering;
 
@@ -1008,6 +1001,111 @@ mod tests {
         );
         assert!(!real.exists(), "the safe dir still deletes");
         assert_eq!(result.bytes_freed, real_size, "the safe dir is summed");
+    }
+
+    // ── CliCleaner fallback ledger migration (PBI 77) ──
+
+    /// A reporter that records the progress calls, so the threading of the
+    /// reporter into the fallback delete ledger is observable.
+    struct RecordingReporter {
+        inits: std::sync::Mutex<Vec<(String, usize)>>,
+        ticks: std::sync::Mutex<Vec<(PathBuf, usize, u64)>>,
+    }
+
+    impl Default for RecordingReporter {
+        fn default() -> Self {
+            Self {
+                inits: std::sync::Mutex::new(Vec::new()),
+                ticks: std::sync::Mutex::new(Vec::new()),
+            }
+        }
+    }
+
+    impl crate::progress::ProgressReporter for RecordingReporter {
+        fn show_spinner(&self) -> bool {
+            false
+        }
+        fn progress_init(&self, label: &str, total: usize) {
+            self.inits.lock().unwrap().push((label.to_string(), total));
+        }
+        fn progress_tick(&self, path: &Path, current: usize, size_bytes: u64) {
+            self.ticks
+                .lock()
+                .unwrap()
+                .push((path.to_path_buf(), current, size_bytes));
+        }
+        fn progress_finish(&self) {}
+    }
+
+    #[test]
+    fn cli_fallback_threads_the_reporter_into_the_ledger() {
+        // The fallback delete rides the delete ledger: progress_init carries
+        // the label and items.len() (PBI 68) and the deletion ticks. Before
+        // the ledger migration the reporter had no path into the fallback
+        // branch, so the progress tick was structurally absent.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let dir = tmp.path().join("cache");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("data.bin"), vec![0u8; 1024]).unwrap();
+        let cleaner = fallback_cli_cleaner(&dir);
+        let reporter = RecordingReporter::default();
+        let opts = CleanOptions {
+            trash_mode: crate::trash::TrashMode::Permanent,
+            ..Default::default()
+        };
+        cleaner.clean(false, &reporter, &opts).unwrap();
+        let inits = reporter.inits.lock().unwrap();
+        assert_eq!(
+            *inits,
+            vec![("test-cli-pin".to_string(), 1)],
+            "progress_init runs once with the label and items.len()"
+        );
+        let ticks = reporter.ticks.lock().unwrap();
+        assert_eq!(ticks.len(), 1, "one tick per deleted entry: {ticks:?}");
+        assert_eq!(ticks[0].0, dir);
+    }
+
+    #[test]
+    fn cli_fallback_records_an_unsafe_detect_dir_as_a_skipped_entry() {
+        // The TOCTOU pre-check warned without recording: the skip channel
+        // and the exit code could not see the refusal. The seam's scope
+        // tripwire refuses the same path at deletion time and the ledger
+        // records it as a skipped entry (prose reason) — same as every
+        // other ledger user. A tempdir under /tmp never passes
+        // is_safe_delete_target (the canonicalized path starts with
+        // /private/tmp).
+        let tmp = tempfile::TempDir::new_in("/tmp").unwrap();
+        std::fs::write(tmp.path().join("keep.txt"), b"data").unwrap();
+        let cleaner = fallback_cli_cleaner(tmp.path());
+        let opts = CleanOptions {
+            trash_mode: crate::trash::TrashMode::Permanent,
+            ..Default::default()
+        };
+        let result = cleaner
+            .clean(false, &crate::progress::DeepSuppressReporter, &opts)
+            .unwrap();
+        assert_eq!(result.bytes_freed, 0, "a refused dir frees nothing");
+        assert!(
+            tmp.path().join("keep.txt").exists(),
+            "the unsafe dir must survive"
+        );
+        assert_eq!(
+            result.skipped.len(),
+            1,
+            "the refusal must be recorded as a SkippedEntry: {:?}",
+            result.skipped
+        );
+        assert_eq!(result.skipped[0].path, tmp.path());
+        assert!(
+            matches!(&result.skipped[0].reason, SkipCause::Reason(reason) if reason.contains("refusing to delete unsafe path")),
+            "the seam refusal rides as prose: {:?}",
+            result.skipped[0].reason
+        );
+        assert_eq!(
+            result.exit_code(),
+            1,
+            "the refusal must surface through the exit code"
+        );
     }
 
     // ── CliCleaner trash_mode pin contract ──
@@ -1249,6 +1347,81 @@ mod tests {
             result.is_ok(),
             "a failed extra command must not fail the clean"
         );
+    }
+
+    #[test]
+    fn no_detect_dir_cleaner_never_runs_extra_commands() {
+        // PBI 81: extras run only for cleaners constructed with a
+        // detect_dir (the with_extra_commands contract). The run_tool
+        // unification must not start running extras for the no-detect_dir
+        // cache-prune cleaners (bun/go/pip/...): the runner records every
+        // command it is asked to run, so a stray extra would appear here.
+        struct RecordingRunner(std::sync::Arc<std::sync::Mutex<Vec<String>>>);
+        impl CommandRunner for RecordingRunner {
+            fn run(&self, program: &str, args: &[&str]) -> anyhow::Result<std::process::Output> {
+                use std::os::unix::process::ExitStatusExt;
+                self.0
+                    .lock()
+                    .unwrap()
+                    .push(format!("{program} {}", args.join(" ")));
+                Ok(std::process::Output {
+                    status: std::process::ExitStatus::from_raw(0),
+                    stdout: vec![],
+                    stderr: vec![],
+                })
+            }
+            fn exists(&self, _: &str) -> bool {
+                true
+            }
+        }
+        let calls = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let runner = CliCleaner::bun(Box::new(RecordingRunner(calls.clone())))
+            .with_extra_commands(vec![("fake-extra", &["extra", "cmd"], Some("a remedy"))]);
+        let result = runner
+            .clean(
+                false,
+                &crate::progress::DeepSuppressReporter,
+                &crate::cleaner::CleanOptions::default(),
+            )
+            .unwrap();
+        assert_eq!(result.bytes_freed, 0, "a no-detect_dir clean frees nothing");
+        let calls = calls.lock().unwrap();
+        assert_eq!(
+            *calls,
+            vec!["bun pm cache rm".to_string()],
+            "only the main tool runs — extras are detect_dir-only: {calls:?}"
+        );
+    }
+
+    #[test]
+    fn clean_continues_past_a_failing_tool_cli() {
+        // PBI 81 (BDD scenario 3): a non-zero exit from the generic cache
+        // CLI is warn+continue, not fatal — the clean still returns Ok and
+        // frees nothing (the run-CLI path never deletes). The warning
+        // wording itself is pinned by warn_tool_failure's
+        // writer-parameterized unit tests in command.rs.
+        struct FailingRunner;
+        impl CommandRunner for FailingRunner {
+            fn run(&self, _: &str, _: &[&str]) -> anyhow::Result<std::process::Output> {
+                use std::os::unix::process::ExitStatusExt;
+                Ok(std::process::Output {
+                    status: std::process::ExitStatus::from_raw(1 << 8),
+                    stdout: vec![],
+                    stderr: b"boom".to_vec(),
+                })
+            }
+            fn exists(&self, _: &str) -> bool {
+                true
+            }
+        }
+        let cleaner = CliCleaner::bun(Box::new(FailingRunner));
+        let result = cleaner.clean(
+            false,
+            &crate::progress::DeepSuppressReporter,
+            &crate::cleaner::CleanOptions::default(),
+        );
+        assert!(result.is_ok(), "a failed cache CLI must not fail the clean");
+        assert_eq!(result.unwrap().bytes_freed, 0, "a failed CLI frees nothing");
     }
 
     // ── type split: per_cleaner_filters / is_available live on each type ──
@@ -1736,14 +1909,45 @@ mod tests {
     }
 
     #[test]
+    fn colima_clean_proceeds_silently_while_confirm_suppressed() {
+        // PBI 81 (the previously unpinned suppressed path): when the TUI
+        // has suppressed the per-cleaner confirms, the confirm gate must
+        // stay silent and proceed — never prompt, never cancel, never
+        // error through a bailing port (NonInteractive.confirm() would
+        // bail and fail the clean). The non-TTY floor at the fallback
+        // delete still refuses the deletion itself.
+        if prompt::is_interactive() {
+            // On a TTY the suppressed path cannot be observed without a
+            // real prompt; the E2E suite pins the TTY behavior instead.
+            return;
+        }
+        let tmp = tempfile::TempDir::new().unwrap();
+        let disk = tmp.path().join(".colima/_lima/colima/disk");
+        fs::create_dir_all(disk.parent().unwrap()).unwrap();
+        fs::write(&disk, b"vm disk bytes").unwrap();
+        let cleaner = CliCleaner::colima_prune(tmp.path(), Box::new(MissingToolRunner));
+        prompt::set_confirm_suppressed(true);
+        let result = cleaner.clean(
+            false,
+            &crate::progress::DeepSuppressReporter,
+            &crate::cleaner::CleanOptions::default(),
+        );
+        prompt::set_confirm_suppressed(false);
+        let result = result.expect("a suppressed confirm must proceed, not error");
+        assert_eq!(result.bytes_freed, 0, "the floor refusal frees nothing");
+        assert!(disk.exists(), "the VM disk must survive the floor refusal");
+    }
+
+    #[test]
     fn confirm_prompt_ownership_lives_in_the_port() {
-        // The confirm branch's prompt contracts (suspension, the one-line
-        // Confirm prompt) are owned by the prompt port (PBI 55): the
-        // cleaner calls the port instead of running dialoguer itself, so
-        // the dialoguer-redraw fix cannot resurface per call site. The
-        // suspension contract is behaviorally tested in the port's own
-        // tests (prompt::tests::tty_prompt_suspends_live_output_*); this
-        // pins the seam shape.
+        // The confirm gate's prompt contracts — the TTY resolution, the TUI
+        // suppression, the explanation placement, and the one-line Confirm
+        // prompt — are owned by the prompt port (PBI 55, PBI 81): the
+        // cleaner names `confirm_on_tty` and handles the answer, so the
+        // dialoguer-redraw fix cannot resurface per call site. The
+        // suspension and None semantics are behaviorally tested in the
+        // port's own tests (prompt::tests::tty_prompt_suspends_live_output_*,
+        // prompt::tests::confirm_on_tty_*); this pins the seam shape.
         let src = include_str!("generic.rs");
         let start = src
             .find("fn clean_with_mode(")
@@ -1754,15 +1958,23 @@ mod tests {
             .unwrap_or(src.len());
         let body = &src[start..end];
         assert!(
-            body.contains("TtyPrompt.confirm"),
-            "the confirm prompt must run through the prompt port"
+            body.contains("confirm_on_tty"),
+            "the confirm gate must run through the port's confirm_on_tty"
+        );
+        assert!(
+            !body.contains("TtyPrompt"),
+            "the cleaner must not resolve the TTY or name the adapter — the port owns the TTY resolution"
         );
         assert!(
             !body.contains("dialoguer::"),
             "the cleaner must not call dialoguer directly (the port owns the prompt)"
         );
         assert!(
-            !body.contains("with_prompt(*msg)"),
+            !body.contains("confirm_suppressed()"),
+            "the cleaner must not hand-roll the TUI-suppression predicate — the port owns it"
+        );
+        assert!(
+            !body.contains("with_prompt"),
             "the Confirm prompt must stay one short line — the long explanation prints as normal output above it, because dialoguer clears one line and a wrapped prompt doubles the message"
         );
     }

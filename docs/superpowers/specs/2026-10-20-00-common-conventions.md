@@ -337,7 +337,7 @@ if let Err(e) = crate::trash::delete_path(&entry.path) {
 
 登録方法は 2 種類あります。
 
-- 標準エントリ (docs/HOWTO-ADD-target.md の Path A): CLI 引数が `--dry-run` だけの cleaner。`define_cleaners!` の表に 1 エントリ足すだけで、`CleanTarget` の変種、`command_name()` / `dry_run()`、`SUPPORTED_TARGETS` (= `sasurahime targets`)、`dispatch_clean`、そして 04 の実装後は `standard_cleaners()` 経由で `all_cleaners()` (scan、TUI) への登録まで自動で行われます。
+- 標準エントリ (docs/HOWTO-ADD-target.md の Path A): CLI 引数が `--dry-run` だけの cleaner。`define_cleaners!` の表に 1 エントリ足すだけで、`CleanTarget` の変種、`command_name()` / `dry_run()` / `is_special()`、`ALL_TARGETS` (= `sasurahime targets`、`SUPPORTED_TARGETS` と `SPECIAL_TARGETS` の合流)、`dispatch_clean`、そして 04 の実装後は `standard_cleaners()` 経由で `all_cleaners()` (scan、TUI) への登録まで自動で行われます。
 - 特殊変種 (Path B): `--all` や `--keep` など `--dry-run` 以外の引数を持つ cleaner。手本は `ApfsSnapshot` (`--all` 付き、構造体ビルダー方式) と `LibraryLogs` (`--all` 付き、`CleanOptions` 方式)。
 
 今回の 02 (orphan-containers)、03 (library-caches)、05 (app-support) は 3 つとも `--dry-run` 以外の引数を持たないので、標準エントリで登録します (5.0 節)。特殊変種の手順 (5.1 節) は使いません。どちらで登録しても `--yes` の対象外にする方法は同じで、2.2 節の `auto_clean_allowed()` です。
@@ -356,7 +356,7 @@ if let Err(e) = crate::trash::delete_path(&entry.path) {
    ```
 
    これだけで `CleanTarget::<Variant> { dry_run }`、`sasurahime clean <cli-name> [--dry-run]`、`sasurahime targets` の行、`scan` と TUI への登録が揃います。`name()` は `<cli-name>` と同じ文字列にします (04 のテスト `standard_cleaners_follow_the_macro_table_order` が検査します)。
-4. [ ] 特殊変種の並び (`;` より後ろ)、`command_name()`、`dry_run()`、`extra_targets()`、`Some(Commands::Clean { target })` の `matches!` と `match target`、`special_cleaners()` には何も書かない。同じ変種を両方に書くと clap が重複で panic します。
+4. [ ] special 行のセクション、`command_name()`、`dry_run()`、`is_special()`、`SPECIAL_TARGETS`、`ALL_TARGETS`、`special_cleaners()` には何も書かない。マクロが行から生成します。同じ変種を両方に書くと clap が重複で panic します。
 5. [ ] `AUTO_CLEAN_TARGETS` には追加しない。
 6. [ ] `src/main.rs` の `mod tests` の末尾に、`all_cleaners()` に登録されていて `auto_clean_allowed()` が `false` であることを確かめるテストを 1 件足す (各設計書にコードがあります)。
 7. [ ] `tests/<module>.rs` に E2E テストを追加する (5.3)。
@@ -365,7 +365,9 @@ if let Err(e) = crate::trash::delete_path(&entry.path) {
 10. [ ] `README.md` の「Data access」節は、各設計書に指示がある場合だけ追記する (11.5 節)。ただし 1.6 節の規則に当たる変更 (新しいファイル内容の読み取り、ネットワーク、保存) を設計書の指示なしに見つけた場合は、実装を止めて報告する。
 11. [ ] `cargo build`、`cargo clippy -- -D warnings`、`cargo fmt --check`、`cargo test` を全て通す。
 
-### 5.1 変更箇所のチェックリスト (特殊変種、今回は使わない)
+### 5.1 変更箇所のチェックリスト (特殊変種、PBI-82 以降)
+
+PBI-82 で特殊変種は identity 系消費者 (`command_name()` / `dry_run()` / `is_special()` / `SPECIAL_TARGETS` / `ALL_TARGETS`) の唯一の源であるマクロ表の special 行に昇格しました。旧来の 8 手順の手動同期 (5.0 旧版の手順 4 と 5.1 旧版の手順 3 から 8) は不要です。
 
 参考として残します。04 の実装後は、手順 7 の `all_cleaners()` を `special_cleaners()` と読み替えます。
 
@@ -373,36 +375,23 @@ if let Err(e) = crate::trash::delete_path(&entry.path) {
 
 1. [ ] `src/cleaners/<module>.rs` を新規作成する。構造体と `impl Cleaner for ...` を書く (6 章)。テストも同じファイルの `#[cfg(test)] mod tests` に書く。
 2. [ ] `src/cleaners/mod.rs` に `pub mod <module>;` を追加する。ファイルはアルファベット順の `pub mod` 一覧です。
-3. [ ] `src/main.rs` の `define_cleaners!` 呼び出し (`define_cleaners! {` は 99 行付近) の、末尾の `;` 行 (217 行付近) より後ろの「特殊 enum 変種」部に変種を追加する。マクロの標準変種の表には書かない。ApfsSnapshot の実物 (275 行付近):
+3. [ ] `src/main.rs` の `define_cleaners!` 呼び出しの special 行セクションに 1 行追加する。行ヘッダが列挙子、CLI 名、clap 用の説明、`special` マーカー、`targets` 一覧の説明、`dry_run` マーカーを持ち、フィールドは verbatim で書く:
 
    ```rust
-   /// Delete APFS local Time Machine snapshots
-   #[command(name = "apfs-snapshot")]
-   ApfsSnapshot {
+   <Variant> : "<cli-name>"
+       => "<説明 (英語、1 行)>" ;
+   special ;
+   {
        #[arg(long)]
        dry_run: bool,
-       /// Delete every local snapshot without prompting
-       #[arg(long)]
-       all: bool,
-   },
+   } ;
+   "<targets 一覧の説明>" ;
+   dry_run,
    ```
 
-   `#[command(name = "...")]` は、CLI 名が enum 名の kebab-case と一致しない場合に必須です。迷ったら常に付けます。
-4. [ ] `impl CleanTarget` の `command_name()` (362 行付近) の `match` に `CleanTarget::<Variant> { .. } => "<cli-name>",` を追加する。
-5. [ ] 同じ `impl CleanTarget` の `dry_run()` (377 行付近) の `match` に `CleanTarget::<Variant> { dry_run, .. } => *dry_run,` を追加する。
-6. [ ] `extra_targets()` (394 行付近) の配列に `("<cli-name>", "説明 (英語、1 行)"),` を追加する。これが `sasurahime targets` の出力になる。
-7. [ ] `all_cleaners()` (426 行付近) の `vec![ ... ]` に cleaner を追加する。`scan` と引数なし起動 (TUI) と `--yes` の対象になる。
-
-   ```rust
-   Box::new(cleaners::apfs_snapshot::ApfsSnapshotCleaner::new(Box::new(
-       SystemCommandRunner,
-   ))),
-   ```
-
-   HOME を使う cleaner は `cleaners::<module>::<Struct>::new(home, Box::new(SystemCommandRunner))` です。
-   この後の `cleaners.retain(...)` で config の `exclude` が効くため、`name()` は CLI 名と同じにすること。
-8. [ ] `main()` の `Some(Commands::Clean { target })` (714 行付近) の最初の `if matches!(target, ... )` に `| CleanTarget::<Variant> { .. }` を追加する (725 行付近)。ここに足し忘れると `unreachable!` ではなく標準ディスパッチに落ち、実行時に panic します。
-9. [ ] その直下の `match target { ... }` に腕を追加する (886 行付近が ApfsSnapshot)。2 つの型がある。
+   これだけで `CleanTarget::<Variant> { ... }` 列挙子、`sasurahime clean <cli-name> [--dry-run]`、`sasurahime targets` の行、`command_name()` / `dry_run()` / `is_special()` のマッチアームが揃います。`_` 腕なしの完全一致なので、行から CLI 名を削除するとコンパイルが落ちます (runtime pin を待ちません)。
+4. [ ] `command_name()`、`dry_run()`、`is_special()`、`SPECIAL_TARGETS`、`ALL_TARGETS` には何も書かない。マクロが行から生成します。
+5. [ ] `main()` の `Some(Commands::Clean { target })` の `if target.is_special()` ブロック内の `match target { ... }` に腕を追加する。2 つの型がある。
    - 構造体ビルダー方式 (ApfsSnapshot):
 
      ```rust
@@ -413,14 +402,15 @@ if let Err(e) = crate::trash::delete_path(&entry.path) {
          .with_all(all);
          run_and_exit(
              "apfs-snapshot",
-             move |dry, rep| cleaner.clean(dry, rep),
+             move |dry, rep, opts| cleaner.clean(dry, rep, opts),
              dry_run,
              reporter.as_ref(),
+             &clean_opts,
          )?;
      }
      ```
 
-   - `CleanOptions` 方式 (LibraryLogs、848 行付近):
+   - `CleanOptions` 方式 (LibraryLogs):
 
      ```rust
      CleanTarget::LibraryLogs { dry_run, all } => {
@@ -428,23 +418,24 @@ if let Err(e) = crate::trash::delete_path(&entry.path) {
              &home,
              Box::new(SystemCommandRunner),
          );
-         let opts = crate::cleaner::CleanOptions { all };
+         let opts = crate::cleaner::CleanOptions { all, trash_mode, ..Default::default() };
          run_and_exit(
              "library-logs",
-             move |dry, rep| cleaner.clean_with_opts(dry, rep, &opts),
+             move |dry, rep, opts| cleaner.clean(dry, rep, opts),
              dry_run,
              reporter.as_ref(),
+             &opts,
          )?;
      }
      ```
 
    どちらを使うかは設計書の指示に従います。指示がなければ、HOME 配下を走査する cleaner は `CleanOptions` 方式です。
    `run_and_exit` の第 1 引数のラベルは `name()` と同じ CLI 名にします (履歴 `history.json` のキーになる)。
-10. [ ] `tests/<module>.rs` に E2E テストを追加する (5.3)。
-11. [ ] `docs/SUPPORTED.md` を更新する (5.2)。
-12. [ ] 必要なら `docs/HOWTO-USE.md` の対象表に追加する。英語の表 (102 行付近) と日本語の表 (674 行付近) の両方 (11.6 節)。
-13. [ ] `README.md` は、対象表を持ちません。「Data access」節 (90 行付近の英語、200 行付近の日本語) に、cleaner が新しく読むディレクトリが含まれていなければ追記します (11.5 節)。既に列挙されているパス (`~/Library/Caches/`、`~/Library/Application Support/` など) の配下のメタデータだけを読むなら変更不要です。ファイルの内容を新しく読む場合は 1.6 節の規則に従い、同じタスクで「内容を読むファイル」の一覧を更新します。
-14. [ ] `cargo build`、`cargo clippy -- -D warnings`、`cargo fmt --check`、`cargo test` を全て通す。
+6. [ ] `tests/<module>.rs` に E2E テストを追加する (5.3)。
+7. [ ] `docs/SUPPORTED.md` を更新する (5.2)。
+8. [ ] 必要なら `docs/HOWTO-USE.md` の対象表に追加する。英語の表 (102 行付近) と日本語の表 (674 行付近) の両方 (11.6 節)。
+9. [ ] `README.md` は、対象表を持ちません。「Data access」節 (90 行付近の英語、200 行付近の日本語) に、cleaner が新しく読むディレクトリが含まれていなければ追記します (11.5 節)。既に列挙されているパス (`~/Library/Caches/`、`~/Library/Application Support/` など) の配下のメタデータだけを読むなら変更不要です。ファイルの内容を新しく読む場合は 1.6 節の規則に従い、同じタスクで「内容を読むファイル」の一覧を更新します。
+10. [ ] `cargo build`、`cargo clippy -- -D warnings`、`cargo fmt --check`、`cargo test` を全て通す。
 
 ### 5.2 docs/SUPPORTED.md の更新
 
@@ -488,7 +479,7 @@ if let Err(e) = crate::trash::delete_path(&entry.path) {
   3. `clean <cli-name> --all` (ある場合) で fixture が消えること。
   4. `scan` の stdout に `<cli-name>` が含まれること。
 - E2E テストでは TTY がないため、対話選択 (MultiSelect) を通る経路は試験できません。`--dry-run` か `--all` を使います。
-- `tests/coverage.rs` が自動で検証すること: `sasurahime targets` に出た全名前に対して `clean <name> --help` が成功する、かつ名前が重複しない。登録漏れ (`extra_targets` の追加忘れや重複) はここで検知されます。
+- `tests/coverage.rs` が自動で検証すること: `sasurahime targets` に出た全名前に対して `clean <name> --help` が成功する、かつ名前が重複しない。登録漏れ (special 行の追加忘れや重複) はここで検知されます。
 - `sasurahime targets` の出力は `{:<12} {}` 形式で名前順にソートされます (12 文字より長い名前でも崩れません)。
 
 ## 6. HOME 配下をスキャンして選択して削除する cleaner の標準形 (src/cleaners/library_logs.rs)
