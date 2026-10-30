@@ -34,6 +34,37 @@ All notable changes to sasurahime will be documented in this file. The format is
   an all-skipped run exited 0 and `--verbose` lost the audit trail. The
   full result now propagates, so an all-skipped run exits 1 (the same
   contract every other ledger user pins).
+- A fatal per-item error in `clean uv`'s old `simple-vN` removals aborted
+  the whole clean (the prune never ran); the deletions now ride the shared
+  ledger, so a fatal item is recorded as a skipped entry, the remaining
+  items delete, and the prune still runs. The same migration records the
+  CLI-fallback fallback deletes (colima, huggingface, pre-commit),
+  ollama's fallback and `clean project-artifacts`' unsafe-path refusals
+  as skipped entries with a prose reason, so the skip channel and the
+  exit code see them.
+- `clean project-artifacts` never received the live reporter, so its
+  per-entry progress ticks never printed; the reporter now threads down
+  and the heaviest cleaner prints the standard progress again.
+- A batch run (`clean all --include-manual`, `auto`) reported a cleaner
+  cancelled at its confirm prompt as an `Error cleaning <target>` failure
+  line; the batch now collects it as a separate `cancelled` row and keeps
+  going, so declining colima no longer reads as a script failure. The
+  single-target path's calm exit is unchanged.
+- `sasurahime auto --deep-suppress` printed the `Cleaning <target>...
+  [OK]` status line the single-target path suppressed; the status line's
+  owner is now the reporter kind in both engines, so the two agree.
+- The orphan scan read one canonical app-root list that was missing the
+  `/Applications/Utilities` roots, so an app installed two folders under
+  `/Applications` was invisible and its container could be reported as
+  an orphan while the app was still installed. Both cleaners now read
+  one root list (the superset) and the README promise matches it.
+- `--dry-run` never reached the hint flow, so answering `y` at the hint
+  prompt under `sasurahime --dry-run` deleted for real. The flag now
+  threads down, and a deletion the hint flow performs is recorded in the
+  history and reported in `stats` like every other cleaner's.
+- `--permanent clean caches` dropped the resolved clean options, so the
+  node-gyp fallback delete used the default `Trash` mode; the caches arm
+  now forwards the resolved options and the permanent promise holds.
 
 ### Changed
 
@@ -106,6 +137,36 @@ All notable changes to sasurahime will be documented in this file. The format is
   vice versa). Wording, output streams, the `auto` `[policy].present`
   gate and the interactive-gate notice are unchanged, and a matrix unit
   test pins all 48 cells (3 policies x 4 risks x opt-in x scan status).
+- `CliCleaner::clean_with_mode` is split into two internal seams
+  (`run_tool` and `fallback_delete_dir`), the warning for a tool that
+  exited non-zero has one owner (`warn_tool_failure`), and the colima
+  confirm gate runs through the new `CleanPrompt::confirm_on_tty` port.
+  One visible consequence: the fallback cleaners' CLI-failure warning
+  (huggingface, pre-commit) moved from the log channel to a stderr line
+  with the `[<target>]` prefix the other cleaners print. Exit codes,
+  gate order and the non-TTY refusal are unchanged.
+- The `CleanTarget` special variants are promoted into the macro table:
+  the CLI name, the descriptions, `command_name`/`dry_run`/`is_special`
+  and the target lists are generated from one row per target, so adding
+  a target is one line (and a missing CLI name is a compile error, not a
+  runtime pin). The caches batch is generated from the table's group
+  rows, the xcode runner is one function shared by the CLI arm and the
+  seam, and the registry builds from one composition. CLI help, the
+  `targets` output and all exit paths are unchanged.
+- The installed-app concept lives in one module (`installed_apps`): the
+  app-support and orphan-containers cleaners stop importing each other,
+  the root list and its CI trim are single-sourced, and a bundle path is
+  read with `plutil` once. Behavior is unchanged apart from the root
+  list fix above.
+
+### Added
+
+- `sasurahime clean hints` deletes the hint-table candidates (the same
+  quit → delete → relaunch flow the interactive offer runs) and
+  `--sub "<name>"` restricts it to one candidate, so the hint flow rides
+  the shared engine: dry-run, history, skip reporting and the ledger
+  contract come for free. `targets` lists `hints` and the TUI selects
+  its sub-targets like xcode's.
 
 ## [0.4.3] - 2026-10-29
 
