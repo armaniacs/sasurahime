@@ -328,6 +328,58 @@ fn scan_json_outputs_valid_schema() {
 }
 
 #[test]
+fn cli_total_reclaimable_matches_the_json_total() {
+    // One counting decision must feed both engines: the CLI "Total
+    // reclaimable" line (run_scan) and the JSON `total_reclaimable_bytes`
+    // (run_scan_json) re-derive the same Pruneable / hints / unavailable rule
+    // at separate sites, so a one-sided fix can quietly split them. This pin
+    // parses the JSON raw total and compares it against the formatted CLI
+    // line (the tests/plugin.rs:436 format_bytes shape). vm-swap is excluded
+    // so a machine-wide swap-file change cannot race between the two runs.
+    let tmp = TempDir::new().unwrap();
+    let config_dir = tmp.path().join(".config/sasurahime");
+    fs::create_dir_all(&config_dir).unwrap();
+    fs::write(config_dir.join("config.toml"), "exclude = [\"vm-swap\"]\n").unwrap();
+    fs::create_dir_all(tmp.path().join(".cache/act")).unwrap();
+    fs::write(tmp.path().join(".cache/act/dummy"), b"x".repeat(100)).unwrap();
+    fs::create_dir_all(tmp.path().join(".cache/tree-sitter")).unwrap();
+    fs::write(
+        tmp.path().join(".cache/tree-sitter/big"),
+        b"x".repeat(50_000),
+    )
+    .unwrap();
+
+    let table = sasurahime(tmp.path())
+        .args(["--no-cache", "scan"])
+        .output()
+        .unwrap();
+    assert!(table.status.success(), "the table scan must exit 0");
+    let total_line = String::from_utf8_lossy(&table.stdout)
+        .lines()
+        .find(|l| l.contains("Total reclaimable"))
+        .expect("a non-empty total must print the Total reclaimable line")
+        .to_string();
+
+    let json = sasurahime(tmp.path())
+        .args(["--no-cache", "scan", "--json"])
+        .output()
+        .unwrap();
+    assert!(json.status.success(), "the JSON scan must exit 0");
+    let parsed: serde_json::Value = serde_json::from_str(&String::from_utf8_lossy(&json.stdout))
+        .expect("a valid scan JSON document");
+
+    let json_total = parsed["total_reclaimable_bytes"]
+        .as_u64()
+        .expect("u64 total_reclaimable_bytes");
+    assert!(json_total > 0, "the fixture must leave reclaimable bytes");
+    assert!(
+        total_line.contains(&sasurahime::format::format_bytes(json_total)),
+        "CLI and JSON must tell the same one total:\nCLI: {total_line}\nJSON total: {json_total} ({})",
+        sasurahime::format::format_bytes(json_total)
+    );
+}
+
+#[test]
 fn scan_shows_risk_column() {
     let tmp = TempDir::new().unwrap();
     let bin = tmp.path().join("bin");

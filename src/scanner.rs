@@ -4,16 +4,23 @@ use comfy_table::presets::{ASCII_FULL, UTF8_FULL};
 use comfy_table::Table;
 use rayon::prelude::*;
 
+/// The one measured-bytes decision: a row's bytes are measurable exactly when
+/// its status is `Pruneable`. Every byte-count consumer (the size sort, the
+/// table's counted column, the JSON `size_bytes`/`estimable` pair and both
+/// total engines) reads this function instead of re-matching the status, so a
+/// new status variant is one function turn and the CLI and JSON totals cannot
+/// quietly split.
+fn measured_bytes(r: &ScanResult) -> Option<u64> {
+    match r.status {
+        ScanStatus::Pruneable(b) => Some(b),
+        _ => None,
+    }
+}
+
 /// Larger targets first; targets without a size (clean / not found) keep their
 /// registration order at the end.
 fn sort_by_size(results: &mut [ScanResult]) {
-    fn size(r: &ScanResult) -> Option<u64> {
-        match r.status {
-            ScanStatus::Pruneable(b) => Some(b),
-            _ => None,
-        }
-    }
-    results.sort_by(|a, b| match (size(a), size(b)) {
+    results.sort_by(|a, b| match (measured_bytes(a), measured_bytes(b)) {
         (Some(x), Some(y)) => y.cmp(&x),
         (Some(_), None) => std::cmp::Ordering::Less,
         (None, Some(_)) => std::cmp::Ordering::Greater,
@@ -34,15 +41,14 @@ pub(crate) fn status_label(status: &ScanStatus) -> &'static str {
 
 /// (size column, status column, bytes counted toward the total).
 /// `Unavailable` and `Unknown` rows display their own status and are excluded
-/// from the total.
-fn status_columns(status: &ScanStatus) -> (String, &'static str, Option<u64>) {
-    match status {
-        ScanStatus::Pruneable(b) => (format_bytes(*b), status_label(status), Some(*b)),
-        ScanStatus::Clean => ("-".to_string(), status_label(status), None),
-        ScanStatus::NotFound => ("-".to_string(), status_label(status), None),
-        ScanStatus::Unavailable => ("-".to_string(), status_label(status), None),
-        ScanStatus::Unknown => ("-".to_string(), status_label(status), None),
-    }
+/// from the total; the counted decision itself lives in [`measured_bytes`].
+fn status_columns(r: &ScanResult) -> (String, &'static str, Option<u64>) {
+    let counted = measured_bytes(r);
+    let size = match r.status {
+        ScanStatus::Pruneable(b) => format_bytes(b),
+        _ => "-".to_string(),
+    };
+    (size, status_label(&r.status), counted)
 }
 
 /// Rows whose bytes are summed into "Total reclaimable". The hints row
@@ -79,13 +85,10 @@ pub(crate) fn scan_json_document(
         .iter()
         .map(|r| ScanJsonEntry {
             name: r.name,
-            size_bytes: match r.status {
-                ScanStatus::Pruneable(b) => Some(b),
-                _ => None,
-            },
+            size_bytes: measured_bytes(r),
             status: status_label(&r.status),
             risk: risks.get(r.name).map(|risk| risk.label()).unwrap_or("-"),
-            estimable: matches!(r.status, ScanStatus::Pruneable(_)),
+            estimable: measured_bytes(r).is_some(),
         })
         .collect();
     let doc = serde_json::json!({
@@ -188,7 +191,7 @@ pub fn run_scan(cleaners: &[Box<dyn Cleaner>], home: &std::path::Path) {
     let mut unavailable: usize = 0;
 
     for r in &rows {
-        let (size, status, counted) = status_columns(&r.status);
+        let (size, status, counted) = status_columns(r);
         if let Some(b) = counted {
             if counts_toward_total(r) {
                 total += b;
@@ -263,10 +266,7 @@ pub fn run_scan_json(cleaners: &[Box<dyn Cleaner>], home: &std::path::Path) {
     let total: u64 = rows
         .iter()
         .filter(|r| counts_toward_total(r))
-        .filter_map(|r| match r.status {
-            ScanStatus::Pruneable(b) => Some(b),
-            _ => None,
-        })
+        .filter_map(measured_bytes)
         .sum();
     println!("{}", scan_json_document(&rows, total, &risks, &denied));
 }
@@ -320,7 +320,7 @@ mod tests {
 
     #[test]
     fn status_columns_unavailable_is_excluded_from_total() {
-        let (size, status, counted) = status_columns(&ScanStatus::Unavailable);
+        let (size, status, counted) = status_columns(&r("failed", ScanStatus::Unavailable));
         assert_eq!(status, "unavailable");
         assert_eq!(size, "-");
         assert_eq!(counted, None, "unavailable must not count toward the total");
@@ -328,7 +328,7 @@ mod tests {
 
     #[test]
     fn status_columns_unknown_is_excluded_from_total() {
-        let (size, status, counted) = status_columns(&ScanStatus::Unknown);
+        let (size, status, counted) = status_columns(&r("docker", ScanStatus::Unknown));
         assert_eq!(status, "unknown");
         assert_eq!(size, "-");
         assert_eq!(counted, None, "unknown must not count toward the total");
@@ -391,7 +391,7 @@ mod tests {
 
     #[test]
     fn status_columns_pruneable_counts_toward_total() {
-        let (size, status, counted) = status_columns(&ScanStatus::Pruneable(1234));
+        let (size, status, counted) = status_columns(&r("uv", ScanStatus::Pruneable(1234)));
         assert_eq!(status, "pruneable");
         assert_eq!(counted, Some(1234));
         assert!(!size.is_empty());
