@@ -46,6 +46,7 @@ type は `fix` / `feat` / `backlog` のいずれか。
 2. E2E テスト（tempdir fixture）→ Integration → Unit の順で書く
 3. 各レイヤーで Red → Green → Refactor を繰り返す
 4. `cargo clippy -- -D warnings` と `cargo fmt --check` を通してから PR を出す
+5. gate を触る PBI は `src/batch.rs` の行家族所有者表（status/cancel/note/freed/skip/exit）の該当行を同じ PR で更新する
 
 ## 完了・アーカイブ
 

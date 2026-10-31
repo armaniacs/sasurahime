@@ -85,7 +85,7 @@ Total reclaimable     43.7 GB
     $ rm -rf ~/Library/Caches/Microsoft\ Edge
 ────────────────────────────────────────────────────────────
 
-Quit Claude (desktop) and clear cache? (428 MB will be freed) [y/N]
+Quit Claude (desktop) and clear cache? (428 MB will be freed, delete ~/Library/Application Support/Claude/Cache) [y/N]
 ```
 
 Answering `y` quits the app via `osascript`, deletes the cache, and relaunches the app if appropriate. Answering `n` (or pressing Enter) skips it. Apps that should not be auto-relaunched (Slack, Zoom, Claude) are noted — you relaunch those yourself.
@@ -669,7 +669,7 @@ Total reclaimable     43.7 GB
     $ rm -rf ~/Library/Caches/Microsoft\ Edge
 ────────────────────────────────────────────────────────────
 
-Quit Claude (desktop) and clear cache? (428 MB will be freed) [y/N]
+Quit Claude (desktop) and clear cache? (428 MB will be freed, delete ~/Library/Application Support/Claude/Cache) [y/N]
 ```
 
 `y` と答えると `osascript` でアプリを終了し、キャッシュを削除し、適切であれば再起動します。`n`（または Enter）でスキップします。自動再起動しないアプリ（Slack、Zoom、Claude）は手動で再起動してください。

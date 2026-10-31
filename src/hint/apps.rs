@@ -3,6 +3,9 @@ use super::{BaseDir, HintEntry};
 const MB: u64 = 1024 * 1024;
 
 /// Known application cache directories that can be suggested for manual cleanup.
+///
+/// Vetted data — add a new entry via PR, never via config: a config entry
+/// would bypass the review that keeps every row an audited deletion target.
 pub static KNOWN_ENTRIES: &[HintEntry] = &[
     // ── ~/Library/Caches/ ────────────────────────────────────────────────────
     HintEntry {

@@ -173,6 +173,27 @@ mod tests {
     }
 
     #[test]
+    fn known_entries_caches_invariants_are_single_suffix() {
+        // library_caches::known_entry_for matches on the structural
+        // `path_suffixes == [name]`, so a Caches row with more than one
+        // suffix would silently never match: pin the single-suffix invariant
+        // of the vetted table.
+        let caches: Vec<_> = apps::KNOWN_ENTRIES
+            .iter()
+            .filter(|e| e.base_dir == BaseDir::Caches)
+            .collect();
+        assert!(!caches.is_empty(), "the vetted table must keep Caches rows");
+        for entry in caches {
+            assert_eq!(
+                entry.path_suffixes.len(),
+                1,
+                "Caches known entry {:?} must declare exactly one path suffix",
+                entry.display_name
+            );
+        }
+    }
+
+    #[test]
     fn collect_hints_uses_format_dir_size_metric() {
         // Unification test: hint sizes must be measured by the same
         // `format::dir_size` metric as scan, not by `du -sk`.
