@@ -160,7 +160,9 @@ installed with cargo); no resident daemon is required.
   Command-delegating cleaners (brew, docker, ...) use their own tool
   semantics; global filters cannot restrict them, so `[cleaner.*]` settings
   for those names keep the "no effect" warning. `--yes` is unaffected: it
-  still runs only `Safe` targets in the TUI-driven path.
+  still runs only `Safe` targets in the TUI-driven path. A cleaner that
+  fails inside `clean all` is reported, not fatal: partial success is an
+  intentional contract, and the run still exits 0.
 - `scan` keeps a persistent cache (`~/.local/share/sasurahime/scan-cache.json`)
   keyed by directory mtime, so unchanged directories skip the expensive walk.
   Invalidation is conservative: any mtime mismatch, hourly expiry, filesystem
@@ -399,7 +401,9 @@ launchd で定期実行するには、以下を
   条件外のエントリはスキップ理由と共に表示されます。外部コマンド委譲系の
   クリーナー（brew、docker など）はツール自身の意味論に従うため、グローバル
   フィルタでは絞り込めません。そのため、それらの名前への `[cleaner.*]` 設定は
-  引き続き「効果なし」警告が出ます。`--yes` は影響を受けません。
+  引き続き「効果なし」警告が出ます。`--yes` は影響を受けません。一部の
+  クリーナーが失敗しても `clean all` はそれを報告するだけで実行は失敗に
+  ならず、終了コード 0 で終わります（部分成功を許す意図的な契約です）。
 - `scan` は永続キャッシュ（`~/.local/share/sasurahime/scan-cache.json`）を
   ディレクトリの mtime をキーに保持し、変更のないディレクトリは高コストな
   walk をスキップします。無効化は保守的です: mtime の不一致・1時間の期限切れ・
