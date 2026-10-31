@@ -32,6 +32,24 @@ pub struct BatchSummary {
 /// derived from `show_spinner` (no-tick-while-prompting: a cleaner on this
 /// path may still prompt, and a derived steady tick would redraw the line
 /// under the prompt).
+///
+/// Output-line families: each family keeps its own owner on the two engines
+/// (`run_clean_target` = single target, [`run_batch`] = batch) — the paths
+/// share the engines, not the printing.
+///
+/// | # | Line family | Single target (`run_clean_target`) | Batch ([`run_batch`]) | Gate |
+/// |---|---|---|---|---|
+/// | 1 | status line (`[OK]`/`[FAILED]`) | `show_spinner()` branch (main.rs:893-915) | reporter kind: animated → `with_spinner_result_progress` / `show_spinner()` → `with_spinner_result` / quiet → none | `animated` is the caller's flag, never derived from `show_spinner()` |
+/// | 2 | cancel line | `Ok(cancelled)`, silent | `summary.cancelled` → the caller's neutral `cancelled by user` line | `Err(CleanCancelled)` downcast branch |
+/// | 3 | note line (`post_clean_note`) | inside the `show_spinner()` branch (main.rs:934-940) | `with_notes` && `reporter.show_spinner()` (unified in PBI 90) | `--deep-suppress` hides; default and `--suppress` show |
+/// | 4 | freed line | per-target `freed_message`, `show_spinner()` branch only | the caller's closing `Total freed` line (`report_total_freed`) | per-target and total are separate concepts |
+/// | 5 | skip lines | direct `N file(s) skipped` + `path: reason` (nameless) | `summary.skipped` → `report_batch_failures` (named shape, cleaner name included) | when `skipped` is non-empty |
+/// | 6 | exit code | `exit_code() != 0` → exit 1 | always exit 0 (report only) | pinned by the PBI 78 scope fence 2 |
+///
+/// Option A (full unification of the two paths) stays deferred; it fires on
+/// the next change that touches either engine's semantics (a new line
+/// family, a gate move, or a gate condition change), since the previous
+/// trigger "next new entry point" never fires naturally.
 pub fn run_batch(
     cleaners: &[&dyn crate::cleaner::Cleaner],
     opts: &crate::cleaner::CleanOptions,
@@ -73,7 +91,11 @@ pub fn run_batch(
                         format!("{}: {}", s.path.display(), s.reason),
                     ));
                 }
-                if with_notes {
+                // Notes follow the status line's gate (PBI 90): the quiet
+                // deep-suppress reporter gets no per-target note either, so
+                // `clean all --deep-suppress` stays as quiet as the
+                // single-target path's show_spinner()==false branch.
+                if with_notes && reporter.show_spinner() {
                     let trash_mode = opts.trash_mode == crate::trash::TrashMode::Trash;
                     if let Some(note) = post_clean_note(r.bytes_freed, r.uses_trash, trash_mode) {
                         println!("{note}");
