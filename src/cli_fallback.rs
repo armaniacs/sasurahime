@@ -1,10 +1,11 @@
 //! The "CLI tool first, fallback delete" adapter (PBI 57).
 //!
-//! huggingface and pre-commit differ only in their cache-dir resolution and
-//! their [`CliFallbackConfig`] values, so the detect/clean skeleton lives
-//! once here and the wrappers own their constructors. Extracted from the
-//! cleaner-layer `generic.rs` so the adapter lives with the other
-//! structural helpers instead of inside the 2000-line generic module.
+//! huggingface and pre-commit differ only in the cache dir they resolve at
+//! construction and their [`CliFallbackConfig`] values, so the detect/clean
+//! skeleton lives once here and the wrappers own their constructors.
+//! Extracted from the cleaner-layer `generic.rs` so the adapter lives with
+//! the other structural helpers instead of inside the 2000-line generic
+//! module.
 
 use crate::cleaner::{CleanResult, Cleaner, ScanResult, ScanStatus};
 use crate::command::CommandRunner;
@@ -24,15 +25,18 @@ pub struct CliFallbackConfig<'a> {
 
 /// Shared adapter for cleaners that run a CLI tool with a fallback delete.
 ///
-/// huggingface and pre-commit differ only in their cache-dir resolution and
-/// their [`CliFallbackConfig`] values; the detect/clean skeleton used to be
-/// duplicated per module. The wrappers own their constructors and delegate
-/// here, so the skeleton lives once.
+/// huggingface and pre-commit differ only in the cache dir they resolve at
+/// construction and their [`CliFallbackConfig`] values; the detect/clean
+/// skeleton used to be duplicated per module. The wrappers own their
+/// constructors — each resolves its cache dir once there and passes the
+/// resolved value in — and delegate here, so the skeleton lives once.
+/// The cache dir flows in as an already-resolved [`PathBuf`] (PBI 88):
+/// detect/clean reuse it and never re-read the process environment, so the
+/// adapter does not need to know the home dir the wrapper resolved from.
 pub struct CliFallbackCleaner {
     name: &'static str,
     config: CliFallbackConfig<'static>,
-    home: PathBuf,
-    resolve_cache_dir: Box<dyn Fn(&Path) -> PathBuf + Send + Sync>,
+    cache_dir: PathBuf,
     runner: Box<dyn CommandRunner>,
 }
 
@@ -40,21 +44,19 @@ impl CliFallbackCleaner {
     pub(crate) fn with_parts(
         name: &'static str,
         config: CliFallbackConfig<'static>,
-        home: PathBuf,
-        resolve_cache_dir: Box<dyn Fn(&Path) -> PathBuf + Send + Sync>,
+        cache_dir: PathBuf,
         runner: Box<dyn CommandRunner>,
     ) -> Self {
         Self {
             name,
             config,
-            home,
-            resolve_cache_dir,
+            cache_dir,
             runner,
         }
     }
 
     pub(crate) fn cache_dir(&self) -> PathBuf {
-        (self.resolve_cache_dir)(&self.home)
+        self.cache_dir.clone()
     }
 }
 
@@ -264,8 +266,7 @@ mod tests {
                 args: &[],
                 recreate: true,
             },
-            tmp.path().to_path_buf(),
-            Box::new(|h: &Path| h.join("cache")),
+            dir.clone(),
             Box::new(FallbackNoToolRunner),
         );
         let reporter = RecordingReporter::default();

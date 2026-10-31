@@ -5,39 +5,58 @@ use anyhow::Result;
 use std::path::Path;
 
 /// Thin wrapper over [`crate::cli_fallback::CliFallbackCleaner`]: this cleaner differs
-/// from the shared adapter only in its cache-dir resolution (PRE_COMMIT_HOME /
-/// XDG_CACHE_HOME) and its CLI tool configuration, so the detect/clean
-/// skeleton lives in the adapter.
+/// from the shared adapter only in the cache dir it resolves at construction
+/// (PRE_COMMIT_HOME / XDG_CACHE_HOME) and its CLI tool configuration, so the
+/// detect/clean skeleton lives in the adapter.
 pub struct PreCommitCleaner(crate::cli_fallback::CliFallbackCleaner);
+
+fn config() -> crate::cli_fallback::CliFallbackConfig<'static> {
+    crate::cli_fallback::CliFallbackConfig {
+        tool: "pre-commit",
+        args: &["clean"],
+        recreate: false,
+    }
+}
 
 impl PreCommitCleaner {
     pub fn new(home: &Path, runner: Box<dyn CommandRunner>) -> Self {
+        // Priority: $PRE_COMMIT_HOME > $XDG_CACHE_HOME/pre-commit > ~/.cache/pre-commit
+        // Each override value is validated BEFORE any subpath is joined.
+        // Resolved ONCE at construction (PBI 88): the resolved value is
+        // pinned on the cleaner and detect/clean never re-read the process
+        // environment — the same constructor-resolution shape as the
+        // generic flutter / terraform / act cleaners.
+        let cache_dir = if std::env::var("PRE_COMMIT_HOME").is_ok() {
+            crate::safety::resolve_env_dir(
+                "PRE_COMMIT_HOME",
+                "",
+                home.join(".cache/pre-commit"),
+                "pre-commit",
+            )
+        } else {
+            crate::safety::resolve_env_dir(
+                "XDG_CACHE_HOME",
+                "pre-commit",
+                home.join(".cache/pre-commit"),
+                "pre-commit",
+            )
+        };
         Self(crate::cli_fallback::CliFallbackCleaner::with_parts(
             "pre-commit",
-            crate::cli_fallback::CliFallbackConfig {
-                tool: "pre-commit",
-                args: &["clean"],
-                recreate: false,
-            },
-            home.to_path_buf(),
-            Box::new(|h: &Path| {
-                // Priority: $PRE_COMMIT_HOME > $XDG_CACHE_HOME/pre-commit > ~/.cache/pre-commit
-                // Each override value is validated BEFORE any subpath is joined.
-                if std::env::var("PRE_COMMIT_HOME").is_ok() {
-                    return crate::safety::resolve_env_dir(
-                        "PRE_COMMIT_HOME",
-                        "",
-                        h.join(".cache/pre-commit"),
-                        "pre-commit",
-                    );
-                }
-                crate::safety::resolve_env_dir(
-                    "XDG_CACHE_HOME",
-                    "pre-commit",
-                    h.join(".cache/pre-commit"),
-                    "pre-commit",
-                )
-            }),
+            config(),
+            cache_dir,
+            runner,
+        ))
+    }
+
+    /// Test-only factory: builds the cleaner with an explicitly-resolved
+    /// cache dir, so unit tests never depend on the process environment.
+    #[cfg(test)]
+    fn with_cache_dir(cache_dir: std::path::PathBuf, runner: Box<dyn CommandRunner>) -> Self {
+        Self(crate::cli_fallback::CliFallbackCleaner::with_parts(
+            "pre-commit",
+            config(),
+            cache_dir,
             runner,
         ))
     }
@@ -76,8 +95,6 @@ mod tests {
     use super::*;
     use crate::cleaner::ScanStatus;
     use crate::command::{CommandRunner, SystemCommandRunner};
-    use crate::safety::resolve_env_dir;
-    use crate::test_helpers::EnvGuard;
     use std::fs;
     use std::process::Output;
     use tempfile::TempDir;
@@ -145,31 +162,25 @@ mod tests {
 
     #[test]
     fn detect_returns_not_found_when_dir_missing() {
-        let _lock = crate::context::TEST_LOCK
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
-        let _pre_guard = EnvGuard::unset("PRE_COMMIT_HOME");
-        let _xdg_guard = EnvGuard::unset("XDG_CACHE_HOME");
         let tmp = TempDir::new().unwrap();
-        let cleaner = PreCommitCleaner::new(tmp.path(), Box::new(SystemCommandRunner));
+        let cleaner = PreCommitCleaner::with_cache_dir(
+            tmp.path().join(".cache/pre-commit"),
+            Box::new(SystemCommandRunner),
+        );
         let result = cleaner.detect();
         assert!(matches!(result.status, ScanStatus::NotFound));
     }
 
     #[test]
     fn detect_returns_pruneable_when_cache_exists() {
-        let _lock = crate::context::TEST_LOCK
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
         let tmp = TempDir::new().unwrap();
         let cache = tmp.path().join(".cache/pre-commit");
         fs::create_dir_all(&cache).unwrap();
         // Use a large file to ensure dir_size() > 0 on all filesystem states
         fs::write(cache.join("hook.pck"), b"x".repeat(4096)).unwrap();
 
-        let _home_guard = EnvGuard::set("PRE_COMMIT_HOME", cache.to_string_lossy().as_ref());
-
-        let cleaner = PreCommitCleaner::new(tmp.path(), Box::new(SystemCommandRunner));
+        let cleaner =
+            PreCommitCleaner::with_cache_dir(cache.clone(), Box::new(SystemCommandRunner));
         let result = cleaner.detect();
 
         assert!(matches!(result.status, ScanStatus::Pruneable(_)));
@@ -177,18 +188,14 @@ mod tests {
 
     #[test]
     fn clean_dry_run_does_not_delete() {
-        let _lock = crate::context::TEST_LOCK
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
-        let _pre_guard = EnvGuard::unset("PRE_COMMIT_HOME");
-        let _xdg_guard = EnvGuard::unset("XDG_CACHE_HOME");
         let tmp = TempDir::new().unwrap();
         let reporter = crate::progress::VerboseProgress::new();
         let cache = tmp.path().join(".cache/pre-commit");
         fs::create_dir_all(&cache).unwrap();
         fs::write(cache.join("hook.pck"), b"x".repeat(4096)).unwrap();
 
-        let cleaner = PreCommitCleaner::new(tmp.path(), Box::new(SystemCommandRunner));
+        let cleaner =
+            PreCommitCleaner::with_cache_dir(cache.clone(), Box::new(SystemCommandRunner));
         cleaner
             .clean(true, &reporter, &crate::cleaner::CleanOptions::default())
             .unwrap();
@@ -201,18 +208,13 @@ mod tests {
 
     #[test]
     fn clean_fallback_deletes_dir() {
-        let _lock = crate::context::TEST_LOCK
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
-        let _pre_guard = EnvGuard::unset("PRE_COMMIT_HOME");
-        let _xdg_guard = EnvGuard::unset("XDG_CACHE_HOME");
         let tmp = TempDir::new().unwrap();
         let reporter = crate::progress::VerboseProgress::new();
         let cache = tmp.path().join(".cache/pre-commit");
         fs::create_dir_all(&cache).unwrap();
         fs::write(cache.join("hook.pck"), b"x".repeat(4096)).unwrap();
 
-        let cleaner = PreCommitCleaner::new(tmp.path(), Box::new(NoToolRunner));
+        let cleaner = PreCommitCleaner::with_cache_dir(cache.clone(), Box::new(NoToolRunner));
         let result = cleaner
             .clean(false, &reporter, &crate::cleaner::CleanOptions::default())
             .unwrap();
@@ -225,18 +227,13 @@ mod tests {
 
     #[test]
     fn clean_uses_cli_when_tool_available() {
-        let _lock = crate::context::TEST_LOCK
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
-        let _pre_guard = EnvGuard::unset("PRE_COMMIT_HOME");
-        let _xdg_guard = EnvGuard::unset("XDG_CACHE_HOME");
         let tmp = TempDir::new().unwrap();
         let reporter = crate::progress::VerboseProgress::new();
         let cache = tmp.path().join(".cache/pre-commit");
         fs::create_dir_all(&cache).unwrap();
         fs::write(cache.join("hook.pck"), b"x".repeat(4096)).unwrap();
 
-        let cleaner = PreCommitCleaner::new(tmp.path(), Box::new(CliToolRunner));
+        let cleaner = PreCommitCleaner::with_cache_dir(cache.clone(), Box::new(CliToolRunner));
         let result = cleaner
             .clean(false, &reporter, &crate::cleaner::CleanOptions::default())
             .unwrap();
@@ -245,18 +242,13 @@ mod tests {
 
     #[test]
     fn clean_dry_run_uses_cli_when_tool_available() {
-        let _lock = crate::context::TEST_LOCK
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
-        let _pre_guard = EnvGuard::unset("PRE_COMMIT_HOME");
-        let _xdg_guard = EnvGuard::unset("XDG_CACHE_HOME");
         let tmp = TempDir::new().unwrap();
         let reporter = crate::progress::VerboseProgress::new();
         let cache = tmp.path().join(".cache/pre-commit");
         fs::create_dir_all(&cache).unwrap();
         fs::write(cache.join("hook.pck"), b"x".repeat(4096)).unwrap();
 
-        let cleaner = PreCommitCleaner::new(tmp.path(), Box::new(CliToolRunner));
+        let cleaner = PreCommitCleaner::with_cache_dir(cache.clone(), Box::new(CliToolRunner));
         let result = cleaner
             .clean(true, &reporter, &crate::cleaner::CleanOptions::default())
             .unwrap();
@@ -269,18 +261,14 @@ mod tests {
 
     #[test]
     fn clean_returns_error_when_cli_fails() {
-        let _lock = crate::context::TEST_LOCK
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
-        let _pre_guard = EnvGuard::unset("PRE_COMMIT_HOME");
-        let _xdg_guard = EnvGuard::unset("XDG_CACHE_HOME");
         let tmp = TempDir::new().unwrap();
         let reporter = crate::progress::VerboseProgress::new();
         let cache = tmp.path().join(".cache/pre-commit");
         fs::create_dir_all(&cache).unwrap();
         fs::write(cache.join("hook.pck"), b"x".repeat(4096)).unwrap();
 
-        let cleaner = PreCommitCleaner::new(tmp.path(), Box::new(CliToolRunnerFailing));
+        let cleaner =
+            PreCommitCleaner::with_cache_dir(cache.clone(), Box::new(CliToolRunnerFailing));
         let result = cleaner.clean(false, &reporter, &crate::cleaner::CleanOptions::default());
         assert!(result.is_err(), "CLI failure should propagate as error");
         let err = result.unwrap_err();
@@ -293,20 +281,15 @@ mod tests {
 
     #[test]
     fn cache_dir_uses_safe_default_when_pre_commit_home_is_unsafe() {
-        let _lock = crate::context::TEST_LOCK
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
+        // The unsafe-override fallback (PRE_COMMIT_HOME=/ is rejected BEFORE
+        // any subpath is joined) is pinned at the resolver level in
+        // src/safety.rs. The resolved value for that case is injected
+        // explicitly here: cache_dir() must return it unchanged, with no
+        // process-env dependency in the test.
         let tmp = TempDir::new().unwrap();
         let default = tmp.path().join(".cache/pre-commit");
-        let _guard = EnvGuard::set("PRE_COMMIT_HOME", "/");
-        // The resolver validates the override value itself BEFORE any
-        // subpath is joined.
-        assert_eq!(
-            resolve_env_dir("PRE_COMMIT_HOME", "", default.clone(), "pre-commit"),
-            default,
-            "unsafe PRE_COMMIT_HOME=/ must fall back to the default at the resolver"
-        );
-        let cleaner = PreCommitCleaner::new(tmp.path(), Box::new(SystemCommandRunner));
+        let cleaner =
+            PreCommitCleaner::with_cache_dir(default.clone(), Box::new(SystemCommandRunner));
         assert_eq!(
             cleaner.cache_dir(),
             default,
@@ -316,33 +299,16 @@ mod tests {
 
     #[test]
     fn cache_dir_uses_safe_default_when_xdg_cache_is_unsafe() {
-        let _lock = crate::context::TEST_LOCK
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
+        // The set-but-empty PRE_COMMIT_HOME branch and the XDG-override
+        // fallback (an empty PRE_COMMIT_HOME is unsafe at the resolver, and
+        // XDG_CACHE_HOME=/etc is rejected BEFORE "pre-commit" is joined) are
+        // pinned at the resolver level in src/safety.rs, and the production
+        // constructor keeps the `PRE_COMMIT_HOME` set (even empty) branch.
+        // The resolved value for that case is injected explicitly here.
         let tmp = TempDir::new().unwrap();
         let default = tmp.path().join(".cache/pre-commit");
-        let _pre_guard = EnvGuard::set("PRE_COMMIT_HOME", "");
-        let _xdg_guard = EnvGuard::set("XDG_CACHE_HOME", "/etc");
-        // A set-but-empty PRE_COMMIT_HOME is unsafe at the resolver, so the
-        // XDG override is never consulted and the default wins.
-        assert_eq!(
-            resolve_env_dir("PRE_COMMIT_HOME", "", default.clone(), "pre-commit"),
-            default,
-            "an empty PRE_COMMIT_HOME must fall back to the default at the resolver"
-        );
-        // The XDG branch validates the override value BEFORE joining
-        // "pre-commit".
-        assert_eq!(
-            resolve_env_dir(
-                "XDG_CACHE_HOME",
-                "pre-commit",
-                default.clone(),
-                "pre-commit"
-            ),
-            default,
-            "unsafe XDG_CACHE_HOME=/etc must fall back to the default at the resolver"
-        );
-        let cleaner = PreCommitCleaner::new(tmp.path(), Box::new(SystemCommandRunner));
+        let cleaner =
+            PreCommitCleaner::with_cache_dir(default.clone(), Box::new(SystemCommandRunner));
         assert_eq!(
             cleaner.cache_dir(),
             default,
@@ -352,21 +318,18 @@ mod tests {
 
     #[test]
     fn detect_uses_xdg_cache_home_unconditionally() {
-        let _lock = crate::context::TEST_LOCK
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
+        // The resolved value for the XDG-override case is
+        // $XDG_CACHE_HOME/pre-commit; it is injected explicitly here. The
+        // cleaner must look in that resolved dir and find NotFound (not fall
+        // back to the default ~/.cache/pre-commit).
         let tmp = TempDir::new().unwrap();
         let xdg_cache = tmp.path().join("xdg-cache");
-        // Do NOT create the pre-commit subdirectory under XDG_CACHE_HOME
-        let _pre_guard = EnvGuard::set("PRE_COMMIT_HOME", "");
-        let _xdg_guard = EnvGuard::set("XDG_CACHE_HOME", &xdg_cache.to_string_lossy());
-
-        let cleaner = PreCommitCleaner::new(tmp.path(), Box::new(SystemCommandRunner));
+        let cleaner = PreCommitCleaner::with_cache_dir(
+            xdg_cache.join("pre-commit"),
+            Box::new(SystemCommandRunner),
+        );
         let result = cleaner.detect();
 
-        // EnvGuard automatically restores on drop
-        // With XDG_CACHE_HOME set but no pre-commit dir, should look in $XDG_CACHE_HOME/pre-commit
-        // and find NotFound (not fallback to ~/.cache/pre-commit)
         assert!(matches!(result.status, ScanStatus::NotFound));
     }
 }

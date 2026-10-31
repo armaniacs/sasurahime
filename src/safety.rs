@@ -84,18 +84,26 @@ pub fn is_safe_delete_target(path: &Path) -> bool {
 ///
 /// # Side effect
 ///
-/// Reads the process environment (`std::env::var(var)`) at call time. That
-/// read is the function's side effect: callers that construct cleaners with
-/// an override reach this function, so the env lookup happens at
-/// construction, not at clean time. Injecting the value instead is a
-/// behavior change and is deliberately out of scope (PBI 57).
+/// Reads the process environment (`std::env::var(var)`) exactly once, at the
+/// point where a cleaner is CONSTRUCTED: every env-dependent cleaner calls
+/// this function from its constructor, so the resolved value is pinned at
+/// construction and detect/clean never re-read the process environment.
+/// PBI 88 unified the huggingface / pre-commit wrappers onto the
+/// constructor-resolution shape the flutter / terraform / act cleaners
+/// already used, and this revises the PBI 57 pin ("Reads the process
+/// environment at call time... Injecting the value instead is a behavior
+/// change and is deliberately out of scope (PBI 57)"): the read is no
+/// longer per-call, and the value injection PBI 57 deferred is what PBI 88
+/// shipped — the constructor passes the resolved `PathBuf` into the
+/// adapter, so the lookup happens at construction by construction.
 ///
 /// The OVERRIDE VALUE ITSELF is validated BEFORE any subpath is joined, so a
 /// root-adjacent value (e.g. `HF_HOME=/`) can never yield a joined path
 /// that passes the safety check. The JOIN RESULT is validated too: a
 /// subpath carrying `..` — or an absolute one, which `PathBuf::join` uses
 /// to replace the base — fails closed to the default. Unsafe values warn
-/// and fall back.
+/// and fall back. This fail-closed validation and the warn behaviour are
+/// unchanged (PBI 57).
 pub fn resolve_env_dir(
     var: &str,
     subpath: &str,
