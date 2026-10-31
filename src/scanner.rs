@@ -55,6 +55,33 @@ fn counts_toward_total(r: &ScanResult) -> bool {
     r.name != "hints"
 }
 
+/// The name-level overlap between the hints row and its siblings: the one
+/// home for "who counts the same dirs" (the hints row and the
+/// app-support / library-caches rows — "the same dirs are counted in both",
+/// see [`counts_toward_total`]). The TUI's selection sum reads this to net
+/// the overlap out instead of re-stating the names there; the scanner's
+/// [`counts_toward_total`] keeps its own pinned name join.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum HintsOverlap {
+    /// This is the hints row: its selection counts the same dirs as the
+    /// app-support / library-caches rows.
+    HintsRow,
+    /// This is an overlapping sibling row: it counts the dirs the hints row
+    /// also counts.
+    OverlappingSibling,
+}
+
+/// Names the overlap kind of one cleaner row, or `None` when the row has no
+/// overlap with the hints row. Keyed on the name (PBI-83: 1 cleaner = 1
+/// name) and pinned through the TUI sum tests: a rename goes red.
+pub(crate) fn hints_overlap_kind(name: &str) -> Option<HintsOverlap> {
+    match name {
+        "hints" => Some(HintsOverlap::HintsRow),
+        "app-support" | "library-caches" => Some(HintsOverlap::OverlappingSibling),
+        _ => None,
+    }
+}
+
 /// One machine-readable entry of `scan --json`.
 #[derive(serde::Serialize)]
 pub(crate) struct ScanJsonEntry {

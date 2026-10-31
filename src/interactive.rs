@@ -1,5 +1,6 @@
 use crate::cleaner::{CleanByName, CleanResult, Cleaner, ScanResult, ScanStatus};
 use crate::format::format_bytes;
+use crate::scanner::{hints_overlap_kind, HintsOverlap};
 use anyhow::Result;
 use std::io::{BufRead, IsTerminal, Write};
 
@@ -49,25 +50,52 @@ pub(crate) fn build_selection_items(
 
 /// Compute the total freed bytes for selected items.
 /// Pure function — no I/O, fully testable.
+/// The hints row overlaps the app-support / library-caches rows (the same
+/// dirs are counted in both, [`crate::scanner::hints_overlap_kind`]), so the
+/// hints selection's size is subtracted once when an overlapping sibling is
+/// selected at the same time — dedup, not exclusion: a counts_toward_total
+/// style name filter here would report "Will free approximately 0 B" for a
+/// hints-only selection, while hints really deletes the app-support /
+/// library-caches dirs (PBI 94). With no overlap this stays the plain sum.
 pub(crate) fn compute_selected_total(
     selected: &[usize],
     selection_mapping: &[SelectionEntry],
     results: &[ScanResult],
 ) -> u64 {
-    selected
-        .iter()
-        .map(|&si| {
-            let (cleaner_idx, sub) = &selection_mapping[si];
-            if let Some((_, sub_size)) = sub {
-                // The sub's size rode in the mapping: no string re-match.
-                *sub_size
-            } else if let ScanStatus::Pruneable(b) = &results[*cleaner_idx].status {
-                *b
-            } else {
-                0
+    // First pass: one (kind, size) per selected row. Size is the carried
+    // sub_size when the row is a sub-target, else the cleaner's Pruneable
+    // bytes — the same reference the plain sum used.
+    let mut total: u64 = 0;
+    let mut hints_size: u64 = 0;
+    let mut hints_selected = false;
+    let mut sibling_selected = false;
+    for &si in selected {
+        let (cleaner_idx, sub) = &selection_mapping[si];
+        let size = match sub {
+            // The sub's size rode in the mapping: no string re-match.
+            Some((_, sub_size)) => *sub_size,
+            None => match &results[*cleaner_idx].status {
+                ScanStatus::Pruneable(b) => *b,
+                _ => 0,
+            },
+        };
+        match hints_overlap_kind(results[*cleaner_idx].name) {
+            Some(HintsOverlap::HintsRow) => {
+                hints_selected = true;
+                hints_size += size;
             }
-        })
-        .sum()
+            Some(HintsOverlap::OverlappingSibling) => sibling_selected = true,
+            None => {}
+        }
+        total += size;
+    }
+    // Subtract the hints selection once — `hints_size` is a subset of the
+    // addends above, so this cannot underflow.
+    if hints_selected && sibling_selected {
+        total - hints_size
+    } else {
+        total
+    }
 }
 
 /// Names of the Pruneable Safe targets whose clean() gates on an interactive
@@ -597,6 +625,65 @@ mod tests {
         // Select xcode > DerivedData (idx 0) and brew (idx 1)
         let total = compute_selected_total(&[0, 1], &mapping, &results);
         assert_eq!(total, 500 + 2000);
+    }
+
+    // --- PBI 98: the TUI estimate nets the hints/sibling overlap out ---
+
+    #[test]
+    fn compute_selected_total_subtracts_hints_overlap_when_sibling_selected() {
+        // The hints row overlaps the app-support / library-caches rows (the
+        // same dirs are counted in both, scanner::hints_overlap_kind): when
+        // both sides are selected the hints selection's size must not be
+        // summed a second time — the confirm-line estimate would otherwise
+        // overshoot the real free. The plain sum reports 1550 here.
+        let cleaners: Vec<Box<dyn Cleaner>> = vec![
+            Box::new(TestCleaner::new(
+                "hints",
+                550,
+                vec![("slack", 250), ("xcode", 300)],
+            )),
+            Box::new(TestCleaner::new("app-support", 1000, vec![])),
+            Box::new(TestCleaner::new("library-caches", 400, vec![])),
+        ];
+        let results: Vec<ScanResult> = cleaners.iter().map(|c| c.detect()).collect();
+        let (mapping, _items) = build_selection_items(&results, &cleaners, &[0, 1, 2]);
+
+        // Select both hint rows (idx 0, 1 = 250 + 300) and app-support: the
+        // hints side is already counted in the app-support row, so only the
+        // sibling's 1000 remain.
+        let total = compute_selected_total(&[0, 1, 2], &mapping, &results);
+        assert_eq!(
+            total, 1000,
+            "the hints selection must not double count against a selected sibling"
+        );
+
+        // + library-caches: still one subtraction, not one per sibling row.
+        let total = compute_selected_total(&[0, 1, 2, 3], &mapping, &results);
+        assert_eq!(
+            total, 1400,
+            "the overlap must be subtracted exactly once across 3 selections"
+        );
+    }
+
+    #[test]
+    fn compute_selected_total_keeps_hints_when_selected_alone() {
+        // Dedup, not exclusion: hints really deletes the app-support /
+        // library-caches dirs (PBI 94), so a hints-only selection must keep
+        // its size. A counts_toward_total-style name filter here would
+        // report "Will free approximately 0 B" and go red on this pin.
+        let cleaners: Vec<Box<dyn Cleaner>> = vec![Box::new(TestCleaner::new(
+            "hints",
+            550,
+            vec![("slack", 250), ("xcode", 300)],
+        ))];
+        let results = vec![cleaners[0].detect()];
+        let (mapping, _items) = build_selection_items(&results, &cleaners, &[0]);
+        // Select both hint rows (idx 0, 1 = 250 + 300).
+        let total = compute_selected_total(&[0, 1], &mapping, &results);
+        assert_eq!(
+            total, 550,
+            "a hints-only selection must keep its size, not report 0 B"
+        );
     }
 
     #[test]
