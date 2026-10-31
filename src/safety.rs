@@ -7,9 +7,15 @@
 //! depending on the cleaner layer. Extracting the pair here removes the
 //! inversion: both functions change for the same reason (deletion safety),
 //! so they share one module below the seam.
+//!
+//! PBI 89 adds the third member for the same reason: the per-component
+//! symlink scope check (`symlink_scope`), cut out of the check
+//! `app_support.rs::resolve_allowed` already carried, so every delete path
+//! vetted by the seam rejects an intermediate symlink below its trusted
+//! base with one implementation.
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 pub fn is_safe_delete_target(path: &Path) -> bool {
     let check = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
@@ -78,6 +84,77 @@ pub fn is_safe_delete_target(path: &Path) -> bool {
         && !is_sys("/Users/Shared")
         && !is_sys("/Library")
         && !is_sys("/opt")
+}
+
+/// Outcome of the per-component symlink scope check for one delete
+/// candidate ([`symlink_scope`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SymlinkScope {
+    /// Every component below the trusted base exists and none is a symbolic
+    /// link: the path may proceed to the deletion sink.
+    Clean,
+    /// Some component below the base does not exist: not a symlink, and the
+    /// downstream delete produces its own not-found classification.
+    Missing,
+    /// Some component below the base is a symbolic link, a component could
+    /// not be inspected, or the path carries a component this check cannot
+    /// inspect: fail closed, the path must be refused.
+    Rejected,
+}
+
+/// The per-component symlink scope check (PBI 89): no component strictly
+/// below the trusted `base` may be a symbolic link.
+///
+/// [`is_safe_delete_target`] canonicalizes and vets the FINAL target, so a
+/// cache path whose INTERMEDIATE component is a symlink into HOME (e.g.
+/// `~/Library/Application Support/Slack` → `~/Documents/重要`) resolves to an
+/// in-HOME destination and deletes the real data through the link. This
+/// check inspects the components below `base` one by one with
+/// `fs::symlink_metadata` and rejects the path at the first symlink, the
+/// same shape as `app_support.rs::resolve_allowed`. Inspection is impossible
+/// (a component's metadata cannot be read) or the path carries a `..`
+/// component: fail closed to [`SymlinkScope::Rejected`].
+///
+/// The scope is limited to components below `base` on purpose: on macOS
+/// `/var`, `/tmp` and `/etc` are themselves symlinks to `/private/*`, so
+/// walking every component from the filesystem root would reject every
+/// tempdir (`/var/folders/...`) and kill the whole test suite. A path that
+/// is not below `base` at all is not inspected here — it relies on
+/// [`is_safe_delete_target`]'s canonicalize + blocklist vetting.
+pub fn symlink_scope(base: &Path, path: &Path) -> SymlinkScope {
+    let Ok(rel) = path.strip_prefix(base) else {
+        return SymlinkScope::Clean;
+    };
+    let rel: Vec<Component> = rel.components().collect();
+    if rel.iter().any(|c| !matches!(c, Component::Normal(_))) {
+        return SymlinkScope::Rejected;
+    }
+    let mut cur = base.to_path_buf();
+    for comp in rel {
+        cur.push(comp);
+        let meta = match fs::symlink_metadata(&cur) {
+            Ok(m) => m,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return SymlinkScope::Missing,
+            Err(_) => return SymlinkScope::Rejected,
+        };
+        if meta.file_type().is_symlink() {
+            return SymlinkScope::Rejected;
+        }
+    }
+    SymlinkScope::Clean
+}
+
+/// The seam's scope check anchored on the trusted HOME base (PBI 89): the
+/// [`safe_delete`]-side variant of [`symlink_scope`], so every deletion that
+/// reaches the seam is inspected below HOME without each caller passing a
+/// base. HOME comes from the crate-wide resolver, the same chain
+/// [`is_safe_delete_target`] uses. With no resolvable HOME there is no
+/// trusted base to anchor the component walk on: fail closed.
+pub fn symlink_scope_below_home(path: &Path) -> SymlinkScope {
+    match crate::config::resolved_home_dir() {
+        Some(home) => symlink_scope(&home, path),
+        None => SymlinkScope::Rejected,
+    }
 }
 
 /// Resolves a cache directory that may be overridden by `var`.
@@ -625,5 +702,165 @@ mod tests {
             PathBuf::from("/Users/u/hf/hub"),
             "a safe subpath on a safe override must still be joined"
         );
+    }
+
+    // ── per-component symlink scope check (PBI 89) ──
+
+    #[test]
+    fn symlink_scope_allows_a_clean_path_below_base() {
+        // Every component below the trusted base exists and none is a
+        // symlink: the path proceeds.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let base = tmp.path().join("base");
+        let leaf = base.join("Library/Application Support/Slack/Cache");
+        fs::create_dir_all(&leaf).unwrap();
+        assert!(
+            matches!(symlink_scope(&base, &leaf), SymlinkScope::Clean),
+            "a symlink-free path below the base must be Clean, got {:?}",
+            symlink_scope(&base, &leaf)
+        );
+    }
+
+    #[test]
+    fn symlink_scope_allows_a_file_leaf() {
+        // The seam also deletes files (logs, single caches): a regular file
+        // leaf is not a symlink and must stay Clean.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let base = tmp.path().join("base");
+        fs::create_dir_all(&base).unwrap();
+        fs::write(base.join("old.log"), b"x").unwrap();
+        assert!(matches!(
+            symlink_scope(&base, &base.join("old.log")),
+            SymlinkScope::Clean
+        ));
+    }
+
+    #[test]
+    fn symlink_scope_rejects_an_intermediate_symlink() {
+        // The PBI-89 attack shape: ~/Library/Application Support/Slack →
+        // ~/Documents/重要. The first symlinked component below the base
+        // rejects the whole path, fail closed.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let base = tmp.path().join("base");
+        let real = tmp.path().join("real-data");
+        fs::create_dir_all(real.join("Cache")).unwrap();
+        fs::create_dir_all(&base).unwrap();
+        std::os::unix::fs::symlink(&real, base.join("Slack")).unwrap();
+        let attacked = base.join("Slack/Cache");
+        assert!(
+            matches!(symlink_scope(&base, &attacked), SymlinkScope::Rejected),
+            "an intermediate symlink below the base must be Rejected, got {:?}",
+            symlink_scope(&base, &attacked)
+        );
+    }
+
+    #[test]
+    fn symlink_scope_rejects_a_symlinked_leaf() {
+        // The leaf itself may not be a symlink either: a leaf link into HOME
+        // redirects the deletion the same way an intermediate one does.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let base = tmp.path().join("base");
+        let real = tmp.path().join("real-data");
+        fs::create_dir_all(&real).unwrap();
+        fs::create_dir_all(&base).unwrap();
+        std::os::unix::fs::symlink(&real, base.join("Cache")).unwrap();
+        assert!(matches!(
+            symlink_scope(&base, &base.join("Cache")),
+            SymlinkScope::Rejected
+        ));
+    }
+
+    #[test]
+    fn symlink_scope_reports_missing_for_a_nonexistent_path() {
+        // A component below the base that does not exist is not a symlink:
+        // Missing (the hint filter drops it, the seam lets the delete
+        // produce its own not-found classification).
+        let tmp = tempfile::TempDir::new().unwrap();
+        let base = tmp.path().join("base");
+        fs::create_dir_all(&base).unwrap();
+        assert!(matches!(
+            symlink_scope(&base, &base.join("nope/Cache")),
+            SymlinkScope::Missing
+        ));
+    }
+
+    #[test]
+    fn symlink_scope_fails_closed_when_a_component_is_unreadable() {
+        // 検査不能は拒否 (fail closed): a component whose metadata cannot be
+        // inspected must reject the path, never skip the check.
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::TempDir::new().unwrap();
+        let base = tmp.path().join("base");
+        fs::create_dir_all(base.join("child")).unwrap();
+        fs::set_permissions(&base, fs::Permissions::from_mode(0o000)).unwrap();
+        let scope = symlink_scope(&base, &base.join("child"));
+        fs::set_permissions(&base, fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(
+            matches!(scope, SymlinkScope::Rejected),
+            "an uninspectable component must fail closed, got {scope:?}"
+        );
+    }
+
+    #[test]
+    fn symlink_scope_does_not_inspect_components_above_the_base() {
+        // The macOS pitfall: /var, /tmp and /etc are symlinks to /private/*.
+        // A tempdir under /var/folders must not be rejected by the /var
+        // symlink, so the check stays scoped to components below the base:
+        // a path that is not below the base at all is not inspected here.
+        let tmp = tempfile::TempDir::new().unwrap();
+        assert!(matches!(
+            symlink_scope(Path::new("/Users/other"), tmp.path()),
+            SymlinkScope::Clean
+        ));
+        // A base deeper inside the tempdir with a clean path below it stays
+        // Clean even though the path itself was reached through /var →
+        // /private/var: components above the base are not inspected.
+        let base = tmp.path().join("Library/Application Support");
+        let leaf = base.join("Slack/Cache");
+        fs::create_dir_all(&leaf).unwrap();
+        assert!(matches!(symlink_scope(&base, &leaf), SymlinkScope::Clean));
+    }
+
+    #[test]
+    fn symlink_scope_rejects_a_traversing_relative_component() {
+        // A `..` component in the path below the base cannot be inspected
+        // component-wise: fail closed.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let base = tmp.path().join("base");
+        let sub = base.join("sub");
+        fs::create_dir_all(&sub).unwrap();
+        assert!(matches!(
+            symlink_scope(&base, &sub.join("../../etc")),
+            SymlinkScope::Rejected
+        ));
+    }
+
+    #[test]
+    fn symlink_scope_below_home_rejects_the_intermediate_symlink_attack() {
+        // The seam's HOME-anchored variant: the PBI-89 attack path below a
+        // tempdir HOME is refused, while a clean cache path below the same
+        // HOME stays Clean.
+        let _lock = crate::context::TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let tmp = tempfile::TempDir::new().unwrap();
+        let home = tmp.path().join("home");
+        fs::create_dir_all(&home).unwrap();
+        let real = tmp.path().join("real-data");
+        fs::create_dir_all(real.join("Cache")).unwrap();
+        let link = home.join("Library/Application Support/Slack");
+        fs::create_dir_all(link.parent().unwrap()).unwrap();
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        let _guard = crate::test_helpers::EnvGuard::set("HOME", &home.to_string_lossy());
+        assert!(matches!(
+            symlink_scope_below_home(&link.join("Cache")),
+            SymlinkScope::Rejected
+        ));
+        let clean = home.join("Library/Caches/ms-playwright");
+        fs::create_dir_all(&clean).unwrap();
+        assert!(matches!(
+            symlink_scope_below_home(&clean),
+            SymlinkScope::Clean
+        ));
     }
 }

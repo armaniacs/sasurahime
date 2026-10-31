@@ -239,3 +239,64 @@ fn scan_shows_the_hints_row_pruneable_with_debris() {
         "the hints row must report the Moderate classification, got: {row}"
     );
 }
+
+/// Slack's KNOWN_ENTRIES threshold, read from the table the hint flow
+/// actually uses (src/hint/apps.rs).
+fn slack_threshold_bytes() -> u64 {
+    sasurahime::hint::apps::KNOWN_ENTRIES
+        .iter()
+        .find(|e| e.display_name == "Slack")
+        .expect("the Slack entry is in KNOWN_ENTRIES")
+        .threshold_bytes
+}
+
+#[test]
+fn clean_hints_refuses_to_delete_through_an_intermediate_symlink() {
+    // PBI-89: ~/Library/Application Support/Slack is a symlink to
+    // ~/Documents/重要 — the 中間 symlink + 実在リーフ (Slack/Cache)
+    // configuration. The metric collect_hints uses counts the real bytes
+    // through the intermediate symlink (walkdir does not follow a symlinked
+    // walk root, but the symlink sits above the root here), so the hint flow
+    // reaches the deletion — and the symlink scope check must refuse it
+    // fail-closed instead of wiping the real data.
+    let tmp = TempDir::new().unwrap();
+    let real = tmp.path().join("Documents/重要");
+    let cache = real.join("Cache");
+    fs::create_dir_all(&cache).unwrap();
+    // 80 MB: comfortably above Slack's 64 MB threshold, a multiple of the
+    // 4096-byte APFS page so dir_size (st_blocks x 512) measures it.
+    let debris = vec![0u8; 80 * 1024 * 1024];
+    fs::write(cache.join("important.db"), &debris).unwrap();
+
+    let app_support = tmp.path().join("Library/Application Support");
+    fs::create_dir_all(&app_support).unwrap();
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&real, app_support.join("Slack")).unwrap();
+
+    // (a) dir_size 計上 pin: the real bytes are counted through the
+    // intermediate symlink, so the hint crosses the threshold and the
+    // deletion flow is reached (計上が通っても削除は fail closed).
+    let hint_path = app_support.join("Slack/Cache");
+    let measured = sasurahime::format::dir_size(&hint_path);
+    let threshold = slack_threshold_bytes();
+    assert!(
+        measured > threshold,
+        "dir_size must count the real bytes through the intermediate symlink \
+         so the hint reaches the deletion flow: measured {measured}, threshold {threshold}"
+    );
+
+    let output = sasurahime(tmp.path())
+        .args(["--permanent", "clean", "hints"])
+        .output()
+        .unwrap();
+    let combined = combined_output(&output);
+    // (b) The real data survives: the deletion is refused fail-closed.
+    assert!(
+        output.status.success(),
+        "the refused hint must not fail the run, got:\n{combined}"
+    );
+    assert!(
+        cache.join("important.db").exists(),
+        "the real data behind the intermediate symlink must survive, got:\n{combined}"
+    );
+}

@@ -125,17 +125,29 @@ pub fn auto_clean_hint(
 
     let base = base_path(home, entry.base_dir);
     eprintln!("  Clearing cache...");
-    // Only entries that exist join the ledger: the seam is not asked to
-    // delete a path that is not there (the pre-ledger loop filtered on
-    // exists()), and each item carries the size `format::dir_size` reports
-    // for it — the same metric `collect_hints` measured, so the freed sum
-    // equals what the tip displayed instead of repeating the aggregate per
-    // suffix on multi-suffix entries.
+    // Only candidates the symlink scope check admits join the ledger: the
+    // seam is not asked to delete a path that is not there or that crosses a
+    // symlink below the base, and each item carries the size
+    // `format::dir_size` reports for it — the same metric `collect_hints`
+    // measured, so the freed sum equals what the tip displayed instead of
+    // repeating the aggregate per suffix on multi-suffix entries.
     let items: Vec<(std::path::PathBuf, u64)> = entry
         .path_suffixes
         .iter()
         .map(|suffix| base.join(suffix))
-        .filter(|path| path.exists())
+        .filter(|path| {
+            // PBI 89: the per-component symlink scope check replaces the
+            // bare `path.exists()` gate (exists() follows symlinks, so it
+            // detected nothing): a candidate whose path crosses a symlink
+            // below the trusted base — or that cannot be inspected — never
+            // joins the ledger, and a missing path is dropped exactly like
+            // the old exists() gate did. The size metric and the ledger
+            // contract are unchanged.
+            matches!(
+                crate::safety::symlink_scope(&base, path),
+                crate::safety::SymlinkScope::Clean
+            )
+        })
         .map(|path| {
             let size = crate::format::dir_size(&path);
             (path, size)
