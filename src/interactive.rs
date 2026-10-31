@@ -180,10 +180,10 @@ pub fn report_batch_failures(
     summary: &crate::batch::BatchSummary,
     shape: ReportShape,
 ) -> std::io::Result<()> {
-    for (name, e) in &summary.failures {
+    for f in &summary.failures {
         match shape {
-            ReportShape::Named => writeln!(out, "Error cleaning {name}: {e}")?,
-            ReportShape::Bare => writeln!(out, "Error: {e}")?,
+            ReportShape::Named => writeln!(out, "Error cleaning {}: {}", f.name, f.error)?,
+            ReportShape::Bare => writeln!(out, "Error: {}", f.error)?,
         }
     }
     // Cancelled targets come after the failures and stay neutral: a decline
@@ -710,9 +710,13 @@ mod tests {
     fn report_batch_failures_named_shape_names_the_cleaner() {
         let summary = crate::batch::BatchSummary {
             total_freed: 0,
-            failures: vec![("brew".to_string(), "boom".to_string())],
+            failures: vec![crate::batch::BatchFailure {
+                name: "brew".to_string(),
+                error: anyhow::anyhow!("boom"),
+            }],
             cancelled: vec![],
             skipped: vec![("a.log".to_string(), "locked".to_string())],
+            results: vec![],
         };
         let mut out: Vec<u8> = Vec::new();
         report_batch_failures(&mut out, &summary, ReportShape::Named).unwrap();
@@ -726,9 +730,13 @@ mod tests {
     fn report_batch_failures_bare_shape_omits_the_name() {
         let summary = crate::batch::BatchSummary {
             total_freed: 0,
-            failures: vec![("brew".to_string(), "boom".to_string())],
+            failures: vec![crate::batch::BatchFailure {
+                name: "brew".to_string(),
+                error: anyhow::anyhow!("boom"),
+            }],
             cancelled: vec![],
             skipped: vec![("a.log".to_string(), "locked".to_string())],
+            results: vec![],
         };
         let mut out: Vec<u8> = Vec::new();
         report_batch_failures(&mut out, &summary, ReportShape::Bare).unwrap();
@@ -745,9 +753,13 @@ mod tests {
         // failures, and never says `Error cleaning` (PBI 78).
         let summary = crate::batch::BatchSummary {
             total_freed: 0,
-            failures: vec![("brew".to_string(), "boom".to_string())],
+            failures: vec![crate::batch::BatchFailure {
+                name: "brew".to_string(),
+                error: anyhow::anyhow!("boom"),
+            }],
             cancelled: vec!["colima".to_string()],
             skipped: vec![],
+            results: vec![],
         };
         let mut out: Vec<u8> = Vec::new();
         report_batch_failures(&mut out, &summary, ReportShape::Named).unwrap();
@@ -766,6 +778,7 @@ mod tests {
             failures: vec![],
             cancelled: vec!["colima".to_string()],
             skipped: vec![],
+            results: vec![],
         };
         let mut out: Vec<u8> = Vec::new();
         report_batch_failures(&mut out, &summary, ReportShape::Bare).unwrap();
@@ -779,6 +792,7 @@ mod tests {
             failures: vec![],
             cancelled: vec![],
             skipped: vec![],
+            results: vec![],
         };
         let mut out: Vec<u8> = Vec::new();
         report_batch_failures(&mut out, &summary, ReportShape::Named).unwrap();
