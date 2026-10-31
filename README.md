@@ -136,6 +136,14 @@ installed with cargo); no resident daemon is required.
   plus a restore pointer (`open ~/.Trash`). `--permanent` runs keep a minimal
   audit trail (`Permanently deleted: no Trash copy was kept.`) without
   `--verbose`, and `history.json`/`stats` record the trash vs delete method.
+- `freed` is measured at delete time: dir-based cleaners re-measure each path
+  (`format::dir_size`) right before deleting it, so a cache that grew after the
+  scan (stale persistent-cache entries, writes while an app quits) is still
+  counted truthfully.
+- An app that does not quit within the timeout is handled per route: the
+  `hints` cleaner reports it as a prose error and exits 0; `app-support`
+  records the app as a skipped entry and exits 1 only when every entry was
+  skipped.
 - `clean trash` is report-only: it shows the Trash size and how to empty it in
   Finder; sasurahime never empties the Trash itself.
 - `clean apfs-snapshot --thin 10GB` thins local Time Machine snapshots toward
@@ -227,6 +235,9 @@ Every successful clean operation appends a record to
 `~/.local/share/sasurahime/history.json` with the cleaner name, freed bytes, and
 timestamp. This data stays on your local machine. You can control the maximum
 number of entries via `[history].max_entries` in `config.toml` (default: 1000).
+The Cleaner column of the `stats`/`history` table holds the route name: the
+`hints` cleaner records every accepted entry as `hints`, while each other
+cleaner records its own target name (`library-caches`, `app-support`, ...).
 
 ## License
 

@@ -506,7 +506,12 @@ impl AppSupportCleaner {
                     continue;
                 }
             };
-            items.push((path, cand.size));
+            // PBI 93: freed is the delete-time dir_size. This loop runs
+            // after prepare_app's quit wait, so the re-measurement here
+            // reflects writes that landed while the app quit. The ledger
+            // keeps its caller-owned size contract (it never re-walks).
+            let size = crate::format::dir_size(&path);
+            items.push((path, size));
         }
 
         let mut result =
@@ -1365,6 +1370,47 @@ mod tests {
         assert!(format!("{}", r.skipped[0].reason).contains("running"));
         assert!(!fake.calls().iter().any(|c| c.starts_with("osascript")));
         assert_eq!(r.exit_code(), 1);
+    }
+
+    #[test]
+    fn apply_freed_is_remeasured_after_the_scan_drifts() {
+        // PBI 93 drift pin: freed must be the delete-time dir_size. The
+        // items loop runs after prepare_app's quit wait, so writes that
+        // land between the scan and the deletion (as they do while an app
+        // quits) must be reflected; Candidate.size is the scan-time value.
+        let tmp = TempDir::new().unwrap();
+        let base = base_of(&tmp);
+        put(&base, "obsidian/Cache/a.bin", 10_000);
+        let fake = Fake::default();
+        let c = cleaner_for(&tmp, &fake);
+        let sel = scan_candidates(&base, Some(0));
+        assert_eq!(sel.len(), 1, "fixture: one candidate");
+        let scan_time_size = sel[0].size;
+
+        // The cache grows after the scan, inside a subdirectory: the
+        // top-level mtime stays untouched, the same shape the persistent
+        // cache pin uses for the library-caches drift.
+        put(&base, "obsidian/Cache/anchors/b.bin", 4096);
+        let drifted = dir_size(&base.join("obsidian/Cache"));
+        assert!(
+            drifted > scan_time_size,
+            "fixture: the cache must have grown after the scan ({drifted} <= {scan_time_size})"
+        );
+
+        let r = c
+            .apply_selection(
+                &sel,
+                &HashSet::new(),
+                &DeepSuppressReporter,
+                crate::trash::TrashMode::Permanent,
+            )
+            .unwrap();
+        assert!(!base.join("obsidian/Cache").exists());
+        assert_eq!(
+            r.bytes_freed, drifted,
+            "freed must be the delete-time measurement, not the scan-time Candidate.size"
+        );
+        assert!(r.skipped.is_empty());
     }
 
     /// Records the totals that `progress_init` receives, so a test can pin
