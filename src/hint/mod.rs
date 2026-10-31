@@ -884,6 +884,95 @@ mod tests {
     }
 
     #[test]
+    fn hints_cleaner_clean_with_sub_never_rederives_collect_hints() {
+        // PBI-100: the subs arm resolves the named entries statically from
+        // KNOWN_ENTRIES — it must not re-derive collect_hints (whose pgrep
+        // probes would run for every above-threshold entry with a process
+        // name), and the fresh running check is the single pgrep right
+        // before the deletion (PBI 93's measure-at-delete-time philosophy).
+        //
+        // (a) Two above-threshold process-name entries (VSCode caches at
+        //     3 × 22 MB > 64 MB, Claude logs at 1.25 MB > 1 MB), subs = 1 of
+        //     them: the only pgrep is the selected entry's fresh check; the
+        //     unselected candidate is never probed (the pre-PBI-100 clean
+        //     re-ran collect_hints and pgrep'd both).
+        const SUFFIX_BYTES: usize = 22 * 1_048_576;
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path();
+        make_dirs_with_files(
+            home,
+            BaseDir::AppSupport,
+            &["Code/Cache", "Code/CachedExtensionVSIXs", "Code/CachedData"],
+            SUFFIX_BYTES,
+        );
+        make_dirs_with_files(home, BaseDir::Logs, &["Claude"], ABOVE_LOG_THRESHOLD);
+
+        let runner = RecordingRunner::new(&[], 0);
+        let call_watcher = runner.clone();
+        let c = cleaner::KnownAppHintsCleaner::new(home, Box::new(runner))
+            .with_sub_names(vec!["VSCode caches".to_string()]);
+        let result = c
+            .clean(
+                false,
+                &crate::progress::DeepSuppressReporter,
+                &crate::cleaner::CleanOptions {
+                    trash_mode: crate::trash::TrashMode::Permanent,
+                    ..Default::default()
+                },
+            )
+            .expect("clean must succeed");
+        let calls = call_watcher.recorded_calls();
+        let pgreps: Vec<_> = calls.iter().filter(|(p, _)| p == "pgrep").collect();
+        assert_eq!(
+            pgreps.len(),
+            1,
+            "exactly the fresh pre-delete pgrep must run (no collect_hints \
+             re-derivation), got: {calls:?}"
+        );
+        assert!(
+            pgreps[0].1.iter().any(|a| a == "Code"),
+            "the fresh pgrep must name the selected entry's process, got: {calls:?}"
+        );
+        assert!(
+            !calls.iter().any(|(p, _)| p == "osascript"),
+            "a non-running selection never quits, got: {calls:?}"
+        );
+        assert_eq!(
+            result.bytes_freed,
+            3 * SUFFIX_BYTES as u64,
+            "the selected entry must be cleaned"
+        );
+
+        // (b) A process-name-less selection runs no pgrep at all.
+        let tmp2 = tempfile::tempdir().unwrap();
+        let home2 = tmp2.path();
+        make_dirs_with_files(
+            home2,
+            BaseDir::Logs,
+            &["DiagnosticReports"],
+            DIAGNOSTIC_BYTES,
+        );
+        let runner2 = RecordingRunner::new(&[], 0);
+        let watcher2 = runner2.clone();
+        let c2 = cleaner::KnownAppHintsCleaner::new(home2, Box::new(runner2))
+            .with_sub_names(vec!["Diagnostic Reports".to_string()]);
+        c2.clean(
+            false,
+            &crate::progress::DeepSuppressReporter,
+            &crate::cleaner::CleanOptions {
+                trash_mode: crate::trash::TrashMode::Permanent,
+                ..Default::default()
+            },
+        )
+        .expect("clean must succeed");
+        let calls2 = watcher2.recorded_calls();
+        assert!(
+            !calls2.iter().any(|(p, _)| p == "pgrep"),
+            "a process-name-less selection must run no pgrep, got: {calls2:?}"
+        );
+    }
+
+    #[test]
     fn hints_cleaner_clean_returns_the_aggregate_for_history() {
         // PBI 80 history contract, moved to the cleaner: clean() returns what
         // the hint path actually freed, named "hints" (1 cleaner = 1 name),

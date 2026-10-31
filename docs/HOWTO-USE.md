@@ -116,6 +116,7 @@ Clean a single cache target. Replace `<target>` with one of the names below.
 | `flutter`       | `dart pub cache clean`                                                |
 | `go`            | `go clean -cache`                                                     |
 | `gradle`        | Gradle old version caches                                             |
+| `hints`         | Known app hints: quit + delete + relaunch for the top 5 above-threshold caches (per-app via `--sub`) |
 | `huggingface`   | Hugging Face model cache (`hub/`) via CLI or fallback                  |
 | `ios-backup`    | iOS device backups (interactive only — never in --yes mode)           |
 | `jetbrains`     | JetBrains IDE caches (old versions)                                   |
