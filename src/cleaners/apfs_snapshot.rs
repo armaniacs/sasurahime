@@ -285,11 +285,13 @@ impl ApfsSnapshotCleaner {
         } else {
             match self.interactive_select(reporter, &names)? {
                 Some(selected) => selected,
-                // Not a terminal: the port printed the standard remedy once,
-                // nothing is selected and the clean skips.
+                // Not a terminal or an empty selection: multi_select_or_skip
+                // owns both skips and the clean skips.
                 None => return Ok(CleanResult::empty(self.name())),
             }
         };
+        // Defensive check for the `--all` path: the select branch above
+        // already skips an empty selection via multi_select_or_skip.
         if selected.is_empty() {
             println!("[apfs-snapshot] nothing selected");
             return Ok(CleanResult::empty(self.name()));
@@ -370,13 +372,8 @@ impl ApfsSnapshotCleaner {
     ) -> Result<Option<Vec<String>>> {
         let defaults = vec![true; names.len()];
         println!("\nLocal APFS Time Machine snapshots:\n");
-        let picks = crate::prompt::CleanPrompt::for_current_run().multi_select(
-            "apfs-snapshot",
-            reporter,
-            None,
-            names,
-            &defaults,
-        )?;
+        let picks =
+            crate::prompt::multi_select_or_skip("apfs-snapshot", reporter, None, names, &defaults)?;
         Ok(picks.map(|selections| selections.into_iter().map(|i| names[i].clone()).collect()))
     }
 
@@ -464,6 +461,7 @@ impl ApfsSnapshotCleaner {
 mod tests {
     use super::*;
     use crate::cleaner::ScanStatus;
+    use std::io::IsTerminal;
     use std::os::unix::process::ExitStatusExt;
 
     fn exit_ok() -> std::process::ExitStatus {
@@ -1250,5 +1248,56 @@ mod tests {
             .unwrap();
         assert_eq!(result.bytes_freed, 0, "a failed thinning reclaims nothing");
         assert!(!result.uses_trash);
+    }
+
+    #[test]
+    fn clean_delete_skips_interactive_select_without_a_terminal() {
+        // The per-cleaner non-TTY pin (PBI 99): on a non-TTY stdin the
+        // shared select ritual skips the interactive path, so nothing is
+        // deleted and the clean never hangs on a hidden prompt. The `--all`
+        // bypass needs no terminal and stays as-is.
+        if std::io::stdin().is_terminal() {
+            // An interactive `cargo test` would otherwise hang on the prompt.
+            return;
+        }
+        let cleaner = ApfsSnapshotCleaner::new(Box::new(
+            crate::test_helpers::MockRunner::new()
+                .with_stdout("tmutil", "com.apple.TimeMachine.2026-10-01-120000.local\n"),
+        ))
+        .with_mode(SnapshotMode::Delete { all: false });
+        let reporter = crate::progress::DeepSuppressReporter;
+        let result = cleaner
+            .clean(false, &reporter, &crate::cleaner::CleanOptions::default())
+            .unwrap();
+        assert_eq!(
+            result.bytes_freed, 0,
+            "non-terminal stdin must skip the interactive select"
+        );
+    }
+
+    #[test]
+    fn the_select_ritual_flows_through_the_shared_select_path() {
+        // PBI 99: the select branch migrates to multi_select_or_skip - the
+        // `--all` bypass and the defensive empty check after it stay as-is
+        // (a different arm that legitimately keeps the line), so this pin
+        // slices the select helper: the prompt must run through the shared
+        // select path and dialoguer is never called directly.
+        let src = include_str!("apfs_snapshot.rs");
+        let start = src
+            .find("fn interactive_select(")
+            .expect("interactive_select is present");
+        let end = src[start..]
+            .find("/// Thins local snapshots")
+            .map(|i| start + i)
+            .unwrap_or(src.len());
+        let body = &src[start..end];
+        assert!(
+            body.contains("multi_select"),
+            "the select prompt must run through the shared select path"
+        );
+        assert!(
+            !body.contains("dialoguer::"),
+            "the cleaner must not call dialoguer directly (the port owns the prompt)"
+        );
     }
 }

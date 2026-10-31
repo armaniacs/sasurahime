@@ -105,16 +105,12 @@ impl Cleaner for IosCleaner {
         }
 
         // Safety: iOS backups are irreversible and must only be deleted
-        // interactively. The port owns the non-TTY resolution (PBI 75): on
-        // a non-TTY stdin it prints the standard remedy once and returns
-        // None, and the clean skips instead of hanging on a hidden prompt.
+        // interactively. multi_select_or_skip owns both skips - the port's
+        // non-TTY remedy and the empty-selection skip - so the clean skips
+        // instead of hanging on a hidden prompt.
         let Some(selected) = self.interactive_select(reporter, &entries)? else {
             return Ok(CleanResult::empty(self.name()));
         };
-        if selected.is_empty() {
-            println!("[ios-backup] nothing selected");
-            return Ok(CleanResult::empty(self.name()));
-        }
 
         // The shared delete ledger owns the per-entry contracts. The mode is
         // Global: the deletion scope was already gated interactively above.
@@ -151,13 +147,8 @@ impl IosCleaner {
             .collect();
         let defaults = vec![true; entries.len()];
         println!("\niOS device backups in ~/Library/Application Support/MobileSync/Backup/:\n");
-        let picks = crate::prompt::CleanPrompt::for_current_run().multi_select(
-            "ios-backup",
-            reporter,
-            None,
-            &items,
-            &defaults,
-        )?;
+        let picks =
+            crate::prompt::multi_select_or_skip("ios-backup", reporter, None, &items, &defaults)?;
         Ok(picks.map(|selections| selections.into_iter().map(|i| entries[i].clone()).collect()))
     }
 }
@@ -165,6 +156,7 @@ impl IosCleaner {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::IsTerminal;
     use std::os::unix::process::ExitStatusExt;
     use tempfile::TempDir;
 
@@ -279,5 +271,53 @@ mod tests {
     fn ios_backup_is_never_auto_cleaned() {
         let tmp = TempDir::new().unwrap();
         assert!(!make_cleaner(&tmp).auto_clean_allowed());
+    }
+
+    #[test]
+    fn clean_skips_interactive_select_without_a_terminal() {
+        // The per-cleaner non-TTY pin (PBI 99): on a non-TTY stdin the
+        // shared select ritual skips the interactive path, so nothing is
+        // deleted and the clean never hangs on a hidden prompt.
+        if std::io::stdin().is_terminal() {
+            // An interactive `cargo test` would otherwise hang on the prompt.
+            return;
+        }
+        let tmp = TempDir::new().unwrap();
+        let backup_dir = make_backup_dir(&tmp);
+        let entry = backup_dir.join("AABBCCDD-EEFF-0011-2233-445566778899");
+        fs::create_dir_all(&entry).unwrap();
+        fs::write(entry.join("Manifest.db"), b"fakedata").unwrap();
+        let result = make_cleaner(&tmp)
+            .clean(
+                false,
+                &crate::progress::DeepSuppressReporter,
+                &crate::cleaner::CleanOptions::default(),
+            )
+            .unwrap();
+        assert_eq!(
+            result.bytes_freed, 0,
+            "non-terminal stdin must skip the interactive select"
+        );
+        assert!(entry.exists(), "nothing is deleted without a terminal");
+    }
+
+    #[test]
+    fn the_empty_selection_line_is_owned_by_the_shared_select_path() {
+        // PBI 99: the empty-selection skip must be owned by the shared
+        // select path, not re-printed per cleaner. The drift cannot surface
+        // as behaviour (an empty selection needs a TTY), so the pin greps
+        // the source: Red before the helper, green after the migration. The
+        // needle is assembled from two pieces so the pin's own source does
+        // not contain the contiguous line it greps for.
+        let needle = String::from("] nothing") + " selected";
+        let src = include_str!("ios_backup.rs");
+        assert!(
+            !src.contains(&needle),
+            "the empty-selection line must be owned by the shared select path"
+        );
+        assert!(
+            src.contains("multi_select"),
+            "the interactive select must flow through the shared select path"
+        );
     }
 }

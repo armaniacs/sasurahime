@@ -1013,6 +1013,30 @@ mod tests {
             delete_body.contains("enable_live_elapsed"),
             "the delete phase must enable the live per-second elapsed tick"
         );
+        // The shared select ritual (PBI 99) lives in multi_select_or_skip
+        // (prompt.rs): the six migrated cleaners hand it their live reporter
+        // and it hands the port the same one, while this cleaner keeps the
+        // explicit form above. The seam-shape claims are the same for the
+        // helper as for this cleaner's explicit form - the prompt goes
+        // through the port and dialoguer is never called directly - so the
+        // pin's search starts at the helper's source too.
+        let helper_src = include_str!("../prompt.rs");
+        let helper_start = helper_src
+            .find("pub fn multi_select_or_skip(")
+            .expect("multi_select_or_skip source present");
+        let helper_end = helper_src[helper_start..]
+            .find("#[cfg(test)]")
+            .map(|i| helper_start + i)
+            .unwrap_or(helper_src.len());
+        let helper_body = &helper_src[helper_start..helper_end];
+        assert!(
+            helper_body.contains("multi_select("),
+            "the shared select ritual must run through the port with the caller's reporter"
+        );
+        assert!(
+            !helper_body.contains("dialoguer::"),
+            "the helper must not call dialoguer directly (the port owns the prompt)"
+        );
     }
 
     // ── trash_mode pin contract ──

@@ -151,16 +151,11 @@ impl Cleaner for OllamaCleaner {
             let defaults: Vec<bool> = vec![true; models.len()];
 
             println!("\nOllama models in ~/.ollama/models/:\n");
-            let picks = crate::prompt::CleanPrompt::for_current_run()
-                .multi_select("ollama", reporter, None, &items, &defaults)?;
-            let Some(selections) = picks else {
+            let Some(selections) =
+                crate::prompt::multi_select_or_skip("ollama", reporter, None, &items, &defaults)?
+            else {
                 return Ok(CleanResult::empty(self.name()));
             };
-
-            if selections.is_empty() {
-                println!("[ollama] nothing selected");
-                return Ok(CleanResult::empty(self.name()));
-            }
 
             let items: Vec<(PathBuf, u64)> = selections
                 .iter()
@@ -252,6 +247,7 @@ impl OllamaCleaner {
 mod tests {
     use super::*;
     use crate::command::CommandRunner;
+    use std::io::IsTerminal;
     use std::os::unix::process::ExitStatusExt;
 
     // ── ledger migration (PBI 77) ──
@@ -477,6 +473,54 @@ mod tests {
         assert!(
             err.contains("failed to spawn"),
             "the spawn failure must surface in the reason, got {err}"
+        );
+    }
+
+    #[test]
+    fn clean_skips_interactive_select_without_a_terminal() {
+        // The per-cleaner non-TTY pin (PBI 99): on a non-TTY stdin the
+        // shared select ritual skips the interactive path, so nothing is
+        // deleted and the clean never hangs on a hidden prompt.
+        if std::io::stdin().is_terminal() {
+            // An interactive `cargo test` would otherwise hang on the prompt.
+            return;
+        }
+        let runner = MockOllamaRunner {
+            list_output: "NAME\tID\tSIZE\tMODIFIED\nllama3.2:3b\tabc123\t2.0GB\t2 days ago\n"
+                .to_string(),
+        };
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cleaner = OllamaCleaner::new(tmp.path(), Box::new(runner));
+        let result = cleaner
+            .clean(
+                false,
+                &crate::progress::DeepSuppressReporter,
+                &crate::cleaner::CleanOptions::default(),
+            )
+            .unwrap();
+        assert_eq!(
+            result.bytes_freed, 0,
+            "non-terminal stdin must skip the interactive select"
+        );
+    }
+
+    #[test]
+    fn the_empty_selection_line_is_owned_by_the_shared_select_path() {
+        // PBI 99: the empty-selection skip must be owned by the shared
+        // select path, not re-printed per cleaner. The drift cannot surface
+        // as behaviour (an empty selection needs a TTY), so the pin greps
+        // the source: Red before the helper, green after the migration. The
+        // needle is assembled from two pieces so the pin's own source does
+        // not contain the contiguous line it greps for.
+        let needle = String::from("] nothing") + " selected";
+        let src = include_str!("ollama.rs");
+        assert!(
+            !src.contains(&needle),
+            "the empty-selection line must be owned by the shared select path"
+        );
+        assert!(
+            src.contains("multi_select"),
+            "the interactive select must flow through the shared select path"
         );
     }
 }
