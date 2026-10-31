@@ -8,6 +8,19 @@ All notable changes to sasurahime will be documented in this file. The format is
 
 ### Fixed
 
+- The freed bytes for `app-support` and `library-caches` were the
+  scan-time size: `library-caches` rides the one-hour persistent cache,
+  so the "Total freed" line could report a size that is up to an hour
+  old (changes inside a subdirectory do not move the top-level mtime
+  the cache keys on). Both cleaners now measure the bytes at delete
+  time, so the freed line is the on-disk measurement of what was
+  deleted (the hint flow already did).
+- The scanner's "Total reclaimable" counted the hint candidates twice:
+  the same directory was listed in the hints row and again in the
+  app-support / library-caches rows. The hints row is now shown but
+  never counted toward the total (the JSON total follows the same
+  rule), and the candidates managed by hints are tagged
+  `[managed by hints]`, so the total matches what the rows mean.
 - A hint candidate whose path goes through an intermediate symlink that
   points elsewhere inside HOME was deleted together with the symlink's
   real target (the symlink check only ran on one of the two routes to
