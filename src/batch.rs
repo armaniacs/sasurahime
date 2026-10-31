@@ -3,11 +3,22 @@
 //! funnels through [`run_batch`]; skip policies stay at the call sites —
 //! they are genuinely different per entry point.
 
+/// One batch failure carried as a typed error: the cleaner name plus the
+/// whole `anyhow::Error` (cause/context chain intact), instead of a
+/// flattened `to_string()` that throws the chain away at collection time.
+/// Stage 3 (single/batch unification into `report_single_target`) rebuilds
+/// the single-target `Err` contract from this — see `run_batch`'s doc.
+#[derive(Debug)]
+pub struct BatchFailure {
+    pub name: String,
+    pub error: anyhow::Error,
+}
+
 /// Summary of a batch clean run: what the callers print afterwards.
 pub struct BatchSummary {
     pub total_freed: u64,
-    /// Per-target failures (cleaner name + error), reported by the caller.
-    pub failures: Vec<(String, String)>,
+    /// Per-target failures (typed error carry), reported by the caller.
+    pub failures: Vec<BatchFailure>,
     /// Targets the user cancelled (cleaner name), reported by the caller as
     /// a neutral `cancelled by user` line — a cancel is a run-level
     /// decision, not an error, so it never lands in `failures`.
@@ -15,6 +26,12 @@ pub struct BatchSummary {
     /// Per-entry skips (cleaner name + "path: reason"), reported by the
     /// caller in the single-target "N file(s) skipped" shape.
     pub skipped: Vec<(String, String)>,
+    /// Stage-3 carry: each successful cleaner's `CleanResult`, in loop
+    /// order, so the single/batch unification can rebuild the single-target
+    /// contract (a "succeeded but exit_code() == 1" result survives the
+    /// summary instead of being compressed into `total_freed`). Unused for
+    /// display today — a deliberate preparation, see `run_batch`'s doc.
+    pub results: Vec<crate::cleaner::CleanResult>,
 }
 
 /// The ONE batch execution path: spinner per cleaner, result accumulation,
@@ -46,6 +63,20 @@ pub struct BatchSummary {
 /// | 5 | skip lines | direct `N file(s) skipped` + `path: reason` (nameless) | `summary.skipped` → `report_batch_failures` (named shape, cleaner name included) | when `skipped` is non-empty |
 /// | 6 | exit code | `exit_code() != 0` → exit 1 | always exit 0 (report only) | pinned by the PBI 78 scope fence 2 |
 ///
+/// Stage-3 carry (deliberate preparation, NOT dead weight): `failures`
+/// keeps each error as an `anyhow::Error` (cause/context chain intact) and
+/// `results` keeps each successful [`CleanResult`] in loop order, so stage
+/// 3 — the single/batch unification into `report_single_target`, deferred
+/// above — can rebuild the single-target `Err` contract and the "succeeded
+/// but exit_code() == 1" result without loss. Today the only display reader
+/// is `report_batch_failures`; `results` has no display reader yet.
+///
+/// Stage-3 trap: do NOT let `report_single_target` display or record
+/// `results[0].name` — `CleanResult::name` is a pub field whose equality
+/// with the batch loop's `c.name()` is NOT pinned by any test (a non-
+/// invariant), so the display and history labels must keep coming from the
+/// batch's own cleaner name, the same label the branches above already use.
+///
 /// Option A (full unification of the two paths) stays deferred; it fires on
 /// the next change that touches either engine's semantics (a new line
 /// family, a gate move, or a gate condition change), since the previous
@@ -63,6 +94,7 @@ pub fn run_batch(
         failures: Vec::new(),
         cancelled: Vec::new(),
         skipped: Vec::new(),
+        results: Vec::new(),
     };
     for c in cleaners {
         let msg = format!("Cleaning {}...", c.name());
@@ -108,6 +140,11 @@ pub fn run_batch(
                     r.skipped.len(),
                     r.uses_trash,
                 );
+                // Stage-3 carry (see the doc): the single-target result is
+                // parked in the summary LAST — the skipped/history/note
+                // branches above consume `r`'s fields, and pushing before
+                // them would move `r` out from under those reads.
+                summary.results.push(r);
             }
             Err(e) => {
                 // CleanCancelled is a run-level decision, not an error: it
@@ -119,7 +156,13 @@ pub fn run_batch(
                 if e.is::<crate::cleaner::CleanCancelled>() {
                     summary.cancelled.push(c.name().to_string());
                 } else {
-                    summary.failures.push((c.name().to_string(), e.to_string()));
+                    // The error itself rides in the summary (R1: no
+                    // `to_string()` flattening here) so the anyhow chain
+                    // survives for stage 3's Err reconstruction.
+                    summary.failures.push(BatchFailure {
+                        name: c.name().to_string(),
+                        error: e,
+                    });
                 }
             }
         }
@@ -330,11 +373,11 @@ mod tests {
             "only the successful cleans sum into total_freed"
         );
         assert_eq!(summary.failures.len(), 1, "one failure for the one error");
-        assert_eq!(summary.failures[0].0, "bad");
+        assert_eq!(summary.failures[0].name, "bad");
         assert!(
-            summary.failures[0].1.contains("boom"),
+            summary.failures[0].error.to_string().contains("boom"),
             "the failure message must carry the error, got: {}",
-            summary.failures[0].1
+            summary.failures[0].error
         );
     }
 
@@ -370,7 +413,7 @@ mod tests {
             1,
             "only the real error is a failure"
         );
-        assert_eq!(summary.failures[0].0, "bad");
+        assert_eq!(summary.failures[0].name, "bad");
         assert_eq!(
             summary.total_freed, 100,
             "the successful clean still sums into total_freed"
@@ -420,7 +463,7 @@ mod tests {
         );
         assert_eq!(summary.total_freed, 100);
         assert_eq!(summary.failures.len(), 1);
-        assert_eq!(summary.failures[0].0, "bad-anim");
+        assert_eq!(summary.failures[0].name, "bad-anim");
     }
 
     #[test]
