@@ -8,6 +8,33 @@ All notable changes to sasurahime will be documented in this file. The format is
 
 ### Fixed
 
+- A user cancel printed the contradictory pair "Cleaning colima...
+  [FAILED]" plus "colima: cancelled by user" on `clean all
+  --include-manual`: the batch engine classified a `CleanCancelled`
+  error, but the shared spinner helpers keyed on `is_err()` and printed
+  the `[FAILED]` token. The cancel classification now reaches the
+  emission (a `CancelClassified` impl beside the error type), so a
+  cancel prints no status token on either engine path.
+- The freed bytes for `library-logs` and `orphan-containers` were the
+  scan-time size (the same scope miss the app-support / library-caches
+  fix covered): `library-logs` waits on an interactive multi-select for
+  an unbounded time, so the freed line could report a size from before
+  the screen was read. Both cleaners now measure the bytes at delete
+  time like the rest of the ledger riders.
+- The TUI's "Will free approximately" double-counted overlapping rows:
+  the hints row deletes directories that the app-support /
+  library-caches rows also claim, so selecting both showed the shared
+  bytes twice. The estimate now nets the overlap out (once, only when
+  both kinds are selected), while a hints-only selection keeps its own
+  bytes.
+- `clean hints --sub <known name>` silently did nothing for a name
+  outside the current top 5 (the vetted-name check validated all
+  entries, but the subs route re-derived the offer and truncated to
+  five), and an offer whose caches fell below the threshold between the
+  prompt and the cleanup also vanished without a line. The subs route
+  now resolves the name statically (no threshold re-judgement for an
+  explicit choice) and re-checks only whether the app is running right
+  before deleting.
 - The freed bytes for `app-support` and `library-caches` were the
   scan-time size: `library-caches` rides the one-hour persistent cache,
   so the "Total freed" line could report a size that is up to an hour
@@ -106,6 +133,9 @@ All notable changes to sasurahime will be documented in this file. The format is
 
 ### Changed
 
+- `docs/HOWTO-USE.md` now lists `clean hints` in the `clean <target>`
+  table (quit, delete and relaunch the top 5 above-threshold caches,
+  per-app via `--sub`), so the flow is discoverable outside `scan`.
 - The per-entry deletion bookkeeping is now one loop behind one
   interface: `delete_ledger` owns the progress ticks, the fatal/skip
   classification, the freed sums, the `uses_trash` truth (deletion
