@@ -45,6 +45,16 @@ fn status_columns(status: &ScanStatus) -> (String, &'static str, Option<u64>) {
     }
 }
 
+/// Rows whose bytes are summed into "Total reclaimable". The hints row
+/// overlaps the app-support / library-caches rows (the same dirs are counted
+/// in both), so it is displayed but never summed into the total -- the
+/// name-level sibling of the Unavailable / Unknown `counted=None` precedent,
+/// which stays status-level. The name is hardcoded on purpose (PBI-83: 1
+/// cleaner = 1 name) and pinned by the scanner tests: a rename goes red.
+fn counts_toward_total(r: &ScanResult) -> bool {
+    r.name != "hints"
+}
+
 /// One machine-readable entry of `scan --json`.
 #[derive(serde::Serialize)]
 pub(crate) struct ScanJsonEntry {
@@ -180,7 +190,9 @@ pub fn run_scan(cleaners: &[Box<dyn Cleaner>], home: &std::path::Path) {
     for r in &rows {
         let (size, status, counted) = status_columns(&r.status);
         if let Some(b) = counted {
-            total += b;
+            if counts_toward_total(r) {
+                total += b;
+            }
         }
         if matches!(r.status, ScanStatus::Unavailable) {
             unavailable += 1;
@@ -194,6 +206,18 @@ pub fn run_scan(cleaners: &[Box<dyn Cleaner>], home: &std::path::Path) {
 
     if total > 0 {
         println!("\nTotal reclaimable: {}", format_bytes(total));
+    }
+
+    // One note line when the hints row was displayed as Pruneable: its size
+    // overlaps the app-support / library-caches rows and the 100 MB log
+    // threshold keeps small log dirs out of the library-logs row.
+    let hints_row_shown = rows
+        .iter()
+        .any(|r| r.name == "hints" && matches!(r.status, ScanStatus::Pruneable(_)));
+    if hints_row_shown {
+        println!(
+            "\nKnown app hints (shown above) overlap the app-support / library-caches rows and are excluded from the total; log dirs below the 100 MB log threshold are counted only in the hints row."
+        );
     }
 
     if unavailable > 0 {
@@ -226,7 +250,9 @@ pub fn run_scan(cleaners: &[Box<dyn Cleaner>], home: &std::path::Path) {
 }
 
 /// Machine-readable scan: prints one JSON document, no table, no hints and no
-/// prompt. Used by `scan --json` for scripts and CI.
+/// prompt. Used by `scan --json` for scripts and CI. The total excludes the
+/// hints row (it overlaps the app-support / library-caches rows); the hints
+/// entry keeps `size_bytes` and `estimable` so consumers sum it themselves.
 pub fn run_scan_json(cleaners: &[Box<dyn Cleaner>], home: &std::path::Path) {
     let (results, available) = detect_all(cleaners);
     let (risks, denied) = scan_preamble(cleaners, &available, home);
@@ -236,6 +262,7 @@ pub fn run_scan_json(cleaners: &[Box<dyn Cleaner>], home: &std::path::Path) {
     sort_by_size(&mut rows);
     let total: u64 = rows
         .iter()
+        .filter(|r| counts_toward_total(r))
         .filter_map(|r| match r.status {
             ScanStatus::Pruneable(b) => Some(b),
             _ => None,
@@ -368,6 +395,29 @@ mod tests {
         assert_eq!(status, "pruneable");
         assert_eq!(counted, Some(1234));
         assert!(!size.is_empty());
+    }
+
+    #[test]
+    fn the_hints_row_is_displayed_but_never_counted_toward_the_total() {
+        // Same "display but don't count" shape as the Unavailable / Unknown
+        // counted=None precedent, keyed on the row name instead of the
+        // status: the hints row overlaps the app-support / library-caches
+        // rows (the same dirs are counted in both), so the total must not
+        // sum it. The name is hardcoded on purpose (PBI-83: 1 cleaner = 1
+        // name) — a PR that renames the hints row goes red here. The name
+        // does not shadow the status-level counting of the other rows.
+        assert!(
+            !counts_toward_total(&r("hints", ScanStatus::Pruneable(65 * 1024 * 1024))),
+            "the hints row must be excluded from the total"
+        );
+        assert!(
+            counts_toward_total(&r("app-support", ScanStatus::Pruneable(1))),
+            "the app-support row still counts toward the total"
+        );
+        assert!(
+            counts_toward_total(&r("uv", ScanStatus::NotFound)),
+            "the name filter must not shadow the status-level counting"
+        );
     }
 
     /// Tiny stub cleaner for `detect_all`: fixed name, detect status, and
