@@ -3,7 +3,7 @@ use crate::cleaner::{
 };
 use crate::command::CommandRunner;
 use crate::format::{dir_size, format_bytes};
-use crate::hint::apps::KNOWN_ENTRIES;
+use crate::hint::apps::{hint_owned_paths, KNOWN_ENTRIES, MANAGED_BY_HINTS_TAG};
 use crate::hint::{is_running, quit_app_and_wait, relaunch_app, BaseDir, HintEntry};
 use crate::progress::ProgressReporter;
 use crate::prompt::PromptPort;
@@ -222,12 +222,19 @@ pub fn scan_candidates(base: &Path, min_app_bytes: Option<u64>) -> Vec<Candidate
 const NAME: &str = "app-support";
 
 pub fn format_candidate_label(c: &Candidate, running: bool) -> String {
+    let sub_path = format!("{}/{}", c.target.root, c.sub);
+    // The hint cleaner owns this dir too (`clean hints` deletes it as well):
+    // exact-match membership against hint_owned_paths only -- a prefix match
+    // would mis-tag Default/Cache, whose hint-owned sibling is
+    // Default/Cache_Data. (iii) renders the overlap, it never filters.
+    let managed = hint_owned_paths().contains(&(BaseDir::AppSupport, sub_path.as_str()));
     format!(
-        "{:<18} {:<44} {:>10}{}",
+        "{:<18} {:<44} {:>10}{}{}",
         c.target.hint_name,
-        format!("{}/{}", c.target.root, c.sub),
+        sub_path,
         format_bytes(c.size),
-        if running { "  [running]" } else { "" }
+        if running { "  [running]" } else { "" },
+        if managed { MANAGED_BY_HINTS_TAG } else { "" }
     )
 }
 
@@ -1579,6 +1586,16 @@ mod tests {
         assert!(format_candidate_label(&sel[0], true).contains("[running]"));
         assert!(!format_candidate_label(&sel[0], false).contains("[running]"));
         assert!(format_candidate_label(&sel[0], false).contains("Slack/Cache"));
+        // PBI-94: Slack/Cache is hint-owned, so the label also carries the
+        // managed-by-hints tag after the [running] slot.
+        let busy = format_candidate_label(&sel[0], true);
+        assert!(busy.contains("[managed by hints]"), "{busy}");
+        assert!(
+            busy.find("[managed by hints]").unwrap() > busy.find("[running]").unwrap(),
+            "the managed tag must follow the running tag: {busy}"
+        );
+        let idle = format_candidate_label(&sel[0], false);
+        assert!(idle.contains("[managed by hints]"), "{idle}");
     }
 
     #[test]

@@ -3,7 +3,10 @@ use crate::cleaner::{
 };
 use crate::command::CommandRunner;
 use crate::format::format_bytes;
-use crate::hint::{apps::KNOWN_ENTRIES, BaseDir, HintEntry};
+use crate::hint::{
+    apps::{hint_owned_paths, KNOWN_ENTRIES, MANAGED_BY_HINTS_TAG},
+    BaseDir, HintEntry,
+};
 use crate::progress::ProgressReporter;
 use anyhow::Result;
 use std::fs;
@@ -148,6 +151,15 @@ pub fn mark_running(entries: &mut [CacheEntry], runner: &dyn CommandRunner) {
 }
 
 pub fn render_listing(entries: &[CacheEntry]) -> Vec<String> {
+    // Tag source is hint_owned_paths (the known_entry_for lookup demands the
+    // single-suffix shape and would drop a future multi-suffix Caches entry):
+    // exact-match membership only -- prefixes must never match. (iii) renders
+    // the overlap, it never filters.
+    let hint_owned: Vec<&'static str> = hint_owned_paths()
+        .into_iter()
+        .filter(|(base, _)| *base == BaseDir::Caches)
+        .map(|(_, s)| s)
+        .collect();
     entries
         .iter()
         .map(|e| {
@@ -157,7 +169,18 @@ pub fn render_listing(entries: &[CacheEntry]) -> Vec<String> {
                 (Disposition::BelowThreshold, _) => "  [below threshold]",
                 (Disposition::Unknown, _) => "  [display only]",
             };
-            format!("  {:<32} {:>10}{}", e.name, format_bytes(e.size), tag)
+            let managed = if hint_owned.contains(&e.name.as_str()) {
+                MANAGED_BY_HINTS_TAG
+            } else {
+                ""
+            };
+            format!(
+                "  {:<32} {:>10}{}{}",
+                e.name,
+                format_bytes(e.size),
+                tag,
+                managed
+            )
         })
         .collect()
 }
@@ -168,12 +191,18 @@ pub fn render_item(entry: &CacheEntry) -> String {
     } else {
         ""
     };
+    let managed = if hint_owned_paths().contains(&(BaseDir::Caches, entry.name.as_str())) {
+        MANAGED_BY_HINTS_TAG
+    } else {
+        ""
+    };
     format!(
-        "{:<32} {:>10}  {}{}",
+        "{:<32} {:>10}  {}{}{}",
         entry.name,
         format_bytes(entry.size),
         entry.display_name,
-        running
+        running,
+        managed
     )
 }
 
@@ -533,22 +562,40 @@ mod tests {
             entry("B", 2 << 20, Disposition::Deletable, None),
             entry("C", 1 << 20, Disposition::BelowThreshold, None),
             entry("D", 512, Disposition::Unknown, None),
+            // PBI-94: typescript is hint-owned (KNOWN_ENTRIES Caches), so its
+            // row carries the managed tag next to the disposition tag.
+            entry("typescript", 4 << 20, Disposition::Deletable, None),
         ];
         let lines = render_listing(&v);
-        assert_eq!(lines.len(), 4);
+        assert_eq!(lines.len(), 5);
         assert!(lines[0].contains("[running]"), "{}", lines[0]);
         assert!(lines[0].contains("3.0 MB"));
         assert!(!lines[1].contains('['), "{}", lines[1]);
         assert!(lines[2].contains("[below threshold]"));
         assert!(lines[3].contains("[display only]"));
+        assert!(lines[4].contains("[managed by hints]"), "{}", lines[4]);
     }
 
     #[test]
     fn render_item_mentions_running() {
         let mut e = entry("A", 1 << 20, Disposition::Deletable, Some("A"));
         assert!(!render_item(&e).contains("running"));
+        // PBI-94: a non-managed name carries no managed tag.
+        assert!(!render_item(&e).contains("[managed by hints]"));
         e.running = true;
         assert!(render_item(&e).contains("running"));
+        // PBI-94: a hint-owned name carries the managed tag after the
+        // running tag.
+        let mut m = entry("typescript", 2 << 20, Disposition::Deletable, None);
+        let idle = render_item(&m);
+        assert!(idle.contains("[managed by hints]"), "{idle}");
+        m.running = true;
+        let busy = render_item(&m);
+        assert!(busy.contains("running"));
+        assert!(
+            busy.find("[managed by hints]").unwrap() > busy.find("running").unwrap(),
+            "the managed tag must follow the running tag: {busy}"
+        );
     }
 
     #[test]

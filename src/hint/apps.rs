@@ -254,3 +254,75 @@ pub static KNOWN_ENTRIES: &[HintEntry] = &[
         relaunch_app: None,
     },
 ];
+
+/// The paths the hint cleaner owns: non-skip KNOWN_ENTRIES suffixes paired
+/// with their base dir. One owner for the "who else claims this dir"
+/// question, shared by the app-support / library-caches candidate tags and
+/// the cross-reference tests. Exact-match membership only -- prefixes must
+/// never match (Default/Cache vs Default/Cache_Data).
+pub fn hint_owned_paths() -> Vec<(BaseDir, &'static str)> {
+    KNOWN_ENTRIES
+        .iter()
+        .filter(|e| !e.skip)
+        .flat_map(|e| e.path_suffixes.iter().map(move |s| (e.base_dir, *s)))
+        .collect()
+}
+
+/// Render tag for a cleaner candidate that the hint cleaner also claims.
+pub const MANAGED_BY_HINTS_TAG: &str = "  [managed by hints]";
+
+// ─── tests ───────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hint_owned_paths_expands_the_multi_suffix_code_entry() {
+        let owned = hint_owned_paths();
+        for suffix in ["Code/Cache", "Code/CachedExtensionVSIXs", "Code/CachedData"] {
+            assert!(
+                owned.contains(&(BaseDir::AppSupport, suffix)),
+                "the VSCode multi-suffix entry must expand every suffix, missing: {suffix}"
+            );
+        }
+    }
+
+    #[test]
+    fn hint_owned_paths_distinguishes_chrome_cache_from_cache_data() {
+        // Prefix-bomb defense pin: `Default/Cache_Data` is hint-owned while
+        // `Default/Cache` is not in KNOWN_ENTRIES — membership must be
+        // exact-match only, never a prefix match.
+        let owned = hint_owned_paths();
+        assert!(
+            owned.contains(&(BaseDir::AppSupport, "Google/Chrome/Default/Cache_Data")),
+            "Cache_Data is the hint-owned Chrome path"
+        );
+        assert!(
+            !owned.contains(&(BaseDir::AppSupport, "Google/Chrome/Default/Cache")),
+            "Default/Cache is not in KNOWN_ENTRIES and must never match by prefix"
+        );
+    }
+
+    #[test]
+    fn hint_owned_paths_excludes_skip_entries() {
+        let owned = hint_owned_paths();
+        assert!(
+            !owned.iter().any(|(_, s)| *s == "GeoServices"),
+            "the GeoServices skip entry must not be hint-owned"
+        );
+    }
+
+    #[test]
+    fn hint_owned_paths_includes_homebrew_and_ms_playwright() {
+        // library-caches delegates these names, but the hint cleaner owns them.
+        let owned = hint_owned_paths();
+        assert!(owned.contains(&(BaseDir::Caches, "Homebrew")));
+        assert!(owned.contains(&(BaseDir::Caches, "ms-playwright")));
+    }
+
+    #[test]
+    fn managed_by_hints_tag_wording() {
+        assert_eq!(MANAGED_BY_HINTS_TAG, "  [managed by hints]");
+    }
+}
