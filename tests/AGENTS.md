@@ -19,3 +19,10 @@ Cache directories are resolved **once, in the cleaner's constructor**. Every env
 - Cleaner unit tests must NOT steer cache-dir resolution with `std::env::set_var` or an `EnvGuard`: build the cleaner through the `#[cfg(test)]` test factory (e.g. `HuggingFaceCleaner::with_cache_dir`) and pass the resolved cache dir explicitly, so the test has no process-env dependency.
 - The resolver's env-value → result matrix (unsafe / root / unset / escaping / joined) is pinned at the unit level in `src/safety.rs` using a test-only var name; production env behaviour is pinned by the E2E spawn pins (`.env()` on the child process).
 - A new env-dependent cleaner follows the generic constructor-resolution shape (`let cache = resolve_env_dir(...);` in its constructor), never a per-call resolver closure.
+
+## Source pins (include_str! greps)
+
+A pin greps `include_str!` source for a structural property; reach for one only as the last resort, when the guarded drift cannot surface as behaviour and a behavior test would not catch it. When a pin is justified:
+
+- Anchor the grep on the **definition line** of the pinned item (`pub(crate) fn safe_delete(`, `fn delete_selected(`), never a call site.
+- Keep the pinned literal out of the pin's own source by assembling it with `split` / `format` (precedents: the ledger-bypass pin in `src/trash.rs`, the tool-failure wording pin in `src/command.rs`).
