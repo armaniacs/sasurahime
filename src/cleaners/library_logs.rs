@@ -253,17 +253,13 @@ impl Cleaner for LibraryLogsCleaner {
             self.delete_entries(&entries, reporter, mode)
         } else {
             // The interactive select is the only prompt this cleaner has:
-            // the port owns the non-TTY resolution (PBI 75), so on a
-            // non-TTY stdin it prints the standard remedy once and returns
-            // None, and the clean skips instead of hanging on a hidden
-            // prompt. The `--all` branch above needs no terminal at all.
+            // multi_select_or_skip owns both skips - the port's non-TTY
+            // remedy and the empty-selection skip - so the clean skips
+            // instead of hanging on a hidden prompt. The `--all` branch
+            // above needs no terminal at all.
             let Some(selected) = self.interactive_select(reporter, &entries)? else {
                 return Ok(CleanResult::empty(self.name()));
             };
-            if selected.is_empty() {
-                println!("[library-logs] nothing selected");
-                return Ok(CleanResult::empty(self.name()));
-            }
             let result = self.delete_entries(&selected, reporter, mode)?;
             println!(
                 "[library-logs] total freed: {}",
@@ -308,13 +304,8 @@ impl LibraryLogsCleaner {
         let defaults: Vec<bool> = vec![true; entries.len()];
 
         println!("\nCleanable log directories in ~/Library/Logs/:\n");
-        let picks = crate::prompt::CleanPrompt::for_current_run().multi_select(
-            "library-logs",
-            reporter,
-            None,
-            &items,
-            &defaults,
-        )?;
+        let picks =
+            crate::prompt::multi_select_or_skip("library-logs", reporter, None, &items, &defaults)?;
         Ok(picks.map(|selections| selections.into_iter().map(|i| entries[i].clone()).collect()))
     }
 }
@@ -626,5 +617,25 @@ mod tests {
             "freed must be the delete-time measurement, not the scan-time size"
         );
         assert!(r.skipped.is_empty());
+    }
+
+    #[test]
+    fn the_empty_selection_line_is_owned_by_the_shared_select_path() {
+        // PBI 99: the empty-selection skip must be owned by the shared
+        // select path, not re-printed per cleaner. The drift cannot surface
+        // as behaviour (an empty selection needs a TTY), so the pin greps
+        // the source: Red before the helper, green after the migration. The
+        // needle is assembled from two pieces so the pin's own source does
+        // not contain the contiguous line it greps for.
+        let needle = String::from("] nothing") + " selected";
+        let src = include_str!("library_logs.rs");
+        assert!(
+            !src.contains(&needle),
+            "the empty-selection line must be owned by the shared select path"
+        );
+        assert!(
+            src.contains("multi_select"),
+            "the interactive select must flow through the shared select path"
+        );
     }
 }

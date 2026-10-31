@@ -413,8 +413,7 @@ impl AppSupportCleaner {
             .collect();
         let defaults = vec![false; items.len()];
         println!("\nCache directories under ~/Library/Application Support/ (none selected by default):\n");
-        let picks = crate::prompt::CleanPrompt::for_current_run()
-            .multi_select(NAME, reporter, None, &items, &defaults)?;
+        let picks = crate::prompt::multi_select_or_skip(NAME, reporter, None, &items, &defaults)?;
         Ok(picks.map(|picked| picked.into_iter().map(|i| cands[i].clone()).collect()))
     }
 
@@ -578,17 +577,13 @@ impl AppSupportCleaner {
             println!("[{NAME}] nothing to clean");
             return Ok(CleanResult::empty(NAME));
         }
-        // The port owns the non-TTY resolution (PBI 75): on a non-TTY stdin
-        // it prints the standard remedy once and returns None, and the
-        // clean skips instead of hanging on a hidden prompt.
+        // multi_select_or_skip owns both skips - the port's non-TTY remedy
+        // and the empty-selection skip - so the clean skips instead of
+        // hanging on a hidden prompt.
         let running = self.running_apps(&cands);
         let Some(selected) = self.interactive_select(reporter, &cands, &running)? else {
             return Ok(CleanResult::empty(NAME));
         };
-        if selected.is_empty() {
-            println!("[{NAME}] nothing selected");
-            return Ok(CleanResult::empty(NAME));
-        }
         let approved = self.confirm_quits(reporter, &selected, &running)?;
         let result = self.apply_selection(&selected, &approved, reporter, mode)?;
         println!("[{NAME}] total freed: {}", format_bytes(result.bytes_freed));
@@ -860,6 +855,7 @@ pub fn find_leftovers(
 mod tests {
     use super::*;
     use std::collections::HashSet;
+    use std::io::IsTerminal;
     use std::path::Component;
 
     #[test]
@@ -906,6 +902,27 @@ mod tests {
                     .unwrap_or_else(|| panic!("{s} is not under root {}", t.root));
                 assert!(t.subpaths.contains(&rel), "{s} missing from allowlist");
             }
+        }
+    }
+
+    #[test]
+    fn every_app_support_hint_entry_display_names_are_unique() {
+        // B5 (PBI 99): hint_entry resolves a target with a first-match find
+        // on the AppSupport rows, so a duplicated display_name would
+        // silently bind another row's process_name/threshold/quit_app to a
+        // target. The bidirectional tests above stop a missing row; this
+        // pin stops the same name twice - writing the same display_name on
+        // two AppSupport rows must fail the PR.
+        let mut seen = HashSet::new();
+        for e in KNOWN_ENTRIES
+            .iter()
+            .filter(|e| e.base_dir == BaseDir::AppSupport)
+        {
+            assert!(
+                seen.insert(e.display_name),
+                "duplicated AppSupport display_name: {} (first-match would bind the wrong row)",
+                e.display_name
+            );
         }
     }
 
@@ -2154,6 +2171,56 @@ mod tests {
         assert_eq!(
             r.uses_trash, deletions_happened,
             "uses_trash must come from the deletion outcomes' seam truth"
+        );
+    }
+
+    #[test]
+    fn clean_skips_interactive_select_without_a_terminal() {
+        // The per-cleaner non-TTY pin (PBI 99): on a non-TTY stdin the
+        // shared select ritual skips the interactive path, so nothing is
+        // deleted and the clean never hangs on a hidden prompt.
+        if std::io::stdin().is_terminal() {
+            // An interactive `cargo test` would otherwise hang on the prompt.
+            return;
+        }
+        let tmp = TempDir::new().unwrap();
+        let base = base_of(&tmp);
+        put(&base, "Slack/Cache/a.bin", 10_000);
+        let c = cleaner_for(&tmp, &Fake::default());
+        let r = c
+            .clean(
+                false,
+                &DeepSuppressReporter,
+                &crate::cleaner::CleanOptions::default(),
+            )
+            .unwrap();
+        assert_eq!(
+            r.bytes_freed, 0,
+            "non-terminal stdin must skip the interactive select"
+        );
+        assert!(
+            base.join("Slack/Cache/a.bin").exists(),
+            "nothing is deleted without a terminal"
+        );
+    }
+
+    #[test]
+    fn the_empty_selection_line_is_owned_by_the_shared_select_path() {
+        // PBI 99: the empty-selection skip must be owned by the shared
+        // select path, not re-printed per cleaner. The drift cannot surface
+        // as behaviour (an empty selection needs a TTY), so the pin greps
+        // the source: Red before the helper, green after the migration. The
+        // needle is assembled from two pieces so the pin's own source does
+        // not contain the contiguous line it greps for.
+        let needle = String::from("] nothing") + " selected";
+        let src = include_str!("app_support.rs");
+        assert!(
+            !src.contains(&needle),
+            "the empty-selection line must be owned by the shared select path"
+        );
+        assert!(
+            src.contains("multi_select"),
+            "the interactive select must flow through the shared select path"
         );
     }
 }

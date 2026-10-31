@@ -295,7 +295,7 @@ impl LibraryCachesCleaner {
         let items: Vec<String> = entries.iter().map(render_item).collect();
         let defaults = vec![false; entries.len()];
         println!("\nSelect known app caches to move to Trash:\n");
-        let picks = crate::prompt::CleanPrompt::for_current_run().multi_select(
+        let picks = crate::prompt::multi_select_or_skip(
             "library-caches",
             reporter,
             None,
@@ -348,16 +348,12 @@ impl LibraryCachesCleaner {
             println!("\n[library-caches] no deletable known caches");
             return Ok(CleanResult::empty(self.name()));
         }
-        // The port owns the non-TTY resolution (PBI 75): on a non-TTY stdin
-        // it prints the standard remedy once and returns None, and the
-        // clean skips instead of hanging on a hidden prompt.
+        // multi_select_or_skip owns both skips - the port's non-TTY remedy
+        // and the empty-selection skip - so the clean skips instead of
+        // hanging on a hidden prompt.
         let Some(selected) = self.interactive_select(reporter, &deletable)? else {
             return Ok(CleanResult::empty(self.name()));
         };
-        if selected.is_empty() {
-            println!("[library-caches] nothing selected");
-            return Ok(CleanResult::empty(self.name()));
-        }
         let (to_delete, mut skipped) = split_running(selected);
         let mut result = self.delete_entries(&to_delete, reporter, mode)?;
         result.skipped.append(&mut skipped);
@@ -426,6 +422,7 @@ impl Cleaner for LibraryCachesCleaner {
 mod tests {
     use super::*;
     use std::fs;
+    use std::io::IsTerminal;
     use tempfile::TempDir;
 
     #[test]
@@ -1006,6 +1003,59 @@ mod tests {
         assert_eq!(
             r.uses_trash, deletions_happened,
             "uses_trash must come from the deletion outcomes' seam truth"
+        );
+    }
+
+    #[test]
+    fn clean_skips_interactive_select_without_a_terminal() {
+        // The per-cleaner non-TTY pin (PBI 99): on a non-TTY stdin the
+        // shared select ritual skips the interactive path, so nothing is
+        // deleted and the clean never hangs on a hidden prompt.
+        if std::io::stdin().is_terminal() {
+            // An interactive `cargo test` would otherwise hang on the prompt.
+            return;
+        }
+        let tmp = TempDir::new().unwrap();
+        let c = caches(&tmp);
+        put(&c, "typescript", 20_000);
+        let cl = LibraryCachesCleaner::new(
+            tmp.path(),
+            Box::new(MockRunner::new().with_success("chflags")),
+        );
+        let r = cl
+            .clean(
+                false,
+                &crate::progress::DeepSuppressReporter,
+                &crate::cleaner::CleanOptions::default(),
+            )
+            .unwrap();
+        assert_eq!(
+            r.bytes_freed, 0,
+            "non-terminal stdin must skip the interactive select"
+        );
+        assert!(
+            c.join("typescript").exists(),
+            "nothing is deleted without a terminal"
+        );
+    }
+
+    #[test]
+    fn the_empty_selection_line_is_owned_by_the_shared_select_path() {
+        // PBI 99: the empty-selection skip must be owned by the shared
+        // select path, not re-printed per cleaner. The drift cannot surface
+        // as behaviour (an empty selection needs a TTY), so the pin greps
+        // the source: Red before the helper, green after the migration. The
+        // needle is assembled from two pieces so the pin's own source does
+        // not contain the contiguous line it greps for.
+        let needle = String::from("] nothing") + " selected";
+        let src = include_str!("library_caches.rs");
+        assert!(
+            !src.contains(&needle),
+            "the empty-selection line must be owned by the shared select path"
+        );
+        assert!(
+            src.contains("multi_select"),
+            "the interactive select must flow through the shared select path"
         );
     }
 }

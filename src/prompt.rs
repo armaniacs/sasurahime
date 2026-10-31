@@ -200,6 +200,36 @@ impl PromptPort for NonInteractive {
     }
 }
 
+/// The one interactive-select ritual (PBI 99): a multi-select plus the two
+/// skips every interactive cleaner used to repeat by hand in three drifted
+/// shapes. The port owns the non-TTY resolution (PBI 75): when prompts are
+/// unavailable, the port prints the standard remedy line exactly once and
+/// hands back `None` — the caller skips its interactive path and never
+/// interprets the `None`. An empty selection is the other skip: the
+/// `[{name}] nothing selected` line prints here, exactly once, and the
+/// caller skips. The two wordings live on disjoint paths, so "not a
+/// terminal" and "nothing selected" can never print together, and the
+/// cleaner-side duplicate outputs are gone. `Some` carries the picked
+/// indices and the clean proceeds.
+pub fn multi_select_or_skip(
+    name: &str,
+    reporter: &dyn ProgressReporter,
+    prompt: Option<&str>,
+    items: &[String],
+    defaults: &[bool],
+) -> Result<Option<Vec<usize>>> {
+    match CleanPrompt::for_current_run().multi_select(name, reporter, prompt, items, defaults)? {
+        // PBI 75: the port owns the non-TTY semantics — None means the
+        // remedy is already printed and the caller just skips.
+        None => Ok(None),
+        Some(picks) if picks.is_empty() => {
+            println!("[{name}] nothing selected");
+            Ok(None)
+        }
+        Some(picks) => Ok(Some(picks)),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -267,6 +297,32 @@ mod tests {
     }
 
     #[test]
+    fn multi_select_or_skip_skips_without_a_terminal() {
+        // PBI 99: the one interactive-select ritual. The port owns the
+        // non-TTY resolution (PBI 75): a non-TTY run gets Ok(None) without
+        // hanging, the remedy is the only line the port prints, and nothing
+        // is suspended (there is no dialoguer call to hide). The empty-
+        // selection and picked-indices exits hand a real dialoguer call and
+        // need a TTY, so they are pinned by the six cleaners' seam pins and
+        // the port's own unit tests instead.
+        if is_interactive() {
+            // dialoguer needs a real TTY; an interactive cargo test would
+            // hang on the prompt.
+            return;
+        }
+        let rep = RecordingReporter::new();
+        let items = vec!["a".to_string(), "b".to_string()];
+        let picks = multi_select_or_skip("ollama", &rep, None, &items, &[])
+            .expect("unavailable is a None, not an error");
+        assert!(picks.is_none(), "a non-TTY run must skip (Ok(None))");
+        assert_eq!(
+            rep.suspends.load(AtomicOrdering::Relaxed),
+            0,
+            "nothing to suspend: no dialoguer call happens"
+        );
+    }
+
+    #[test]
     fn cleaner_prompt_call_sites_pass_a_live_reporter_not_a_suppressor() {
         // PBI 64: the port owns the suspension, but the suspension only
         // happens when the caller passes the LIVE reporter. Six call sites
@@ -274,7 +330,10 @@ mod tests {
         // is the no-op default, so the dialoguer redraw bug could still
         // reproduce at those cleaners. The pin: no cleaner ever passes a
         // literal reference to the port - every call site threads the live
-        // reporter down from clean().
+        // reporter down from clean(). Since PBI 99 the shared select ritual
+        // (multi_select_or_skip) is the single port call site for the six
+        // migrated cleaners, so this file is scanned too: the helper must
+        // hand the port the caller's live reporter, never a literal.
         let sources = [
             include_str!("cleaners/library_caches.rs"),
             include_str!("cleaners/library_logs.rs"),
@@ -284,12 +343,18 @@ mod tests {
             include_str!("cleaners/generic.rs"),
             include_str!("cleaners/ollama.rs"),
             include_str!("cleaners/orphan_containers.rs"),
+            include_str!("prompt.rs"),
         ];
         for src in sources {
             // Whitespace-normalized so a wrapped argument list still matches.
             let flat = src.split_whitespace().collect::<Vec<_>>().join(" ");
+            // The needles are assembled from two pieces so this file's own
+            // assertion code does not contain the contiguous shape it greps
+            // for.
+            let select_needle = concat!("multi_select (", "&");
+            let confirm_needle = concat!("confirm (", "&");
             assert!(
-                !flat.contains("multi_select (&") && !flat.contains("confirm (&"),
+                !flat.contains(select_needle) && !flat.contains(confirm_needle),
                 "a prompt call site passes a literal reference (the suppressor) \
                  instead of the live reporter:\n{}",
                 &flat[..flat.len().min(200)]
