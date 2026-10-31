@@ -372,12 +372,41 @@ fn dry_run_scan_answers_y_in_stdin_but_never_deletes_hint_dirs() {
         "the hint flow must print its dry-run line, got:\n{combined}"
     );
     assert!(
-        !combined.contains("Clear Diagnostic Reports cache?"),
+        !combined.contains("Clear Diagnostic Reports cache? (2.0 MB will be freed, delete"),
         "a dry run must never print the hint prompt, got:\n{combined}"
     );
     assert!(
         dir.exists(),
         "--dry-run + y in stdin must never delete the hint dir, got:\n{combined}"
+    );
+}
+
+#[test]
+fn scan_prompt_shows_the_deletion_path() {
+    // PBI-91: the hint prompt must show WHERE the cache will be deleted —
+    // the resolved base_dir + path_suffixes paths, `~`-abbreviated — not
+    // just the vetted display name and the size. The no-quit Diagnostic
+    // Reports entry keeps the run deterministic (no process to quit, so no
+    // osascript ever runs), and the piped stdin proves the prompt still
+    // consumes the y answer and deletes.
+    let tmp = TempDir::new().unwrap();
+    let dir = make_diagnostic_reports(tmp.path());
+
+    let output = run_with_stdin(tmp.path(), &["--permanent", "scan"], "y\n");
+    let combined = combined_output(&output);
+    assert!(
+        output.status.success(),
+        "the scan with an answered hint prompt must succeed, got:\n{combined}"
+    );
+    assert!(
+        combined.contains(
+            "Clear Diagnostic Reports cache? (2.0 MB will be freed, delete ~/Library/Logs/DiagnosticReports) [y/N]",
+        ),
+        "the prompt must show the deletion path, got:\n{combined}"
+    );
+    assert!(
+        !dir.exists(),
+        "the y answer must still be consumed and delete the hint dir, got:\n{combined}"
     );
 }
 

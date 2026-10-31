@@ -540,7 +540,7 @@ mod tests {
             running: true,
         };
 
-        let selection = offer_auto_clean(&[hint], false, &prompt);
+        let selection = offer_auto_clean(&[hint], false, Path::new("/Users/tester"), &prompt);
         assert_eq!(selection.len(), 1, "the y answer must collect the entry");
         assert!(
             std::ptr::eq(selection[0], &VSCODE_ENTRY),
@@ -565,7 +565,7 @@ mod tests {
             running: true,
         };
 
-        let selection = offer_auto_clean(&[hint], false, &prompt);
+        let selection = offer_auto_clean(&[hint], false, Path::new("/Users/tester"), &prompt);
         assert!(selection.is_empty(), "an n answer must collect nothing");
         assert!(
             !runner
@@ -588,7 +588,7 @@ mod tests {
             running: false,
         };
 
-        let selection = offer_auto_clean(&[hint], false, &prompt);
+        let selection = offer_auto_clean(&[hint], false, Path::new("/Users/tester"), &prompt);
         assert_eq!(selection.len(), 1, "a non-running hint is still offered");
         let calls = runner.recorded_calls();
         assert!(
@@ -616,7 +616,12 @@ mod tests {
             running: false,
         };
 
-        let selection = offer_auto_clean(&[running_hint, idle_hint], true, &prompt);
+        let selection = offer_auto_clean(
+            &[running_hint, idle_hint],
+            true,
+            Path::new("/Users/tester"),
+            &prompt,
+        );
         assert!(selection.is_empty(), "a dry run must collect nothing");
         let calls = runner.recorded_calls();
         for program in ["osascript", "rm", "chflags", "open"] {
