@@ -237,9 +237,18 @@ impl LibraryCachesCleaner {
         mode: crate::trash::TrashMode,
     ) -> Result<CleanResult> {
         // The shared delete loop owns the per-entry contracts (progress,
-        // skip classification, freed sums, uses_trash truth).
-        let items: Vec<(std::path::PathBuf, u64)> =
-            entries.iter().map(|e| (e.path.clone(), e.size)).collect();
+        // skip classification, freed sums, uses_trash truth). PBI 93: freed
+        // is the delete-time dir_size — scan sizes ride the persistent
+        // cache (mtime key on the top-level dir), so re-measure right
+        // before the deletion. The ledger keeps its caller-owned size
+        // contract (it never re-walks a path).
+        let items: Vec<(std::path::PathBuf, u64)> = entries
+            .iter()
+            .map(|e| {
+                let size = crate::format::dir_size(&e.path);
+                (e.path.clone(), size)
+            })
+            .collect();
         Ok(crate::trash::delete_entries(
             self.name(),
             self.runner.as_ref(),
@@ -765,6 +774,56 @@ mod tests {
             "the report must carry the failure cause: {}",
             r.skipped[0].reason
         );
+    }
+
+    #[test]
+    fn delete_entries_freed_is_remeasured_after_the_scan_drifts() {
+        // PBI 93 drift pin: freed must be the delete-time dir_size. Scan
+        // sizes ride the persistent scan cache (mtime key on the top-level
+        // dir), so a cache that grew INSIDE a subdirectory after the scan
+        // keeps serving the scan-time size for up to an hour. The delete
+        // loop must re-measure instead of trusting the stale e.size.
+        let tmp = TempDir::new().unwrap();
+        let c = caches(&tmp);
+        let app = c.join("typescript");
+        fs::create_dir_all(app.join("tsbuildinfo")).unwrap();
+        fs::write(app.join("tsbuildinfo/data.bin"), vec![1u8; 20_000]).unwrap();
+        // The persistent cache is enabled for every command (main.rs), so
+        // the scan below runs exactly like production.
+        crate::scan_cache::init(&tmp.path().join("scan-cache.json"));
+        let mut cl = LibraryCachesCleaner::new(
+            tmp.path(),
+            Box::new(MockRunner::new().with_success("chflags")),
+        );
+        cl.threshold_override = Some(1);
+        let entries = cl.scan(false);
+        assert_eq!(entries.len(), 1, "fixture: one known cache entry");
+        let scan_time_size = entries[0].size;
+
+        // The cache grows inside a subdirectory: the top-level mtime is
+        // untouched (the changed-target pin re-measures only on direct
+        // children), so the persistent cache stays valid and keeps serving
+        // the scan-time value.
+        fs::write(app.join("tsbuildinfo/extra.bin"), vec![1u8; 4096]).unwrap();
+        let drifted = crate::format::dir_size(&app);
+        assert!(
+            drifted > scan_time_size,
+            "fixture: the cache must have grown after the scan ({drifted} <= {scan_time_size})"
+        );
+
+        let r = cl
+            .delete_entries(
+                &entries,
+                &crate::progress::DeepSuppressReporter,
+                crate::trash::TrashMode::Permanent,
+            )
+            .unwrap();
+        assert!(!app.exists());
+        assert_eq!(
+            r.bytes_freed, drifted,
+            "freed must be the delete-time measurement, not the scan-time size"
+        );
+        assert!(r.skipped.is_empty());
     }
 
     #[test]
