@@ -96,6 +96,18 @@ pub fn classify(
     }
 }
 
+/// The counted-side truth (PBI 101): whether the library-caches row counts
+/// `(BaseDir, path)` in its total. Static and pure — the counted set is the
+/// KNOWN non-skip Caches entries minus the names another clean target owns
+/// (`excluded_by`), the same filter [`scan_caches`] applies before an entry
+/// can exist. The home for "does the sibling count this dir": the hint side
+/// alone ([`crate::hint::apps::hint_owned_paths`]) would mis-share Homebrew,
+/// which the hint cleaner owns but this row never counts — ownership is not
+/// counting.
+pub fn counts_owned(base: BaseDir, path: &str) -> bool {
+    base == BaseDir::Caches && known_entry_for(path).is_some() && excluded_by(path).is_none()
+}
+
 /// Lists first-level entries of `dir`, largest first.
 /// Sizes are computed only for entries that will be shown: excluded, hidden and
 /// symlinked entries are never measured, and unknown apps are measured only when
@@ -1056,6 +1068,33 @@ mod tests {
         assert!(
             src.contains("multi_select"),
             "the interactive select must flow through the shared select path"
+        );
+    }
+
+    #[test]
+    fn counts_owned_is_the_counted_side_of_the_library_caches_row() {
+        // PBI 101: the counted-side truth of the library-caches row is the
+        // KNOWN non-skip Caches entries minus the names another clean target
+        // owns (`excluded_by`) — the same filter scan_caches applies before
+        // an entry can exist. The hint side alone (hint_owned_paths) would
+        // mis-share Homebrew, which the hint cleaner owns but this row
+        // never counts: ownership is not counting.
+        assert!(counts_owned(BaseDir::Caches, "typescript"));
+        assert!(
+            !counts_owned(BaseDir::Caches, "Homebrew"),
+            "excluded_by(brew) removes it: ownership is not counting"
+        );
+        assert!(
+            !counts_owned(BaseDir::Caches, "ms-playwright"),
+            "prefix-excluded (browsers) names are never counted"
+        );
+        assert!(
+            !counts_owned(BaseDir::Caches, "GeoServices"),
+            "a skip entry is OS-managed and never counted"
+        );
+        assert!(
+            !counts_owned(BaseDir::AppSupport, "Slack/Cache"),
+            "this row counts only ~/Library/Caches"
         );
     }
 }

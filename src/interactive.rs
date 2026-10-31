@@ -1,4 +1,4 @@
-use crate::cleaner::{CleanByName, CleanResult, Cleaner, ScanResult, ScanStatus};
+use crate::cleaner::{CleanByName, CleanResult, Cleaner, OwnedPaths, ScanResult, ScanStatus};
 use crate::format::format_bytes;
 use crate::scanner::{hints_overlap_kind, HintsOverlap};
 use anyhow::Result;
@@ -8,8 +8,11 @@ use std::io::{BufRead, IsTerminal, Write};
 /// Pure function — no I/O, fully testable.
 /// One selection entry: the cleaner's index plus, when the selection is a
 /// sub-target, the sub's CLI spelling and its scanned bytes (the size rides
-/// in the mapping so the sum re-binds by value, not by string re-match).
-pub(crate) type SelectionEntry = (usize, Option<(&'static str, u64)>);
+/// in the mapping so the sum re-binds by value, not by string re-match), and
+/// — PBI 101 — the sub's owned-path annotation ([`OwnedPaths`]), which rides
+/// the same way so the per-sibling net never re-looks-up a display name
+/// string at sum time.
+pub(crate) type SelectionEntry = (usize, Option<(&'static str, u64)>, Option<OwnedPaths>);
 
 pub(crate) fn build_selection_items(
     results: &[ScanResult],
@@ -17,7 +20,9 @@ pub(crate) fn build_selection_items(
     pruneable_indices: &[usize],
 ) -> (Vec<SelectionEntry>, Vec<String>) {
     // The sub's scanned bytes ride in the mapping: the sum re-binds by the
-    // carried size instead of re-matching the sub name string (PBI 59).
+    // carried size instead of re-matching the sub name string (PBI 59). The
+    // sub's owned-path annotation rides the same way (PBI 101): joined here
+    // by display name, carried by value from then on.
     let mut selection_mapping: Vec<SelectionEntry> = vec![];
     let items: Vec<String> = pruneable_indices
         .iter()
@@ -28,12 +33,17 @@ pub(crate) fn build_selection_items(
             };
             let subs = cleaners[i].sub_targets();
             if subs.is_empty() {
-                selection_mapping.push((i, None));
+                selection_mapping.push((i, None, None));
                 vec![format!("{}  ({})", cleaners[i].name(), format_bytes(bytes))]
             } else {
+                let owned = cleaners[i].sub_owned_paths();
                 subs.iter()
                     .map(|&(sub_name, sub_size)| {
-                        selection_mapping.push((i, Some((sub_name, sub_size))));
+                        let paths = owned
+                            .iter()
+                            .find(|(name, _)| *name == sub_name)
+                            .map(|(_, paths)| *paths);
+                        selection_mapping.push((i, Some((sub_name, sub_size)), paths));
                         format!(
                             "  {} > {}  ({})",
                             cleaners[i].name(),
@@ -51,26 +61,33 @@ pub(crate) fn build_selection_items(
 /// Compute the total freed bytes for selected items.
 /// Pure function — no I/O, fully testable.
 /// The hints row overlaps the app-support / library-caches rows (the same
-/// dirs are counted in both, [`crate::scanner::hints_overlap_kind`]), so the
-/// hints selection's size is subtracted once when an overlapping sibling is
-/// selected at the same time — dedup, not exclusion: a counts_toward_total
-/// style name filter here would report "Will free approximately 0 B" for a
-/// hints-only selection, while hints really deletes the app-support /
-/// library-caches dirs (PBI 94). With no overlap this stays the plain sum.
+/// dirs are counted in both, [`crate::scanner::hints_overlap_kind`]). PBI
+/// 101 generalizes the tier-1 net to per-sibling: a selected sub's owned
+/// paths are double-counted only where a selected sibling's counted set
+/// actually contains them, so the sub's size is subtracted once per
+/// selected sibling that counts its owned dir ([`sibling_counts_owned`]).
+/// A sub neither sibling counts (Homebrew: the library-caches row excludes
+/// it via `excluded_by`) is never subtracted; with no sibling selected the
+/// hints selection keeps its size — dedup, not exclusion: a
+/// counts_toward_total style name filter here would report "Will free
+/// approximately 0 B" for a hints-only selection, while hints really
+/// deletes the app-support / library-caches dirs (PBI 94). With no overlap
+/// this stays the plain sum.
 pub(crate) fn compute_selected_total(
     selected: &[usize],
     selection_mapping: &[SelectionEntry],
     results: &[ScanResult],
 ) -> u64 {
-    // First pass: one (kind, size) per selected row. Size is the carried
-    // sub_size when the row is a sub-target, else the cleaner's Pruneable
-    // bytes — the same reference the plain sum used.
+    // First pass: one row per selection. Size is the carried sub_size when
+    // the row is a sub-target, else the cleaner's Pruneable bytes — the
+    // same reference the plain sum used. Hints-row subs also carry their
+    // owned-path annotation (PBI 101), which rides in the mapping beside
+    // the size.
     let mut total: u64 = 0;
-    let mut hints_size: u64 = 0;
-    let mut hints_selected = false;
-    let mut sibling_selected = false;
+    let mut siblings: Vec<&'static str> = Vec::new();
+    let mut owned_subs: Vec<(OwnedPaths, u64)> = Vec::new();
     for &si in selected {
-        let (cleaner_idx, sub) = &selection_mapping[si];
+        let (cleaner_idx, sub, owned) = &selection_mapping[si];
         let size = match sub {
             // The sub's size rode in the mapping: no string re-match.
             Some((_, sub_size)) => *sub_size,
@@ -80,22 +97,53 @@ pub(crate) fn compute_selected_total(
             },
         };
         match hints_overlap_kind(results[*cleaner_idx].name) {
+            // The net's sub side is the hints row's subs: their owned paths
+            // are what a sibling row may also count.
             Some(HintsOverlap::HintsRow) => {
-                hints_selected = true;
-                hints_size += size;
+                if let Some(paths) = owned {
+                    owned_subs.push((*paths, size));
+                }
             }
-            Some(HintsOverlap::OverlappingSibling) => sibling_selected = true,
+            Some(HintsOverlap::OverlappingSibling) => siblings.push(results[*cleaner_idx].name),
             None => {}
         }
         total += size;
     }
-    // Subtract the hints selection once — `hints_size` is a subset of the
-    // addends above, so this cannot underflow.
-    if hints_selected && sibling_selected {
-        total - hints_size
-    } else {
-        total
+    // Per-sibling net (PBI 101): subtract each sub's size once per selected
+    // sibling that counts its owned dir. app-support counts only
+    // Application Support paths and library-caches only ~/Library/Caches,
+    // so at most one sibling counts any owned pair and each size was added
+    // above — the subtraction cannot underflow. A sub neither sibling
+    // counts (Homebrew) is never subtracted; a sub with no sibling selected
+    // (hints alone) keeps its size.
+    for (owned, size) in &owned_subs {
+        for sibling in &siblings {
+            if sibling_counts_owned(sibling, owned) {
+                total -= size;
+            }
+        }
     }
+    total
+}
+
+/// Whether one selected sibling row's counted set contains the sub's owned
+/// dir (PBI 101): every owned path must pass the sibling's counted-side
+/// predicate, the entry-level all-or-nothing the vetted tables actually
+/// produce (an Application Support entry is wholly inside the app-support
+/// allowlist; a Caches entry is wholly inside or wholly excluded by the
+/// library-caches row). The counted-side truth lives in the sibling
+/// cleaners — the hint side alone (`hint_owned_paths`) would mis-share
+/// Homebrew, which the hints cleaner owns but the library-caches row never
+/// counts (`excluded_by`). Keyed on the sibling name (PBI-83: 1 cleaner =
+/// 1 name), the same key [`hints_overlap_kind`] dispatches on.
+fn sibling_counts_owned(sibling: &str, owned: &OwnedPaths) -> bool {
+    let (base, paths) = *owned;
+    !paths.is_empty()
+        && paths.iter().all(|path| match sibling {
+            "app-support" => crate::cleaners::app_support::counts_owned(base, path),
+            "library-caches" => crate::cleaners::library_caches::counts_owned(base, path),
+            _ => false,
+        })
 }
 
 /// Names of the Pruneable Safe targets whose clean() gates on an interactive
@@ -438,7 +486,7 @@ pub fn run_interactive(
 
     let mut freed: u64 = 0;
     for &si in &selected {
-        let (cleaner_idx, sub) = &selection_mapping[si];
+        let (cleaner_idx, sub, _owned) = &selection_mapping[si];
         if let Some((sub_name, _)) = sub {
             let name = cleaners[*cleaner_idx].name();
             // PBI-50: the sub-target clean runs in-process through the seam
@@ -488,6 +536,7 @@ pub fn run_interactive(
 mod tests {
     use super::*;
     use crate::cleaner::CleanResult;
+    use crate::hint::BaseDir;
     use crate::progress::ProgressReporter;
     use anyhow::Result;
 
@@ -496,11 +545,26 @@ mod tests {
         name: &'static str,
         size: u64,
         subs: Vec<(&'static str, u64)>,
+        /// Per sub display name, the owned-path annotation (PBI 101).
+        owned: Vec<(&'static str, OwnedPaths)>,
     }
 
     impl TestCleaner {
         fn new(name: &'static str, size: u64, subs: Vec<(&'static str, u64)>) -> Self {
-            Self { name, size, subs }
+            Self {
+                name,
+                size,
+                subs,
+                owned: vec![],
+            }
+        }
+
+        /// Attaches the owned-path annotation per sub display name (PBI
+        /// 101), the way the real hints cleaner resolves it from
+        /// KNOWN_ENTRIES.
+        fn with_owned(mut self, owned: Vec<(&'static str, OwnedPaths)>) -> Self {
+            self.owned = owned;
+            self
         }
     }
 
@@ -536,6 +600,9 @@ mod tests {
         fn sub_targets(&self) -> Vec<(&'static str, u64)> {
             self.subs.clone()
         }
+        fn sub_owned_paths(&self) -> Vec<(&'static str, OwnedPaths)> {
+            self.owned.clone()
+        }
     }
 
     #[test]
@@ -546,7 +613,7 @@ mod tests {
         let pruneable = vec![0];
         let (mapping, items) = build_selection_items(&results, &cleaners, &pruneable);
         assert_eq!(mapping.len(), 1);
-        assert_eq!(mapping[0], (0, None));
+        assert_eq!(mapping[0], (0, None, None));
         assert_eq!(items.len(), 1);
         assert!(items[0].contains("test"));
         assert!(items[0].contains("1000 B"));
@@ -564,9 +631,10 @@ mod tests {
         let (mapping, items) = build_selection_items(&results, &cleaners, &pruneable);
         assert_eq!(mapping.len(), 2);
         // The sub's size rides in the mapping (PBI 59): the sum re-binds by
-        // the carried size, no string re-match.
-        assert_eq!(mapping[0], (0, Some(("DerivedData", 500))));
-        assert_eq!(mapping[1], (0, Some(("Archives", 300))));
+        // the carried size, no string re-match. PBI 101 adds the owned-path
+        // annotation beside it — None for a cleaner with no owned paths.
+        assert_eq!(mapping[0], (0, Some(("DerivedData", 500)), None));
+        assert_eq!(mapping[1], (0, Some(("Archives", 300)), None));
         assert_eq!(items.len(), 2);
         assert!(items[0].contains("DerivedData"));
         assert!(items[0].contains("500"));
@@ -586,7 +654,7 @@ mod tests {
         let pruneable = vec![1]; // only brew is Pruneable
         let (mapping, items) = build_selection_items(&results, &cleaners, &pruneable);
         assert_eq!(mapping.len(), 1);
-        assert_eq!(mapping[0], (1, None));
+        assert_eq!(mapping[0], (1, None, None));
         assert!(items[0].contains("brew"));
     }
 
@@ -635,13 +703,20 @@ mod tests {
         // same dirs are counted in both, scanner::hints_overlap_kind): when
         // both sides are selected the hints selection's size must not be
         // summed a second time — the confirm-line estimate would otherwise
-        // overshoot the real free. The plain sum reports 1550 here.
+        // overshoot the real free. Under the per-sibling net (PBI 101) each
+        // sub is subtracted once per selected sibling that counts its owned
+        // dir: both subs are owned in Application Support, which the
+        // app-support row counts and the library-caches row never does. The
+        // plain sum reports 1550 here.
         let cleaners: Vec<Box<dyn Cleaner>> = vec![
-            Box::new(TestCleaner::new(
-                "hints",
-                550,
-                vec![("slack", 250), ("xcode", 300)],
-            )),
+            Box::new(
+                TestCleaner::new("hints", 550, vec![("slack", 250), ("xcode", 300)]).with_owned(
+                    vec![
+                        ("slack", (BaseDir::AppSupport, &["Slack/Cache"])),
+                        ("xcode", (BaseDir::AppSupport, &["Code/Cache"])),
+                    ],
+                ),
+            ),
             Box::new(TestCleaner::new("app-support", 1000, vec![])),
             Box::new(TestCleaner::new("library-caches", 400, vec![])),
         ];
@@ -657,7 +732,8 @@ mod tests {
             "the hints selection must not double count against a selected sibling"
         );
 
-        // + library-caches: still one subtraction, not one per sibling row.
+        // + library-caches: the row counts neither Application Support sub,
+        // so still one subtraction per sub — not one per sibling row.
         let total = compute_selected_total(&[0, 1, 2, 3], &mapping, &results);
         assert_eq!(
             total, 1400,
@@ -683,6 +759,91 @@ mod tests {
         assert_eq!(
             total, 550,
             "a hints-only selection must keep its size, not report 0 B"
+        );
+    }
+
+    // --- PBI 101: the TUI estimate nets the shared paths out per sibling ---
+
+    #[test]
+    fn compute_selected_total_keeps_an_app_support_sub_the_library_caches_row_never_counts() {
+        // Cross-sibling under-subtraction pin (BDD scenario 1): a hints sub
+        // owned in ~/Library/Application Support is NOT counted by the
+        // library-caches row (it counts only ~/Library/Caches), so selecting
+        // it with library-caches must not subtract the sub's size. The
+        // tier-1 net subtracted the full hints size and under-reported by
+        // exactly the sub's size — the plain sum here is 900, tier 1
+        // reported 400 ("will free" smaller than what really goes).
+        let cleaners: Vec<Box<dyn Cleaner>> = vec![
+            Box::new(
+                TestCleaner::new("hints", 500, vec![("Google Chrome", 500)]).with_owned(vec![(
+                    "Google Chrome",
+                    (BaseDir::AppSupport, &["Google/Chrome/Default/Cache_Data"]),
+                )]),
+            ),
+            Box::new(TestCleaner::new("library-caches", 400, vec![])),
+        ];
+        let results: Vec<ScanResult> = cleaners.iter().map(|c| c.detect()).collect();
+        let (mapping, _items) = build_selection_items(&results, &cleaners, &[0, 1]);
+
+        let total = compute_selected_total(&[0, 1], &mapping, &results);
+        assert_eq!(
+            total, 900,
+            "a sub the sibling row never counts must not be subtracted against it"
+        );
+    }
+
+    #[test]
+    fn compute_selected_total_keeps_a_caches_sub_the_app_support_row_never_counts() {
+        // Symmetric cross-sibling under-subtraction pin (BDD scenario 2): a
+        // hints sub owned in ~/Library/Caches is NOT counted by the
+        // app-support row (it counts only its Application Support allowlist
+        // paths), so the tier-1 net's full subtraction under-reported by
+        // exactly the sub's size — the plain sum here is 1300, tier 1
+        // reported 1000.
+        let cleaners: Vec<Box<dyn Cleaner>> = vec![
+            Box::new(
+                TestCleaner::new("hints", 300, vec![("TypeScript server cache", 300)]).with_owned(
+                    vec![(
+                        "TypeScript server cache",
+                        (BaseDir::Caches, &["typescript"]),
+                    )],
+                ),
+            ),
+            Box::new(TestCleaner::new("app-support", 1000, vec![])),
+        ];
+        let results: Vec<ScanResult> = cleaners.iter().map(|c| c.detect()).collect();
+        let (mapping, _items) = build_selection_items(&results, &cleaners, &[0, 1]);
+
+        let total = compute_selected_total(&[0, 1], &mapping, &results);
+        assert_eq!(
+            total, 1300,
+            "a Caches-owned sub must not be subtracted against the app-support row"
+        );
+    }
+
+    #[test]
+    fn compute_selected_total_never_subtracts_homebrew_against_the_library_caches_row() {
+        // Homebrew mis-subtraction pin (BDD scenario 3): the hints cleaner
+        // owns ~/Library/Caches/Homebrew but the library-caches row excludes
+        // it (excluded_by("Homebrew") -> Some("brew")), so the row never
+        // counted it — subtracting the sub's size against that row reported
+        // a free smaller by exactly the Homebrew size (plain sum 500, tier 1
+        // reported 300). Neither sibling counts it, so it must not be
+        // subtracted at all.
+        let cleaners: Vec<Box<dyn Cleaner>> = vec![
+            Box::new(
+                TestCleaner::new("hints", 200, vec![("Homebrew", 200)])
+                    .with_owned(vec![("Homebrew", (BaseDir::Caches, &["Homebrew"]))]),
+            ),
+            Box::new(TestCleaner::new("library-caches", 300, vec![])),
+        ];
+        let results: Vec<ScanResult> = cleaners.iter().map(|c| c.detect()).collect();
+        let (mapping, _items) = build_selection_items(&results, &cleaners, &[0, 1]);
+
+        let total = compute_selected_total(&[0, 1], &mapping, &results);
+        assert_eq!(
+            total, 500,
+            "a dir neither sibling counts (Homebrew) must not be subtracted"
         );
     }
 

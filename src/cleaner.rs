@@ -306,6 +306,14 @@ impl Risk {
     }
 }
 
+/// The sub's owned-path annotation (PBI 101): the base dir plus the
+/// `'static` path suffixes (relative to it) that a sub-target owns. One
+/// alias for the `hint::BaseDir` coupling, so every carrier — this trait
+/// method and the TUI's `SelectionEntry` — shares one type instead of a
+/// string spelling of the directory (PBI 59: by value, not by string
+/// re-match).
+pub type OwnedPaths = (crate::hint::BaseDir, &'static [&'static str]);
+
 pub trait Cleaner: Send + Sync {
     fn name(&self) -> &'static str;
     /// Read-only. Never deletes anything.
@@ -379,6 +387,19 @@ pub trait Cleaner: Send + Sync {
 
     /// Returns sub-targets with display names and sizes (for TUI/CLI).
     fn sub_targets(&self) -> Vec<(&'static str, u64)> {
+        vec![]
+    }
+
+    /// Per sub-target, the owned-path annotation (PBI 101): `(display_name,
+    /// OwnedPaths)` for the paths this cleaner's sub would delete, resolved
+    /// statically from the vetted table — no scan, no measurement. Default
+    /// empty: only the hints cleaner owns paths a sibling row may also
+    /// count. The annotation rides with the selection mapping (PBI 59's
+    /// "the size rides in the mapping", extended to paths), so the TUI sum
+    /// re-binds the carried annotation and never re-looks-up a display name
+    /// string. Unlike [`Cleaner::sub_targets`] this never extends the sub
+    /// CLI's return shape — the annotation is the TUI's concern only.
+    fn sub_owned_paths(&self) -> Vec<(&'static str, OwnedPaths)> {
         vec![]
     }
 }
