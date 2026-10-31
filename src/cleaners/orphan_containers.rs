@@ -415,8 +415,14 @@ impl OrphanContainersCleaner {
         // per-entry contracts) lives in the shared
         // `crate::trash::delete_entries`.
         reporter.enable_live_elapsed();
-        let items: Vec<(std::path::PathBuf, u64)> =
-            selected.iter().map(|c| (c.path.clone(), c.size)).collect();
+        // PBI 97: freed is the delete-time dir_size (the interactive select can wait unbounded), so re-measure right before the deletion; the ledger keeps its caller-owned size contract (it never re-walks a path).
+        let items: Vec<(std::path::PathBuf, u64)> = selected
+            .iter()
+            .map(|c| {
+                let size = crate::format::dir_size(&c.path);
+                (c.path.clone(), size)
+            })
+            .collect();
         let result =
             crate::trash::delete_entries(self.name(), self.runner.as_ref(), reporter, mode, &items);
         println!(
@@ -965,6 +971,47 @@ mod tests {
     }
 
     #[test]
+    fn delete_selected_freed_is_remeasured_after_the_scan_drifts() {
+        // PBI 97 drift pin: freed must be the delete-time dir_size. The
+        // interactive select can wait on a human for unbounded time, so
+        // writes that land between the scan and the deletion must be
+        // reflected; OrphanCandidate.size is the scan-time value.
+        let tmp = TempDir::new().unwrap();
+        let gone = write_container(tmp.path(), "Containers", "com.example.gone");
+        let scan_time_size = dir_size(&gone);
+        assert!(scan_time_size > 0, "fixture: the container must have bytes");
+
+        // The container grows inside a subdirectory: the top-level mtime is
+        // untouched, the same fixture shape the PBI 93 drift pins use.
+        fs::write(gone.join("Data/extra.bin"), vec![1u8; 4096]).unwrap();
+        let drifted = dir_size(&gone);
+        assert!(
+            drifted > scan_time_size,
+            "fixture: the container must have grown after the scan ({drifted} <= {scan_time_size})"
+        );
+
+        let cand = OrphanCandidate {
+            path: gone.clone(),
+            name: "com.example.gone".into(),
+            kind: ContainerKind::Containers,
+            size: scan_time_size,
+        };
+        let r = cleaner_for(&tmp)
+            .delete_selected(
+                &[cand],
+                &SuppressReporter,
+                crate::trash::TrashMode::Permanent,
+            )
+            .unwrap();
+        assert!(!gone.exists());
+        assert_eq!(
+            r.bytes_freed, drifted,
+            "freed must be the delete-time measurement, not the scan-time size"
+        );
+        assert!(r.skipped.is_empty());
+    }
+
+    #[test]
     fn orphan_containers_is_never_auto_cleaned() {
         let tmp = TempDir::new().unwrap();
         assert!(!cleaner_for(&tmp).auto_clean_allowed());
@@ -1019,9 +1066,10 @@ mod tests {
 
     /// One orphan candidate folder plus its cleaner. The interactive select
     /// is gated on a real terminal, so the pin tests drive the deletion body
-    /// `clean_with_opts` threads its resolved mode into (`clean_with_opts`
-    /// resolves `opts.trash_mode.unwrap_or(Global)` and passes the result to
-    /// `delete_selected` via `clean_with_mode`).
+    /// `clean` threads its resolved mode into (`opts.trash_mode` is the
+    /// resolved deletion mode — the merged clean contract,
+    /// src/cleaner.rs:300-304 — passed to `delete_selected` via
+    /// `clean_with_mode`).
     fn orphan_candidate_cleaner(
         tmp: &TempDir,
     ) -> (OrphanContainersCleaner, Vec<OrphanCandidate>, PathBuf) {

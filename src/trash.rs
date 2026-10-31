@@ -293,6 +293,7 @@ pub fn seam_delete(
 /// `items` pairs each path with the byte count the run reports as freed
 /// when its deletion succeeds; the caller owns the per-item size
 /// computation and display labels (the ledger never re-walks a path).
+/// The provenance of what each rider's freed size means is the freed semantics table in the freed_message doc (src/main.rs).
 /// `label` names the cleaner in the progress and per-entry log lines.
 /// dry-run never reaches the ledger: callers print their own dry-run
 /// lines and return before calling it. `seam_delete` is the adapter for
