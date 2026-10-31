@@ -176,14 +176,22 @@ pub fn auto_clean_hint(
     Ok(result)
 }
 
+/// The `--sub` resolution predicate: exact display-name match over the
+/// non-skip KNOWN_ENTRIES rows. One owner for the predicate, shared by the
+/// sub-target validation ([`is_known_hint_name`]) and the static lookup
+/// ([`KnownAppHintsCleaner::static_sub_hint`]) so they can never drift.
+fn find_known_entry(name: &str) -> Option<&'static HintEntry> {
+    super::apps::KNOWN_ENTRIES
+        .iter()
+        .find(|e| !e.skip && e.display_name == name)
+}
+
 /// True when `name` is a KNOWN_ENTRIES display name a `--sub` may select.
 /// Skip entries are excluded: they are never cleaned (detector.rs), so
 /// naming one is an unknown sub-target. One owner for the sub-target
 /// validation shared by the `clean hints` CLI arm and the seam.
 pub fn is_known_hint_name(name: &str) -> bool {
-    super::apps::KNOWN_ENTRIES
-        .iter()
-        .any(|e| !e.skip && e.display_name == name)
+    find_known_entry(name).is_some()
 }
 
 /// The KNOWN_ENTRIES hints cleaner (PBI-83): the whole hint table as ONE
@@ -216,6 +224,12 @@ impl KnownAppHintsCleaner {
     /// TUI's sub-target selection). Names are validated by the caller
     /// (`is_known_hint_name`) before they reach here: an unknown name is an
     /// error at the arm/seam, never a silent no-op clean (PBI 63 shape).
+    ///
+    /// PBI-100: a named entry resolves statically from KNOWN_ENTRIES in
+    /// clean() — the explicit selection is the threshold judgment, so no
+    /// `collect_hints` re-derivation, threshold re-judgment or top5 truncate
+    /// happens for it (top5 stays the display contract of detect() /
+    /// sub_targets()).
     pub fn with_sub_names(mut self, subs: Vec<String>) -> Self {
         self.subs = Some(subs);
         self
@@ -225,6 +239,46 @@ impl KnownAppHintsCleaner {
     /// (above-threshold, skip entries excluded, largest first, top 5).
     fn collect(&self) -> Vec<ProcessHint> {
         collect_hints(&self.home, &*self.runner)
+    }
+
+    /// Resolves one `--sub` / TUI display name to its hint (PBI-100): the
+    /// explicit selection is the threshold judgment, so the entry is looked
+    /// up statically in KNOWN_ENTRIES — the same predicate
+    /// [`is_known_hint_name`] validates with, shared via
+    /// [`find_known_entry`] — and the clean never re-derives
+    /// `collect_hints` (no full 22-dir walk, no threshold re-judgment, no
+    /// top5 truncate; top5 stays the display contract of detect() /
+    /// sub_targets()). A below-threshold or top5-outside named entry is
+    /// therefore still cleaned instead of silently dropping out of a
+    /// re-derived selection.
+    ///
+    /// `running` alone is fetched fresh with ONE pgrep right before the
+    /// deletion (PBI 93's measure-at-delete-time philosophy): the quit
+    /// decision is "is it running now", never the offer-time flag. An
+    /// entry without a process_name skips the pgrep entirely and is never
+    /// running.
+    fn static_sub_hint(&self, name: &str) -> Option<ProcessHint> {
+        let entry = find_known_entry(name)?;
+        let base = base_path(&self.home, entry.base_dir);
+        // Display-only measure of the selected entry's own paths (the size
+        // the dry-run plan line shows): this is not the collect_hints walk
+        // — no other entry is touched, no threshold predicate, no top5
+        // truncate. The deletion seam re-measures at delete time and the
+        // freed sum stays the seam's.
+        let size_bytes: u64 = entry
+            .path_suffixes
+            .iter()
+            .map(|s| crate::format::dir_size(&base.join(s)))
+            .sum();
+        let running = entry
+            .process_name
+            .map(|n| super::detector::is_running(n, &*self.runner))
+            .unwrap_or(false);
+        Some(ProcessHint {
+            entry,
+            size_bytes,
+            running,
+        })
     }
 }
 
@@ -296,13 +350,17 @@ impl Cleaner for KnownAppHintsCleaner {
         _reporter: &dyn ProgressReporter,
         opts: &CleanOptions,
     ) -> anyhow::Result<CleanResult> {
-        let hints = self.collect();
-        let selected: Vec<&ProcessHint> = match &self.subs {
-            Some(subs) => hints
+        // PBI-100: subs = Some is an explicit selection — the threshold was
+        // already judged when the user picked the name, so the entries
+        // resolve statically ([Self::static_sub_hint]) and the clean never
+        // re-derives `collect_hints`. The bare `clean hints` (subs = None)
+        // keeps the current contract: every hint above its threshold, top 5.
+        let selected: Vec<ProcessHint> = match &self.subs {
+            Some(subs) => subs
                 .iter()
-                .filter(|h| subs.iter().any(|s| *s == h.entry.display_name))
+                .filter_map(|name| self.static_sub_hint(name))
                 .collect(),
-            None => hints.iter().collect(),
+            None => self.collect(),
         };
 
         let mut summary = CleanResult::empty(self.name());
@@ -329,7 +387,7 @@ impl Cleaner for KnownAppHintsCleaner {
             return Ok(summary);
         }
 
-        for hint in selected {
+        for hint in &selected {
             match auto_clean_hint(hint, &self.home, &*self.runner, opts.trash_mode) {
                 Ok(result) => {
                     summary.bytes_freed += result.bytes_freed;

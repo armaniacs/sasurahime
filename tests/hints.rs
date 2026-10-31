@@ -9,7 +9,11 @@
 // - an unknown sub-target name exits non-zero (PBI 63 shape: an unknown
 //   spelling is an error, not a silent drop);
 // - `targets` lists `hints` (also pinned by tests/coverage.rs);
-// - `scan` shows the hints row (not found when no candidate has debris).
+// - `scan` shows the hints row (not found when no candidate has debris);
+// - a known name outside the top 5 (PBI-100: the explicit selection is the
+//   threshold judgment) is still cleaned via `--sub`;
+// - below-threshold debris behind an explicit selection is still cleaned
+//   (PBI-100: the clean never re-runs the collect_hints threshold filter).
 //
 // The E2E debris uses the no-quit KNOWN_ENTRIES ("Diagnostic Reports",
 // "Crash Reporter logs": no process, no osascript, no relaunch), so the runs
@@ -56,6 +60,34 @@ fn make_crash_reporter_logs(home: &std::path::Path) -> std::path::PathBuf {
     let dir = home.join("Library/Logs/CrashReporter");
     fs::create_dir_all(&dir).unwrap();
     fs::write(dir.join("crash-reporter.log"), vec![0u8; DEBRIS_BYTES]).unwrap();
+    dir
+}
+
+/// Creates `size_bytes` of debris for the no-quit "Diagnostic Reports" hint
+/// entry (~/Library/Logs/DiagnosticReports, threshold 1 MB), a multiple of
+/// the 4096-byte APFS page so `format::dir_size` (st_blocks × 512) measures
+/// it exactly.
+fn make_diagnostic_reports_with_bytes(
+    home: &std::path::Path,
+    size_bytes: usize,
+) -> std::path::PathBuf {
+    let dir = home.join("Library/Logs/DiagnosticReports");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("crash-report.ips"), vec![0u8; size_bytes]).unwrap();
+    dir
+}
+
+/// Creates `size_bytes` of debris in a KNOWN_ENTRIES log directory
+/// (~/Library/Logs/<log_dir>, threshold 1 MB), a multiple of the 4096-byte
+/// APFS page so `format::dir_size` (st_blocks × 512) measures it exactly.
+fn make_log_dir_debris(
+    home: &std::path::Path,
+    log_dir: &str,
+    size_bytes: usize,
+) -> std::path::PathBuf {
+    let dir = home.join("Library/Logs").join(log_dir);
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("debris.log"), vec![0u8; size_bytes]).unwrap();
     dir
 }
 
@@ -298,5 +330,100 @@ fn clean_hints_refuses_to_delete_through_an_intermediate_symlink() {
     assert!(
         cache.join("important.db").exists(),
         "the real data behind the intermediate symlink must survive, got:\n{combined}"
+    );
+}
+
+#[test]
+fn clean_hints_sub_deletes_a_known_name_outside_the_top5() {
+    // PBI-100: the explicit selection is the threshold judgment. A known
+    // name that sorts below the top 5 of the display list used to drop out
+    // of the re-derived selection and become a silent no-op (debris alive,
+    // exit 0); the named entry must be cleaned instead. 1.5 MB of
+    // Diagnostic Reports sorts below the five 2 MB log candidates, so the
+    // display list (largest first, top 5) truncates it away — and the
+    // non-selected candidates' running probes (pgrep) cannot influence the
+    // selected entry's clean, so the run stays deterministic.
+    let tmp = TempDir::new().unwrap();
+    let diagnostic = make_diagnostic_reports_with_bytes(tmp.path(), 1_572_864);
+    let crash_reporter = make_crash_reporter_logs(tmp.path());
+    let claude = make_log_dir_debris(tmp.path(), "Claude", DEBRIS_BYTES);
+    let zoom = make_log_dir_debris(tmp.path(), "zoom.us", DEBRIS_BYTES);
+    let lm_studio = make_log_dir_debris(tmp.path(), "LM Studio", DEBRIS_BYTES);
+    let fsck = make_log_dir_debris(tmp.path(), "fsck_hfs.log", DEBRIS_BYTES);
+
+    let output = sasurahime(tmp.path())
+        .args([
+            "--permanent",
+            "clean",
+            "hints",
+            "--sub",
+            "Diagnostic Reports",
+        ])
+        .output()
+        .unwrap();
+    let combined = combined_output(&output);
+    assert!(
+        output.status.success(),
+        "clean hints --sub must succeed, got:\n{combined}"
+    );
+    assert!(
+        !diagnostic.exists(),
+        "a known name outside the top 5 must still be cleaned, got:\n{combined}"
+    );
+    assert!(
+        crash_reporter.exists()
+            && claude.exists()
+            && zoom.exists()
+            && lm_studio.exists()
+            && fsck.exists(),
+        "the other candidates must survive, got:\n{combined}"
+    );
+}
+
+#[test]
+fn clean_hints_sub_cleans_below_threshold_debris_without_rejudging() {
+    // PBI-100: the explicit selection is the threshold judgment — the clean
+    // must not re-run collect_hints' threshold filter, so debris below the
+    // 1 MB threshold (e.g. logs rotated or shrunk between the offer and the
+    // clean) is still cleaned and the history row is written.
+    let tmp = TempDir::new().unwrap();
+    let diagnostic = make_diagnostic_reports_with_bytes(tmp.path(), 4_096);
+
+    let output = sasurahime(tmp.path())
+        .args([
+            "--permanent",
+            "clean",
+            "hints",
+            "--sub",
+            "Diagnostic Reports",
+        ])
+        .output()
+        .unwrap();
+    let combined = combined_output(&output);
+    assert!(
+        output.status.success(),
+        "clean hints --sub must succeed, got:\n{combined}"
+    );
+    assert!(
+        !diagnostic.exists(),
+        "below-threshold debris behind an explicit selection must still be \
+         cleaned, got:\n{combined}"
+    );
+
+    // The history row is written for the bytes the run actually freed.
+    let history_path = tmp.path().join(".local/share/sasurahime/history.json");
+    let entries = sasurahime::history::load_history(&history_path);
+    assert_eq!(
+        entries.len(),
+        1,
+        "one history row for the hints clean, got: {entries:?}"
+    );
+    assert_eq!(
+        entries[0].cleaner, "hints",
+        "the row names the hints cleaner"
+    );
+    assert_eq!(
+        entries[0].freed_bytes, 4_096,
+        "the freed bytes are recorded"
     );
 }
