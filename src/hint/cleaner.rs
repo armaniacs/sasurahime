@@ -226,7 +226,9 @@ impl Cleaner for KnownAppHintsCleaner {
     /// it even when `[policy] include_manual` or `--include-manual` is set
     /// (PBI 87, via [`Cleaner::quits_running_apps`]). Only an explicit
     /// selection runs it (`clean hints`, `--sub`, or the TUI); the
-    /// interactive offer keeps its `Quit ... and clear cache? [y/N]` prompt.
+    /// interactive offer keeps its
+    /// `Quit ... and clear cache? (... will be freed, delete ...) [y/N]`
+    /// prompt (PBI-91 adds the deletion paths to it).
     fn risk(&self) -> Risk {
         Risk::Moderate
     }
@@ -298,14 +300,15 @@ impl Cleaner for KnownAppHintsCleaner {
         if dry_run {
             for hint in &selected {
                 let size_str = format_bytes(hint.size_bytes);
+                let paths = hint_paths_display(&self.home, hint.entry);
                 if hint.running {
                     eprintln!(
-                        "[dry-run] would quit and clear {} ({size_str})",
+                        "[dry-run] would quit and clear {} ({size_str}, delete {paths})",
                         hint.entry.display_name
                     );
                 } else {
                     eprintln!(
-                        "[dry-run] would clear {} ({size_str})",
+                        "[dry-run] would clear {} ({size_str}, delete {paths})",
                         hint.entry.display_name
                     );
                 }
@@ -332,6 +335,28 @@ impl Cleaner for KnownAppHintsCleaner {
     }
 }
 
+/// The `~`-abbreviated deletion target paths for a hint entry: the same
+/// `base_path` + `path_suffixes` resolution the delete loop runs, joined
+/// with ", " for display. One owner for the path text shared by the
+/// interactive prompt and both dry-run listings, so the three never drift
+/// (PBI-91: the user audits what is deleted where instead of trusting the
+/// vetted display name alone).
+fn hint_paths_display(home: &Path, entry: &HintEntry) -> String {
+    let base = base_path(home, entry.base_dir);
+    entry
+        .path_suffixes
+        .iter()
+        .map(|suffix| {
+            let path = base.join(suffix);
+            match path.strip_prefix(home) {
+                Ok(rest) => format!("~/{}", rest.display()),
+                Err(_) => path.to_string_lossy().to_string(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 /// The scan-tip offer, reduced to selection collection (PBI-83): ask the
 /// user per actionable hint and return the accepted entries. The execution
 /// is the caller's job — it rides the CleanByName seam through the
@@ -346,9 +371,14 @@ impl Cleaner for KnownAppHintsCleaner {
 /// alike, the accepted entries come back as the selection; the quit →
 /// delete → relaunch steps live in the cleaner's clean() (one loop, no
 /// drift).
+///
+/// `home` resolves the `~`-abbreviated deletion paths shown in the prompt
+/// and in the dry-run lines (PBI-91) — display only, it never reaches a
+/// deletion call.
 pub fn offer_auto_clean(
     hints: &[ProcessHint],
     dry_run: bool,
+    home: &Path,
     prompt: &dyn PromptReader,
 ) -> Vec<&'static HintEntry> {
     let mut accepted: Vec<&'static HintEntry> = Vec::new();
@@ -365,14 +395,15 @@ pub fn offer_auto_clean(
     if dry_run {
         for hint in actionable {
             let size_str = format_bytes(hint.size_bytes);
+            let paths = hint_paths_display(home, hint.entry);
             if hint.running {
                 eprintln!(
-                    "[dry-run] would quit and clear {} ({size_str})",
+                    "[dry-run] would quit and clear {} ({size_str}, delete {paths})",
                     hint.entry.display_name
                 );
             } else {
                 eprintln!(
-                    "[dry-run] would clear {} ({size_str})",
+                    "[dry-run] would clear {} ({size_str}, delete {paths})",
                     hint.entry.display_name
                 );
             }
@@ -382,14 +413,15 @@ pub fn offer_auto_clean(
 
     for hint in actionable {
         let size_str = format_bytes(hint.size_bytes);
+        let paths = hint_paths_display(home, hint.entry);
         if hint.running {
             eprint!(
-                "\nQuit {} and clear cache? ({size_str} will be freed) [y/N] ",
+                "\nQuit {} and clear cache? ({size_str} will be freed, delete {paths}) [y/N] ",
                 hint.entry.display_name
             );
         } else {
             eprint!(
-                "\nClear {} cache? ({size_str} will be freed) [y/N] ",
+                "\nClear {} cache? ({size_str} will be freed, delete {paths}) [y/N] ",
                 hint.entry.display_name
             );
         }
@@ -498,5 +530,44 @@ mod tests {
             "quit app \"Visual Studio Code\""
         );
         assert_eq!(quit_app_script("Slack"), "quit app \"Slack\"");
+    }
+
+    #[test]
+    fn hint_paths_display_abbreviates_home_and_joins_suffixes() {
+        // PBI-91: the path text the prompt and the dry-run lines show is the
+        // same base_path + path_suffixes resolution the delete loop runs,
+        // `~`-abbreviated; a multi-suffix entry lists every path.
+        let home = Path::new("/Users/tester");
+        let logs = HintEntry {
+            base_dir: crate::hint::BaseDir::Logs,
+            path_suffixes: &["DiagnosticReports"],
+            display_name: "Diagnostic Reports",
+            process_name: None,
+            commands: &[],
+            threshold_bytes: 1024 * 1024,
+            skip: false,
+            quit_app: None,
+            relaunch_app: None,
+        };
+        assert_eq!(
+            hint_paths_display(home, &logs),
+            "~/Library/Logs/DiagnosticReports"
+        );
+
+        let multi = HintEntry {
+            base_dir: crate::hint::BaseDir::AppSupport,
+            path_suffixes: &["Code/Cache", "Code/CachedData"],
+            display_name: "VSCode caches",
+            process_name: None,
+            commands: &[],
+            threshold_bytes: 1024 * 1024,
+            skip: false,
+            quit_app: None,
+            relaunch_app: None,
+        };
+        assert_eq!(
+            hint_paths_display(home, &multi),
+            "~/Library/Application Support/Code/Cache, ~/Library/Application Support/Code/CachedData"
+        );
     }
 }

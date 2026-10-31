@@ -1218,7 +1218,7 @@ fn run_hint_flow(
     let runner = SystemCommandRunner;
     let hints = hint::collect_hints(home, &runner);
     hint::print_hints(&hints);
-    let selection = hint::offer_auto_clean(&hints, dry_run, &hint::StdinPrompt);
+    let selection = hint::offer_auto_clean(&hints, dry_run, home, &hint::StdinPrompt);
     let mut aggregate = cleaner::CleanResult::empty("hints");
     for entry in &selection {
         let result = clean_by_name(
