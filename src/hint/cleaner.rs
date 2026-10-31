@@ -1,4 +1,6 @@
-use crate::cleaner::{CleanOptions, CleanResult, Cleaner, Risk, ScanResult, ScanStatus};
+use crate::cleaner::{
+    CleanOptions, CleanResult, Cleaner, OwnedPaths, Risk, ScanResult, ScanStatus,
+};
 use crate::command::CommandRunner;
 use crate::format::format_bytes;
 use crate::interactive::is_yes_answer;
@@ -344,6 +346,23 @@ impl Cleaner for KnownAppHintsCleaner {
             .collect()
     }
 
+    /// The owned-path annotation per display name (PBI 101), resolved
+    /// through [`find_known_entry`] — the same non-skip KNOWN_ENTRIES
+    /// predicate `--sub` validates with, so the resolution owner stays
+    /// single. No `collect_hints` walk, no threshold judgment, no top5
+    /// truncate: the annotation is the vetted table's own data, and it
+    /// covers every `--sub`-selectable name, not just the top 5 the
+    /// detector lists (the TUI joins it onto the sub rows by name and
+    /// carries it by value — PBI 59's "the size rides in the mapping",
+    /// extended to paths: the sum never re-looks-up a display name string).
+    fn sub_owned_paths(&self) -> Vec<(&'static str, OwnedPaths)> {
+        super::apps::KNOWN_ENTRIES
+            .iter()
+            .filter_map(|e| find_known_entry(e.display_name))
+            .map(|e| (e.display_name, (e.base_dir, e.path_suffixes)))
+            .collect()
+    }
+
     fn clean(
         &self,
         dry_run: bool,
@@ -639,6 +658,40 @@ mod tests {
         assert_eq!(
             hint_paths_display(home, &multi),
             "~/Library/Application Support/Code/Cache, ~/Library/Application Support/Code/CachedData"
+        );
+    }
+
+    #[test]
+    fn sub_owned_paths_resolves_the_owned_paths_statically() {
+        // PBI 101: the owned-path annotation per display name resolves
+        // through find_known_entry's predicate (non-skip KNOWN_ENTRIES
+        // rows) — no collect_hints walk, so a tempdir with no debris must
+        // still carry every annotation. The annotation rides in the
+        // selection mapping (PBI 59), so the TUI sum never re-looks-up a
+        // display name string.
+        let tmp = tempfile::tempdir().unwrap();
+        let c = KnownAppHintsCleaner::new(
+            tmp.path(),
+            Box::new(crate::test_helpers::MockRunner::new().with_not_found()),
+        );
+        let owned = c.sub_owned_paths();
+        assert!(
+            owned.contains(&(
+                "Google Chrome",
+                (
+                    crate::hint::BaseDir::AppSupport,
+                    &["Google/Chrome/Default/Cache_Data"]
+                )
+            )),
+            "the Chrome sub must carry its owned path, got: {owned:?}"
+        );
+        assert!(
+            owned.contains(&("Homebrew", (crate::hint::BaseDir::Caches, &["Homebrew"]))),
+            "the Homebrew sub must carry its owned path, got: {owned:?}"
+        );
+        assert!(
+            !owned.iter().any(|(name, _)| *name == "GeoServices"),
+            "a skip entry must not carry an annotation, got: {owned:?}"
         );
     }
 }

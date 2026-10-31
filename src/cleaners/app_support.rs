@@ -108,6 +108,20 @@ pub fn hint_entry(target: &AppSupportTarget) -> Option<&'static HintEntry> {
         .find(|e| e.base_dir == BaseDir::AppSupport && e.display_name == target.hint_name)
 }
 
+/// The counted-side truth (PBI 101): whether the app-support row counts
+/// `(BaseDir, path)` in its total. Static and pure — the counted set is
+/// every [`TARGETS`] allowlist path (root + subpath), the same paths
+/// [`scan_candidates`] resolves. Exact-match membership only — prefixes must
+/// never match (Default/Cache vs Default/Cache_Data, the PBI 94 pin).
+pub fn counts_owned(base: BaseDir, path: &str) -> bool {
+    base == BaseDir::AppSupport
+        && TARGETS.iter().any(|t| {
+            t.subpaths
+                .iter()
+                .any(|&sub| format!("{}/{}", t.root, sub) == path)
+        })
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum GuardError {
     NotAllowed,
@@ -2221,6 +2235,37 @@ mod tests {
         assert!(
             src.contains("multi_select"),
             "the interactive select must flow through the shared select path"
+        );
+    }
+
+    #[test]
+    fn counts_owned_is_the_counted_side_of_the_app_support_row() {
+        // PBI 101: the counted-side truth of the app-support row is every
+        // TARGETS allowlist path (root + subpath), the same paths
+        // scan_candidates resolves. Membership is exact-match only — a
+        // prefix of an allowlisted path that is not itself allowlisted must
+        // never match (the whole Service Worker dir holds user data).
+        assert!(counts_owned(BaseDir::AppSupport, "Code/Cache"));
+        assert!(counts_owned(
+            BaseDir::AppSupport,
+            "Google/Chrome/Default/Cache_Data"
+        ));
+        assert!(
+            counts_owned(BaseDir::AppSupport, "Google/Chrome/Default/Cache"),
+            "both Chrome cache dirs are allowlisted, so both are counted"
+        );
+        assert!(
+            !counts_owned(BaseDir::AppSupport, "Slack/Service Worker"),
+            "a prefix of allowlisted Service Worker/CacheStorage must never \
+             match: the whole dir holds user data"
+        );
+        assert!(
+            !counts_owned(BaseDir::AppSupport, "Slack/Local Storage"),
+            "user data is never in the allowlist"
+        );
+        assert!(
+            !counts_owned(BaseDir::Caches, "typescript"),
+            "this row counts only Application Support"
         );
     }
 }
