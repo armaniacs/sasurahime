@@ -762,6 +762,18 @@ fn all_cleaners(home: &std::path::Path, config: &config::Config) -> Vec<Box<dyn 
 /// Message shown after a clean. `uses_trash` is the cleaner's own report: a
 /// cleaner that deletes outside the Trash (tmutil, rustup, ...) must not claim
 /// its bytes can be restored.
+///
+/// # freed 意味論の契約(PBI 97)
+///
+/// "Freed" の意味は対象によって異なる。来歴の検証はこの表で 1 hop に落ちる:
+///
+/// | 種 | 意味 | anchor |
+/// |---|---|---|
+/// | (a) ledger 総和 | caller 提供の per-item size(本 PBI 着地後は全 ledger rider が削除時 dir_size)の和、成功分だけ | src/trash.rs:293-295 + :332 |
+/// | (b) 差分 | 外部ツール実行前後の dir_size 差 | src/cleaners/generic.rs:640 / src/cleaners/uv.rs:158 |
+/// | (c) 実行前全量 | CLI 実行成功時に実行前のディレクトリ全量を freed として報告 | src/cli_fallback.rs:147 + :168 |
+/// | (d) 検証済み上限 | plugin の claimed freed を削除後の残り実測サイズで上限切り | src/cleaners/plugin.rs:431-438 |
+/// | 解釈 | Trash 軸の分離表示(Logical/Physical) | src/main.rs:765-776(本 doc) |
 fn freed_message(bytes_freed: u64, uses_trash: bool, trash_mode: bool) -> String {
     if trash_mode && uses_trash && bytes_freed > 0 {
         // Two axes: the logical size is gone from the caches, but the bytes

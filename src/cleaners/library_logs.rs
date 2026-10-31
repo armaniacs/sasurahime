@@ -156,8 +156,14 @@ impl LibraryLogsCleaner {
         reporter: &dyn ProgressReporter,
         mode: crate::trash::TrashMode,
     ) -> Result<CleanResult> {
-        let items: Vec<(std::path::PathBuf, u64)> =
-            entries.iter().map(|e| (e.path.clone(), e.size)).collect();
+        // PBI 97: freed is the delete-time dir_size (the interactive select can wait unbounded), so re-measure right before the deletion; the ledger keeps its caller-owned size contract (it never re-walks a path).
+        let items: Vec<(std::path::PathBuf, u64)> = entries
+            .iter()
+            .map(|e| {
+                let size = crate::format::dir_size(&e.path);
+                (e.path.clone(), size)
+            })
+            .collect();
         Ok(crate::trash::delete_entries(
             self.name(),
             self.runner.as_ref(),
@@ -577,5 +583,48 @@ mod tests {
             logs.join("aged.log").exists(),
             "nothing is deleted without a terminal"
         );
+    }
+
+    #[test]
+    fn delete_entries_freed_is_remeasured_after_the_scan_drifts() {
+        // PBI 97 drift pin: freed must be the delete-time dir_size. The
+        // interactive select can wait on a human for unbounded time, so
+        // writes that land between the scan and the deletion (logs grow
+        // and rotate while the screen is being read) must be reflected;
+        // LogEntry.size is the scan-time value.
+        let tmp = TempDir::new().unwrap();
+        let logs = logs_dir(&tmp);
+        let app = logs.join("com.example.app");
+        fs::create_dir_all(app.join("logs")).unwrap();
+        fs::write(app.join("logs/a.log"), vec![1u8; 20_000]).unwrap();
+        let runner = crate::test_helpers::MockRunner::new().with_success("chflags");
+        let cleaner = LibraryLogsCleaner::new(tmp.path(), Box::new(runner));
+        let entries = scan_logs(&logs, DEFAULT_KEEP_DAYS, 1);
+        assert_eq!(entries.len(), 1, "fixture: one log dir entry");
+        let scan_time_size = entries[0].size;
+
+        // The log dir grows inside a subdirectory: the top-level mtime is
+        // untouched, the same fixture shape the PBI 93 drift pins use for
+        // the persistent cache drift.
+        fs::write(app.join("logs/b.log"), vec![1u8; 4096]).unwrap();
+        let drifted = dir_size(&app);
+        assert!(
+            drifted > scan_time_size,
+            "fixture: the log dir must have grown after the scan ({drifted} <= {scan_time_size})"
+        );
+
+        let r = cleaner
+            .delete_entries(
+                &entries,
+                &crate::progress::DeepSuppressReporter,
+                crate::trash::TrashMode::Permanent,
+            )
+            .unwrap();
+        assert!(!app.exists());
+        assert_eq!(
+            r.bytes_freed, drifted,
+            "freed must be the delete-time measurement, not the scan-time size"
+        );
+        assert!(r.skipped.is_empty());
     }
 }
