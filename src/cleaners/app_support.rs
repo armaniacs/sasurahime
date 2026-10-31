@@ -134,6 +134,16 @@ impl std::fmt::Display for GuardError {
 
 /// The only way to obtain a deletable path. `sub` must equal one of
 /// `target.subpaths` verbatim, and no component below `base` may be a symlink.
+///
+/// PBI 89 design-it-twice decision: this loop keeps its own per-component
+/// walk instead of calling [`crate::safety::symlink_scope`]. The safety
+/// helper rejects symlinks only — the seam also deletes files — while this
+/// resolver must additionally refuse non-directory components and return the
+/// typed [`GuardError`] variants the guard tests pin; collapsing both
+/// contracts into one helper would force the seam's file-leaf allowance onto
+/// the allowlist or duplicate the walk anyway. The seam's HOME-anchored
+/// check runs behind this resolver for every app-support deletion, so the
+/// two inspections are a harmless fail-closed double gate, not drift.
 pub fn resolve_allowed(
     base: &Path,
     target: &AppSupportTarget,

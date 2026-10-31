@@ -143,7 +143,10 @@ pub struct DeleteOutcome {
 /// ([`crate::safety::is_safe_delete_target`]) so HOME, its
 /// ancestors, system roots and the mounted/shared roots (/Volumes, /net,
 /// /Users/Shared, /Library, /opt, /private/var/vm) are refused before
-/// anything is touched, then clears macOS `uchg` immutable flags before a
+/// anything is touched, then enforces the per-component symlink scope check
+/// ([`crate::safety::symlink_scope_below_home`], PBI 89) so a path whose
+/// intermediate component below HOME is a symlink is refused too, then
+/// clears macOS `uchg` immutable flags before a
 /// permanent remove (warning and continuing when the clear fails), deletes
 /// according to `mode`, and classifies failures into skippable vs fatal.
 ///
@@ -170,6 +173,22 @@ pub(crate) fn safe_delete(
     // chflags call and the delete itself, so a misdirected override (e.g.
     // ACT_CACHE_DIR=$HOME) can never reach the deletion sink.
     if !crate::safety::is_safe_delete_target(path) {
+        log::warn!("refusing to delete unsafe path: {}", path.display());
+        anyhow::bail!("refusing to delete unsafe path: {}", path.display());
+    }
+    // Per-component symlink scope check (PBI 89): no component below the
+    // trusted HOME base may be a symlink, so a cache path whose intermediate
+    // component links into HOME (~/Library/Application Support/Slack →
+    // ~/Documents/重要) is refused here before any chflags or delete runs —
+    // the same warn + bail classification as the scope tripwire above, since
+    // the canonicalized destination is HOME-internal and the tripwire's
+    // blocklist cannot see the redirect. A missing component below HOME is
+    // not a symlink: the delete itself produces the not-found classification
+    // it always did.
+    if matches!(
+        crate::safety::symlink_scope_below_home(path),
+        crate::safety::SymlinkScope::Rejected
+    ) {
         log::warn!("refusing to delete unsafe path: {}", path.display());
         anyhow::bail!("refusing to delete unsafe path: {}", path.display());
     }
@@ -610,6 +629,46 @@ mod tests {
         assert!(
             Path::new("/etc").exists(),
             "the refused path must still exist"
+        );
+        assert!(
+            !runner.ran("chflags"),
+            "no chflags may run on a refused path"
+        );
+    }
+
+    #[test]
+    fn safe_delete_refuses_an_intermediate_symlink_below_home() {
+        // PBI 89: a cache path whose intermediate component is a symlink to
+        // another location inside HOME (~/Library/Application Support/Slack →
+        // ~/Documents/重要) deletes the real data through the link: the
+        // canonicalized destination is HOME-internal, so neither the HOME
+        // guard nor the root blocklist catches it. The seam's per-component
+        // symlink scope check must refuse it with the same warn + bail
+        // classification as the tripwires above. TEST_LOCK serializes the
+        // process-global HOME mutation against the other HOME-scoped tests.
+        let _lock = crate::context::TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let tmp = TempDir::new().unwrap();
+        let home = tmp.path().join("home");
+        fs::create_dir_all(&home).unwrap();
+        let _guard = crate::test_helpers::EnvGuard::set("HOME", &home.to_string_lossy());
+        let real = tmp.path().join("real-data");
+        fs::create_dir_all(real.join("Cache")).unwrap();
+        let link = home.join("Library/Application Support/Slack");
+        fs::create_dir_all(link.parent().unwrap()).unwrap();
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        let target = link.join("Cache");
+        let runner = RecordingRunner::new();
+        let err = safe_delete(&runner, &target, TrashMode::Permanent)
+            .expect_err("a path with an intermediate symlink below HOME must be refused");
+        assert!(
+            err.to_string().contains("refusing to delete unsafe path"),
+            "the refusal error must say so, got: {err:#}"
+        );
+        assert!(
+            real.join("Cache").exists(),
+            "the real data behind the symlink must survive"
         );
         assert!(
             !runner.ran("chflags"),
