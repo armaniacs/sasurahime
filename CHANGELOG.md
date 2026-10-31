@@ -8,6 +8,15 @@ All notable changes to sasurahime will be documented in this file. The format is
 
 ### Fixed
 
+- The TUI's "Will free approximately" still drifted from the rows even
+  after the first overlap fix: the hint row subtracted its full size
+  whenever either sibling was selected (whichever directories the
+  sibling actually counted), Homebrew was subtracted although
+  `library-caches` never counts it, and the brew / library-logs rows
+  shared directories with hint subs without any netting. The estimate
+  now rides the directories each sub owns through the selection
+  mapping and nets them against the set of selected siblings, so a
+  shared directory is subtracted exactly once per pair that counts it.
 - A user cancel printed the contradictory pair "Cleaning colima...
   [FAILED]" plus "colima: cancelled by user" on `clean all
   --include-manual`: the batch engine classified a `CleanCancelled`
