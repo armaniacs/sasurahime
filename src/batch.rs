@@ -56,7 +56,7 @@ pub struct BatchSummary {
 ///
 /// | # | Line family | Single target (`run_clean_target`) | Batch ([`run_batch`]) | Gate |
 /// |---|---|---|---|---|
-/// | 1 | status line (`[OK]`/`[FAILED]`) | `show_spinner()` branch (main.rs:893-915) | reporter kind: animated → `with_spinner_result_progress` / `show_spinner()` → `with_spinner_result` / quiet → none | `animated` is the caller's flag, never derived from `show_spinner()` |
+/// | 1 | status line (`[OK]`/`[FAILED]`) | `show_spinner()` branch (main.rs:893-915) | reporter kind: animated → `with_spinner_result_progress` / `show_spinner()` → `with_spinner_result` / quiet → none | `animated` is the caller's flag, never derived from `show_spinner()`; a `CleanCancelled` Err prints no status token on either path; the classification is owned by the `CancelClassified` impl beside `CleanCancelled` (cleaner.rs), not by the emission |
 /// | 2 | cancel line | `Ok(cancelled)`, silent | `summary.cancelled` → the caller's neutral `cancelled by user` line | `Err(CleanCancelled)` downcast branch |
 /// | 3 | note line (`post_clean_note`) | inside the `show_spinner()` branch (main.rs:934-940) | `with_notes` && `reporter.show_spinner()` (unified in PBI 90) | `--deep-suppress` hides; default and `--suppress` show |
 /// | 4 | freed line | per-target `freed_message`, `show_spinner()` branch only | the caller's closing `Total freed` line (`report_total_freed`) | per-target and total are separate concepts |
@@ -443,6 +443,46 @@ mod tests {
             summary.failures
         );
         assert_eq!(summary.total_freed, 0);
+    }
+
+    #[test]
+    fn run_batch_cancel_via_the_status_line_path_continues_remaining_targets() {
+        // The contradictory-2-lines path: the non-animated branch × a
+        // spinner reporter funnels through with_spinner_result, whose
+        // status line is the only status-token printer on this path. A
+        // cancelled cleaner must land in `cancelled` with its name (never
+        // `failures`) and the targets after it must keep running (PBI 78
+        // channel; the status-token absence itself is pinned by the
+        // progress.rs source pin
+        // with_spinner_helpers_stay_silent_on_a_user_cancel).
+        let boxed: Vec<Box<dyn crate::cleaner::Cleaner>> = vec![
+            Box::new(CancelledCleaner("colima")),
+            Box::new(OkCleaner("after-cancel")),
+        ];
+        let cleaners: Vec<&dyn crate::cleaner::Cleaner> =
+            boxed.iter().map(|b| b.as_ref()).collect();
+        let summary = run_batch(
+            &cleaners,
+            &CleanOptions::default(),
+            &crate::progress::SuppressReporter, // show_spinner() == true
+            true,                               // dry_run: never deletes and never writes history
+            false,                              // animated=false: the with_spinner_result branch
+            false,                              // with_notes
+        );
+        assert_eq!(
+            summary.cancelled,
+            vec!["colima".to_string()],
+            "the cancel must be carried with the cleaner name"
+        );
+        assert!(
+            summary.failures.is_empty(),
+            "a user cancel is not a failure, got: {:?}",
+            summary.failures
+        );
+        assert_eq!(
+            summary.total_freed, 100,
+            "the targets after the cancel must keep running"
+        );
     }
 
     #[test]

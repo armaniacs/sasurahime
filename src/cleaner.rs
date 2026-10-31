@@ -240,6 +240,21 @@ impl std::fmt::Display for CleanCancelled {
 
 impl std::error::Error for CleanCancelled {}
 
+/// Classification of an error as a user cancel: the ONE owner of the cancel
+/// contract. The emission layer (the `with_spinner_result` helpers in
+/// progress.rs) classifies through this trait instead of duplicating a
+/// downcast, so a `CleanCancelled` Err prints no status token on any path
+/// and the truth lives in exactly one `downcast_ref` here.
+pub trait CancelClassified {
+    fn is_user_cancelled(&self) -> bool;
+}
+
+impl CancelClassified for anyhow::Error {
+    fn is_user_cancelled(&self) -> bool {
+        self.downcast_ref::<CleanCancelled>().is_some()
+    }
+}
+
 /// The in-process clean seam (PBI-50): the binary wires this callback to the
 /// same dispatch the `clean <target>` CLI uses —
 /// `(target name, optional sub-target, dry_run, reporter) -> CleanResult`.

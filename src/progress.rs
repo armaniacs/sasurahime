@@ -1,3 +1,4 @@
+use crate::cleaner::CancelClassified;
 use indicatif::{ProgressBar, ProgressStyle};
 use std::path::Path;
 use std::sync::Mutex;
@@ -164,8 +165,11 @@ impl ProgressReporter for CleaningProgress {
 }
 
 /// Spinner whose message updates with the path being deleted. `animated`
-/// enables the steady tick (safe only when the cleaner will not prompt).
-pub fn with_spinner_result_progress<T, E: std::fmt::Display>(
+/// enables the steady tick (safe only when the cleaner will not prompt). A
+/// user cancel (a `CleanCancelled` Err) prints no status token: the
+/// classification is [`CancelClassified::is_user_cancelled`], and the
+/// cleaner's own cancel line is the only cancel voice.
+pub fn with_spinner_result_progress<T, E: std::fmt::Display + CancelClassified>(
     msg: &str,
     animated: bool,
     f: impl FnOnce(&dyn ProgressReporter) -> Result<T, E>,
@@ -173,10 +177,14 @@ pub fn with_spinner_result_progress<T, E: std::fmt::Display>(
     let spinner = SharedSpinner::start(msg, animated);
     let result = f(&spinner.reporter());
     spinner.finish();
-    if result.is_ok() {
-        eprintln!("{msg} [OK]");
-    } else {
-        eprintln!("{msg} [FAILED]");
+    match &result {
+        Ok(_) => eprintln!("{msg} [OK]"),
+        // User cancelled: the cleaner printed its own cancel line, so no
+        // status token follows — the same silent contract as the
+        // single-target path's inline branch. A cancel is not a failure
+        // and not a new line family.
+        Err(e) if e.is_user_cancelled() => {}
+        Err(_) => eprintln!("{msg} [FAILED]"),
     }
     result
 }
@@ -186,8 +194,10 @@ pub fn with_spinner_result_progress<T, E: std::fmt::Display>(
 /// steady tick (no-tick-while-prompting): a background tick would redraw the
 /// line under an in-cleaner prompt; message changes still redraw it. The
 /// animated counterpart is [`with_spinner_result_progress`], which passes the
-/// caller's animated choice to [`SharedSpinner`].
-pub fn with_spinner_result<T, E: std::fmt::Display>(
+/// caller's animated choice to [`SharedSpinner`]. A user cancel (a
+/// `CleanCancelled` Err) prints no status token, the same as the animated
+/// counterpart.
+pub fn with_spinner_result<T, E: std::fmt::Display + CancelClassified>(
     msg: &str,
     f: impl FnOnce() -> Result<T, E>,
 ) -> Result<T, E> {
@@ -196,10 +206,14 @@ pub fn with_spinner_result<T, E: std::fmt::Display>(
     pb.set_message(msg.to_string());
     let result = f();
     pb.finish_and_clear();
-    if result.is_ok() {
-        eprintln!("{msg} [OK]");
-    } else {
-        eprintln!("{msg} [FAILED]");
+    match &result {
+        Ok(_) => eprintln!("{msg} [OK]"),
+        // User cancelled: the cleaner printed its own cancel line, so no
+        // status token follows — the same silent contract as the
+        // single-target path's inline branch. A cancel is not a failure
+        // and not a new line family.
+        Err(e) if e.is_user_cancelled() => {}
+        Err(_) => eprintln!("{msg} [FAILED]"),
     }
     result
 }
@@ -540,15 +554,19 @@ mod tests {
 
     #[test]
     fn with_spinner_result_returns_ok() {
-        let result: Result<i32, String> = with_spinner_result("test", || Ok(42));
+        // The helper's E must satisfy CancelClassified (anyhow::Error is
+        // the one impl): the classification is how the cancel branch stays
+        // silent.
+        let result: Result<i32, anyhow::Error> = with_spinner_result("test", || Ok(42));
         assert_eq!(result.unwrap(), 42);
     }
 
     #[test]
     fn with_spinner_result_returns_error() {
-        let result: Result<i32, &str> = with_spinner_result("test", || Err("boom"));
+        let result: Result<i32, anyhow::Error> =
+            with_spinner_result("test", || Err(anyhow::anyhow!("boom")));
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err(), "boom");
+        assert_eq!(result.unwrap_err().to_string(), "boom");
     }
 
     #[test]
@@ -573,6 +591,48 @@ mod tests {
             !body.contains("enable_steady_tick"),
             "the non-animated with_spinner_result must not enable a steady tick (no-tick-while-prompting)"
         );
+    }
+
+    #[test]
+    fn with_spinner_helpers_stay_silent_on_a_user_cancel() {
+        // A `CleanCancelled` Err must reach no status token in either
+        // emission helper: the cleaner prints its own cancel line
+        // (`<target>: cancelled by user`), so a status line right after it
+        // reads as a contradiction (the run_batch non-animated branch ×
+        // spinner-reporter path). The helpers expose no in-process
+        // output-capture seam for their eprintln, so this pins the source
+        // (the same style as the steady-tick pins): both helpers classify
+        // the Err (is_user_cancelled) and the classification precedes the
+        // [FAILED] print, so a cancel never reaches a status token.
+        let src = include_str!("progress.rs");
+        let helpers = [
+            (
+                "pub fn with_spinner_result_progress<",
+                "pub fn with_spinner_result<",
+            ),
+            (
+                "pub fn with_spinner_result<",
+                "/// Show a consolidated progress bar",
+            ),
+        ];
+        for (start_marker, end_marker) in helpers {
+            let start = src.find(start_marker).expect("helper source present");
+            let end = src[start..]
+                .find(end_marker)
+                .map(|i| start + i)
+                .unwrap_or(src.len());
+            let body = &src[start..end];
+            let class = body
+                .find("is_user_cancelled")
+                .expect("the helper must classify the Err (is_user_cancelled) before printing");
+            let failed = body
+                .find("[FAILED]")
+                .expect("the helper must keep the [FAILED] print for real errors");
+            assert!(
+                class < failed,
+                "the cancel classification must precede the [FAILED] print so a CleanCancelled Err reaches no status token"
+            );
+        }
     }
 
     #[test]
