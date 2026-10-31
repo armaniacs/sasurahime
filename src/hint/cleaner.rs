@@ -60,9 +60,10 @@ pub(crate) fn quit_app_and_wait(
 
 /// Builds the `quit app "..."` AppleScript for an entry's app name.
 ///
-/// quit_app comes from the compile-time KNOWN_ENTRIES table (every current
-/// value is quote- and backslash-free), but nothing in the type forbids such
-/// a character in a future entry; escaping the AppleScript string delimiters
+/// `quit_app` comes from the vetted KNOWN_ENTRIES table (see `hint::apps` —
+/// add a new entry via PR, never via config). Every current value is
+/// quote- and backslash-free, but nothing in the type forbids such a
+/// character in a future entry; escaping the AppleScript string delimiters
 /// here means a future value can never close the `quit app "..."` literal
 /// early and interpolate arbitrary AppleScript.
 fn quit_app_script(quit_app: &str) -> String {

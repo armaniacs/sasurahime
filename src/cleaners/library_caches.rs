@@ -58,7 +58,17 @@ pub fn excluded_by(name: &str) -> Option<&'static str> {
         .map(|(_, target)| *target)
 }
 
-// `skip: true` entries (GeoServices) are OS-managed and must not become deletable.
+/// Returns the clean target that owns `name`, or None when it is not excluded.
+///
+/// The `e.path_suffixes == [name]` structural match only narrows to
+/// `BaseDir::Caches` under a table invariant: every Caches row in
+/// KNOWN_ENTRIES declares exactly one path suffix (the multi-suffix
+/// aggregate, VSCode caches, is AppSupport-only), so a future multi-suffix
+/// Caches entry would silently never match here. The match stays structural
+/// on purpose — a `contains` form would misapply an aggregate row's
+/// threshold per directory.
+///
+/// `skip: true` entries (GeoServices) are OS-managed and must not become deletable.
 pub fn known_entry_for(name: &str) -> Option<&'static HintEntry> {
     KNOWN_ENTRIES
         .iter()
