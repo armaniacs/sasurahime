@@ -56,9 +56,9 @@ pub struct BatchSummary {
 ///
 /// | # | Line family | Single target (`run_clean_target`) | Batch ([`run_batch`]) | Gate |
 /// |---|---|---|---|---|
-/// | 1 | status line (`[OK]`/`[FAILED]`) | `show_spinner()` branch (main.rs:893-915) | reporter kind: animated → `with_spinner_result_progress` / `show_spinner()` → `with_spinner_result` / quiet → none | `animated` is the caller's flag, never derived from `show_spinner()`; a `CleanCancelled` Err prints no status token on either path; the classification is owned by the `CancelClassified` impl beside `CleanCancelled` (cleaner.rs), not by the emission |
+/// | 1 | status line (`[OK]`/`[FAILED]`) | `show_spinner()` branch (main.rs:894-986) | reporter kind: animated → `with_spinner_result_progress` / `show_spinner()` → `with_spinner_result` / quiet → none | `animated` is the caller's flag, never derived from `show_spinner()`; a `CleanCancelled` Err prints no status token on either path; the classification is owned by the `CancelClassified` impl beside `CleanCancelled` (cleaner.rs), not by the emission |
 /// | 2 | cancel line | `Ok(cancelled)`, silent | `summary.cancelled` → the caller's neutral `cancelled by user` line | `Err(CleanCancelled)` downcast branch |
-/// | 3 | note line (`post_clean_note`) | inside the `show_spinner()` branch (main.rs:934-940) | `with_notes` && `reporter.show_spinner()` (unified in PBI 90) | `--deep-suppress` hides; default and `--suppress` show |
+/// | 3 | note line (`post_clean_note`) | inside the `show_spinner()` branch (main.rs:937-953) | `with_notes` && `reporter.show_spinner()` (unified in PBI 90) | `--deep-suppress` hides; default and `--suppress` show |
 /// | 4 | freed line | per-target `freed_message`, `show_spinner()` branch only | the caller's closing `Total freed` line (`report_total_freed`) | per-target and total are separate concepts |
 /// | 5 | skip lines | direct `N file(s) skipped` + `path: reason` (nameless) | `summary.skipped` → `report_batch_failures` (named shape, cleaner name included) | when `skipped` is non-empty |
 /// | 6 | exit code | `exit_code() != 0` → exit 1 | always exit 0 (report only) | pinned by the PBI 78 scope fence 2 |
@@ -80,7 +80,12 @@ pub struct BatchSummary {
 /// Option A (full unification of the two paths) stays deferred; it fires on
 /// the next change that touches either engine's semantics (a new line
 /// family, a gate move, or a gate condition change), since the previous
-/// trigger "next new entry point" never fires naturally.
+/// trigger "next new entry point" never fires naturally. Round-7
+/// re-triggers: a change to main.rs's inline match is emission
+/// consolidation only (stage 3 does not come with it); a `run_batch`
+/// argument-list change takes the form enum plus stage 3 in the same PR;
+/// a new line family shared by both engines takes stage 3 plus the form
+/// enum; a one-sided note-gate change bundles the form enum.
 pub fn run_batch(
     cleaners: &[&dyn crate::cleaner::Cleaner],
     opts: &crate::cleaner::CleanOptions,
