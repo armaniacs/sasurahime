@@ -8,6 +8,22 @@ All notable changes to sasurahime will be documented in this file. The format is
 
 ### Fixed
 
+- A hint candidate whose path goes through an intermediate symlink that
+  points elsewhere inside HOME was deleted together with the symlink's
+  real target (the symlink check only ran on one of the two routes to
+  the same paths). The per-component check now runs on the one delete
+  seam every cleaner goes through, so a path that leaves its base
+  through a symlink is refused instead of followed, on every route.
+- `clean all --deep-suppress` and `auto --deep-suppress` printed one
+  per-target note (`Permanently deleted: no Trash copy was kept.`) per
+  target, while the same single-target operation printed none; the
+  batch note is now gated on the reporter kind, so the suppression
+  contract holds in both engines and scripts can rely on the line
+  shapes again.
+- The hint prompt and `--dry-run` lines showed only a name and a size,
+  so answering `y` trusted the vetted name-to-path table blindly; the
+  resolved deletion path is now shown next to the size, consistent
+  with the `[[custom]]` verbose display.
 - The plugin protocol's JSON extractor now tracks JSON string state
   (quotes and escapes), so a `}` inside a JSON string value can no longer
   truncate the object and leave the plugin permanently unavailable.
