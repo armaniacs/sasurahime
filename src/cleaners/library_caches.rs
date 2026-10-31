@@ -370,6 +370,7 @@ impl LibraryCachesCleaner {
 }
 
 impl Cleaner for LibraryCachesCleaner {
+    // Removing an app cache is an explicit per-app choice.
     fn risk(&self) -> crate::cleaner::Risk {
         crate::cleaner::Risk::Manual
     }
@@ -415,7 +416,7 @@ impl Cleaner for LibraryCachesCleaner {
         self.clean_with_mode(dry_run, reporter, opts.trash_mode)
     }
 
-    // Removing an app cache is an explicit per-app choice; `--yes` must never pick it.
+    // `--yes` must never pick this target.
     fn auto_clean_allowed(&self) -> bool {
         false
     }

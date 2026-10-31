@@ -597,6 +597,7 @@ impl AppSupportCleaner {
 }
 
 impl Cleaner for AppSupportCleaner {
+    // Deleting app caches may require quitting running apps.
     fn risk(&self) -> crate::cleaner::Risk {
         crate::cleaner::Risk::Manual
     }
@@ -640,8 +641,7 @@ impl Cleaner for AppSupportCleaner {
         self.clean_with_mode(dry_run, reporter, opts.trash_mode)
     }
 
-    // Deleting app caches may require quitting running apps, so it is never
-    // done unattended; `--yes` skips this cleaner even on a terminal.
+    // `--yes` skips this cleaner even on a terminal.
     fn auto_clean_allowed(&self) -> bool {
         false
     }

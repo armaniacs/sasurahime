@@ -428,6 +428,7 @@ impl OrphanContainersCleaner {
 }
 
 impl Cleaner for OrphanContainersCleaner {
+    // Which folders are leftovers is a human judgement.
     fn risk(&self) -> crate::cleaner::Risk {
         crate::cleaner::Risk::Manual
     }
@@ -459,8 +460,7 @@ impl Cleaner for OrphanContainersCleaner {
         self.clean_with_mode(dry_run, reporter, opts.trash_mode)
     }
 
-    // Which folders are leftovers is a human judgement, so `--yes` must skip this
-    // cleaner even on a terminal where the prompt would otherwise appear.
+    // `--yes` must skip this cleaner even on a terminal.
     fn auto_clean_allowed(&self) -> bool {
         false
     }

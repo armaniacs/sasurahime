@@ -20,6 +20,7 @@ impl IosCleaner {
 }
 
 impl Cleaner for IosCleaner {
+    // Deleting an iOS backup is irreversible; its selection prompt accepts exactly one Enter.
     fn risk(&self) -> crate::cleaner::Risk {
         crate::cleaner::Risk::Risky
     }
@@ -28,8 +29,7 @@ impl Cleaner for IosCleaner {
         "ios-backup"
     }
 
-    // Deleting an iOS backup is irreversible, and its selection prompt would
-    // otherwise accept exactly one Enter, so `--yes` must never pick it.
+    // `--yes` must never pick this target.
     fn auto_clean_allowed(&self) -> bool {
         false
     }

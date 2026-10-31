@@ -166,6 +166,7 @@ pub fn parse_snapshot_names(output: &str) -> Vec<String> {
 }
 
 impl Cleaner for ApfsSnapshotCleaner {
+    // Deleted on the system volume via tmutil, never restorable from the Trash.
     fn risk(&self) -> crate::cleaner::Risk {
         crate::cleaner::Risk::Risky
     }
@@ -178,8 +179,7 @@ impl Cleaner for ApfsSnapshotCleaner {
         "apfs-snapshot"
     }
 
-    // Snapshots are deleted on the system volume via tmutil and cannot be
-    // restored from the Trash, so `--yes` must never pick this target.
+    // `--yes` must never pick this target.
     fn auto_clean_allowed(&self) -> bool {
         false
     }
