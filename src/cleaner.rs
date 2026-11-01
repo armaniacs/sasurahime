@@ -240,11 +240,12 @@ impl std::fmt::Display for CleanCancelled {
 
 impl std::error::Error for CleanCancelled {}
 
-/// Classification of an error as a user cancel: the ONE owner of the cancel
-/// contract. The emission layer (the `with_spinner_result` helpers in
-/// progress.rs) classifies through this trait instead of duplicating a
-/// downcast, so a `CleanCancelled` Err prints no status token on any path
-/// and the truth lives in exactly one `downcast_ref` here.
+/// Classification of an error as a user cancel: the ONE predicate
+/// definition. Classifiers — the emission seam (`emit_result_status` in
+/// progress.rs) and the run-level decisions in main.rs and batch.rs — ask
+/// this trait instead of each spelling its own downcast, so "what counts as
+/// a user cancel" is decided in one place: the single `downcast_ref` in the
+/// impl below, beside [`CleanCancelled`].
 pub trait CancelClassified {
     fn is_user_cancelled(&self) -> bool;
 }
@@ -312,6 +313,15 @@ impl Risk {
 /// method and the TUI's `SelectionEntry` — shares one type instead of a
 /// string spelling of the directory (PBI 59: by value, not by string
 /// re-match).
+///
+/// WHY the coupling is left as-is (the recorded decision point): when a
+/// second cleaner family wants the annotation, the choice is between
+/// reusing `hint::BaseDir` (a misfit for a non-Library base, or a new
+/// variant — and a variant is a core change since the enum is welded to the
+/// compile-time hint table) and forking a cleaner-owned type. Promoting
+/// `BaseDir` itself into core is rejected by default: it belongs to hint's
+/// proactive suggestions while cleaners are scan-driven, and the promotion
+/// would blur that role split.
 pub type OwnedPaths = (crate::hint::BaseDir, &'static [&'static str]);
 
 pub trait Cleaner: Send + Sync {

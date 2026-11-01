@@ -4,7 +4,7 @@ use sasurahime::{
 };
 
 use clap::{Parser, Subcommand};
-use cleaner::{CleanCancelled, CleanOptions, CleanResult, Cleaner};
+use cleaner::{CancelClassified, CleanOptions, CleanResult, Cleaner};
 use command::SystemCommandRunner;
 use config::Config;
 use progress::{build_reporter_from_flags, merge_suppress_flags, ProgressReporter};
@@ -915,7 +915,7 @@ where
                 eprintln!("{msg} [OK]");
                 v
             }
-            Err(e) if e.is::<CleanCancelled>() => {
+            Err(e) if e.is_user_cancelled() => {
                 // User cancelled — clean shutdown, no [FAILED], no Freed line.
                 // The hint was already printed in GenericCleaner.
                 return Ok(CleanResult::cancelled());
@@ -929,7 +929,7 @@ where
         let r = cleaner_fn(dry_run, reporter, opts);
         match r {
             Ok(v) => v,
-            Err(e) if e.is::<CleanCancelled>() => return Ok(CleanResult::cancelled()),
+            Err(e) if e.is_user_cancelled() => return Ok(CleanResult::cancelled()),
             Err(e) => return Err(e),
         }
     };

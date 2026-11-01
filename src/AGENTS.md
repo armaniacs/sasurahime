@@ -4,7 +4,15 @@ Guidance for AI agents editing `src/`. Repo-wide contract (commands, safety rule
 
 ## Cleaner trait (`cleaner.rs`)
 
-Every cleaner implements the shared `Cleaner` trait:
+Every cleaner implements the shared `Cleaner` trait. The snippet below is
+**abridged**: it shows the core shape only — the real trait has grown
+default predicates since (prompt gating, desktop interference, per-cleaner
+filters, the sub-target owned-path annotation), so treat the source as the
+truth. This file intentionally does not enumerate the methods; a full
+enumeration went stale the moment the next method landed.
+
+Full trait: `src/cleaner.rs` — every method and its contract doc lives
+there and is updated together with the code.
 
 ```rust
 pub trait Cleaner: Send + Sync {
