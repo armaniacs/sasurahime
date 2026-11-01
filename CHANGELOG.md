@@ -4,7 +4,7 @@ All notable changes to sasurahime will be documented in this file. The format is
 
 ---
 
-## [Unreleased]
+## [0.4.4] - 2026-11-01
 
 ### Fixed
 
@@ -32,7 +32,10 @@ All notable changes to sasurahime will be documented in this file. The format is
   fix covered): `library-logs` waits on an interactive multi-select for
   an unbounded time, so the freed line could report a size from before
   the screen was read. Both cleaners now measure the bytes at delete
-  time like the rest of the ledger riders.
+  time wherever a wait window exists: `orphan-containers` always
+  re-measures, and `library-logs` re-measures on the interactive select
+  path (its `--all` path has no prompt and keeps the size the scan in
+  the same run took).
 - The freed bytes for `ios-backup` were the size collected before the
   selection prompt, and the irreversible multi-select can wait on a
   human for an unbounded time, so a backup that grew while the screen
