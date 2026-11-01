@@ -1,6 +1,6 @@
 use crate::cleaner::{CleanByName, CleanResult, Cleaner, OwnedPaths, ScanResult, ScanStatus};
 use crate::format::format_bytes;
-use crate::scanner::{hints_overlap_kind, HintsOverlap};
+use crate::scanner::{hints_overlap_kind, HintsOverlap, Sibling};
 use anyhow::Result;
 use std::io::{BufRead, IsTerminal, Write};
 
@@ -84,7 +84,7 @@ pub(crate) fn compute_selected_total(
     // owned-path annotation (PBI 101), which rides in the mapping beside
     // the size.
     let mut total: u64 = 0;
-    let mut siblings: Vec<&'static str> = Vec::new();
+    let mut siblings: Vec<Sibling> = Vec::new();
     let mut owned_subs: Vec<(OwnedPaths, u64)> = Vec::new();
     for &si in selected {
         let (cleaner_idx, sub, owned) = &selection_mapping[si];
@@ -104,7 +104,8 @@ pub(crate) fn compute_selected_total(
                     owned_subs.push((*paths, size));
                 }
             }
-            Some(HintsOverlap::OverlappingSibling) => siblings.push(results[*cleaner_idx].name),
+            // The sibling rides in the variant: no name string here.
+            Some(HintsOverlap::OverlappingSibling(sibling)) => siblings.push(sibling),
             None => {}
         }
         total += size;
@@ -117,7 +118,7 @@ pub(crate) fn compute_selected_total(
     // counts (Homebrew) is never subtracted; a sub with no sibling selected
     // (hints alone) keeps its size.
     for (owned, size) in &owned_subs {
-        for sibling in &siblings {
+        for &sibling in &siblings {
             if sibling_counts_owned(sibling, owned) {
                 total -= size;
             }
@@ -134,15 +135,16 @@ pub(crate) fn compute_selected_total(
 /// library-caches row). The counted-side truth lives in the sibling
 /// cleaners — the hint side alone (`hint_owned_paths`) would mis-share
 /// Homebrew, which the hints cleaner owns but the library-caches row never
-/// counts (`excluded_by`). Keyed on the sibling name (PBI-83: 1 cleaner =
-/// 1 name), the same key [`hints_overlap_kind`] dispatches on.
-fn sibling_counts_owned(sibling: &str, owned: &OwnedPaths) -> bool {
+/// counts (`excluded_by`). Dispatched on the [`Sibling`] type carried by
+/// [`HintsOverlap::OverlappingSibling`] — no name string here, so the match
+/// is exhaustive: a third overlapping sibling is a new variant and a
+/// forgotten arm is a compile error, not a subtraction of 0.
+fn sibling_counts_owned(sibling: Sibling, owned: &OwnedPaths) -> bool {
     let (base, paths) = *owned;
     !paths.is_empty()
         && paths.iter().all(|path| match sibling {
-            "app-support" => crate::cleaners::app_support::counts_owned(base, path),
-            "library-caches" => crate::cleaners::library_caches::counts_owned(base, path),
-            _ => false,
+            Sibling::AppSupport => crate::cleaners::app_support::counts_owned(base, path),
+            Sibling::LibraryCaches => crate::cleaners::library_caches::counts_owned(base, path),
         })
 }
 
@@ -818,6 +820,47 @@ mod tests {
         assert_eq!(
             total, 1300,
             "a Caches-owned sub must not be subtracted against the app-support row"
+        );
+    }
+
+    #[test]
+    fn compute_selected_total_subtracts_a_caches_sub_against_the_library_caches_row() {
+        // Positive cross-sibling subtraction pin: a hints sub owned in
+        // ~/Library/Caches IS counted by the library-caches row, so selecting
+        // it with library-caches must subtract the sub's size once — the
+        // mirror image of the two "never counts" pins above. The sibling x
+        // base_dir matrix over the 4 cells plus the Homebrew special case
+        // (the sibling identity rides in the scanner's Sibling type):
+        //   app-support    x AppSupport  -> subtracted
+        //     (compute_selected_total_subtracts_hints_overlap_when_sibling_selected)
+        //   app-support    x Caches      -> never counted
+        //     (compute_selected_total_keeps_a_caches_sub_the_app_support_row_never_counts)
+        //   library-caches x AppSupport  -> never counted
+        //     (compute_selected_total_keeps_an_app_support_sub_the_library_caches_row_never_counts)
+        //   library-caches x Caches      -> subtracted (this pin)
+        //   Homebrew (Caches)            -> excluded_by: neither sibling
+        //     counts it (compute_selected_total_never_subtracts_homebrew_against_the_library_caches_row)
+        let cleaners: Vec<Box<dyn Cleaner>> = vec![
+            Box::new(
+                TestCleaner::new("hints", 300, vec![("TypeScript server cache", 300)]).with_owned(
+                    vec![(
+                        "TypeScript server cache",
+                        (BaseDir::Caches, &["typescript"]),
+                    )],
+                ),
+            ),
+            Box::new(TestCleaner::new("library-caches", 400, vec![])),
+        ];
+        let results: Vec<ScanResult> = cleaners.iter().map(|c| c.detect()).collect();
+        let (mapping, _items) = build_selection_items(&results, &cleaners, &[0, 1]);
+
+        // Select the TypeScript hint row (idx 0 = 300) and library-caches
+        // (idx 1 = 400): the library-caches row counts the Caches sub, so
+        // the sub's 300 is subtracted and only the row's 400 remain.
+        let total = compute_selected_total(&[0, 1], &mapping, &results);
+        assert_eq!(
+            total, 400,
+            "a Caches-owned sub must be subtracted against the library-caches row that counts it"
         );
     }
 

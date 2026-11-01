@@ -316,7 +316,9 @@ fn scan_json_outputs_valid_schema() {
         .arg(
             r#"(.total_reclaimable_bytes >= 0) and
                ([.targets[] | select(.name == "act" and .status == "pruneable" and .estimable == true and .size_bytes > 0)] | length) == 1 and
-               (all(.targets[]; has("name") and has("status") and has("estimable")))"#,
+               (all(.targets[]; has("name") and has("status") and has("estimable"))) and
+               ([.targets[] | select(.estimable == false)] | length) > 0 and
+               (all(.targets[] | select(.estimable == false); (.size_bytes == null) and (.status != "pruneable")))"#,
         )
         .arg(&json_path)
         .status()

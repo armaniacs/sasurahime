@@ -9,7 +9,8 @@ use rayon::prelude::*;
 /// table's counted column, the JSON `size_bytes`/`estimable` pair and both
 /// total engines) reads this function instead of re-matching the status, so a
 /// new status variant is one function turn and the CLI and JSON totals cannot
-/// quietly split.
+/// quietly split. The JSON entry binds this one call per row, so the
+/// `size_bytes`/`estimable` pair derives from the same measurement.
 fn measured_bytes(r: &ScanResult) -> Option<u64> {
     match r.status {
         ScanStatus::Pruneable(b) => Some(b),
@@ -61,29 +62,54 @@ fn counts_toward_total(r: &ScanResult) -> bool {
     r.name != "hints"
 }
 
+/// Which row overlaps the hints row. Carried inside
+/// [`HintsOverlap::OverlappingSibling`] so the TUI's selection sum dispatches
+/// on the type instead of re-matching the name there: a third overlapping
+/// sibling is a new variant, and the consumers' exhaustive matches turn a
+/// forgotten arm into a compile error. The counted-side truth itself (which
+/// dirs the sibling counts) stays in the sibling cleaners
+/// ([`crate::cleaners::app_support::counts_owned`] /
+/// [`crate::cleaners::library_caches::counts_owned`]), not here.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum Sibling {
+    /// The app-support row: it counts the Application Support dirs the
+    /// hints row also counts.
+    AppSupport,
+    /// The library-caches row: it counts the ~/Library/Caches dirs the
+    /// hints row also counts.
+    LibraryCaches,
+}
+
 /// The name-level overlap between the hints row and its siblings: the one
-/// home for "who counts the same dirs" (the hints row and the
-/// app-support / library-caches rows — "the same dirs are counted in both",
-/// see [`counts_toward_total`]). The TUI's selection sum reads this to net
-/// the overlap out instead of re-stating the names there; the scanner's
-/// [`counts_toward_total`] keeps its own pinned name join.
+/// name-string dispatch for "who overlaps the hints row, and which sibling
+/// it is" (the hints row and the app-support / library-caches rows — "the
+/// same dirs are counted in both", see [`counts_toward_total`]). The
+/// sibling identity rides in the [`HintsOverlap::OverlappingSibling`]
+/// variant, so the TUI's selection sum consumes the type instead of
+/// re-stating the names there; the counted-side truth lives in the sibling
+/// cleaners, and the scanner's [`counts_toward_total`] keeps its own pinned
+/// name join.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum HintsOverlap {
     /// This is the hints row: its selection counts the same dirs as the
     /// app-support / library-caches rows.
     HintsRow,
     /// This is an overlapping sibling row: it counts the dirs the hints row
-    /// also counts.
-    OverlappingSibling,
+    /// also counts, and carries which sibling it is.
+    OverlappingSibling(Sibling),
 }
 
 /// Names the overlap kind of one cleaner row, or `None` when the row has no
 /// overlap with the hints row. Keyed on the name (PBI-83: 1 cleaner = 1
-/// name) and pinned through the TUI sum tests: a rename goes red.
+/// name) and pinned through the TUI sum tests: a rename goes red. The last
+/// name-string dispatch for the overlap: downstream consumers match the
+/// carried [`Sibling`] exhaustively, so adding a third overlapping sibling
+/// cannot slip through silently.
 pub(crate) fn hints_overlap_kind(name: &str) -> Option<HintsOverlap> {
     match name {
         "hints" => Some(HintsOverlap::HintsRow),
-        "app-support" | "library-caches" => Some(HintsOverlap::OverlappingSibling),
+        "app-support" => Some(HintsOverlap::OverlappingSibling(Sibling::AppSupport)),
+        "library-caches" => Some(HintsOverlap::OverlappingSibling(Sibling::LibraryCaches)),
         _ => None,
     }
 }
@@ -110,12 +136,17 @@ pub(crate) fn scan_json_document(
 ) -> String {
     let targets: Vec<ScanJsonEntry> = results
         .iter()
-        .map(|r| ScanJsonEntry {
-            name: r.name,
-            size_bytes: measured_bytes(r),
-            status: status_label(&r.status),
-            risk: risks.get(r.name).map(|risk| risk.label()).unwrap_or("-"),
-            estimable: measured_bytes(r).is_some(),
+        .map(|r| {
+            // One bind per row: the size and the estimable flag derive from
+            // the same measurement, so the pair cannot split.
+            let bytes = measured_bytes(r);
+            ScanJsonEntry {
+                name: r.name,
+                size_bytes: bytes,
+                status: status_label(&r.status),
+                risk: risks.get(r.name).map(|risk| risk.label()).unwrap_or("-"),
+                estimable: bytes.is_some(),
+            }
         })
         .collect();
     let doc = serde_json::json!({
@@ -389,6 +420,20 @@ mod tests {
         assert_eq!(docker["estimable"], false);
         assert_eq!(entries[2]["status"], "not found");
         assert_eq!(entries[3]["status"], "unavailable");
+    }
+
+    #[test]
+    fn measured_bytes_is_none_for_every_non_pruneable_status() {
+        // The JSON size_bytes/estimable pair derives from this one decision:
+        // a non-Pruneable row must measure None so the JSON row carries
+        // size_bytes == null and estimable == false — the pair cannot split
+        // (the schema check in tests/scan.rs pins the same contract on the
+        // document level).
+        assert_eq!(measured_bytes(&r("gone", ScanStatus::NotFound)), None);
+        assert_eq!(measured_bytes(&r("done", ScanStatus::Clean)), None);
+        assert_eq!(measured_bytes(&r("failed", ScanStatus::Unavailable)), None);
+        assert_eq!(measured_bytes(&r("docker", ScanStatus::Unknown)), None);
+        assert_eq!(measured_bytes(&r("uv", ScanStatus::Pruneable(7))), Some(7));
     }
 
     #[test]
