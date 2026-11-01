@@ -178,14 +178,23 @@ pub fn auto_clean_hint(
     Ok(result)
 }
 
-/// The `--sub` resolution predicate: exact display-name match over the
-/// non-skip KNOWN_ENTRIES rows. One owner for the predicate, shared by the
-/// sub-target validation ([`is_known_hint_name`]) and the static lookup
-/// ([`KnownAppHintsCleaner::static_sub_hint`]) so they can never drift.
+/// The non-skip judgment of a KNOWN_ENTRIES row: one owner of the
+/// `--sub`-selectable predicate, shared by the display-name lookup
+/// ([`find_known_entry`]) and the owned-path annotation
+/// ([`KnownAppHintsCleaner::sub_owned_paths`]) so they can never drift.
+fn sub_selectable(e: &HintEntry) -> bool {
+    !e.skip
+}
+
+/// The `--sub` resolution: exact display-name match over the
+/// [`sub_selectable`] KNOWN_ENTRIES rows. One owner for the lookup, shared
+/// by the sub-target validation ([`is_known_hint_name`]) and the static
+/// hint construction ([`KnownAppHintsCleaner::static_sub_hint`]) so they
+/// can never drift.
 fn find_known_entry(name: &str) -> Option<&'static HintEntry> {
     super::apps::KNOWN_ENTRIES
         .iter()
-        .find(|e| !e.skip && e.display_name == name)
+        .find(|e| sub_selectable(e) && e.display_name == name)
 }
 
 /// True when `name` is a KNOWN_ENTRIES display name a `--sub` may select.
@@ -346,19 +355,25 @@ impl Cleaner for KnownAppHintsCleaner {
             .collect()
     }
 
-    /// The owned-path annotation per display name (PBI 101), resolved
-    /// through [`find_known_entry`] — the same non-skip KNOWN_ENTRIES
-    /// predicate `--sub` validates with, so the resolution owner stays
-    /// single. No `collect_hints` walk, no threshold judgment, no top5
-    /// truncate: the annotation is the vetted table's own data, and it
-    /// covers every `--sub`-selectable name, not just the top 5 the
-    /// detector lists (the TUI joins it onto the sub rows by name and
-    /// carries it by value — PBI 59's "the size rides in the mapping",
-    /// extended to paths: the sum never re-looks-up a display name string).
+    /// The owned-path annotation per display name (PBI 101), read in one
+    /// pass off the non-skip KNOWN_ENTRIES rows — the input is the vetted
+    /// table itself, so [`sub_selectable`] filters it directly and
+    /// [`find_known_entry`] is never asked to re-find a row by its own
+    /// display name (the predicate stays single-owner, and the per-row
+    /// self-join through the display-name lookup is gone with it). No
+    /// `collect_hints` walk, no threshold judgment, no top5 truncate: the
+    /// annotation is the vetted table's own data, and it covers every
+    /// `--sub`-selectable name, not just the top 5 the detector lists
+    /// (the TUI joins it onto the sub rows by name and carries it by
+    /// value — PBI 59's "the size rides in the mapping", extended to
+    /// paths: the sum never re-looks-up a display name string). The
+    /// by-name join cannot bind another row's annotation: display names
+    /// are unique across every base dir, pinned by
+    /// `every_hint_entry_display_names_are_unique` in this module's tests.
     fn sub_owned_paths(&self) -> Vec<(&'static str, OwnedPaths)> {
         super::apps::KNOWN_ENTRIES
             .iter()
-            .filter_map(|e| find_known_entry(e.display_name))
+            .filter(|e| sub_selectable(e))
             .map(|e| (e.display_name, (e.base_dir, e.path_suffixes)))
             .collect()
     }
@@ -574,6 +589,7 @@ pub fn print_hints(hints: &[ProcessHint]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashSet;
 
     #[test]
     fn completion_line_ok_when_every_delete_succeeded() {
@@ -663,12 +679,12 @@ mod tests {
 
     #[test]
     fn sub_owned_paths_resolves_the_owned_paths_statically() {
-        // PBI 101: the owned-path annotation per display name resolves
-        // through find_known_entry's predicate (non-skip KNOWN_ENTRIES
-        // rows) — no collect_hints walk, so a tempdir with no debris must
-        // still carry every annotation. The annotation rides in the
-        // selection mapping (PBI 59), so the TUI sum never re-looks-up a
-        // display name string.
+        // PBI 101: the owned-path annotation per display name is read off
+        // the non-skip KNOWN_ENTRIES rows with the same sub_selectable
+        // predicate find_known_entry filters with — no collect_hints walk,
+        // so a tempdir with no debris must still carry every annotation.
+        // The annotation rides in the selection mapping (PBI 59), so the
+        // TUI sum never re-looks-up a display name string.
         let tmp = tempfile::tempdir().unwrap();
         let c = KnownAppHintsCleaner::new(
             tmp.path(),
@@ -693,5 +709,29 @@ mod tests {
             !owned.iter().any(|(name, _)| *name == "GeoServices"),
             "a skip entry must not carry an annotation, got: {owned:?}"
         );
+    }
+
+    #[test]
+    fn every_hint_entry_display_names_are_unique() {
+        // Moved from cleaners/app_support.rs (B5, PBI 99) and widened to
+        // every base dir: display_name is the join key of the whole hint
+        // table, so the same name twice binds the wrong row wherever it
+        // sits. hint_entry resolves a target with a first-match find on the
+        // AppSupport rows (a duplicate would silently bind another row's
+        // process_name/threshold/quit_app), find_known_entry resolves a
+        // `--sub` with a first-match find over the non-skip rows, and the
+        // TUI joins sub_owned_paths' annotations onto the sub rows by name
+        // (a duplicate would silently substitute another row's annotation).
+        // The bidirectional cross-reference tests stop a missing row; this
+        // pin stops the same name twice - writing the same display_name on
+        // two rows must fail the PR.
+        let mut seen = HashSet::new();
+        for e in crate::hint::apps::KNOWN_ENTRIES {
+            assert!(
+                seen.insert(e.display_name),
+                "duplicated display_name: {} (first-match would bind the wrong row)",
+                e.display_name
+            );
+        }
     }
 }
