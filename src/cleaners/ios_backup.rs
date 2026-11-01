@@ -114,13 +114,7 @@ impl Cleaner for IosCleaner {
 
         // The shared delete ledger owns the per-entry contracts. The mode is
         // Global: the deletion scope was already gated interactively above.
-        let result = crate::trash::delete_entries(
-            self.name(),
-            self.runner.as_ref(),
-            reporter,
-            opts.trash_mode,
-            &selected,
-        );
+        let result = self.delete_selected(&selected, reporter, opts.trash_mode)?;
         println!(
             "[ios-backup] total freed: {}",
             crate::format::format_bytes(result.bytes_freed)
@@ -150,6 +144,32 @@ impl IosCleaner {
         let picks =
             crate::prompt::multi_select_or_skip("ios-backup", reporter, None, &items, &defaults)?;
         Ok(picks.map(|selections| selections.into_iter().map(|i| entries[i].clone()).collect()))
+    }
+
+    // PBI 97: freed is the delete-time dir_size (the interactive select
+    // above can wait unbounded), so re-measure right before the deletion;
+    // the ledger keeps its caller-owned size contract, and the collected
+    // sizes stay the dry-run / selection-list numbers.
+    fn delete_selected(
+        &self,
+        selected: &[(PathBuf, u64)],
+        reporter: &dyn ProgressReporter,
+        mode: crate::trash::TrashMode,
+    ) -> Result<CleanResult> {
+        let items: Vec<(PathBuf, u64)> = selected
+            .iter()
+            .map(|(path, _)| {
+                let size = crate::format::dir_size(path);
+                (path.clone(), size)
+            })
+            .collect();
+        Ok(crate::trash::delete_entries(
+            self.name(),
+            self.runner.as_ref(),
+            reporter,
+            mode,
+            &items,
+        ))
     }
 }
 
@@ -299,6 +319,48 @@ mod tests {
             "non-terminal stdin must skip the interactive select"
         );
         assert!(entry.exists(), "nothing is deleted without a terminal");
+    }
+
+    #[test]
+    fn delete_selected_freed_is_remeasured_after_the_scan_drifts() {
+        // PBI 97 drift pin (ios_backup): freed must be the delete-time
+        // dir_size. The interactive select can wait on a human for
+        // unbounded time, so growth that lands between the collect above
+        // and the deletion (a device syncing its backup while the screen
+        // is open) must be reflected; the collected size is the scan-time
+        // value and stays the dry-run / selection-list number.
+        let tmp = TempDir::new().unwrap();
+        let backup_dir = make_backup_dir(&tmp);
+        let entry = backup_dir.join("AABBCCDD-EEFF-0011-2233-445566778899");
+        fs::create_dir_all(entry.join("logs")).unwrap();
+        fs::write(entry.join("logs/a.log"), vec![1u8; 20_000]).unwrap();
+        let runner = crate::test_helpers::MockRunner::new().with_success("chflags");
+        let cleaner = IosCleaner::new(tmp.path(), Box::new(runner));
+        let scan_time_size = crate::format::dir_size(&entry);
+        let entries = vec![(entry.clone(), scan_time_size)];
+
+        // The backup grows inside a subdirectory: the top-level mtime is
+        // untouched, the same fixture shape the PBI 93/97 drift pins use.
+        fs::write(entry.join("logs/b.log"), vec![1u8; 4096]).unwrap();
+        let drifted = crate::format::dir_size(&entry);
+        assert!(
+            drifted > scan_time_size,
+            "fixture: the backup must have grown after the scan ({drifted} <= {scan_time_size})"
+        );
+
+        let r = cleaner
+            .delete_selected(
+                &entries,
+                &crate::progress::DeepSuppressReporter,
+                crate::trash::TrashMode::Permanent,
+            )
+            .unwrap();
+        assert!(!entry.exists());
+        assert_eq!(
+            r.bytes_freed, drifted,
+            "freed must be the delete-time measurement, not the scan-time size"
+        );
+        assert!(r.skipped.is_empty());
     }
 
     #[test]

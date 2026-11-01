@@ -11,12 +11,15 @@ All notable changes to sasurahime will be documented in this file. The format is
 - The TUI's "Will free approximately" still drifted from the rows even
   after the first overlap fix: the hint row subtracted its full size
   whenever either sibling was selected (whichever directories the
-  sibling actually counted), Homebrew was subtracted although
-  `library-caches` never counts it, and the brew / library-logs rows
-  shared directories with hint subs without any netting. The estimate
-  now rides the directories each sub owns through the selection
-  mapping and nets them against the set of selected siblings, so a
-  shared directory is subtracted exactly once per pair that counts it.
+  sibling actually counted), and Homebrew was subtracted although
+  `library-caches` never counts it. The estimate now rides the
+  directories each sub owns through the selection mapping and nets
+  them against the set of selected siblings, so a shared directory is
+  subtracted exactly once per pair that counts it. The net knows the
+  `app-support` and `library-caches` siblings only: the brew row and
+  the hints "Homebrew" sub (and the library-logs row and the hints
+  Logs subs) still count shared directories without a net, tracked for
+  a future PBI.
 - A user cancel printed the contradictory pair "Cleaning colima...
   [FAILED]" plus "colima: cancelled by user" on `clean all
   --include-manual`: the batch engine classified a `CleanCancelled`
@@ -30,6 +33,12 @@ All notable changes to sasurahime will be documented in this file. The format is
   an unbounded time, so the freed line could report a size from before
   the screen was read. Both cleaners now measure the bytes at delete
   time like the rest of the ledger riders.
+- The freed bytes for `ios-backup` were the size collected before the
+  selection prompt, and the irreversible multi-select can wait on a
+  human for an unbounded time, so a backup that grew while the screen
+  was open was reported at its old size. The freed number is now
+  measured right before the deletion (the dry-run and selection lists
+  keep the sizes they showed).
 - The TUI's "Will free approximately" double-counted overlapping rows:
   the hints row deletes directories that the app-support /
   library-caches rows also claim, so selecting both showed the shared

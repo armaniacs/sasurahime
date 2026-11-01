@@ -769,7 +769,7 @@ fn all_cleaners(home: &std::path::Path, config: &config::Config) -> Vec<Box<dyn 
 ///
 /// | 種 | 意味 | anchor |
 /// |---|---|---|
-/// | (a) ledger 総和 | caller 提供の per-item size(本 PBI 着地後は全 ledger rider が削除時 dir_size)の和、成功分だけ | src/trash.rs:293-295 + :332 |
+/// | (a) ledger 総和 | caller 提供の per-item size(計測は待ち窓の後、対話 select 経路)の和、成功分だけ | src/trash.rs:293-295 + :333 |
 /// | (b) 差分 | 外部ツール実行前後の dir_size 差 | src/cleaners/generic.rs:640 / src/cleaners/uv.rs:158 |
 /// | (c) 実行前全量 | CLI 実行成功時に実行前のディレクトリ全量を freed として報告 | src/cli_fallback.rs:147 + :168 |
 /// | (d) 検証済み上限 | plugin の claimed freed を削除後の残り実測サイズで上限切り | src/cleaners/plugin.rs:431-438 |
