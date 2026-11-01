@@ -26,3 +26,11 @@ A pin greps `include_str!` source for a structural property; reach for one only 
 
 - Anchor the grep on the **definition line** of the pinned item (`pub(crate) fn safe_delete(`, `fn delete_selected(`), never a call site.
 - Keep the pinned literal out of the pin's own source by assembling it with `split` / `format` (precedents: the ledger-bypass pin in `src/trash.rs`, the tool-failure wording pin in `src/command.rs`).
+
+## Select-port injection (PBI 102)
+
+The interactive selection path is E2E-walkable through the prompt seam, not through a real terminal. Tests inject a mock `PromptPort` with `CleanPrompt::with_port(port)` (a thread-local guard: it installs the mock for the current thread and restores the ambient TTY resolution on drop), then call the top-level `Cleaner::clean()` of an interactive-gated cleaner with a `tempdir` as `HOME`.
+
+- A mock port's `multi_select` may grow the fixture before returning its selection, which pins the freed-at-delete-time contract across the real interactive path (PBI 97 / 102).
+- The port contract carries selection results only (`Vec<usize>` / `bool`); dialoguer types never cross the seam.
+- `with_port` is `#[doc(hidden)]` test support; production call sites keep the ambient `CleanPrompt::for_current_run()` resolution and must not be parameterized.
