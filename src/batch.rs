@@ -3,6 +3,8 @@
 //! funnels through [`run_batch`]; skip policies stay at the call sites —
 //! they are genuinely different per entry point.
 
+use crate::cleaner::CancelClassified;
+
 /// One batch failure carried as a typed error: the cleaner name plus the
 /// whole `anyhow::Error` (cause/context chain intact), instead of a
 /// flattened `to_string()` that throws the chain away at collection time.
@@ -57,7 +59,7 @@ pub struct BatchSummary {
 /// | # | Line family | Single target (`run_clean_target`) | Batch ([`run_batch`]) | Gate |
 /// |---|---|---|---|---|
 /// | 1 | status line (`[OK]`/`[FAILED]`) | `show_spinner()` branch (main.rs:894-986) | reporter kind: animated → `with_spinner_result_progress` / `show_spinner()` → `with_spinner_result` / quiet → none | `animated` is the caller's flag, never derived from `show_spinner()`; a `CleanCancelled` Err prints no status token on either path; the classification is owned by the `CancelClassified` impl beside `CleanCancelled` (cleaner.rs), not by the emission |
-/// | 2 | cancel line | `Ok(cancelled)`, silent | `summary.cancelled` → the caller's neutral `cancelled by user` line | `Err(CleanCancelled)` downcast branch |
+/// | 2 | cancel line | `Ok(cancelled)`, silent | `summary.cancelled` → the caller's neutral `cancelled by user` line | `CancelClassified::is_user_cancelled` predicate (the ONE cancel predicate, cleaner.rs) |
 /// | 3 | note line (`post_clean_note`) | inside the `show_spinner()` branch (main.rs:937-953) | `with_notes` && `reporter.show_spinner()` (unified in PBI 90) | `--deep-suppress` hides; default and `--suppress` show |
 /// | 4 | freed line | per-target `freed_message`, `show_spinner()` branch only | the caller's closing `Total freed` line (`report_total_freed`) | per-target and total are separate concepts |
 /// | 5 | skip lines | direct `N file(s) skipped` + `path: reason` (nameless) | `summary.skipped` → `report_batch_failures` (named shape, cleaner name included) | when `skipped` is non-empty |
@@ -155,10 +157,12 @@ pub fn run_batch(
                 // CleanCancelled is a run-level decision, not an error: it
                 // gets its own channel so the caller reports a neutral
                 // `cancelled by user` line instead of `Error cleaning ...`.
-                // The name comes from the loop variable `c` (CleanResult::
-                // cancelled() is intentionally nameless, so CleanResult.name
-                // has nothing to give); remaining targets keep running.
-                if e.is::<crate::cleaner::CleanCancelled>() {
+                // The classification is the one CancelClassified predicate
+                // (cleaner.rs), not a local downcast; the name comes from
+                // the loop variable `c` (CleanResult::cancelled() is
+                // intentionally nameless, so CleanResult.name has nothing to
+                // give); remaining targets keep running.
+                if e.is_user_cancelled() {
                     summary.cancelled.push(c.name().to_string());
                 } else {
                     // The error itself rides in the summary (R1: no
@@ -487,6 +491,48 @@ mod tests {
         assert_eq!(
             summary.total_freed, 100,
             "the targets after the cancel must keep running"
+        );
+    }
+
+    #[test]
+    fn run_batch_cancel_via_the_animated_path_continues_remaining_targets() {
+        // The animated-path symmetric pin: animated=true takes the animated
+        // branch (with_spinner_result_progress) no matter the reporter kind,
+        // and the cancel contract must match the non-animated branch exactly
+        // — the cancelled target lands in `cancelled` with its name, never
+        // in `failures`, and the targets after it keep running (PBI 78
+        // channel). indicatif exposes no output-capture seam on this path,
+        // so the status-token absence itself is pinned behaviorally at the
+        // emit_result_status seam in progress.rs and structurally by the
+        // progress.rs source pin
+        // (with_spinner_helpers_stay_silent_on_a_user_cancel).
+        let boxed: Vec<Box<dyn crate::cleaner::Cleaner>> = vec![
+            Box::new(CancelledCleaner("colima")),
+            Box::new(OkCleaner("after-cancel")),
+        ];
+        let cleaners: Vec<&dyn crate::cleaner::Cleaner> =
+            boxed.iter().map(|b| b.as_ref()).collect();
+        let summary = run_batch(
+            &cleaners,
+            &CleanOptions::default(),
+            &crate::progress::SuppressReporter, // spinner reporter (show_spinner() == true)
+            true,                               // dry_run: never deletes and never writes history
+            true,  // animated=true: the with_spinner_result_progress branch
+            false, // with_notes
+        );
+        assert_eq!(
+            summary.cancelled,
+            vec!["colima".to_string()],
+            "the animated path must carry the cancel with the cleaner name"
+        );
+        assert!(
+            summary.failures.is_empty(),
+            "a user cancel is not a failure on the animated path either, got: {:?}",
+            summary.failures
+        );
+        assert_eq!(
+            summary.total_freed, 100,
+            "the targets after the cancel must keep running on the animated path"
         );
     }
 

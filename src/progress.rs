@@ -164,6 +164,33 @@ impl ProgressReporter for CleaningProgress {
     }
 }
 
+/// The one status-line printer behind both spinner helpers: `Ok` prints
+/// `<msg> [OK]`, a user cancel (a `CleanCancelled` Err, classified by
+/// [`CancelClassified::is_user_cancelled`]) prints nothing — the cleaner's
+/// own cancel line is the only cancel voice — and any other Err prints
+/// `<msg> [FAILED]`. `out` is the writer seam: the helpers pass stderr, the
+/// unit pins pass a buffer, because indicatif exposes no capture seam of
+/// its own.
+fn emit_result_status<T, E: std::fmt::Display + CancelClassified>(
+    out: &mut dyn std::io::Write,
+    msg: &str,
+    result: &Result<T, E>,
+) {
+    match result {
+        Ok(_) => {
+            let _ = writeln!(out, "{msg} [OK]");
+        }
+        // User cancelled: the cleaner printed its own cancel line, so no
+        // status token follows — the same silent contract as the
+        // single-target path's inline branch. A cancel is not a failure
+        // and not a new line family.
+        Err(e) if e.is_user_cancelled() => {}
+        Err(_) => {
+            let _ = writeln!(out, "{msg} [FAILED]");
+        }
+    }
+}
+
 /// Spinner whose message updates with the path being deleted. `animated`
 /// enables the steady tick (safe only when the cleaner will not prompt). A
 /// user cancel (a `CleanCancelled` Err) prints no status token: the
@@ -177,15 +204,7 @@ pub fn with_spinner_result_progress<T, E: std::fmt::Display + CancelClassified>(
     let spinner = SharedSpinner::start(msg, animated);
     let result = f(&spinner.reporter());
     spinner.finish();
-    match &result {
-        Ok(_) => eprintln!("{msg} [OK]"),
-        // User cancelled: the cleaner printed its own cancel line, so no
-        // status token follows — the same silent contract as the
-        // single-target path's inline branch. A cancel is not a failure
-        // and not a new line family.
-        Err(e) if e.is_user_cancelled() => {}
-        Err(_) => eprintln!("{msg} [FAILED]"),
-    }
+    emit_result_status(&mut std::io::stderr(), msg, &result);
     result
 }
 
@@ -194,9 +213,9 @@ pub fn with_spinner_result_progress<T, E: std::fmt::Display + CancelClassified>(
 /// steady tick (no-tick-while-prompting): a background tick would redraw the
 /// line under an in-cleaner prompt; message changes still redraw it. The
 /// animated counterpart is [`with_spinner_result_progress`], which passes the
-/// caller's animated choice to [`SharedSpinner`]. A user cancel (a
-/// `CleanCancelled` Err) prints no status token, the same as the animated
-/// counterpart.
+/// caller's animated choice to [`SharedSpinner`]. The status print delegates
+/// to `emit_result_status`: a user cancel (a `CleanCancelled` Err) prints no
+/// status token, the same as the animated counterpart.
 pub fn with_spinner_result<T, E: std::fmt::Display + CancelClassified>(
     msg: &str,
     f: impl FnOnce() -> Result<T, E>,
@@ -206,15 +225,7 @@ pub fn with_spinner_result<T, E: std::fmt::Display + CancelClassified>(
     pb.set_message(msg.to_string());
     let result = f();
     pb.finish_and_clear();
-    match &result {
-        Ok(_) => eprintln!("{msg} [OK]"),
-        // User cancelled: the cleaner printed its own cancel line, so no
-        // status token follows — the same silent contract as the
-        // single-target path's inline branch. A cancel is not a failure
-        // and not a new line family.
-        Err(e) if e.is_user_cancelled() => {}
-        Err(_) => eprintln!("{msg} [FAILED]"),
-    }
+    emit_result_status(&mut std::io::stderr(), msg, &result);
     result
 }
 
@@ -594,45 +605,75 @@ mod tests {
     }
 
     #[test]
+    fn emit_result_status_prints_ok_for_a_successful_result() {
+        // The emission seam's Ok branch: `<msg> [OK]` lands on the writer —
+        // the exact bytes the helpers used to eprintln to stderr.
+        let mut buf: Vec<u8> = Vec::new();
+        emit_result_status(&mut buf, "test", &Ok::<i32, anyhow::Error>(42));
+        assert_eq!(String::from_utf8(buf).unwrap(), "test [OK]\n");
+    }
+
+    #[test]
+    fn emit_result_status_stays_silent_on_a_user_cancel() {
+        // The emission seam's cancel branch: a `CleanCancelled` Err
+        // (classified by the CancelClassified predicate) must reach no
+        // status token — the cleaner's own cancel line is the only cancel
+        // voice, on both spinner paths.
+        let mut buf: Vec<u8> = Vec::new();
+        let result: Result<i32, anyhow::Error> =
+            Err(anyhow::Error::from(crate::cleaner::CleanCancelled));
+        emit_result_status(&mut buf, "test", &result);
+        assert!(
+            buf.is_empty(),
+            "a user cancel must print no status token, got: {:?}",
+            String::from_utf8_lossy(&buf)
+        );
+    }
+
+    #[test]
+    fn emit_result_status_prints_failed_for_a_real_error() {
+        // The emission seam's failure branch: any other Err prints
+        // `<msg> [FAILED]` on the writer.
+        let mut buf: Vec<u8> = Vec::new();
+        let result: Result<i32, anyhow::Error> = Err(anyhow::anyhow!("boom"));
+        emit_result_status(&mut buf, "test", &result);
+        assert_eq!(String::from_utf8(buf).unwrap(), "test [FAILED]\n");
+    }
+
+    #[test]
     fn with_spinner_helpers_stay_silent_on_a_user_cancel() {
         // A `CleanCancelled` Err must reach no status token in either
         // emission helper: the cleaner prints its own cancel line
         // (`<target>: cancelled by user`), so a status line right after it
         // reads as a contradiction (the run_batch non-animated branch ×
-        // spinner-reporter path). The helpers expose no in-process
-        // output-capture seam for their eprintln, so this pins the source
-        // (the same style as the steady-tick pins): both helpers classify
-        // the Err (is_user_cancelled) and the classification precedes the
-        // [FAILED] print, so a cancel never reaches a status token.
+        // spinner-reporter path). Both helpers delegate their status print
+        // to the emit_result_status seam, so the classification must live
+        // in that one source region and precede the failure print; the
+        // behavior itself is pinned by the emit_result_status unit pins.
+        // The needles are assembled from literals so this scan cannot match
+        // its own text (re-anchored from the two helper bodies, which no
+        // longer carry the match).
         let src = include_str!("progress.rs");
-        let helpers = [
-            (
-                "pub fn with_spinner_result_progress<",
-                "pub fn with_spinner_result<",
-            ),
-            (
-                "pub fn with_spinner_result<",
-                "/// Show a consolidated progress bar",
-            ),
-        ];
-        for (start_marker, end_marker) in helpers {
-            let start = src.find(start_marker).expect("helper source present");
-            let end = src[start..]
-                .find(end_marker)
-                .map(|i| start + i)
-                .unwrap_or(src.len());
-            let body = &src[start..end];
-            let class = body
-                .find("is_user_cancelled")
-                .expect("the helper must classify the Err (is_user_cancelled) before printing");
-            let failed = body
-                .find("[FAILED]")
-                .expect("the helper must keep the [FAILED] print for real errors");
-            assert!(
-                class < failed,
-                "the cancel classification must precede the [FAILED] print so a CleanCancelled Err reaches no status token"
-            );
-        }
+        let start = src
+            .find("fn emit_result_status")
+            .expect("the emit_result_status seam must be present");
+        let end = src[start..]
+            .find("/// Spinner whose message updates with the path being deleted")
+            .map(|i| start + i)
+            .unwrap_or(src.len());
+        let body = &src[start..end];
+        let cancel_needle = format!("is_user_{}", "cancelled");
+        let failed_needle = format!("[{}", "FAILED]");
+        let class = body
+            .find(&cancel_needle)
+            .expect("the emission seam must classify the user-cancel Err before printing");
+        let failed = body
+            .find(&failed_needle)
+            .expect("the emission seam must keep the failure print for real errors");
+        assert!(
+            class < failed,
+            "the cancel classification must precede the failure print so a CleanCancelled Err reaches no status token"
+        );
     }
 
     #[test]
