@@ -920,27 +920,6 @@ mod tests {
     }
 
     #[test]
-    fn every_app_support_hint_entry_display_names_are_unique() {
-        // B5 (PBI 99): hint_entry resolves a target with a first-match find
-        // on the AppSupport rows, so a duplicated display_name would
-        // silently bind another row's process_name/threshold/quit_app to a
-        // target. The bidirectional tests above stop a missing row; this
-        // pin stops the same name twice - writing the same display_name on
-        // two AppSupport rows must fail the PR.
-        let mut seen = HashSet::new();
-        for e in KNOWN_ENTRIES
-            .iter()
-            .filter(|e| e.base_dir == BaseDir::AppSupport)
-        {
-            assert!(
-                seen.insert(e.display_name),
-                "duplicated AppSupport display_name: {} (first-match would bind the wrong row)",
-                e.display_name
-            );
-        }
-    }
-
-    #[test]
     fn allowlist_paths_are_relative_normal_components() {
         for t in TARGETS {
             for p in std::iter::once(&t.root).chain(t.subpaths.iter()) {

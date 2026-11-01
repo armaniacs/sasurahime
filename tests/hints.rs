@@ -185,6 +185,44 @@ fn clean_hints_dry_run_deletes_nothing_and_lists_the_plan() {
 }
 
 #[test]
+fn clean_hints_sub_dry_run_lists_the_plan_without_threshold_judgment() {
+    // PBI-100 (#14): the `--sub` dry run resolves the named entry
+    // statically (the explicit selection is the threshold judgment), so the
+    // plan line appears even against an empty home — no collect_hints walk
+    // and no threshold filter stands between the selection and the listing.
+    // 0-byte / below-threshold entries are still listed: the size value is
+    // not pinned verbatim (fs block-size differences), only the line's
+    // shape — the wording and the entry's deletion paths.
+    let tmp = TempDir::new().unwrap();
+
+    let output = sasurahime(tmp.path())
+        .args([
+            "--permanent",
+            "clean",
+            "hints",
+            "--sub",
+            "Diagnostic Reports",
+            "--dry-run",
+        ])
+        .output()
+        .unwrap();
+    let combined = combined_output(&output);
+    assert!(
+        output.status.success(),
+        "the dry run must succeed, got:\n{combined}"
+    );
+    assert!(
+        combined.contains("[dry-run] would clear Diagnostic Reports"),
+        "the dry-run plan must list the selected entry even with no debris, \
+         got:\n{combined}"
+    );
+    assert!(
+        combined.contains("~/Library/Logs/DiagnosticReports"),
+        "the dry-run plan must show the entry's deletion paths, got:\n{combined}"
+    );
+}
+
+#[test]
 fn clean_hints_unknown_sub_exits_nonzero() {
     // PBI 63 shape: an unknown sub-target spelling is an error, not a
     // silent no-op clean.
