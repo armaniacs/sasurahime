@@ -14,3 +14,10 @@
 - 2 候補は同じ価値帯（対話フローの E2E 化）の**代替案**で、並行着手はしない。順位 1（PBI-102）を先に着地させ、その結果で順位 2 の価値を再判定する
 - PBI-102 は既実装確認（フェーズ 0）で「port の新設」から「注入 seam の新設」に修正済み（`PromptPort` は PBI 75 で実在、`for_current_run` の ambient 解決だけがテストから差し替え不能）
 - PBI-103 はスパイク分離（flaky レートの計測）を着手条件に含める
+
+## 着地結果（2026-11-01）
+
+| 順位 | PBI | 処置 | 根拠 |
+|---|---|---|---|
+| 1 | PBI-102 | **実装済み・アーカイブ**（`04a8733` feat + `b065e6ad` follow-up + `b231fd0` docs、focused review Approve。final gates: lib 895/4 既知 TCC、42 targets、clippy 0、fmt pass） | seam で対話流れが E2E で歩ける。RED 証拠 4 本実測（seam 無し / 契約破壊 / handback 断言 / 本番 install pin） |
+| 2 | PBI-103 | **close（着手せず）** | PBI-102 着地後の残存価値は dialoguer 自体の描画（第三者 crate 契約）のみ。5 SP + 構造的 flaky + 依存追加に見合わない。dialoguer pin 変更時に再オープンする判断点を記録 |

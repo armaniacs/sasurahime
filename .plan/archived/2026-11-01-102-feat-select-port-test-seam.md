@@ -31,7 +31,7 @@ sasurahime の保守担当者として、テストから `PromptPort` の選択�
 
 - port インフラ: `PromptPort`（prompt.rs:106）= confirm + multi_select。アダプタ 2 個（TtyPrompt :136 / NonInteractive :183）、どちらも stateless unit struct で解決結果は `&'static` trait object
 - 解決: `CleanPrompt::for_current_run()`（:64-70）= `is_interactive()` で分岐。テストプロセス（stdin 非 TTY）では常に NonInteractive
-- 呼び出し元: `multi_select_or_skip` 7 箇所（library_logs / orphan_containers / library_caches / app_support / ios_backup / ollama / apfs_snapshot）、`confirm_on_tty` 1 箇所（colima）
+- 呼び出し元: `multi_select_or_skip` 6 箇所（library_logs / library_caches / app_support / ios_backup / ollama / apfs_snapshot。orphan_containers は `for_current_run().multi_select` 直呼びで ritual を経由しない ― 着地コードの実測で棚卸し訂正。seam は for_current_run が override を参照するため両筋とも効く）、`confirm_on_tty` 1 箇所（colima）
 - 既存 pin との整合: round 8 の type-name pin（本番領域に SuppressReporter 参照なし）、集約 pin（`multi_select_or_skip` 存在 + 空選択行不在）、non-TTY pin（`[<target>] not a terminal`）は port 解決の形状に触れない
 - 既実装確認（フェーズ 0）: PromptPort と 2 アダプタは src/prompt.rs に実在（grep + 実コード読み確認済み）。**本 PBI は「port の新設」ではなく「注入 seam の新設」**。疑似 TTY ハーネスは src/ にも tests/ にも存在しない（grep で確認済み）
 - テスト規約: tests/AGENTS.md は「cache-dir 解決を env var で操らずテストファクトリで作る」ことを要求（`HuggingFaceCleaner::with_cache_dir` 前例）。選択 port の注入も同型（テストファクトリ or test-only override）が妥当
@@ -112,8 +112,15 @@ PromptPort と 2 アダプタは実在（本 PBI は seam の新設）。疑似 
 - `confirm_on_tty`（PBI 81）は port を使わない第 3 semantics。本 PBI では触らない（選択 port のみ）。触る場合は PBI-process の gate 表更新を伴う
 
 ## Definition of Done
-- [ ] 全 BDD シナリオが自動テストとして実装されパスする
-- [ ] 対話経路の E2E が 1 本以上で RED 確認の証拠が記録されている
-- [ ] production の挙動変更なし（既存 pin 群 green 維持）
-- [ ] コードレビュー完了
-- [ ] tests/AGENTS.md の port 注入規約に 1 行追記（必要なら）
+- [x] 全 BDD シナリオが自動テストとして実装されパスする（tests/select_port.rs 3 本 + src/prompt.rs seam unit 2 本。focused review の follow-up で test 3 を handback 記録断言に強化済み）
+- [x] 対話経路の E2E が 1 本以上で RED 確認の証拠が記録されている ― RED 証拠: (a) seam 無し RED: `error[E0599]: no associated function or constant named 'with_port' found for struct 'CleanPrompt'` ×3（tests/select_port.rs:191/243/275、実装後 green）。(b) 削除時実測契約の破壊 RED: library_logs の interactive 分岐を臨時 collect 時サイズ渡し（remeasure=false）→ E2E 断言 `left: 20480（collect 時）/ right: 24576（成長後 on-disk 実測）` で失敗、巻き戻し。(c) follow-up: with_port 臨時 no-op → handback 断言 `left: None / right: Some(Some([]))` で red（旧 Ok(None) 断言は無音 pass のままの検出力ゼロの穴を検出）、本番領域に with_port 臨時 install → `prompt.rs production code installs the test-only port override` で red。いずれも巻き戻し後 green
+- [x] production の挙動変更なし（既存 pin 群 green 維持: drift pin 5 本、round 8 pin 群、drift pin 含め新規失敗ゼロ。final gates: lib 895 passed / 4 failed（既知 TCC のみ）、42 test targets ok、clippy 0、fmt pass）
+- [x] コードレビュー完了（focused review 2 視点、判定 Approve with follow-ups。High 1 件（test 3 検出力ゼロ）+ Suggestion 4 件を follow-up コミット `b065e6ad` で対応済み、反証で倒れた指摘は採用せず）
+- [x] tests/AGENTS.md の port 注入規約に 1 行追記（Select-port injection (PBI 102) 節、コミット `b231fd0`）
+
+### 着地
+| コミット | 内容 |
+|----------|------|
+| `04a8733` | feat(prompt): expose a test seam for the select port（src/prompt.rs +144/−12、tests/select_port.rs 新規。with_port thread-local guard + handback 記録断言の E2E 3 本 + seam unit 2 本） |
+| `b065e6ad` | test(prompt): pin the select seam against silent bypasses（focused review follow-up: test 3 強化 + #[must_use] + 本番領域 with_port install pin + 書き込み失敗の判断点 WHY + doc 修正 2 箇所） |
+| `b231fd0` | docs(tests): document the select-port injection convention（tests/AGENTS.md Select-port injection 節） |

@@ -107,3 +107,12 @@ grep -n "dialoguer" Cargo.toml Cargo.lock
 - [ ] PBI-102 との重複がない（残存価値の再判定が記録されている）
 - [ ] コードレビュー完了
 - [ ] ドキュメント更新済み（tests/AGENTS.md のハーネス規約）
+
+## 再判定（2026-11-01、close）
+
+PBI-102 の着地結果（`04a8733` feat + `b065e6ad` follow-up + `b231fd0` docs、focused review Approve）を確認した結果、本 PBI は **close**（着手せず）とする。
+
+- PBI-102 の seam で「対話で選ぶ→削除される→freed が出る」流れが E2E で歩けるようになった（成長 variant の E2E が freed-at-delete-time 契約を対話筋そのもので pin、handback 記録断言で seam 破壊も検出）。**sasurahime 自体のコードの退行は PBI-102 の E2E が検出する**
+- 残存価値は「dialoguer 自体の描画とキー操作（ANSI、矢印キー、winsize 検出）を守る価値」のみ ― 第三者 crate の契約で、sasurahime のコードは戻り値の選択結果だけに依存し描画に依存しない。dialoguer は Cargo.lock で pin され、バージョンアップは意図的な作業でその都度手動検証に戻せる
+- 5 ストーリーポイント + 構造的 flaky リスク（raw mode + winsize + pty 実装の環境差）+ 依存追加（portable-pty / `script`）をその残存価値に支払う釣り合いが取れない（本 PBI の優先度節 Confidence 50% の根拠どおり）
+- 将来 dialoguer のバージョンアップで描画退行が現実に着地した場合、この PBI を再オープンする判断点（Cargo.lock の dialoguer pin を変える作業の受入基準として）
