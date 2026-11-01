@@ -4,6 +4,19 @@ All notable changes to sasurahime will be documented in this file. The format is
 
 ---
 
+## [0.4.5] - 2026-11-02
+
+### Added
+
+- The interactive selection path is covered by automated tests through a
+  prompt seam: a test injects a mock port (`CleanPrompt::with_port`) and
+  walks the real select → delete → freed path of an interactive-gated
+  cleaner, so the freed-at-delete-time contract (the drift class the
+  0.4.4 fixes addressed) is pinned across the interactive path the
+  helper-direct pins could not reach. Production behavior is unchanged:
+  the ambient TTY resolution stays, the seam is test support, and
+  dialoguer types never cross it.
+
 ## [0.4.4] - 2026-11-01
 
 ### Fixed
