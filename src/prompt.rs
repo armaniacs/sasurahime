@@ -11,6 +11,7 @@
 
 use crate::progress::ProgressReporter;
 use anyhow::{bail, Result};
+use std::cell::Cell;
 use std::io::{IsTerminal, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -57,11 +58,28 @@ pub fn write_not_a_terminal_remedy(out: &mut dyn Write, name: &str) -> std::io::
 /// lives in the port's implementation instead of a doc comment.
 pub struct CleanPrompt;
 
+// The test-only port override (PBI 102): installed per thread by
+// [`CleanPrompt::with_port`]. Production code never installs one, so every
+// run resolves the ambient TTY port in [`CleanPrompt::for_current_run`].
+thread_local! {
+    static TEST_PORT_OVERRIDE: Cell<Option<&'static dyn PromptPort>> = const { Cell::new(None) };
+}
+
 impl CleanPrompt {
     /// [`TtyPrompt`] when a terminal is attached, [`NonInteractive`]
     /// otherwise. Both adapters are stateless unit structs, so the resolved
-    /// port is a `&'static` trait object.
+    /// port is a `&'static` trait object. A test that installed an override
+    /// through [`CleanPrompt::with_port`] resolves the injected port
+    /// instead; production never installs one, so the ambient TTY
+    /// resolution below is the only resolution a run sees.
     pub fn for_current_run() -> &'static dyn PromptPort {
+        // The test-only seam (PBI 102) is consulted first. With no override
+        // installed — every production run — this is a thread-local read
+        // and the ambient TTY resolution below is exactly what it always
+        // was: one `is_interactive()` read per resolution.
+        if let Some(port) = TEST_PORT_OVERRIDE.with(Cell::get) {
+            return port;
+        }
         if is_interactive() {
             &TtyPrompt
         } else {
@@ -95,6 +113,36 @@ impl CleanPrompt {
         }
         println!("\n{explanation}");
         Ok(Some(TtyPrompt.confirm(reporter, "Proceed?")?))
+    }
+
+    /// The test-only injection seam for the select port (PBI 102): install
+    /// `port` as the resolution on the CALLING THREAD and return a guard
+    /// that restores the ambient TTY resolution on drop. Production code
+    /// never installs an override, so the ambient resolution ([`Self::
+    /// for_current_run`], the TTY-ness read per resolution) is unchanged;
+    /// this seam exists so tests can drive the select paths (the
+    /// `multi_select_or_skip` cleaners) with a mock port that speaks the
+    /// port contract only — `Vec<usize>` picks and bools, never a dialoguer
+    /// type. The override is per-thread, so parallel tests that install
+    /// their own mock cannot see each other's port.
+    #[doc(hidden)]
+    pub fn with_port(port: &'static dyn PromptPort) -> PortOverride {
+        let prev = TEST_PORT_OVERRIDE.with(|slot| slot.replace(Some(port)));
+        PortOverride { prev }
+    }
+}
+
+/// The guard returned by [`CleanPrompt::with_port`] (PBI 102): restores the
+/// thread's previous resolution on drop, so a mock cannot leak past its
+/// scope into the ambient TTY resolution.
+#[doc(hidden)]
+pub struct PortOverride {
+    prev: Option<&'static dyn PromptPort>,
+}
+
+impl Drop for PortOverride {
+    fn drop(&mut self) {
+        TEST_PORT_OVERRIDE.with(|slot| slot.set(self.prev));
     }
 }
 
@@ -229,6 +277,7 @@ pub fn multi_select_or_skip(
     interpret_port_picks(
         name,
         CleanPrompt::for_current_run().multi_select(name, reporter, prompt, items, defaults)?,
+        &mut std::io::stdout(),
     )
 }
 
@@ -239,15 +288,20 @@ pub fn multi_select_or_skip(
 /// call. `None` is the non-TTY remedy exit (the remedy is already printed by
 /// the port) and stays silent; an empty selection prints the one `[{name}]`
 /// line exactly once and skips; real picks carry through unchanged. The
-/// stdout line cannot be captured in-process, so its one-line shape is
-/// pinned by the source pin instead of by value.
-fn interpret_port_picks(name: &str, picks: Option<Vec<usize>>) -> Result<Option<Vec<usize>>> {
+/// stdout line goes through the `out` parameter, so its one-line shape is
+/// pinned by value (the aggregation source pin greps the cleaners'
+/// production regions for the literal, never this print).
+fn interpret_port_picks(
+    name: &str,
+    picks: Option<Vec<usize>>,
+    out: &mut dyn Write,
+) -> Result<Option<Vec<usize>>> {
     match picks {
         // PBI 75: the port owns the non-TTY semantics — None means the
         // remedy is already printed and the caller just skips.
         None => Ok(None),
         Some(picks) if picks.is_empty() => {
-            println!("[{name}] nothing selected");
+            writeln!(out, "[{name}] nothing selected")?;
             Ok(None)
         }
         Some(picks) => Ok(Some(picks)),
@@ -359,35 +413,113 @@ mod tests {
         let _ = multi_select_or_skip("ollama", &rep, None, &items, &defaults);
     }
 
+    // --- PBI 102: the test injection seam for the select port ---
+
+    /// A test port that answers a fixed selection and records that it was
+    /// consulted. Stateless unit struct, same shape as the two adapters.
+    struct MockSelectPort;
+    static MOCK_CONSULTED: AtomicUsize = AtomicUsize::new(0);
+
+    impl PromptPort for MockSelectPort {
+        fn confirm(&self, _reporter: &dyn ProgressReporter, _prompt: &str) -> Result<bool> {
+            bail!("the confirm path is not part of the select-port seam")
+        }
+
+        fn multi_select(
+            &self,
+            _name: &str,
+            _reporter: &dyn ProgressReporter,
+            _prompt: Option<&str>,
+            _items: &[String],
+            _defaults: &[bool],
+        ) -> Result<Option<Vec<usize>>> {
+            MOCK_CONSULTED.fetch_add(1, AtomicOrdering::Relaxed);
+            Ok(Some(vec![0]))
+        }
+    }
+
+    #[test]
+    fn with_port_installs_the_mock_for_the_current_thread() {
+        // PBI 102: the seam replaces the ambient TTY resolution. A test
+        // process has no TTY, so the ambient resolution would always hand
+        // back NonInteractive and the dialoguer select path would stay
+        // untested; the injected port is what `for_current_run` resolves.
+        let _port = CleanPrompt::with_port(&MockSelectPort);
+        let rep = RecordingReporter::new();
+        let items = vec!["a".to_string()];
+        let picks = CleanPrompt::for_current_run()
+            .multi_select("ollama", &rep, None, &items, &[false])
+            .expect("the injected port answers, not the ambient remedy");
+        assert_eq!(picks, Some(vec![0]), "the injected port must resolve");
+        assert_eq!(
+            MOCK_CONSULTED.load(AtomicOrdering::Relaxed),
+            1,
+            "the injected port must be the one consulted"
+        );
+    }
+
+    #[test]
+    fn with_port_restores_the_ambient_resolution_on_drop() {
+        // The guard restores the ambient TTY resolution, so a mock cannot
+        // leak past its scope: after the drop the resolution is ambient
+        // again (NonInteractive on the non-TTY test stdin).
+        {
+            let _port = CleanPrompt::with_port(&MockSelectPort);
+        }
+        if is_interactive() {
+            // dialoguer needs a real TTY; an interactive cargo test would
+            // hang on the prompt.
+            return;
+        }
+        let rep = RecordingReporter::new();
+        let items = vec!["a".to_string()];
+        let picks = CleanPrompt::for_current_run()
+            .multi_select("ollama", &rep, None, &items, &[false])
+            .expect("unavailable is a None, not an error");
+        assert!(
+            picks.is_none(),
+            "the ambient TTY resolution must be back after the guard drops"
+        );
+    }
+
     #[test]
     fn interpret_port_picks_keeps_none_a_silent_skip() {
         // C3: the port's None is the non-TTY remedy exit - the remedy is
         // already printed by the port, so this branch adds no output and
         // stays a skip. The TTY interaction itself (dialoguer) is out of
         // scope here: this seam sits after the port call.
-        let picks = interpret_port_picks("ollama", None).expect("None is not an error");
+        let mut buf: Vec<u8> = Vec::new();
+        let picks = interpret_port_picks("ollama", None, &mut buf).expect("None is not an error");
         assert!(picks.is_none(), "None must stay a skip (Ok(None))");
+        assert!(buf.is_empty(), "the None exit must stay silent");
     }
 
     #[test]
     fn interpret_port_picks_treats_an_empty_selection_as_a_skip() {
         // C3: an empty selection is the other skip - the one `[{name}]`
-        // line plus Ok(None). The println! writes to the process stdout,
-        // which an in-process test cannot capture, so the return value is
-        // what this pin holds (the one-line shape is pinned by the
-        // aggregation source pin).
-        let picks = interpret_port_picks("ollama", Some(Vec::new()))
+        // line plus Ok(None). The writer parameter pins the one-line shape
+        // by value (the aggregation source pin only greps the cleaners'
+        // production regions for the literal, never this file's own print).
+        let mut buf: Vec<u8> = Vec::new();
+        let picks = interpret_port_picks("ollama", Some(Vec::new()), &mut buf)
             .expect("an empty selection is not an error");
         assert!(picks.is_none(), "an empty selection must skip (Ok(None))");
+        assert_eq!(
+            String::from_utf8(buf).unwrap(),
+            "[ollama] nothing selected\n",
+            "the empty-selection exit prints the one [{{name}}] line exactly once"
+        );
     }
 
     #[test]
     fn interpret_port_picks_hands_picked_indices_through() {
         // C3: a real selection carries the picked indices unchanged so the
         // clean proceeds, with no extra output on that path.
-        let picks = interpret_port_picks("ollama", Some(vec![0, 2]))
+        let mut buf: Vec<u8> = Vec::new();
+        let picks = interpret_port_picks("ollama", Some(vec![0, 2]), &mut buf)
             .expect("a real selection is not an error");
         assert_eq!(picks, Some(vec![0, 2]), "picked indices must pass through");
+        assert!(buf.is_empty(), "a real selection must add no output");
     }
 
     /// The whitespace-normalized production region of a scanned file:
