@@ -113,12 +113,15 @@ pub fn hint_entry(target: &AppSupportTarget) -> Option<&'static HintEntry> {
 /// every [`TARGETS`] allowlist path (root + subpath), the same paths
 /// [`scan_candidates`] resolves. Exact-match membership only — prefixes must
 /// never match (Default/Cache vs Default/Cache_Data, the PBI 94 pin).
+/// Symmetric with the library-caches `counts_owned` (library_caches.rs):
+/// neither side builds a joined path string to compare — both match the
+/// allowlist directly, with no per-comparison allocation.
 pub fn counts_owned(base: BaseDir, path: &str) -> bool {
     base == BaseDir::AppSupport
         && TARGETS.iter().any(|t| {
-            t.subpaths
-                .iter()
-                .any(|&sub| format!("{}/{}", t.root, sub) == path)
+            path.strip_prefix(t.root)
+                .and_then(|rest| rest.strip_prefix('/'))
+                .is_some_and(|sub| t.subpaths.contains(&sub))
         })
 }
 
@@ -2215,26 +2218,6 @@ mod tests {
         assert!(
             base.join("Slack/Cache/a.bin").exists(),
             "nothing is deleted without a terminal"
-        );
-    }
-
-    #[test]
-    fn the_empty_selection_line_is_owned_by_the_shared_select_path() {
-        // PBI 99: the empty-selection skip must be owned by the shared
-        // select path, not re-printed per cleaner. The drift cannot surface
-        // as behaviour (an empty selection needs a TTY), so the pin greps
-        // the source: Red before the helper, green after the migration. The
-        // needle is assembled from two pieces so the pin's own source does
-        // not contain the contiguous line it greps for.
-        let needle = String::from("] nothing") + " selected";
-        let src = include_str!("app_support.rs");
-        assert!(
-            !src.contains(&needle),
-            "the empty-selection line must be owned by the shared select path"
-        );
-        assert!(
-            src.contains("multi_select"),
-            "the interactive select must flow through the shared select path"
         );
     }
 

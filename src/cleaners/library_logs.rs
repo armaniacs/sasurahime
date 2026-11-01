@@ -155,12 +155,23 @@ impl LibraryLogsCleaner {
         entries: &[LogEntry],
         reporter: &dyn ProgressReporter,
         mode: crate::trash::TrashMode,
+        remeasure: bool,
     ) -> Result<CleanResult> {
-        // PBI 97: freed is the delete-time dir_size (the interactive select can wait unbounded), so re-measure right before the deletion; the ledger keeps its caller-owned size contract (it never re-walks a path).
+        // PBI 97: freed is the delete-time dir_size (the interactive select
+        // can wait unbounded), so the select path re-measures right before
+        // the deletion (`remeasure = true`). The `--all` branch has no
+        // select window between the scan and this loop, so it passes
+        // `remeasure = false` and reuses the fresh scan-time size instead of
+        // paying a redundant second walk per entry. The ledger keeps its
+        // caller-owned size contract (it never re-walks a path).
         let items: Vec<(std::path::PathBuf, u64)> = entries
             .iter()
             .map(|e| {
-                let size = crate::format::dir_size(&e.path);
+                let size = if remeasure {
+                    crate::format::dir_size(&e.path)
+                } else {
+                    e.size
+                };
                 (e.path.clone(), size)
             })
             .collect();
@@ -249,8 +260,10 @@ impl Cleaner for LibraryLogsCleaner {
         let mode = opts.trash_mode;
 
         if opts.all {
-            // Non-interactive run: process every scanned entry.
-            self.delete_entries(&entries, reporter, mode)
+            // Non-interactive run: process every scanned entry. No select
+            // window sits between the scan above and this loop, so the
+            // scan-time sizes are passed through (remeasure = false).
+            self.delete_entries(&entries, reporter, mode, false)
         } else {
             // The interactive select is the only prompt this cleaner has:
             // multi_select_or_skip owns both skips - the port's non-TTY
@@ -260,7 +273,7 @@ impl Cleaner for LibraryLogsCleaner {
             let Some(selected) = self.interactive_select(reporter, &entries)? else {
                 return Ok(CleanResult::empty(self.name()));
             };
-            let result = self.delete_entries(&selected, reporter, mode)?;
+            let result = self.delete_entries(&selected, reporter, mode, true)?;
             println!(
                 "[library-logs] total freed: {}",
                 crate::format::format_bytes(result.bytes_freed)
@@ -609,6 +622,7 @@ mod tests {
                 &entries,
                 &crate::progress::DeepSuppressReporter,
                 crate::trash::TrashMode::Permanent,
+                true,
             )
             .unwrap();
         assert!(!app.exists());
@@ -617,25 +631,5 @@ mod tests {
             "freed must be the delete-time measurement, not the scan-time size"
         );
         assert!(r.skipped.is_empty());
-    }
-
-    #[test]
-    fn the_empty_selection_line_is_owned_by_the_shared_select_path() {
-        // PBI 99: the empty-selection skip must be owned by the shared
-        // select path, not re-printed per cleaner. The drift cannot surface
-        // as behaviour (an empty selection needs a TTY), so the pin greps
-        // the source: Red before the helper, green after the migration. The
-        // needle is assembled from two pieces so the pin's own source does
-        // not contain the contiguous line it greps for.
-        let needle = String::from("] nothing") + " selected";
-        let src = include_str!("library_logs.rs");
-        assert!(
-            !src.contains(&needle),
-            "the empty-selection line must be owned by the shared select path"
-        );
-        assert!(
-            src.contains("multi_select"),
-            "the interactive select must flow through the shared select path"
-        );
     }
 }

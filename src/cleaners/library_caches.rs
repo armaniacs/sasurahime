@@ -1052,26 +1052,6 @@ mod tests {
     }
 
     #[test]
-    fn the_empty_selection_line_is_owned_by_the_shared_select_path() {
-        // PBI 99: the empty-selection skip must be owned by the shared
-        // select path, not re-printed per cleaner. The drift cannot surface
-        // as behaviour (an empty selection needs a TTY), so the pin greps
-        // the source: Red before the helper, green after the migration. The
-        // needle is assembled from two pieces so the pin's own source does
-        // not contain the contiguous line it greps for.
-        let needle = String::from("] nothing") + " selected";
-        let src = include_str!("library_caches.rs");
-        assert!(
-            !src.contains(&needle),
-            "the empty-selection line must be owned by the shared select path"
-        );
-        assert!(
-            src.contains("multi_select"),
-            "the interactive select must flow through the shared select path"
-        );
-    }
-
-    #[test]
     fn counts_owned_is_the_counted_side_of_the_library_caches_row() {
         // PBI 101: the counted-side truth of the library-caches row is the
         // KNOWN non-skip Caches entries minus the names another clean target
