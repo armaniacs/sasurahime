@@ -117,15 +117,18 @@ impl CleanPrompt {
 
     /// The test-only injection seam for the select port (PBI 102): install
     /// `port` as the resolution on the CALLING THREAD and return a guard
-    /// that restores the ambient TTY resolution on drop. Production code
-    /// never installs an override, so the ambient resolution ([`Self::
-    /// for_current_run`], the TTY-ness read per resolution) is unchanged;
+    /// whose drop restores the PREVIOUS slot value - the ambient TTY
+    /// resolution for a first (non-nested) override, the enclosing
+    /// override when the seams nest. Production code never installs an
+    /// override, so the ambient resolution ([`Self::for_current_run`], the
+    /// TTY-ness read per resolution) is unchanged;
     /// this seam exists so tests can drive the select paths (the
     /// `multi_select_or_skip` cleaners) with a mock port that speaks the
     /// port contract only — `Vec<usize>` picks and bools, never a dialoguer
     /// type. The override is per-thread, so parallel tests that install
     /// their own mock cannot see each other's port.
     #[doc(hidden)]
+    #[must_use = "the override lasts only until the guard drops; a discarded guard leaves the port installed for the rest of the thread"]
     pub fn with_port(port: &'static dyn PromptPort) -> PortOverride {
         let prev = TEST_PORT_OVERRIDE.with(|slot| slot.replace(Some(port)));
         PortOverride { prev }
@@ -135,6 +138,7 @@ impl CleanPrompt {
 /// The guard returned by [`CleanPrompt::with_port`] (PBI 102): restores the
 /// thread's previous resolution on drop, so a mock cannot leak past its
 /// scope into the ambient TTY resolution.
+/// Ownership drops guards in reverse order; an explicit `drop` that fires an outer guard before an inner one un-nests the restores out of sequence - mind the order when dropping by hand.
 #[doc(hidden)]
 pub struct PortOverride {
     prev: Option<&'static dyn PromptPort>,
@@ -301,6 +305,7 @@ fn interpret_port_picks(
         // remedy is already printed and the caller just skips.
         None => Ok(None),
         Some(picks) if picks.is_empty() => {
+            // The ? is deliberate: a failed plan display aborts the clean before any deletion, unlike the best-effort remedy write in NonInteractive::multi_select.
             writeln!(out, "[{name}] nothing selected")?;
             Ok(None)
         }
@@ -594,6 +599,131 @@ mod tests {
                 "{path} production code names a suppressor reporter \
                  ({deep_needle} / {bare_needle}); clean() threads the live \
                  reporter down and only tests may name the suppressors:\n{}",
+                &production[..production.len().min(200)]
+            );
+        }
+    }
+
+    #[test]
+    fn no_production_source_installs_the_test_only_port_override() {
+        // PBI 102 follow-up: the seam doc (the TEST_PORT_OVERRIDE
+        // thread-local) states the contract every run's ambient TTY
+        // resolution rests on: production code never installs an override,
+        // only test support does. That contract breaks the moment anything
+        // outside test support installs the override, and an install
+        // cannot surface as behaviour (the seam is in-process state), so
+        // this is a source pin. The needle is the CALL shape: the `fn
+        // with_port` definition and the PortOverride plumbing are not
+        // installs, and prompt.rs's own mock installs live under its tests
+        // module, which the production-region split excludes.
+        // test_helpers.rs is `#[cfg(test)]`-gated (test support, never
+        // production) and is deliberately not scanned. The needle only
+        // sees direct calls - an aliased or re-exported install would
+        // evade this grep - the accepted limit of a source pin, and a file
+        // added to src/ must be added to this list.
+        let sources = [
+            ("batch.rs", include_str!("batch.rs")),
+            ("cleaner.rs", include_str!("cleaner.rs")),
+            ("cli_fallback.rs", include_str!("cli_fallback.rs")),
+            ("command.rs", include_str!("command.rs")),
+            ("config.rs", include_str!("config.rs")),
+            ("context.rs", include_str!("context.rs")),
+            ("disk_image.rs", include_str!("disk_image.rs")),
+            ("doctor.rs", include_str!("doctor.rs")),
+            ("explorer.rs", include_str!("explorer.rs")),
+            ("format.rs", include_str!("format.rs")),
+            ("history.rs", include_str!("history.rs")),
+            ("installed_apps.rs", include_str!("installed_apps.rs")),
+            ("interactive.rs", include_str!("interactive.rs")),
+            ("lib.rs", include_str!("lib.rs")),
+            ("main.rs", include_str!("main.rs")),
+            ("progress.rs", include_str!("progress.rs")),
+            ("prompt.rs", include_str!("prompt.rs")),
+            ("safety.rs", include_str!("safety.rs")),
+            ("scan_cache.rs", include_str!("scan_cache.rs")),
+            ("scanner.rs", include_str!("scanner.rs")),
+            ("trash.rs", include_str!("trash.rs")),
+            ("unattended.rs", include_str!("unattended.rs")),
+            ("hint/apps.rs", include_str!("hint/apps.rs")),
+            ("hint/cleaner.rs", include_str!("hint/cleaner.rs")),
+            ("hint/detector.rs", include_str!("hint/detector.rs")),
+            ("hint/mod.rs", include_str!("hint/mod.rs")),
+            (
+                "cleaners/apfs_snapshot.rs",
+                include_str!("cleaners/apfs_snapshot.rs"),
+            ),
+            (
+                "cleaners/app_support.rs",
+                include_str!("cleaners/app_support.rs"),
+            ),
+            ("cleaners/brew.rs", include_str!("cleaners/brew.rs")),
+            ("cleaners/browser.rs", include_str!("cleaners/browser.rs")),
+            ("cleaners/cargo.rs", include_str!("cleaners/cargo.rs")),
+            ("cleaners/custom.rs", include_str!("cleaners/custom.rs")),
+            (
+                "cleaners/device_support.rs",
+                include_str!("cleaners/device_support.rs"),
+            ),
+            ("cleaners/generic.rs", include_str!("cleaners/generic.rs")),
+            ("cleaners/gradle.rs", include_str!("cleaners/gradle.rs")),
+            (
+                "cleaners/huggingface.rs",
+                include_str!("cleaners/huggingface.rs"),
+            ),
+            (
+                "cleaners/ios_backup.rs",
+                include_str!("cleaners/ios_backup.rs"),
+            ),
+            (
+                "cleaners/library_caches.rs",
+                include_str!("cleaners/library_caches.rs"),
+            ),
+            (
+                "cleaners/library_logs.rs",
+                include_str!("cleaners/library_logs.rs"),
+            ),
+            ("cleaners/log.rs", include_str!("cleaners/log.rs")),
+            (
+                "cleaners/manual_only.rs",
+                include_str!("cleaners/manual_only.rs"),
+            ),
+            ("cleaners/mise.rs", include_str!("cleaners/mise.rs")),
+            ("cleaners/mod.rs", include_str!("cleaners/mod.rs")),
+            ("cleaners/ollama.rs", include_str!("cleaners/ollama.rs")),
+            (
+                "cleaners/orphan_containers.rs",
+                include_str!("cleaners/orphan_containers.rs"),
+            ),
+            ("cleaners/plugin.rs", include_str!("cleaners/plugin.rs")),
+            (
+                "cleaners/pre_commit.rs",
+                include_str!("cleaners/pre_commit.rs"),
+            ),
+            (
+                "cleaners/project_artifacts.rs",
+                include_str!("cleaners/project_artifacts.rs"),
+            ),
+            (
+                "cleaners/retention.rs",
+                include_str!("cleaners/retention.rs"),
+            ),
+            ("cleaners/rustup.rs", include_str!("cleaners/rustup.rs")),
+            ("cleaners/uv.rs", include_str!("cleaners/uv.rs")),
+            ("cleaners/vm_swap.rs", include_str!("cleaners/vm_swap.rs")),
+            ("cleaners/xcode.rs", include_str!("cleaners/xcode.rs")),
+        ];
+        // Assembled from pieces so this file's own source does not contain
+        // the contiguous shape it greps for (the same defense the
+        // suppressor pin above uses).
+        let needle = concat!("CleanPrompt", "::with_port(");
+        for (path, src) in sources {
+            let production = production_region(src);
+            assert!(
+                !production.contains(needle),
+                "{path} production code installs the test-only port override \
+                 ({needle}); with_port is test support - installing it \
+                 outside test support breaks this contract, production keeps \
+                 the ambient CleanPrompt::for_current_run() resolution:\n{}",
                 &production[..production.len().min(200)]
             );
         }

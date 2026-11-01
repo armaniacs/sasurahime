@@ -157,10 +157,15 @@ impl PromptPort for EmptySelectPort {
     }
 }
 
-/// The shared-routing variant: answers an empty selection and records
-/// nothing, so the `multi_select_or_skip` routing test below stays
-/// parallel-safe against the empty-selection cleaner test.
+/// The shared-routing variant: answers an empty selection and records the
+/// picks it hands back in its own static, so the `multi_select_or_skip`
+/// routing test below can tell the injected port from the ambient
+/// NonInteractive fallback - both reach the same Ok(None) after the same
+/// routing - and stays parallel-safe against the empty-selection cleaner
+/// test (each mock owns its static).
 struct EmptyRoutingPort;
+
+static ROUTING_HANDBACK: Mutex<Option<Option<Vec<usize>>>> = Mutex::new(None);
 
 impl PromptPort for EmptyRoutingPort {
     fn confirm(&self, _reporter: &dyn ProgressReporter, _prompt: &str) -> Result<bool> {
@@ -175,7 +180,13 @@ impl PromptPort for EmptyRoutingPort {
         _items: &[String],
         _defaults: &[bool],
     ) -> Result<Option<Vec<usize>>> {
-        Ok(Some(vec![]))
+        let picks = Some(Vec::new());
+        // The shared routing turns this handback and a NonInteractive None
+        // into the same Ok(None), so the record is the only observable that
+        // says the injected port was consulted: a broken seam (with_port
+        // installing nothing) leaves the record None.
+        *ROUTING_HANDBACK.lock().unwrap() = Some(picks.clone());
+        Ok(picks)
     }
 }
 
@@ -269,6 +280,14 @@ fn empty_selection_through_the_shared_select_path_hands_back_none() {
     // not an error and not a picked list. The one-line stdout shape is
     // pinned by value in src/prompt.rs (an in-process test cannot capture
     // the process stdout this line prints to).
+    //
+    // The Ok(None) return alone is indistinguishable from the ambient
+    // fallback: with no TTY the NonInteractive port answers the same
+    // Ok(None) after the same routing, so a broken seam (with_port
+    // installing nothing) would pass silently. The mock records the picks
+    // it hands back, and the assertion below pins that the mock's
+    // `Some(vec![])` - not a NonInteractive None - is what reached the
+    // shared ritual.
     let _port = CleanPrompt::with_port(&EmptyRoutingPort);
     let items = vec!["com.example.app  (2.5 KB)  [large 2.5 KB]".to_string()];
     let picks = sasurahime::prompt::multi_select_or_skip(
@@ -282,5 +301,17 @@ fn empty_selection_through_the_shared_select_path_hands_back_none() {
     assert!(
         picks.is_none(),
         "the shared routing must hand Ok(None) back to the cleaner"
+    );
+    // Outer Some = the injected port was consulted at all; inner
+    // Some(vec![]) = the empty selection it handed the ritual. A None
+    // record means the seam resolved the ambient NonInteractive instead -
+    // the same Ok(None) from a port that never saw the display items.
+    let handback = ROUTING_HANDBACK.lock().unwrap().clone();
+    assert_eq!(
+        handback,
+        Some(Some(Vec::new())),
+        "the shared ritual must have consumed the mock's Some(vec![]); a \
+         None record means the seam installed nothing and the ambient \
+         NonInteractive resolved instead"
     );
 }
