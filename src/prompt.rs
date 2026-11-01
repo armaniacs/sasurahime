@@ -218,7 +218,31 @@ pub fn multi_select_or_skip(
     items: &[String],
     defaults: &[bool],
 ) -> Result<Option<Vec<usize>>> {
-    match CleanPrompt::for_current_run().multi_select(name, reporter, prompt, items, defaults)? {
+    // dialoguer pairs items and defaults by index, so a drifted pair would
+    // silently pre-check the wrong items. Debug-only: the release build
+    // compiles this out (every call site pairs them by construction).
+    debug_assert_eq!(
+        items.len(),
+        defaults.len(),
+        "multi_select items and defaults must pair up"
+    );
+    interpret_port_picks(
+        name,
+        CleanPrompt::for_current_run().multi_select(name, reporter, prompt, items, defaults)?,
+    )
+}
+
+/// The pick interpretation of the one interactive-select ritual (PBI 99),
+/// extracted from [`multi_select_or_skip`] so the three exits are
+/// unit-testable without a TTY: dialoguer needs a real terminal, so the TTY
+/// interaction itself is out of scope here - this seam sits after the port
+/// call. `None` is the non-TTY remedy exit (the remedy is already printed by
+/// the port) and stays silent; an empty selection prints the one `[{name}]`
+/// line exactly once and skips; real picks carry through unchanged. The
+/// stdout line cannot be captured in-process, so its one-line shape is
+/// pinned by the source pin instead of by value.
+fn interpret_port_picks(name: &str, picks: Option<Vec<usize>>) -> Result<Option<Vec<usize>>> {
+    match picks {
         // PBI 75: the port owns the non-TTY semantics — None means the
         // remedy is already printed and the caller just skips.
         None => Ok(None),
@@ -312,7 +336,7 @@ mod tests {
         }
         let rep = RecordingReporter::new();
         let items = vec!["a".to_string(), "b".to_string()];
-        let picks = multi_select_or_skip("ollama", &rep, None, &items, &[])
+        let picks = multi_select_or_skip("ollama", &rep, None, &items, &[false, false])
             .expect("unavailable is a None, not an error");
         assert!(picks.is_none(), "a non-TTY run must skip (Ok(None))");
         assert_eq!(
@@ -323,41 +347,176 @@ mod tests {
     }
 
     #[test]
+    #[should_panic(expected = "must pair up")]
+    fn multi_select_or_skip_panics_when_items_and_defaults_drift() {
+        // #10: dialoguer pairs items and defaults by index, so a drifted
+        // pair would silently pre-check the wrong items. The guard is a
+        // debug_assert, so this pin only holds in the debug build that
+        // cargo test uses (a release build compiles the assert out).
+        let rep = RecordingReporter::new();
+        let items = vec!["a".to_string(), "b".to_string()];
+        let defaults = vec![false];
+        let _ = multi_select_or_skip("ollama", &rep, None, &items, &defaults);
+    }
+
+    #[test]
+    fn interpret_port_picks_keeps_none_a_silent_skip() {
+        // C3: the port's None is the non-TTY remedy exit - the remedy is
+        // already printed by the port, so this branch adds no output and
+        // stays a skip. The TTY interaction itself (dialoguer) is out of
+        // scope here: this seam sits after the port call.
+        let picks = interpret_port_picks("ollama", None).expect("None is not an error");
+        assert!(picks.is_none(), "None must stay a skip (Ok(None))");
+    }
+
+    #[test]
+    fn interpret_port_picks_treats_an_empty_selection_as_a_skip() {
+        // C3: an empty selection is the other skip - the one `[{name}]`
+        // line plus Ok(None). The println! writes to the process stdout,
+        // which an in-process test cannot capture, so the return value is
+        // what this pin holds (the one-line shape is pinned by the
+        // aggregation source pin).
+        let picks = interpret_port_picks("ollama", Some(Vec::new()))
+            .expect("an empty selection is not an error");
+        assert!(picks.is_none(), "an empty selection must skip (Ok(None))");
+    }
+
+    #[test]
+    fn interpret_port_picks_hands_picked_indices_through() {
+        // C3: a real selection carries the picked indices unchanged so the
+        // clean proceeds, with no extra output on that path.
+        let picks = interpret_port_picks("ollama", Some(vec![0, 2]))
+            .expect("a real selection is not an error");
+        assert_eq!(picks, Some(vec![0, 2]), "picked indices must pass through");
+    }
+
+    /// The whitespace-normalized production region of a scanned file:
+    /// everything before its tests module. Test-only members marked
+    /// `#[cfg(test)]` inside the production area (constructor helpers, a
+    /// `cfg(test)` import) do not match the module marker, so the split
+    /// lands on the real tests module and the suppressor literals that
+    /// legitimately live under it are never scanned.
+    fn production_region(src: &str) -> String {
+        let flat = src.split_whitespace().collect::<Vec<_>>().join(" ");
+        let tests_start = flat
+            .find(concat!("#[cfg(test", ")] mod"))
+            .unwrap_or(flat.len());
+        flat[..tests_start].to_string()
+    }
+
+    #[test]
     fn cleaner_prompt_call_sites_pass_a_live_reporter_not_a_suppressor() {
-        // PBI 64: the port owns the suspension, but the suspension only
-        // happens when the caller passes the LIVE reporter. Six call sites
-        // used to hardcode &DeepSuppressReporter, whose suspend_live_output
-        // is the no-op default, so the dialoguer redraw bug could still
-        // reproduce at those cleaners. The pin: no cleaner ever passes a
-        // literal reference to the port - every call site threads the live
-        // reporter down from clean(). Since PBI 99 the shared select ritual
-        // (multi_select_or_skip) is the single port call site for the six
-        // migrated cleaners, so this file is scanned too: the helper must
-        // hand the port the caller's live reporter, never a literal.
+        // Rebuilt around the type names (PBI 64): the old shape needle
+        // `multi_select (&` fits neither the rustfmt-wrapped form
+        // `multi_select(\n &X` nor the single-line form `multi_select(&X`,
+        // so that assertion was always true and the suppression contract
+        // went unpinned. clean() threads the LIVE reporter down from main()
+        // and only tests may name the suppressor reporters, so every
+        // scanned file's production region must not reference either
+        // suppressor type - as a receiver, an argument, or a type. Type
+        // names survive every rustfmt shape (rustfmt never wraps an
+        // identifier), so the pin holds across argument reordering and
+        // single-line/wrapped call forms. app_support.rs's production
+        // `TtyPrompt` literal (the one direct confirm call, which passes the
+        // caller's live reporter) is the legitimate exception and is NOT
+        // pinned here: only suppressor references are forbidden.
         let sources = [
-            include_str!("cleaners/library_caches.rs"),
-            include_str!("cleaners/library_logs.rs"),
-            include_str!("cleaners/app_support.rs"),
-            include_str!("cleaners/ios_backup.rs"),
-            include_str!("cleaners/apfs_snapshot.rs"),
-            include_str!("cleaners/generic.rs"),
-            include_str!("cleaners/ollama.rs"),
-            include_str!("cleaners/orphan_containers.rs"),
-            include_str!("prompt.rs"),
+            (
+                "cleaners/library_caches.rs",
+                include_str!("cleaners/library_caches.rs"),
+            ),
+            (
+                "cleaners/library_logs.rs",
+                include_str!("cleaners/library_logs.rs"),
+            ),
+            (
+                "cleaners/app_support.rs",
+                include_str!("cleaners/app_support.rs"),
+            ),
+            (
+                "cleaners/ios_backup.rs",
+                include_str!("cleaners/ios_backup.rs"),
+            ),
+            (
+                "cleaners/apfs_snapshot.rs",
+                include_str!("cleaners/apfs_snapshot.rs"),
+            ),
+            ("cleaners/generic.rs", include_str!("cleaners/generic.rs")),
+            ("cleaners/ollama.rs", include_str!("cleaners/ollama.rs")),
+            (
+                "cleaners/orphan_containers.rs",
+                include_str!("cleaners/orphan_containers.rs"),
+            ),
+            ("prompt.rs", include_str!("prompt.rs")),
         ];
-        for src in sources {
-            // Whitespace-normalized so a wrapped argument list still matches.
-            let flat = src.split_whitespace().collect::<Vec<_>>().join(" ");
-            // The needles are assembled from two pieces so this file's own
-            // assertion code does not contain the contiguous shape it greps
-            // for.
-            let select_needle = concat!("multi_select (", "&");
-            let confirm_needle = concat!("confirm (", "&");
+        // Assembled from pieces so this file's own source does not contain
+        // the contiguous shapes it greps for. The bare name subsumes the
+        // Deep-prefixed one; both are asserted so a failure names the exact
+        // forbidden shapes.
+        let deep_needle = concat!("Deep", "SuppressReporter");
+        let bare_needle = concat!("Suppress", "Reporter");
+        for (path, src) in sources {
+            let production = production_region(src);
             assert!(
-                !flat.contains(select_needle) && !flat.contains(confirm_needle),
-                "a prompt call site passes a literal reference (the suppressor) \
-                 instead of the live reporter:\n{}",
-                &flat[..flat.len().min(200)]
+                !production.contains(deep_needle) && !production.contains(bare_needle),
+                "{path} production code names a suppressor reporter \
+                 ({deep_needle} / {bare_needle}); clean() threads the live \
+                 reporter down and only tests may name the suppressors:\n{}",
+                &production[..production.len().min(200)]
+            );
+        }
+    }
+
+    #[test]
+    fn the_empty_selection_exit_and_select_routing_are_owned_by_the_shared_select_path() {
+        // Consolidated form of the five migrated cleaners' seam pins
+        // (PBI 99), both needles on each file's production region:
+        // - the assembled empty-selection literal must NOT appear: the
+        //   shared select path owns that wording, and a cleaner-side print
+        //   would repeat it. prompt.rs is deliberately NOT scanned here -
+        //   the shared path's own print lives in this file and would match
+        //   its own needle;
+        // - the assembled routing needle MUST appear: every migrated cleaner
+        //   routes its selection through the shared ritual, which owns the
+        //   non-TTY remedy and the empty-selection exit. The per-file dup
+        //   pins' routing assertion is self-fulfilling (their own source
+        //   contains the short needle), so this multi-source pin is the
+        //   guard that actually detects a bypass.
+        let migrated = [
+            (
+                "cleaners/library_caches.rs",
+                include_str!("cleaners/library_caches.rs"),
+            ),
+            (
+                "cleaners/library_logs.rs",
+                include_str!("cleaners/library_logs.rs"),
+            ),
+            (
+                "cleaners/app_support.rs",
+                include_str!("cleaners/app_support.rs"),
+            ),
+            (
+                "cleaners/ios_backup.rs",
+                include_str!("cleaners/ios_backup.rs"),
+            ),
+            ("cleaners/ollama.rs", include_str!("cleaners/ollama.rs")),
+        ];
+        let print_needle = concat!("] nothing", " selected");
+        let routing_needle = concat!("multi_select", "_or_skip");
+        for (path, src) in migrated {
+            let production = production_region(src);
+            assert!(
+                !production.contains(print_needle),
+                "{path} prints the empty-selection line itself; the shared \
+                 select path owns that wording exactly once:\n{}",
+                &production[..production.len().min(200)]
+            );
+            assert!(
+                production.contains(routing_needle),
+                "{path} bypasses the shared select ritual ({routing_needle}); \
+                 the non-TTY remedy and the empty-selection exit are owned \
+                 there:\n{}",
+                &production[..production.len().min(200)]
             );
         }
     }
