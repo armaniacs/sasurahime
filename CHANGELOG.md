@@ -4,6 +4,16 @@ All notable changes to sasurahime will be documented in this file. The format is
 
 ---
 
+## [Unreleased]
+
+### Changed
+
+- **Dependency version bumps:** Updated transitive dependencies to latest
+  compatible versions ― log 0.4.34→0.4.35, wasm-bindgen 0.2.129→0.2.130,
+  js-sys 0.3.106→0.3.107, rustix 1.1.5→1.1.6, unicode-width 0.2.2→0.2.3.
+  All 18 direct dependencies were already at their latest versions. No
+  source code changes were required; all APIs remain compatible.
+
 ## [0.4.5] - 2026-11-02
 
 ### Added
