@@ -1,4 +1,5 @@
 :root {
+  color-scheme: dark;
   --bg: #0d1117;
   --bg2: #161b22;
   --bg3: #21262d;
@@ -12,7 +13,14 @@
   --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
   --mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
 }
-*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+*, *::before, *::after { box-sizing: border-box; }
+/* S2: split the old `* { margin: 0; padding: 0 }` reset by element so UA form-control
+   padding is preserved. Listed elements cover every UA default margin/padding in
+   these pages (div/span/a/nav/main/section/footer/code/em/strong/svg/details/
+   summary have zero UA margin/padding), so rendering is unchanged. */
+body, h1, h2, h3, h4, h5, h6, p, ul, ol, li, dl, dd, figure, figcaption,
+blockquote, pre, hr, table, caption, thead, tbody, tr, th, td,
+form, fieldset { margin: 0; padding: 0; }
 body { background: var(--bg); color: var(--text); font-family: var(--font); line-height: 1.6; }
 a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
@@ -24,7 +32,8 @@ nav {
   border-bottom: 1px solid var(--border);
   padding: 0 1.5rem;
   display: flex; align-items: center; justify-content: space-between;
-  height: 60px;
+  min-height: 60px;
+  flex-wrap: wrap;
 }
 .nav-logo { font-weight: 700; font-size: 1.1rem; color: var(--text); text-decoration: none; }
 .nav-logo:hover { color: var(--text); text-decoration: none; }
@@ -86,13 +95,14 @@ nav {
   font-family: var(--mono); font-size: 0.9rem;
   text-align: left; display: inline-block;
   color: var(--text-muted); max-width: 100%;
+  overflow-x: auto;
 }
 .hero-code .prompt { color: var(--green); margin-right: 0.5rem; }
 .hero-code .cmd { color: var(--text); }
 
 /* SECTION */
 section { padding: 4rem 1.5rem; }
-.section-inner { max-width: 900px; margin: 0 auto; }
+.section-inner { max-width: 900px; margin: 0 auto; container-type: inline-size; }
 .section-label {
   font-size: 0.75rem; font-weight: 700; letter-spacing: .1em;
   text-transform: uppercase; color: var(--accent);
@@ -121,7 +131,7 @@ section { padding: 4rem 1.5rem; }
 /* TARGETS TABLE */
 .targets-wrap {
   background: var(--bg2); border: 1px solid var(--border);
-  border-radius: var(--radius); overflow: hidden;
+  border-radius: var(--radius); overflow-x: auto;
 }
 .targets-wrap table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
 .targets-wrap th {
@@ -165,6 +175,7 @@ code {
   border-radius: var(--radius); padding: 1.25rem 1.5rem;
   font-family: var(--mono); font-size: 0.9rem;
   color: var(--text-muted);
+  overflow-x: auto;
 }
 .install-block .prompt { color: var(--green); }
 .install-block .cmd { color: var(--text); }
@@ -258,3 +269,73 @@ pre.install-block code {
   white-space: nowrap;
 }
 .targets-wrap tr:last-child th[scope="row"] { border-bottom: none; }
+
+/* S2 TABLE / RESPONSIVE */
+/* headings: balanced line-wrapping */
+h1, h2, h3 { text-wrap: balance; }
+
+/* targets table: sticky header follows horizontal scroll (S1 caption/scope intact) */
+.targets-wrap thead th {
+  position: sticky; top: 0; z-index: 1;
+  background: var(--bg3);
+}
+/* doc pages (doc.html embeds its own table look; only scrolling/sticky here so the
+   S4-owned <style> block stays untouched). `main` prefix outranks the embedded
+   `.doc-body table` rule without !important. */
+main .doc-body table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+}
+.doc-body thead th {
+  position: sticky; top: 0; z-index: 1;
+}
+
+/* details summary: custom chevron replacing the native marker */
+details summary::marker { content: ""; }
+details summary::-webkit-details-marker { display: none; }
+details summary::before {
+  content: "";
+  flex-shrink: 0;
+  width: 0.5rem; height: 0.5rem;
+  border-right: 2px solid var(--text-muted);
+  border-bottom: 2px solid var(--text-muted);
+  transform: rotate(-45deg);
+  transition: transform 0.15s ease;
+}
+details[open] > summary::before { transform: rotate(45deg); }
+@media (prefers-reduced-motion: reduce) {
+  details summary::before { transition: none; }
+}
+
+/* features grid: container-query stepped layout (base auto-fill kept as fallback) */
+@container (max-width: 600px) {
+  .features-grid { grid-template-columns: 1fr; }
+}
+@container (min-width: 601px) and (max-width: 900px) {
+  .features-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* below-the-fold sections render on demand. hero is a div (untouched); the 1st
+   section stays eager for LCP and the 2nd (targets table) keeps sticky working —
+   content-visibility on a sticky ancestor would break header tracking. */
+main section:nth-of-type(n+3) {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 500px;
+}
+
+/* Windows High Contrast / forced-colors: minimal system-color fallbacks for
+   borders and the current-location indicator */
+@media (forced-colors: active) {
+  .targets-wrap, .feature-card, .step, .install-block, .hero-code,
+  .btn-secondary, .nav-gh, .lang-btn, details summary {
+    border-color: ButtonBorder;
+  }
+  .btn-primary, .lang-btn.active {
+    background: Highlight;
+    color: HighlightText;
+    border-color: Highlight;
+  }
+  a { color: LinkText; }
+  .tag { border-color: ButtonBorder; }
+}
