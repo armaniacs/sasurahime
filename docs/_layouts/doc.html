@@ -7,6 +7,23 @@
   <title>{{ page.title }}</title>
   <meta name="description" content="{{ site.description }}" />
   <link rel="stylesheet" href="{{ '/assets/style.css' | relative_url }}" />
+  <script>
+    /* S3 minimal FOUC guard: sync <html lang> before first paint.
+       Stored choice wins; otherwise a Japanese browser upgrades to ja.
+       The layout default (page.lang) is left untouched. */
+    (function () {
+      try {
+        var stored = null;
+        try { stored = window.localStorage.getItem('sasurahime-lang'); } catch (e) {}
+        var lang = (stored === 'ja' || stored === 'en') ? stored : null;
+        if (!lang) {
+          var code = (window.navigator.language || window.navigator.userLanguage || '').toLowerCase();
+          if (code.slice(0, 2) === 'ja') lang = 'ja';
+        }
+        if (lang) document.documentElement.setAttribute('lang', lang);
+      } catch (e) {}
+    })();
+  </script>
   <style>
     .doc-wrap {
       max-width: 860px;
@@ -121,15 +138,20 @@
 
 <a class="skip-link" href="#content">{% if page.lang == 'ja' %}メインコンテンツへスキップ{% else %}Skip to main content{% endif %}</a>
 
-<nav aria-label="Main navigation">
+<nav aria-label="{% if page.lang == 'ja' %}メインナビゲーション{% else %}Main navigation{% endif %}">
   <a class="nav-logo" href="{{ '/' | relative_url }}">sasurahime <span aria-hidden="true">✦</span></a>
   <ul class="nav-links">
+    {% if page.lang == 'ja' %}
+    <li><a href="{{ '/ja/HOWTO-USE' | relative_url }}">使い方</a></li>
+    <li><a href="{{ '/ja/SUPPORTED' | relative_url }}">ターゲット一覧</a></li>
+    {% else %}
     <li><a href="{{ '/HOWTO-USE' | relative_url }}">HOW TO USE</a></li>
     <li><a href="{{ '/SUPPORTED' | relative_url }}">Targets</a></li>
+    {% endif %}
     <li>
       <div class="lang-switch">
-        <button type="button" id="btn-en" class="lang-btn active" aria-pressed="true" onclick="switchLang('en')">EN</button>
-        <button type="button" id="btn-ja" class="lang-btn" aria-pressed="false" onclick="switchLang('ja')">JA</button>
+        <button type="button" id="btn-en" class="lang-btn" data-lang="en" aria-pressed="true">EN</button>
+        <button type="button" id="btn-ja" class="lang-btn" data-lang="ja" aria-pressed="false">JA</button>
       </div>
     </li>
     <li>
@@ -150,39 +172,64 @@
 
 <footer>
   <p>
+    {% if page.lang == 'ja' %}
+    <a href="{{ '/ja/' | relative_url }}">Top</a> ·
+    <a href="https://github.com/armaniacs/sasurahime" target="_blank" rel="noopener">GitHub</a> ·
+    <a href="{{ '/ja/HOWTO-USE' | relative_url }}">ドキュメント</a> ·
+    {% else %}
     <a href="{{ '/' | relative_url }}">Top</a> ·
     <a href="https://github.com/armaniacs/sasurahime" target="_blank" rel="noopener">GitHub</a> ·
     <a href="{{ '/HOWTO-USE' | relative_url }}">Documentation</a> ·
+    {% endif %}
     Apache-2.0 License
   </p>
   <p style="margin-top:0.5rem">© 2025 sasurahime contributors</p>
 </footer>
 
 <script>
-  /* wrap <details> children (excluding <summary>) in .doc-body */
-  document.querySelectorAll('details').forEach(function(d) {
-    var wrap = document.createElement('div');
-    wrap.className = 'doc-body';
-    Array.from(d.childNodes).forEach(function(n) {
-      if (n.nodeName !== 'SUMMARY') wrap.appendChild(n);
-    });
-    d.appendChild(wrap);
-  });
+  /* S3: explicit language switcher (no inline handlers; data-lang driven).
+     Buttons carry data-lang, sections carry details[data-lang]; the two
+     scopes are queried separately so they never collide. */
+  var SASURAHIME_LANG_KEY = 'sasurahime-lang';
 
-  /* EN/JA language switcher */
-  function switchLang(lang) {
-    var details = document.querySelectorAll('details');
-    details.forEach(function(d) {
-      var summary = d.querySelector('summary');
-      if (!summary) return;
-      var text = summary.textContent || '';
-      if (lang === 'en') {
-        d.open = text.indexOf('English') !== -1;
-      } else {
-        d.open = text.indexOf('日本語') !== -1;
-      }
+  function getStoredLang() {
+    try {
+      var v = window.localStorage.getItem(SASURAHIME_LANG_KEY);
+      return (v === 'ja' || v === 'en') ? v : null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function setStoredLang(lang) {
+    try {
+      window.localStorage.setItem(SASURAHIME_LANG_KEY, lang);
+    } catch (e) { /* private mode etc: keep working without persistence */ }
+  }
+
+  /* ja-JP and other regional variants count as Japanese (prefix match). */
+  function navPrefersJapanese() {
+    try {
+      var nav = window.navigator;
+      var code = nav.language || nav.userLanguage || '';
+      return code.toLowerCase().slice(0, 2) === 'ja';
+    } catch (e) {
+      return false;
+    }
+  }
+
+  /* Layout default comes from page.lang via <html lang>. */
+  function pageDefaultLang() {
+    var l = (document.documentElement.getAttribute('lang') || 'en').toLowerCase();
+    return l.slice(0, 2) === 'ja' ? 'ja' : 'en';
+  }
+
+  function applyLang(lang, persist) {
+    if (lang !== 'ja' && lang !== 'en') lang = 'en';
+    document.querySelectorAll('details[data-lang]').forEach(function (d) {
+      d.open = (d.getAttribute('data-lang') === lang);
     });
-    /* Update nav link labels */
+    /* Keep nav labels in sync with the visible language (hrefs stay per page.lang). */
     var navLinks = document.querySelectorAll('.nav-links a:not(.nav-gh)');
     if (navLinks.length >= 2) {
       if (lang === 'ja') {
@@ -193,27 +240,31 @@
         navLinks[1].textContent = 'Targets';
       }
     }
-    document.getElementById('btn-en').classList.toggle('active', lang === 'en');
-    document.getElementById('btn-ja').classList.toggle('active', lang === 'ja');
-    /* S1: keep pressed state in sync for assistive technology */
-    document.getElementById('btn-en').setAttribute('aria-pressed', lang === 'en' ? 'true' : 'false');
-    document.getElementById('btn-ja').setAttribute('aria-pressed', lang === 'ja' ? 'true' : 'false');
+    var btnEn = document.getElementById('btn-en');
+    var btnJa = document.getElementById('btn-ja');
+    if (btnEn) {
+      btnEn.classList.toggle('active', lang === 'en');
+      btnEn.setAttribute('aria-pressed', lang === 'en' ? 'true' : 'false');
+    }
+    if (btnJa) {
+      btnJa.classList.toggle('active', lang === 'ja');
+      btnJa.setAttribute('aria-pressed', lang === 'ja' ? 'true' : 'false');
+    }
+    document.documentElement.setAttribute('lang', lang);
+    if (persist) setStoredLang(lang);
   }
 
-  /* S1: mark EN/JA details sections by their summary wording (md files are out of scope) */
-  document.querySelectorAll('details').forEach(function(d) {
-    var summary = d.querySelector('summary');
-    if (!summary) return;
-    var text = summary.textContent || '';
-    if (text.indexOf('日本語') !== -1) {
-      d.setAttribute('lang', 'ja');
-    } else if (text.indexOf('English') !== -1) {
-      d.setAttribute('lang', 'en');
-    }
+  document.querySelectorAll('.lang-switch [data-lang]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      applyLang(btn.getAttribute('data-lang'), true);
+    });
   });
 
-  /* default: open EN, close JA */
-  switchLang('en');
+  /* Initial paint: explicit choice wins, else navigator, else layout default.
+     Never persists, so a first visit leaves localStorage untouched. */
+  (function () {
+    applyLang(getStoredLang() || (navPrefersJapanese() ? 'ja' : pageDefaultLang()), false);
+  })();
 </script>
 
 </body>
