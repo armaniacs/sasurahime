@@ -4,8 +4,31 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="color-scheme" content="dark" />
-  <title>{{ page.title }}</title>
-  <meta name="description" content="{{ site.description }}" />
+  <title>{{ page.title }} | sasurahime</title>
+  {% assign meta_desc = page.description | default: site.description %}
+  <meta name="description" content="{{ meta_desc }}" />
+  <meta name="theme-color" content="#0d1117" />
+  <meta property="og:title" content="{{ page.title }} | sasurahime" />
+  <meta property="og:description" content="{{ meta_desc }}" />
+  <meta property="og:type" content="article" />
+  {% if page.lang == 'ja' %}
+  <meta property="og:locale" content="ja_JP" />
+  {% else %}
+  <meta property="og:locale" content="en_US" />
+  {% endif %}
+  <meta property="og:url" content="{{ site.url }}{{ page.url }}" />
+  <link rel="canonical" href="{{ site.url }}{{ page.url }}" />
+  {% if page.lang == 'ja' %}
+    {% assign en_path = page.url | remove_first: '/ja' %}
+    {% if en_path == '' %}{% assign en_path = '/' %}{% endif %}
+    {% assign ja_path = page.url %}
+  {% else %}
+    {% assign en_path = page.url %}
+    {% assign ja_path = '/ja' | append: page.url %}
+  {% endif %}
+  <link rel="alternate" hreflang="en" href="{{ site.url }}{{ en_path }}" />
+  <link rel="alternate" hreflang="ja" href="{{ site.url }}{{ ja_path }}" />
+  <link rel="alternate" hreflang="x-default" href="{{ site.url }}{{ en_path }}" />
   <link rel="stylesheet" href="{{ '/assets/style.css' | relative_url }}" />
   <script>
     /* S3 minimal FOUC guard: sync <html lang> before first paint.
