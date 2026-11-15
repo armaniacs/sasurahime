@@ -118,26 +118,34 @@
 </head>
 <body>
 
-<nav>
-  <a class="nav-logo" href="{{ '/' | relative_url }}">sasurahime <span>✦</span></a>
-  <div class="nav-links">
-    <a href="{{ '/HOWTO-USE' | relative_url }}">HOW TO USE</a>
-    <a href="{{ '/SUPPORTED' | relative_url }}">Targets</a>
-    <div class="lang-switch">
-      <button id="btn-en" class="lang-btn active" onclick="switchLang('en')">EN</button>
-      <button id="btn-ja" class="lang-btn" onclick="switchLang('ja')">JA</button>
-    </div>
-    <a class="nav-gh" href="https://github.com/armaniacs/sasurahime" target="_blank" rel="noopener">
-      <svg height="16" width="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
-      GitHub
-    </a>
-  </div>
+<a class="skip-link" href="#content">{% if page.lang == 'ja' %}メインコンテンツへスキップ{% else %}Skip to main content{% endif %}</a>
+
+<nav aria-label="Main navigation">
+  <a class="nav-logo" href="{{ '/' | relative_url }}">sasurahime <span aria-hidden="true">✦</span></a>
+  <ul class="nav-links">
+    <li><a href="{{ '/HOWTO-USE' | relative_url }}">HOW TO USE</a></li>
+    <li><a href="{{ '/SUPPORTED' | relative_url }}">Targets</a></li>
+    <li>
+      <div class="lang-switch">
+        <button type="button" id="btn-en" class="lang-btn active" aria-pressed="true" onclick="switchLang('en')">EN</button>
+        <button type="button" id="btn-ja" class="lang-btn" aria-pressed="false" onclick="switchLang('ja')">JA</button>
+      </div>
+    </li>
+    <li>
+      <a class="nav-gh" href="https://github.com/armaniacs/sasurahime" target="_blank" rel="noopener">
+        <svg height="16" width="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+        GitHub
+      </a>
+    </li>
+  </ul>
 </nav>
 
+<main id="content">
 <div class="doc-wrap">
   <h1>{{ page.title }}</h1>
   {{ content }}
 </div>
+</main>
 
 <footer>
   <p>
@@ -186,7 +194,22 @@
     }
     document.getElementById('btn-en').classList.toggle('active', lang === 'en');
     document.getElementById('btn-ja').classList.toggle('active', lang === 'ja');
+    /* S1: keep pressed state in sync for assistive technology */
+    document.getElementById('btn-en').setAttribute('aria-pressed', lang === 'en' ? 'true' : 'false');
+    document.getElementById('btn-ja').setAttribute('aria-pressed', lang === 'ja' ? 'true' : 'false');
   }
+
+  /* S1: mark EN/JA details sections by their summary wording (md files are out of scope) */
+  document.querySelectorAll('details').forEach(function(d) {
+    var summary = d.querySelector('summary');
+    if (!summary) return;
+    var text = summary.textContent || '';
+    if (text.indexOf('日本語') !== -1) {
+      d.setAttribute('lang', 'ja');
+    } else if (text.indexOf('English') !== -1) {
+      d.setAttribute('lang', 'en');
+    }
+  });
 
   /* default: open EN, close JA */
   switchLang('en');

@@ -205,3 +205,56 @@ footer a:hover { color: var(--text); }
 
 /* DIVIDER */
 .divider { border: none; border-top: 1px solid var(--border); }
+
+/* S1 ACCESSIBILITY FOUNDATION */
+.skip-link {
+  position: absolute;
+  top: -100px;
+  left: 0;
+  z-index: 200;
+  background: var(--accent-dim);
+  color: #fff;
+  font-size: 0.9rem;
+  font-weight: 600;
+  padding: 8px 16px;
+  border-radius: 0 0 var(--radius) 0;
+  text-decoration: none;
+}
+.skip-link:focus {
+  top: 0;
+  color: #fff;
+  text-decoration: none;
+}
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+/* nav is now a <ul>: remove list markers (S1 ul/li 化に伴う最小限の調整) */
+nav ul.nav-links { list-style: none; }
+/* pre > code blocks: undo the generic inline <code> chip style to keep the old look */
+pre.hero-code code,
+pre.install-block code {
+  background: none;
+  padding: 0;
+}
+/* targets table: caption + row-header cells keep the old look */
+.targets-wrap caption {
+  text-align: left;
+  padding: 0.75rem 1rem;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+.targets-wrap tbody th[scope="row"] {
+  text-align: left;
+  padding: 0.75rem 1rem;
+  background: none;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+  color: var(--text-muted);
+  font-weight: 400;
+  font-size: 0.9rem;
+  text-transform: none;
+  letter-spacing: normal;
+  white-space: nowrap;
+}
+.targets-wrap tr:last-child th[scope="row"] { border-bottom: none; }
