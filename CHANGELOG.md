@@ -4,6 +4,34 @@ All notable changes to sasurahime will be documented in this file. The format is
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- GitHub Pages accessibility foundation: `<main>` landmark and skip links
+  on all pages; accessible names (`<caption>`, `scope`) for the targets
+  table; `pre`+`code` markup for install snippets; `aria-hidden` on
+  decorative icons; list-based nav with `aria-label`; `aria-pressed`
+  language buttons, `aria-current` current-language indicator, and visible
+  `:focus-visible` styles.
+- Japanese doc subpages (`/ja/HOWTO-USE`, `/ja/SUPPORTED`,
+  `/ja/HOWTO-ADD-target`) sharing a single content source with the EN
+  pages, with language-aware navigation and a browser-language-aware
+  default (explicit choice persisted in `localStorage`).
+
+### Changed
+
+- Docs language switcher reworked: no inline handlers, `documentElement.lang`
+  sync, and `data-lang` based section toggling.
+- Docs tables are horizontally scrollable with sticky headers on narrow
+  screens; dark-only `color-scheme` declared; nav no longer uses a fixed
+  height; feature grid migrates toward container queries.
+- Docs `<head>` SEO: Open Graph tags, canonical URLs, `hreflang`
+  (including `x-default`), per-page descriptions, and unique leading page
+  titles (`… | sasurahime`).
+
+---
+
 ## [0.4.6] - 2026-11-02
 
 ### Changed
