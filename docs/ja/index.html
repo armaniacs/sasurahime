@@ -6,45 +6,55 @@ layout: none
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>sasurahime — macOS 開発者向けキャッシュクリーナー</title>
+  <meta name="color-scheme" content="dark" />
+  <title>macOS 開発者向けキャッシュクリーナー | sasurahime</title>
   <meta name="description" content="55個のツールの古いキャッシュを、ひとつのターミナルコマンドからスキャン・選択・削除。" />
+  <meta name="theme-color" content="#0d1117" />
+  <meta property="og:title" content="macOS 開発者向けキャッシュクリーナー | sasurahime" />
+  <meta property="og:description" content="55個のツールの古いキャッシュを、ひとつのターミナルコマンドからスキャン・選択・削除。" />
+  <meta property="og:type" content="website" />
   <meta property="og:locale" content="ja_JP" />
   <meta property="og:url" content="https://armaniacs.github.io/sasurahime/ja/" />
   <link rel="canonical" href="https://armaniacs.github.io/sasurahime/ja/" />
   <link rel="alternate" hreflang="en" href="https://armaniacs.github.io/sasurahime/" />
   <link rel="alternate" hreflang="ja" href="https://armaniacs.github.io/sasurahime/ja/" />
+  <link rel="alternate" hreflang="x-default" href="https://armaniacs.github.io/sasurahime/" />
   <link rel="stylesheet" href="/sasurahime/assets/style.css" />
 </head>
 <body>
 
-<nav>
-  <span class="nav-logo">sasurahime <span>✦</span></span>
-  <div class="nav-links">
-    <a href="../HOWTO-USE">ドキュメント</a>
-    <a href="../SUPPORTED">ターゲット一覧</a>
-    <div class="lang-switch">
-      <a class="lang-btn" href="../">EN</a>
-      <span class="lang-btn active">JA</span>
-    </div>
-    <a class="nav-gh" href="https://github.com/armaniacs/sasurahime" target="_blank" rel="noopener">
-      <svg height="16" width="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
-      GitHub
-    </a>
-  </div>
+<a class="skip-link" href="#content">メインコンテンツへスキップ</a>
+
+<nav aria-label="メインナビゲーション">
+  <span class="nav-logo">sasurahime <span aria-hidden="true">✦</span></span>
+  <ul class="nav-links">
+    <li><a href="HOWTO-USE">ドキュメント</a></li>
+    <li><a href="SUPPORTED">ターゲット一覧</a></li>
+    <li>
+      <div class="lang-switch">
+        <a class="lang-btn" href="../">EN</a>
+        <span class="lang-btn active" aria-current="page">JA</span>
+      </div>
+    </li>
+    <li>
+      <a class="nav-gh" href="https://github.com/armaniacs/sasurahime" target="_blank" rel="noopener">
+        <svg height="16" width="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+        GitHub
+      </a>
+    </li>
+  </ul>
 </nav>
 
+<main id="content">
 <div class="hero">
   <div class="hero-badge">macOS 開発者向けキャッシュクリーナー · Rust 製</div>
   <h1>ディスクを取り戻す。<br><em>ひとコマンドで。</em></h1>
   <p>uv、Homebrew、mise、Docker、Cargo、Go など 55 個のツールの古いキャッシュを、スキャン・選択・削除。</p>
   <div class="hero-cta">
     <a class="btn-primary" href="https://github.com/armaniacs/sasurahime/releases/latest" target="_blank" rel="noopener">最新リリースをダウンロード</a>
-    <a class="btn-secondary" href="../HOWTO-USE">ドキュメントを見る</a>
+    <a class="btn-secondary" href="HOWTO-USE">ドキュメントを見る</a>
   </div>
-  <div class="hero-code">
-    <span class="prompt">$</span><span class="cmd">brew tap armaniacs/sasurahime</span><br>
-    <span class="prompt">$</span><span class="cmd">brew install sasurahime</span>
-  </div>
+  <pre class="hero-code" tabindex="0" role="region" aria-label="インストールコマンド"><code><span class="prompt" aria-hidden="true">$</span><span class="cmd">brew tap armaniacs/sasurahime</span><br><span class="prompt" aria-hidden="true">$</span><span class="cmd">brew install sasurahime</span></code></pre>
 </div>
 
 <hr class="divider" />
@@ -56,47 +66,47 @@ layout: none
     <p class="section-sub">ディスク領域を取り戻すことだけに集中した、無駄のないツールです。</p>
     <div class="features-grid">
       <div class="feature-card">
-        <div class="feature-icon">🎯</div>
+        <div class="feature-icon" aria-hidden="true">🎯</div>
         <h3>55 個のクリーンターゲット</h3>
         <p>uv、brew、mise、ブラウザ、cargo、go、pip、npm、yarn、pnpm、docker、rustup、gradle、ollama、Xcode など。</p>
       </div>
       <div class="feature-card">
-        <div class="feature-icon">🖥️</div>
+        <div class="feature-icon" aria-hidden="true">🖥️</div>
         <h3>インタラクティブ TUI</h3>
         <p>スペースキーでターゲットを選択し、解放容量を確認してからクリーン。ターミナルを離れずに完結。</p>
       </div>
       <div class="feature-card">
-        <div class="feature-icon">🗑️</div>
+        <div class="feature-icon" aria-hidden="true">🗑️</div>
         <h3>デフォルトで安全</h3>
         <p>削除ファイルは macOS のゴミ箱へ（「戻す」が出ないことがあるため、その場合はゴミ箱からドラッグして復元）。<code>--permanent</code> で完全削除。</p>
       </div>
       <div class="feature-card">
-        <div class="feature-icon">🔍</div>
+        <div class="feature-icon" aria-hidden="true">🔍</div>
         <h3>ドライラン対応</h3>
         <p>すべての clean コマンドで <code>--dry-run</code> を使えば、実際に削除する前に結果をプレビューできます。</p>
       </div>
       <div class="feature-card">
-        <div class="feature-icon">📌</div>
+        <div class="feature-icon" aria-hidden="true">📌</div>
         <h3>mise ピン保護</h3>
         <p><code>~/.config/mise/config.toml</code> や <code>.mise.toml</code> にピン留めされたバージョンは削除しません。</p>
       </div>
       <div class="feature-card">
-        <div class="feature-icon">⚙️</div>
+        <div class="feature-icon" aria-hidden="true">⚙️</div>
         <h3>設定ファイル</h3>
         <p><code>~/.config/sasurahime/config.toml</code> でデフォルト値を設定し、毎日のワークフローをゼロ摩擦に。</p>
       </div>
       <div class="feature-card">
-        <div class="feature-icon">📊</div>
+        <div class="feature-icon" aria-hidden="true">📊</div>
         <h3>統計と履歴</h3>
         <p><code>sasurahime stats</code> で累計削除量と実行履歴を表示。どれだけディスクを取り戻したかがひと目でわかります。</p>
       </div>
       <div class="feature-card">
-        <div class="feature-icon">⚡</div>
+        <div class="feature-icon" aria-hidden="true">⚡</div>
         <h3>並列スキャン</h3>
         <p>全ターゲットを <code>rayon</code> で並列スキャン。待ち時間は最も遅いクリーナーに依存するため、逐次より大幅に高速です。</p>
       </div>
       <div class="feature-card">
-        <div class="feature-icon">📂</div>
+        <div class="feature-icon" aria-hidden="true">📂</div>
         <h3>Xcode 部分削除</h3>
         <p>DerivedData だけ、Archives だけ、あるいは両方を選んで削除。全部消す必要がないときも安心。</p>
       </div>
@@ -111,34 +121,35 @@ layout: none
     <div class="section-label">対応ターゲット</div>
     <h2 class="section-title">スタック全体をカバー</h2>
     <p class="section-sub">完全なリストは <code>sasurahime targets</code> で確認できます。</p>
-    <div class="targets-wrap">
+    <div class="targets-wrap" tabindex="0" role="region" aria-label="カテゴリ別のキャッシュターゲット">
       <table>
-        <thead><tr><th>カテゴリ</th><th>ターゲット</th></tr></thead>
+        <caption>カテゴリ別のキャッシュターゲット</caption>
+        <thead><tr><th scope="col">カテゴリ</th><th scope="col">ターゲット</th></tr></thead>
         <tbody>
           <tr>
-            <td>言語 / パッケージマネージャー</td>
+            <th scope="row">言語 / パッケージマネージャー</th>
             <td>
               <span class="tag">uv</span><span class="tag">brew</span><span class="tag">bun</span><span class="tag">go</span><span class="tag">pip</span><span class="tag">npm</span><span class="tag">yarn</span><span class="tag">pnpm</span><span class="tag">pipx</span><span class="tag">poetry</span><span class="tag">conda</span><span class="tag">cargo</span><span class="tag">rustup</span><span class="tag">deno</span><span class="tag">gradle</span><span class="tag">maven</span><span class="tag">spm</span><span class="tag">cocoa-pods</span><span class="tag">flutter</span>
             </td>
           </tr>
           <tr>
-            <td>ランタイム / ツール</td>
+            <th scope="row">ランタイム / ツール</th>
             <td><span class="tag">mise</span><span class="tag">browsers</span><span class="tag">node-gyp</span><span class="tag">sbt</span><span class="tag">volta</span></td>
           </tr>
           <tr>
-            <td>Docker / VM</td>
+            <th scope="row">Docker / VM</th>
             <td><span class="tag">docker</span><span class="tag">colima</span><span class="tag">orbstack</span></td>
           </tr>
           <tr>
-            <td>IDE / シミュレーター</td>
+            <th scope="row">IDE / シミュレーター</th>
             <td><span class="tag">xcode</span><span class="tag">device-support</span><span class="tag">simulator</span><span class="tag">jetbrains</span><span class="tag">vscode-extensions</span><span class="tag">ios-backup</span></td>
           </tr>
           <tr>
-            <td>AI/ML / CI</td>
+            <th scope="row">AI/ML / CI</th>
             <td><span class="tag">huggingface</span><span class="tag">ollama</span><span class="tag">act</span><span class="tag">pre-commit</span></td>
           </tr>
           <tr>
-            <td>ログ / その他</td>
+            <th scope="row">ログ / その他</th>
             <td><span class="tag">logs</span><span class="tag">library-logs</span><span class="tag">downloads</span><span class="tag">trash</span><span class="tag">apfs-snapshot</span><span class="tag">git</span><span class="tag">torrent</span><span class="tag">terraform</span><span class="tag">tree-sitter</span></td>
           </tr>
         </tbody>
@@ -187,16 +198,9 @@ layout: none
     <div class="section-label">インストール</div>
     <h2 class="section-title">今すぐ始める</h2>
     <p class="section-sub">macOS (arm64 または x86_64) が必要です。Homebrew Tap からは自動的にソースビルドされます。</p>
-    <div class="install-block">
-      <span class="prompt"># </span>Homebrew 経由（推奨）<br>
-      <span class="prompt">$ </span><span class="cmd">brew tap armaniacs/sasurahime</span><br>
-      <span class="prompt">$ </span><span class="cmd">brew install sasurahime</span>
-    </div>
+    <pre class="install-block" tabindex="0" role="region" aria-label="Homebrew でのインストール"><code><span class="prompt" aria-hidden="true"># </span>Homebrew 経由（推奨）<br><span class="prompt" aria-hidden="true">$ </span><span class="cmd">brew tap armaniacs/sasurahime</span><br><span class="prompt" aria-hidden="true">$ </span><span class="cmd">brew install sasurahime</span></code></pre>
     <div class="or-divider">— または —</div>
-    <div class="install-block">
-      <span class="prompt"># </span>Cargo 経由<br>
-      <span class="prompt">$ </span><span class="cmd">cargo install sasurahime</span>
-    </div>
+    <pre class="install-block" tabindex="0" role="region" aria-label="Cargo でのインストール"><code><span class="prompt" aria-hidden="true"># </span>Cargo 経由<br><span class="prompt" aria-hidden="true">$ </span><span class="cmd">cargo install sasurahime</span></code></pre>
     <div class="or-divider">— または —</div>
     <div style="text-align:center">
       <a class="btn-primary" href="https://github.com/armaniacs/sasurahime/releases/latest" target="_blank" rel="noopener">ビルド済みバイナリをダウンロード</a>
@@ -218,12 +222,14 @@ layout: none
   </div>
 </section>
 
+</main>
+
 <footer>
   <p>
     <a href="https://github.com/armaniacs/sasurahime" target="_blank" rel="noopener">GitHub</a> ·
-    <a href="../HOWTO-USE">使い方</a> ·
-    <a href="../SUPPORTED">対応ターゲット一覧</a> ·
-    <a href="../HOWTO-ADD-target">ターゲット追加方法</a> ·
+    <a href="HOWTO-USE">使い方</a> ·
+    <a href="SUPPORTED">対応ターゲット一覧</a> ·
+    <a href="HOWTO-ADD-target">ターゲット追加方法</a> ·
     Apache-2.0 License
   </p>
   <p style="margin-top:0.5rem">© 2025 sasurahime contributors</p>

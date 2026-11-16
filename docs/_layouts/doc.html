@@ -3,9 +3,50 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>{{ page.title }}</title>
-  <meta name="description" content="{{ site.description }}" />
+  <meta name="color-scheme" content="dark" />
+  <title>{{ page.title }} | sasurahime</title>
+  {% assign meta_desc = page.description | default: site.description %}
+  <meta name="description" content="{{ meta_desc }}" />
+  <meta name="theme-color" content="#0d1117" />
+  <meta property="og:title" content="{{ page.title }} | sasurahime" />
+  <meta property="og:description" content="{{ meta_desc }}" />
+  <meta property="og:type" content="article" />
+  {% if page.lang == 'ja' %}
+  <meta property="og:locale" content="ja_JP" />
+  {% else %}
+  <meta property="og:locale" content="en_US" />
+  {% endif %}
+  <meta property="og:url" content="{{ site.url }}{{ page.url }}" />
+  <link rel="canonical" href="{{ site.url }}{{ page.url }}" />
+  {% if page.lang == 'ja' %}
+    {% assign en_path = page.url | remove_first: '/ja' %}
+    {% if en_path == '' %}{% assign en_path = '/' %}{% endif %}
+    {% assign ja_path = page.url %}
+  {% else %}
+    {% assign en_path = page.url %}
+    {% assign ja_path = '/ja' | append: page.url %}
+  {% endif %}
+  <link rel="alternate" hreflang="en" href="{{ site.url }}{{ en_path }}" />
+  <link rel="alternate" hreflang="ja" href="{{ site.url }}{{ ja_path }}" />
+  <link rel="alternate" hreflang="x-default" href="{{ site.url }}{{ en_path }}" />
   <link rel="stylesheet" href="{{ '/assets/style.css' | relative_url }}" />
+  <script>
+    /* S3 minimal FOUC guard: sync <html lang> before first paint.
+       Stored choice wins; otherwise a Japanese browser upgrades to ja.
+       The layout default (page.lang) is left untouched. */
+    (function () {
+      try {
+        var stored = null;
+        try { stored = window.localStorage.getItem('sasurahime-lang'); } catch (e) {}
+        var lang = (stored === 'ja' || stored === 'en') ? stored : null;
+        if (!lang) {
+          var code = (window.navigator.language || window.navigator.userLanguage || '').toLowerCase();
+          if (code.slice(0, 2) === 'ja') lang = 'ja';
+        }
+        if (lang) document.documentElement.setAttribute('lang', lang);
+      } catch (e) {}
+    })();
+  </script>
   <style>
     .doc-wrap {
       max-width: 860px;
@@ -118,62 +159,100 @@
 </head>
 <body>
 
-<nav>
-  <a class="nav-logo" href="{{ '/' | relative_url }}">sasurahime <span>✦</span></a>
-  <div class="nav-links">
-    <a href="{{ '/HOWTO-USE' | relative_url }}">HOW TO USE</a>
-    <a href="{{ '/SUPPORTED' | relative_url }}">Targets</a>
-    <div class="lang-switch">
-      <button id="btn-en" class="lang-btn active" onclick="switchLang('en')">EN</button>
-      <button id="btn-ja" class="lang-btn" onclick="switchLang('ja')">JA</button>
-    </div>
-    <a class="nav-gh" href="https://github.com/armaniacs/sasurahime" target="_blank" rel="noopener">
-      <svg height="16" width="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
-      GitHub
-    </a>
-  </div>
+<a class="skip-link" href="#content">{% if page.lang == 'ja' %}メインコンテンツへスキップ{% else %}Skip to main content{% endif %}</a>
+
+<nav aria-label="{% if page.lang == 'ja' %}メインナビゲーション{% else %}Main navigation{% endif %}">
+  <a class="nav-logo" href="{{ '/' | relative_url }}">sasurahime <span aria-hidden="true">✦</span></a>
+  <ul class="nav-links">
+    {% if page.lang == 'ja' %}
+    <li><a href="{{ '/ja/HOWTO-USE' | relative_url }}">使い方</a></li>
+    <li><a href="{{ '/ja/SUPPORTED' | relative_url }}">ターゲット一覧</a></li>
+    {% else %}
+    <li><a href="{{ '/HOWTO-USE' | relative_url }}">HOW TO USE</a></li>
+    <li><a href="{{ '/SUPPORTED' | relative_url }}">Targets</a></li>
+    {% endif %}
+    <li>
+      <div class="lang-switch">
+        <button type="button" id="btn-en" class="lang-btn" data-lang="en" aria-pressed="true">EN</button>
+        <button type="button" id="btn-ja" class="lang-btn" data-lang="ja" aria-pressed="false">JA</button>
+      </div>
+    </li>
+    <li>
+      <a class="nav-gh" href="https://github.com/armaniacs/sasurahime" target="_blank" rel="noopener">
+        <svg height="16" width="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+        GitHub
+      </a>
+    </li>
+  </ul>
 </nav>
 
+<main id="content">
 <div class="doc-wrap">
   <h1>{{ page.title }}</h1>
   {{ content }}
 </div>
+</main>
 
 <footer>
   <p>
+    {% if page.lang == 'ja' %}
+    <a href="{{ '/ja/' | relative_url }}">Top</a> ·
+    <a href="https://github.com/armaniacs/sasurahime" target="_blank" rel="noopener">GitHub</a> ·
+    <a href="{{ '/ja/HOWTO-USE' | relative_url }}">ドキュメント</a> ·
+    {% else %}
     <a href="{{ '/' | relative_url }}">Top</a> ·
     <a href="https://github.com/armaniacs/sasurahime" target="_blank" rel="noopener">GitHub</a> ·
     <a href="{{ '/HOWTO-USE' | relative_url }}">Documentation</a> ·
+    {% endif %}
     Apache-2.0 License
   </p>
   <p style="margin-top:0.5rem">© 2025 sasurahime contributors</p>
 </footer>
 
 <script>
-  /* wrap <details> children (excluding <summary>) in .doc-body */
-  document.querySelectorAll('details').forEach(function(d) {
-    var wrap = document.createElement('div');
-    wrap.className = 'doc-body';
-    Array.from(d.childNodes).forEach(function(n) {
-      if (n.nodeName !== 'SUMMARY') wrap.appendChild(n);
-    });
-    d.appendChild(wrap);
-  });
+  /* S3: explicit language switcher (no inline handlers; data-lang driven).
+     Buttons carry data-lang, sections carry details[data-lang]; the two
+     scopes are queried separately so they never collide. */
+  var SASURAHIME_LANG_KEY = 'sasurahime-lang';
 
-  /* EN/JA language switcher */
-  function switchLang(lang) {
-    var details = document.querySelectorAll('details');
-    details.forEach(function(d) {
-      var summary = d.querySelector('summary');
-      if (!summary) return;
-      var text = summary.textContent || '';
-      if (lang === 'en') {
-        d.open = text.indexOf('English') !== -1;
-      } else {
-        d.open = text.indexOf('日本語') !== -1;
-      }
+  function getStoredLang() {
+    try {
+      var v = window.localStorage.getItem(SASURAHIME_LANG_KEY);
+      return (v === 'ja' || v === 'en') ? v : null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function setStoredLang(lang) {
+    try {
+      window.localStorage.setItem(SASURAHIME_LANG_KEY, lang);
+    } catch (e) { /* private mode etc: keep working without persistence */ }
+  }
+
+  /* ja-JP and other regional variants count as Japanese (prefix match). */
+  function navPrefersJapanese() {
+    try {
+      var nav = window.navigator;
+      var code = nav.language || nav.userLanguage || '';
+      return code.toLowerCase().slice(0, 2) === 'ja';
+    } catch (e) {
+      return false;
+    }
+  }
+
+  /* Layout default comes from page.lang via <html lang>. */
+  function pageDefaultLang() {
+    var l = (document.documentElement.getAttribute('lang') || 'en').toLowerCase();
+    return l.slice(0, 2) === 'ja' ? 'ja' : 'en';
+  }
+
+  function applyLang(lang, persist) {
+    if (lang !== 'ja' && lang !== 'en') lang = 'en';
+    document.querySelectorAll('details[data-lang]').forEach(function (d) {
+      d.open = (d.getAttribute('data-lang') === lang);
     });
-    /* Update nav link labels */
+    /* Keep nav labels in sync with the visible language (hrefs stay per page.lang). */
     var navLinks = document.querySelectorAll('.nav-links a:not(.nav-gh)');
     if (navLinks.length >= 2) {
       if (lang === 'ja') {
@@ -184,12 +263,31 @@
         navLinks[1].textContent = 'Targets';
       }
     }
-    document.getElementById('btn-en').classList.toggle('active', lang === 'en');
-    document.getElementById('btn-ja').classList.toggle('active', lang === 'ja');
+    var btnEn = document.getElementById('btn-en');
+    var btnJa = document.getElementById('btn-ja');
+    if (btnEn) {
+      btnEn.classList.toggle('active', lang === 'en');
+      btnEn.setAttribute('aria-pressed', lang === 'en' ? 'true' : 'false');
+    }
+    if (btnJa) {
+      btnJa.classList.toggle('active', lang === 'ja');
+      btnJa.setAttribute('aria-pressed', lang === 'ja' ? 'true' : 'false');
+    }
+    document.documentElement.setAttribute('lang', lang);
+    if (persist) setStoredLang(lang);
   }
 
-  /* default: open EN, close JA */
-  switchLang('en');
+  document.querySelectorAll('.lang-switch [data-lang]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      applyLang(btn.getAttribute('data-lang'), true);
+    });
+  });
+
+  /* Initial paint: explicit choice wins, else navigator, else layout default.
+     Never persists, so a first visit leaves localStorage untouched. */
+  (function () {
+    applyLang(getStoredLang() || (navPrefersJapanese() ? 'ja' : pageDefaultLang()), false);
+  })();
 </script>
 
 </body>
