@@ -80,6 +80,9 @@ PR #8 で `main` にマージし、`v0.4.7` としてリリース済みです。
 | S3 | 言語切替 JS 再設計と /ja/ 下層整備 | data-lang + addEventListener 化、/ja/ 配下に主要ドキュメント 3 件を新設 |
 | S4 | meta と SEO 整備 | Open Graph、canonical、hreflang (x-default 含む)、ページ固有 description、ユニーク title |
 
+本番デプロイの実機検証 PBI（`2026-11-17-01`）も完了し、`.plan/archived/` にアーカイブ済みです。
+発見事項（`superpowers/` 配下の本番配信、ローカル jekyll build の復旧）は修正 PBI の起票対象として検証記録に残っています。
+
 ## 未着手のバックログ
 
 なし。2026-10-22 / 2026-10-23 の各一覧の PBI はすべて実装済みで
