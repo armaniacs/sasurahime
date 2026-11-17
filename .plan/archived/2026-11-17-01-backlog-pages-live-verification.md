@@ -41,9 +41,9 @@ Scenario: キーボードとモバイルの基本動線が本番で成立する
 - [x] 本番トップ (EN / JA) と doc レイアウト全ページの head に og:title、og:description、og:type、theme-color、canonical、hreflang (x-default 含む) がある (HTTP 取得で確認)
 - [x] /ja/ 配下 3 ページが本番で 200 を返す
 - [x] 本番で配信される JS に onclick 直書きが無く、data-lang + addEventListener で動く
-- [ ] SNS カードバリデータで本番 URL のカードが正しく出る
-- [ ] 実ブラウザ (幅 360px) で表の横スクロールと sticky ヘッダーを確認
-- [ ] キーボードのみでスキップリンクから main ランドマークへ到達できる
+- [x] SNS カードバリデータで本番 URL のカードが正しく出る
+- [x] 実ブラウザ (幅 360px) で表の横スクロールと sticky ヘッダーを確認
+- [x] キーボードのみでスキップリンクから main ランドマークへ到達できる
 - [x] 発見した差異・不具合は修正 PBI として起票するか、軽微であれば本 PBI 内で修正して記録する
 
 ## テスト戦略 (t_wadaスタイル)
@@ -124,6 +124,11 @@ curl による本番 HTML 取得 + grep 検証。対象 8 ページ: `/`、`/ja/
 言語切替の実装形態: トップ 2 ページは EN/JA 相互の plain リンク (`<a href="ja/">`)、
 doc レイアウトは data-lang + addEventListener の JS 切替。inline ハンドラは全ページ 0 件。
 
+### 実ブラウザでの確認結果
+
+SNS カードプレビュー、キーボードのみでのスキップリンク → main 到達、
+幅 360px での表の横スクロールと sticky ヘッダーを目視確認し、問題なし (2026-11-17、保守者確認)。
+
 ### 発見事項と対応判断
 
 1. **`superpowers/` 配下の内部計画ドキュメントが本番配信されている**
@@ -137,15 +142,9 @@ doc レイアウトは data-lang + addEventListener の JS 切替。inline ハ�
 3. **`superpowers/specs/` 配下の URL が一時的に 503 を返した**
    - plans 配下は 200。GitHub Pages 側の一時的応答の可能性が高く、再確認は follow-up で行う
 
-### 残タスク (実ブラウザでの確認)
-
-- SNS カードバリデータでの表示確認 (トップ EN / JA、doc ページ)
-- キーボードのみでのスキップリンク → main 到達
-- 幅 360px での表の横スクロールと sticky ヘッダー
-
 ## Definition of Done
 
-- [ ] 全 BDD シナリオが検証手順として実行されパスする
+- [x] 全 BDD シナリオが検証手順として実行されパスする
 - [x] 本番 HTML の grep 検証の実行結果が本 PBI に記録されている
 - [x] 発見事項と対応 (修正 PBI 起票 / 記録のみ) が明確になっている
-- [ ] レビュー完了
+- [x] レビュー完了
