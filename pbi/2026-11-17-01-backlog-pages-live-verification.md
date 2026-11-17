@@ -38,13 +38,13 @@ Scenario: キーボードとモバイルの基本動線が本番で成立する
 
 ## 受け入れ基準
 
-- [ ] 本番トップ (EN / JA) と doc レイアウト全ページの head に og:title、og:description、og:type、theme-color、canonical、hreflang (x-default 含む) がある (HTTP 取得で確認)
-- [ ] /ja/ 配下 3 ページが本番で 200 を返す
-- [ ] 本番で配信される JS に onclick 直書きが無く、data-lang + addEventListener で動く
+- [x] 本番トップ (EN / JA) と doc レイアウト全ページの head に og:title、og:description、og:type、theme-color、canonical、hreflang (x-default 含む) がある (HTTP 取得で確認)
+- [x] /ja/ 配下 3 ページが本番で 200 を返す
+- [x] 本番で配信される JS に onclick 直書きが無く、data-lang + addEventListener で動く
 - [ ] SNS カードバリデータで本番 URL のカードが正しく出る
 - [ ] 実ブラウザ (幅 360px) で表の横スクロールと sticky ヘッダーを確認
 - [ ] キーボードのみでスキップリンクから main ランドマークへ到達できる
-- [ ] 発見した差異・不具合は修正 PBI として起票するか、軽微であれば本 PBI 内で修正して記録する
+- [x] 発見した差異・不具合は修正 PBI として起票するか、軽微であれば本 PBI 内で修正して記録する
 
 ## テスト戦略 (t_wadaスタイル)
 
@@ -100,9 +100,52 @@ curl -s -o /dev/null -w "%{http_code}\n" https://armaniacs.github.io/sasurahime/
 - カードバリデータは結果をキャッシュすることがある。修正後の再確認はクエリパラメータを付けて行う
 - 本番の URL 形態 (ディレクトリ型か `.html` 付きか) を確認してから一括検証スクリプトを書く。pretty_urls の設定差異で 404 判定を誤らないこと
 
+## 検証結果 (2026-11-17 実施)
+
+### 検証方法
+
+curl による本番 HTML 取得 + grep 検証。対象 8 ページ: `/`、`/ja/`、`/HOWTO-USE`、`/SUPPORTED`、
+`/HOWTO-ADD-target`、`/ja/HOWTO-USE`、`/ja/SUPPORTED`、`/ja/HOWTO-ADD-target`。
+
+### 結果サマリー
+
+| 検証項目 | 結果 |
+|----------|------|
+| og:title / og:description / og:type / theme-color / canonical | 8 ページすべて 1 件ずつ存在 |
+| hreflang (en / ja / x-default) | 8 ページすべて 3 件ずつ存在、x-default は EN トップを指す |
+| meta description | 8 ページすべて 1 件ずつ、全ページの文が互いに異なる |
+| title | 8 ページすべて重複なし、ページ名先頭 + `\| sasurahime` 形式 |
+| /ja/ 下層 3 ページの到達性 | すべて 200 (`/ja/X` と `/ja/X.html` の両形式で到達可能) |
+| /ja/ 下層の nav | `/ja/`、`/ja/HOWTO-ADD-target`、`/ja/SUPPORTED` を指す (言語別 nav 成立) |
+| onclick 直書き | 8 ページすべて 0 件 |
+| data-lang + addEventListener | doc レイアウト 6 ページで data-lang=10、addEventListener=1 を確認 |
+| v0.4.7 デプロイ反映 | og タグ等 (f817ad8 の成果) が本番に存在することで確認 |
+
+言語切替の実装形態: トップ 2 ページは EN/JA 相互の plain リンク (`<a href="ja/">`)、
+doc レイアウトは data-lang + addEventListener の JS 切替。inline ハンドラは全ページ 0 件。
+
+### 発見事項と対応判断
+
+1. **`superpowers/` 配下の内部計画ドキュメントが本番配信されている**
+   - 例: `https://armaniacs.github.io/sasurahime/superpowers/plans/2026-10-27-colima-reclaim.md` が 200
+   - リポジトリ自体が public なため機密性は低いが、nav から到達できない孤立ページとして検索エンジンに index されうる (サイト衛生の問題)
+   - 対応判断: `_config.yml` への exclude 追加が軽微な修正だが、本環境ではローカル `jekyll build` が壊れており (下記 2) 公開設定の変更を検証せずに出せない。**修正 PBI として起票する** (ローカルビルド環境の復旧 + exclude 追加 + デプロイ後再確認をセットにする)
+2. **ローカルの Jekyll ビルドが失敗する (開発環境の問題)**
+   - `bundle exec jekyll build` が `cannot load such file -- .../bundler-4.0.12/exe/bundle (LoadError)` で失敗 (ruby 4.0.9 / Homebrew ruby)
+   - このため「ローカル build と本番の head diff」検証は実施不可。代替として本番 head を S1-S4 の受け入れ基準と直接突き合わせて検証した (上記サマリー)
+   - 対応判断: 発見事項 1 の修正 PBI にビルド環境復旧を含める
+3. **`superpowers/specs/` 配下の URL が一時的に 503 を返した**
+   - plans 配下は 200。GitHub Pages 側の一時的応答の可能性が高く、再確認は follow-up で行う
+
+### 残タスク (実ブラウザでの確認)
+
+- SNS カードバリデータでの表示確認 (トップ EN / JA、doc ページ)
+- キーボードのみでのスキップリンク → main 到達
+- 幅 360px での表の横スクロールと sticky ヘッダー
+
 ## Definition of Done
 
 - [ ] 全 BDD シナリオが検証手順として実行されパスする
-- [ ] 本番 HTML の grep 検証の実行結果が本 PBI に記録されている
-- [ ] 発見事項と対応 (修正 PBI 起票 / 記録のみ) が明確になっている
+- [x] 本番 HTML の grep 検証の実行結果が本 PBI に記録されている
+- [x] 発見事項と対応 (修正 PBI 起票 / 記録のみ) が明確になっている
 - [ ] レビュー完了
