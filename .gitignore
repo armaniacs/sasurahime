@@ -29,6 +29,10 @@ __pycache__/
 .plan/
 .playwright-mcp/
 
+# AI tool output dirs
+.checking-team-tmp/
+graphify-out/
+
 # Jekyll build output
 docs/_site/
 

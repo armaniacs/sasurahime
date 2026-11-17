@@ -5,7 +5,7 @@ macOS 開発環境の不要ファイルを安全に削除する Rust 製 CLI ツ
 ## 完了した PBI
 
 Sprint 1〜5 の全 7 PBI（22 SP）と PBI 01〜12（25 SP）は `v0.2.0` としてリリース済みです。
-システムデータ肥大化対策の 12 PBI（45 SP）は実装と検証が完了していますが、`main` への取り込みは未実施です。
+システムデータ肥大化対策の 12 PBI（45 SP）も `main` へのマージとリリースが完了しています。
 各 PBI の詳細は `.plan/archived/` にアーカイブされています。
 
 | PBI | タイトル | SP | 概要 |
@@ -37,13 +37,14 @@ Sprint 1〜5 の全 7 PBI（22 SP）と PBI 01〜12（25 SP）は `v0.2.0` と�
 ## 全体レビュー・拡張バックログ（2026-10-22 / 2026-10-23、全 15 PBI 完了）
 
 全体レビュー（2026-10-22）と拡張（2026-10-23）由来の 15 PBI はすべて実装と検証が完了し、
-`.plan/archived/` にアーカイブしました。実装はブランチ `1023a` で、`main` には未マージです。
+`.plan/archived/` にアーカイブしました。実装はブランチ `1023a` で行い、`main` にマージ済みです。
 実装コミットは `.plan/00-INDEX.md` のアーカイブ一覧に記載しています。
 
 ## システムデータ肥大化対策（2026-10-20 設計、全 12 PBI 完了）
 
 設計書は `docs/superpowers/specs/2026-10-20-*.md`。実装順は固定で、前提 PBI が完了してから次に着手しました。
-12 本すべて完了し、`.plan/archived/` に移動済みです。作業は複数のブランチに分かれており、`main` には未マージです。
+12 本すべて完了し、`.plan/archived/` に移動済みです。作業は複数のブランチに分かれており、
+いずれも `main` にマージ済みです。
 
 | 順 | PBI | タイトル | SP | 前提 | 設計書 | 状態 |
 |:--:|-----|---------|:--:|------|--------|---|
@@ -66,6 +67,18 @@ Sprint 1〜5 の全 7 PBI（22 SP）と PBI 01〜12（25 SP）は `v0.2.0` と�
 | 2026-10-20-10-backlog-ios-backup-yes-prompt | --yes で ios-backup / apfs-snapshot の確認プロンプトが出る問題を解消する | 1 | PBI-02 の後 | 完了 |
 | 2026-10-20-11-backlog-clean-result-trash-message | clean 結果の「moved to Trash」表示を CleanResult.uses_trash に基づかせる | 1 | なし | 完了 |
 | 2026-10-20-12-backlog-apfs-snapshot-followups | apfs-snapshot の軽微な積み残しを整理する | 2 | なし | 完了 |
+
+## GitHub Pages 改善（2026-11-16、全 4 PBI 完了）
+
+docs 配下のアクセシビリティ・レスポンシブ・言語切替・SEO を段階的に改善した 4 PBI（S1-S4）。
+PR #8 で `main` にマージし、`v0.4.7` としてリリース済みです。詳細は `.plan/archived/` を参照。
+
+| PBI | タイトル | 概要 |
+|:---:|---------|------|
+| S1 | アクセシビリティ土台 | `<main>` ランドマーク、スキップリンク、caption/scope、aria 属性、:focus-visible |
+| S2 | テーブルとレスポンシブ改善 | 横スクロールテーブル + sticky ヘッダー、`color-scheme: dark`、container queries 移行 |
+| S3 | 言語切替 JS 再設計と /ja/ 下層整備 | data-lang + addEventListener 化、/ja/ 配下に主要ドキュメント 3 件を新設 |
+| S4 | meta と SEO 整備 | Open Graph、canonical、hreflang (x-default 含む)、ページ固有 description、ユニーク title |
 
 ## 未着手のバックログ
 
