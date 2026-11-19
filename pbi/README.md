@@ -98,6 +98,9 @@ Batch 1（01∥04 並列）→ 02 → 03。最終ゲート: lib 903 passed（既
 | 02 | main() フロー抽出 | 634 行の main() を 9 個の run_<flow> へ抽出。flush を main 末尾 1 箇所に、External arm の dry-run 解決を 1 箇所に |
 | 03 | 無人バッチ骨格共有化 | select → batch → 報告の骨格と SkipReason 描画を batch.rs に 1 所有者化（PBI 74 の rendering 呼び出し側決定は維持） |
 
+追完（同日、ユーザー指示の個別 PBI）: `2026-11-20-05` — 直接依存の chrono を廃止し jiff へ置換
+（history タイムスタンプの書式は byte 等価。chrono は trash の推移依存として lock に残存）。
+
 台帳送り（再検討トリガー付き）: Cleaner trait の capability split（default method 11 超で再評価）、
 tests/ fixture 重複の全数監査、`SCAN_CACHE.set` テストリセット脆弱点、--yes skip 汎用行への語彙追加。
 
