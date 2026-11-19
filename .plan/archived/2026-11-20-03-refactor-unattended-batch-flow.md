@@ -48,13 +48,13 @@ Scenario: SkipReason の新変数追加が 3 経路の描画更新を build erro
 
 ## 受け入れ基準
 
-- [ ] 「selection → run_batch → BatchSummary」の骨格を batch.rs に 1 所有者として新設する（`run_batch` / `post_clean_note` / `write_history_entry_if_needed` と同じモジュール）。3 呼び出し（main.rs:1378-1385 / :1721-1728 / interactive.rs:409-416）が骨格関数を通る。bool 位置引数の意味付き呼び出しは骨格 1 箇所に集約される
-- [ ] skip 描画は advice 文言を引数に取る共有レンダラへ寄せ、SkipReason の match を 1 箇所化する。stream への書き込み（println!/eprintln! の選択）は呼び出し側が行う（PBI 74 決定の維持）。行構造 "{name} ({risk}): {advice}" は現行維持
-- [ ] run_auto の `gate_skipped_names` による TTY 観測（interactive.rs:334）、permanent 確認（:374-393）、`SkipConfirmGuard`（:396）は呼び出し側に維持される（骨格に吸収しない。TTY の事実と確認文脈は PBI 74 が呼び出し側に置いたもの）
-- [ ] rendering（文言・stream 選択）を unattended.rs に入れない（PBI 74 決定の維持、unattended.rs:38-44）。`UnattendedPolicy::select` は純粋決定のまま。96 セル matrix pin（unattended.rs:418-479）は無修正で green
-- [ ] 移設前に auto/all/yes の skip 出力 pin（文言・stream 含む）を棚卸しし、不足分を先に足す（parity pin は「現行出力を pin してからリファクタ」の順序で初めて意味を持つ）。`combined` 連結 assert で stream 分離が未 pin の箇所は、分離 pin を移設前に追加する
-- [ ] SkipReason 全変数を扱う match が 1 箇所のみであることを source pin（include_str! grep、match 定義行アンカー）で固定する。pin の運用は tests/AGENTS.md の規約（定義行アンカー、pinned literal を pin 自身のソースに直接書かない）に従う。新変数追加時に非網羅 build error が 3 経路すべてに効く構造である
-- [ ] 全 E2E pin 無傷（byte 等価の実測を記録）+ `cargo clippy --tests -- -D warnings` 0 + `cargo fmt --check` clean
+- [x] 「selection → run_batch → BatchSummary」の骨格を batch.rs に 1 所有者として新設する（`run_batch` / `post_clean_note` / `write_history_entry_if_needed` と同じモジュール）。3 呼び出し（main.rs:1378-1385 / :1721-1728 / interactive.rs:409-416）が骨格関数を通る。bool 位置引数の意味付き呼び出しは骨格 1 箇所に集約される
+- [x] skip 描画は advice 文言を引数に取る共有レンダラへ寄せ、SkipReason の match を 1 箇所化する。stream への書き込み（println!/eprintln! の選択）は呼び出し側が行う（PBI 74 決定の維持）。行構造 "{name} ({risk}): {advice}" は現行維持
+- [x] run_auto の `gate_skipped_names` による TTY 観測（interactive.rs:334）、permanent 確認（:374-393）、`SkipConfirmGuard`（:396）は呼び出し側に維持される（骨格に吸収しない。TTY の事実と確認文脈は PBI 74 が呼び出し側に置いたもの）
+- [x] rendering（文言・stream 選択）を unattended.rs に入れない（PBI 74 決定の維持、unattended.rs:38-44）。`UnattendedPolicy::select` は純粋決定のまま。96 セル matrix pin（unattended.rs:418-479）は無修正で green
+- [x] 移設前に auto/all/yes の skip 出力 pin（文言・stream 含む）を棚卸しし、不足分を先に足す（parity pin は「現行出力を pin してからリファクタ」の順序で初めて意味を持つ）。`combined` 連結 assert で stream 分離が未 pin の箇所は、分離 pin を移設前に追加する
+- [x] SkipReason 全変数を扱う match が 1 箇所のみであることを source pin（include_str! grep、match 定義行アンカー）で固定する。pin の運用は tests/AGENTS.md の規約（定義行アンカー、pinned literal を pin 自身のソースに直接書かない）に従う。新変数追加時に非網羅 build error が 3 経路すべてに効く構造である
+- [x] 全 E2E pin 無傷（byte 等価の実測を記録）+ `cargo clippy --tests -- -D warnings` 0 + `cargo fmt --check` clean
 
 ## テスト戦略
 
@@ -71,11 +71,11 @@ parity pin 先行（pin 棚卸し → 不足 pin 追加 → 移設 → pin 無�
 
 ## DoD
 
-- [ ] cargo test が green（既知の TCC 依存 4 失敗を許容: `cleaners::huggingface::tests::clean_fallback_deletes_dir`、`cleaners::library_logs::tests::clean_all_via_opts_processes_all_entries`、`cleaners::pre_commit::tests::clean_fallback_deletes_dir`、`trash::tests::delete_ctx_trash_mode_moves_to_trash`。一覧は PBI 94 / 101 の DoD と同一、実装時に green でない場合はその時点の既知失敗に合わせる）
-- [ ] cargo clippy --tests -- -D warnings が 0
-- [ ] cargo fmt --check が通る
-- [ ] byte 等価の実測記録（3 経路の skip 出力を移設前後で比較した結果を PBI 完了報告に残す。pin の green だけでなく実測の記録を残す）
-- [ ] PBI アーカイブ（統合側が実施: `git mv` → `.plan/archived/`、INDEX 追記。サブエージェントは git 操作しない）
+- [x] cargo test が green（既知の TCC 依存 4 失敗を許容: `cleaners::huggingface::tests::clean_fallback_deletes_dir`、`cleaners::library_logs::tests::clean_all_via_opts_processes_all_entries`、`cleaners::pre_commit::tests::clean_fallback_deletes_dir`、`trash::tests::delete_ctx_trash_mode_moves_to_trash`。一覧は PBI 94 / 101 の DoD と同一、実装時に green でない場合はその時点の既知失敗に合わせる）
+- [x] cargo clippy --tests -- -D warnings が 0
+- [x] cargo fmt --check が通る
+- [x] byte 等価の実測記録（3 経路の skip 出力を移設前後で比較した結果を PBI 完了報告に残す。pin の green だけでなく実測の記録を残す）
+- [x] PBI アーカイブ（統合側が実施: `git mv` → `.plan/archived/`、INDEX 追記。サブエージェントは git 操作しない）
 
 ## scope 外（やらないこと）
 
@@ -88,3 +88,15 @@ parity pin 先行（pin 棚卸し → 不足 pin 追加 → 移設 → pin 無�
 - PBI 74 決定の再読が本 PBI の出発点: 決定文（unattended.rs:38-44）は rendering と stream 選択を呼び出し側に置くと言うが、実行順序（骨格）については沈黙している。骨格の複製は rendering ではなく**実行順序**の複製で、実行順序を共通化しても PBI 74 の決定に触れない（なぜなぜ round 9 §2.a 21-23）
 - 共有先を batch.rs とする根拠: run_batch / post_clean_note / write_history_entry_if_needed という実行の契約の既存の所有者だから。unattended.rs は PBI 74 が純粋決定のみに保った場所で、実行（I/O）を入れると selection matrix 96 セル pin の前提（純粋性）を汚染する
 - 触れるファイル: `src/main.rs`（auto/all arm の骨格呼び出しへの置き換え、02 で抽出された `fn run_<flow>` 内）、`src/batch.rs`（骨格関数 + 共有レンダラ新設）、`src/interactive.rs`（run_auto の寄せ）。`src/unattended.rs` は触れない
+
+## 実装記録（統合側、2026-11-20）
+
+- batch.rs に新設: run_selected_batch（selection → run list → run_batch → BatchSummary の骨格 1 所有者、位置引数 bool の意味付き呼び出しを集約）、SkipAdvice（経路別 advice テーブル。None が --yes の汎用行形状）、render_skip_line + render_advised_line（SkipReason の match を集約する唯一の純粋関数、印刷しない）
+- 集約位置を batch.rs にした根拠: main.rs 置き場だと lib 側の interactive.rs から参照できないため、実行の契約の既存所有者である batch.rs が唯一の共有可能位置
+- 3 呼び出しの移設: run_auto_flow（match 廃止 → advice テーブル + レンダラ、guidance 行の出力位置・文言は現行維持）、run_all_flow（同型 match 廃止 → レンダラ経由 println、batch 前の stdout・現行順序維持）、interactive::run_auto（汎用 1 行廃止 → 全 None advice のレンダラ、byte 等価）。gate_skipped / permanent confirm / SkipConfirmGuard は呼び出し側に維持。unattended.rs には無接触、96 セル matrix pin 無修正で green
+- 構造 pin: the_skip_reason_match_lives_only_in_the_shared_renderer（batch.rs tests。レンダラ定義行アンカーで 3 変数リテラル各 1 回・match 存在・ワイルドカード不在を pin。main.rs / interactive.rs 全文で SkipReason 参照 0 件・.risk().label() 直書き 0 件）
+- 棚卸し結果: auto の NeedsOptIn advice 文言（"set [policy] include_manual = true to include"）が未 pin → 移設前に auto_skip_optin_targets_name_the_policy_optin_on_stderr を補完し現行実装で green 実測（12 passed）。all / --yes は PBI 02 補完分と既存 pin で充足
+- byte 等価実測（/tmp/whywhy/byte-parity/ にキャプチャ）: auto stderr "  - node-gyp (Moderate): set [policy] include_manual = true to include" / "  - hints (Moderate): never runs unattended" / "Run `sasurahime clean <target>` explicitly for those."、all stdout "Skipped spm (Moderate): needs --include-manual" + stderr "Skipped 40 target(s) that need --include-manual."、--yes stdout "Skipped 2 target(s) that need an explicit selection: cargo (Moderate), vm-swap (Manual)"。終了コード 3 経路とも 0、pin 期待リテラルと完全一致（既存 pin 無修正）
+- 検証実測: cargo fmt --check clean / clippy 0 / cargo test --bin sasurahime 50 passed / cargo test --lib 904 passed / cargo test --tests 41 ターゲット全 green
+- 注記: run_caches_batch（clean caches arm）は無人 3 経路の外（unattended.rs doc の scope 外明記）のため run_batch 直呼びのまま維持
+- 実装コミット: 2270865（batch.rs + main.rs + interactive.rs + tests/auto_policy.rs）

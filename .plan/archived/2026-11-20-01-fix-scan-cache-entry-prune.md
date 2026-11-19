@@ -51,12 +51,12 @@ Scenario: 新鮮なエントリは flush を跨いで生存する
 
 ## 受け入れ基準
 
-- [ ] prune は `ScanCache` の純粋メソッドとして実装される（I/O を含まない map 操作。グローバル `SCAN_CACHE` / `init` / `flush` の署名は変更しない。flush 内部から呼ばれる配置は実装者が裁定し、呼び出し契約は不変）
-- [ ] 破棄条件は `scanned_at + MAX_AGE_SECS < now`（既存の期限定数 MAX_AGE_SECS（src/scan_cache.rs:14）と `cached_size()` の判定（:56-58）を再利用。新設定項目・新環境変数を追加しない）
-- [ ] 新鮮エントリの挙動は byte 不変（既存 8 テストは無修正で green。prune の Red→Green pin 2 本を追加: 期限切れのみ捨てる・新鮮は残る）
-- [ ] prune のテストは `ScanCache` 構造体レベルで完結する（グローバル OnceLock `SCAN_CACHE` に触れない。save_then_load_roundtrips（src/scan_cache.rs:254-267）の先例に倣う）
-- [ ] README の scan cache 言及箇所（英語セクション scan-cache.json の項、README.md:174-178 付近 + 日本語セクション README.md:418-422 付近）に保持期間（エントリは 1 時間の age 期限で flush 時に prune される）を 1〜2 行追記する
-- [ ] `--no-cache` / `flush` の呼び出し契約は 1 行も変わらない（src/main.rs:1312-1317 の init 条件と flush 呼び出しは無修正）
+- [x] prune は `ScanCache` の純粋メソッドとして実装される（I/O を含まない map 操作。グローバル `SCAN_CACHE` / `init` / `flush` の署名は変更しない。flush 内部から呼ばれる配置は実装者が裁定し、呼び出し契約は不変）
+- [x] 破棄条件は `scanned_at + MAX_AGE_SECS < now`（既存の期限定数 MAX_AGE_SECS（src/scan_cache.rs:14）と `cached_size()` の判定（:56-58）を再利用。新設定項目・新環境変数を追加しない）
+- [x] 新鮮エントリの挙動は byte 不変（既存 8 テストは無修正で green。prune の Red→Green pin 2 本を追加: 期限切れのみ捨てる・新鮮は残る）
+- [x] prune のテストは `ScanCache` 構造体レベルで完結する（グローバル OnceLock `SCAN_CACHE` に触れない。save_then_load_roundtrips（src/scan_cache.rs:254-267）の先例に倣う）
+- [x] README の scan cache 言及箇所（英語セクション scan-cache.json の項、README.md:174-178 付近 + 日本語セクション README.md:418-422 付近）に保持期間（エントリは 1 時間の age 期限で flush 時に prune される）を 1〜2 行追記する
+- [x] `--no-cache` / `flush` の呼び出し契約は 1 行も変わらない（src/main.rs:1312-1317 の init 条件と flush 呼び出しは無修正）
 
 ## テスト戦略（Outside-In TDD）
 
@@ -74,11 +74,11 @@ Red: 構造体レベルの unit pin 2 本 → Green: prune メソッドで閉じ
 
 ## DoD
 
-- [ ] cargo test が green（既知の TCC 依存 4 失敗を許容: cleaners::huggingface::tests::clean_fallback_deletes_dir、cleaners::library_logs::tests::clean_all_via_opts_processes_all_entries、cleaners::pre_commit::tests::clean_fallback_deletes_dir、trash::tests::delete_ctx_trash_mode_moves_to_trash。一覧は PBI-101 の DoD と同一、実装時に green でない場合はその時点の既知失敗に合わせる）
-- [ ] cargo clippy --tests -- -D warnings が 0
-- [ ] cargo fmt --check が通る
-- [ ] README 同期: 英語・日本語両セクションの scan cache 言及に保持期間 1〜2 行が追記済み
-- [ ] PBI アーカイブ: `git mv` で .plan/archived/ へ + .plan/00-INDEX.md 更新（統合側が実施）
+- [x] cargo test が green（既知の TCC 依存 4 失敗を許容: cleaners::huggingface::tests::clean_fallback_deletes_dir、cleaners::library_logs::tests::clean_all_via_opts_processes_all_entries、cleaners::pre_commit::tests::clean_fallback_deletes_dir、trash::tests::delete_ctx_trash_mode_moves_to_trash。一覧は PBI-101 の DoD と同一、実装時に green でない場合はその時点の既知失敗に合わせる）
+- [x] cargo clippy --tests -- -D warnings が 0
+- [x] cargo fmt --check が通る
+- [x] README 同期: 英語・日本語両セクションの scan cache 言及に保持期間 1〜2 行が追記済み
+- [x] PBI アーカイブ: `git mv` で .plan/archived/ へ + .plan/00-INDEX.md 更新（統合側が実施）
 
 ## scope 外（採らない裁定・記録）
 
@@ -93,3 +93,11 @@ Red: 構造体レベルの unit pin 2 本 → Green: prune メソッドで閉じ
 - 触れるファイル: src/scan_cache.rs（prune メソッド + flush 内呼び出し + tests）、README.md（英語・日本語の scan cache 言及各 1〜2 行）
 - pin（壊してはいけない契約）: `Deletion paths never consult the cache`（src/scan_cache.rs:7-10 の doc 契約）、`MAX_AGE_SECS = 60 * 60`（:14）と `cached_size()` の期限判定（:56-58）、`record_if_unchanged` の mid-walk 防御（:84-95）、save の best-effort 静黙契約（:42-50）、history 側の MAX_HISTORY_ENTRIES=1000（src/history.rs:9、:112）は消費のみ・変更しない
 - 挙動不変の根拠: 期限切れエントリは lookup で None を返すため、破棄はヒット率に対して挙動不変（なぜなぜ round 9、1.a 30）。prune 後も scan の出力・削除の判断が変わる筋は実在しない
+
+## 実装記録（統合側、2026-11-20）
+
+- ScanCache::prune() を純粋メソッドとして新設（retain、破棄条件は cached_size() の期限判定と同一ロジック）。flush() が save 直前に呼ぶ（as_ref → as_mut への最小変更、flush の署名・外部契約は不変）
+- prune pin 2 本を構造体レベルで Red→Green 実測（prune_expired_drops_only_stale_entries は期限切れパスが保存 JSON に出現しない assert も同梱、prune_then_roundtrip_keeps_fresh_entries は prune → save → load で新鮮エントリ生存）。グローバル SCAN_CACHE / init / flush には触れない
+- README: 英語セクション（scan keeps a persistent cache の bullet 末尾）と日本語セクション（scan は永続キャッシュの bullet 末尾）に保持期間 2 行を追記
+- 検証実測: cargo test --lib scan_cache 10 passed（既存 8 本無修正 + 新規 2 本）/ clippy 0 / fmt clean。最終ゲート lib 903 passed（既知 TCC 依存 1 件のみ、隔離再実行で green）
+- 実装コミット: 634b00b

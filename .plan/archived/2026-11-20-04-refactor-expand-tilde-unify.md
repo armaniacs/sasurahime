@@ -56,11 +56,11 @@ Scenario: source pin が MANAGED_PATTERNS の非 "~/" 要素を検出する
 
 ## 受け入れ基準
 
-- [ ] explorer.rs の非公開 `expand_tilde`（explorer.rs:121-123）を削除し、`is_managed()` の展開を `config::Config::expand_tilde` に寄せる。最小差分: `use` 1 追記 + 呼び出し 1 箇所（explorer.rs:128）の変更のみ。正装版の関連関数のまま降格・移動しない
-- [ ] 削除前に全 18 パターン × 簡略版/正装版の出力等価を性質テストで確認し、その結果を本 PBI ファイルに記録する。性質テストは src/explorer.rs の tests モジュールに置き、簡略版削除と同じ変更セットで一緒に撤去する（恒久 pin にしない）
-- [ ] MANAGED_PATTERNS の全要素が "~/" 接頭辞であることを確認する source pin を tests/ に 1 本追加する。include_str! 走査、needle は `path_pattern:` の definition line にアンカー、pin 自身の組立リテラルへの一致（自己充足）を回避する（needle は split/format で組み立てる）。追加後に仮想要素で RED を 1 度確認する
-- [ ] 既存の managed 表示 pin・is_managed 系テスト・E2E は無修正で green。cargo clippy --tests -- -D warnings が 0、cargo fmt --check が clean
-- [ ] 新 util モジュール・新抽象を新設しない（YAGNI。寄せ先は既存の `Config::expand_tilde` に限定）
+- [x] explorer.rs の非公開 `expand_tilde`（explorer.rs:121-123）を削除し、`is_managed()` の展開を `config::Config::expand_tilde` に寄せる。最小差分: `use` 1 追記 + 呼び出し 1 箇所（explorer.rs:128）の変更のみ。正装版の関連関数のまま降格・移動しない
+- [x] 削除前に全 18 パターン × 簡略版/正装版の出力等価を性質テストで確認し、その結果を本 PBI ファイルに記録する。性質テストは src/explorer.rs の tests モジュールに置き、簡略版削除と同じ変更セットで一緒に撤去する（恒久 pin にしない）
+- [x] MANAGED_PATTERNS の全要素が "~/" 接頭辞であることを確認する source pin を tests/ に 1 本追加する。include_str! 走査、needle は `path_pattern:` の definition line にアンカー、pin 自身の組立リテラルへの一致（自己充足）を回避する（needle は split/format で組み立てる）。追加後に仮想要素で RED を 1 度確認する
+- [x] 既存の managed 表示 pin・is_managed 系テスト・E2E は無修正で green。cargo clippy --tests -- -D warnings が 0、cargo fmt --check が clean
+- [x] 新 util モジュール・新抽象を新設しない（YAGNI。寄せ先は既存の `Config::expand_tilde` に限定）
 
 ## テスト戦略
 
@@ -80,11 +80,11 @@ Scenario: source pin が MANAGED_PATTERNS の非 "~/" 要素を検出する
 
 ## DoD
 
-- [ ] cargo test --no-fail-fast が green（既知の TCC 依存 4 失敗を許容: cleaners::huggingface::tests::clean_fallback_deletes_dir、cleaners::library_logs::tests::clean_all_via_opts_processes_all_entries、cleaners::pre_commit::tests::clean_fallback_deletes_dir、trash::tests::delete_ctx_trash_mode_moves_to_trash。実装時に green でない場合はその時点の既知失敗に合わせる）
-- [ ] cargo clippy --tests -- -D warnings が 0
-- [ ] cargo fmt --check が通る
-- [ ] 全 18 パターンの等価性実測が本 PBI ファイル（等価性実測記録）に記録されている
-- [ ] PBI アーカイブ（git mv → .plan/archived/ + .plan/00-INDEX.md の追記。統合側が実施）
+- [x] cargo test --no-fail-fast が green（既知の TCC 依存 4 失敗を許容: cleaners::huggingface::tests::clean_fallback_deletes_dir、cleaners::library_logs::tests::clean_all_via_opts_processes_all_entries、cleaners::pre_commit::tests::clean_fallback_deletes_dir、trash::tests::delete_ctx_trash_mode_moves_to_trash。実装時に green でない場合はその時点の既知失敗に合わせる）
+- [x] cargo clippy --tests -- -D warnings が 0
+- [x] cargo fmt --check が通る
+- [x] 全 18 パターンの等価性実測が本 PBI ファイル（等価性実測記録）に記録されている
+- [x] PBI アーカイブ（git mv → .plan/archived/ + .plan/00-INDEX.md の追記。統合側が実施）
 
 ## scope 外（やらないこと）
 

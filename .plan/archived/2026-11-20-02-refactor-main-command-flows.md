@@ -61,12 +61,12 @@ Scenario: BDD2: `scan --json` 実行後も scan-cache.json が保存される
 
 ## 受け入れ基準
 
-- [ ] 11 フロー（Doctor / Auto / Scan(+--json) / Targets / None(TUI) / Explore / Clean 特殊 12 arm + 標準 dispatch / Stats）を `fn run_<flow>` 自由関数へ抽出する。reporter / home / config / opts を引数で明示し、フロー関数内でスコープ共有変数（`cli` 全体・`clean_opts`・`scan_cache_path` 等）を直接参照しない。標準 dispatch（main.rs:1856-1865）は既に統一済みのため `run_and_exit` + `dispatch_clean` の 1 行 arm に留めてよい
-- [ ] Scan --json の early return（main.rs:1413）を撤去し、`scan_cache::flush` を main() 末尾 1 箇所（main.rs:1883-1885）に寄せる。byte 等価 pin（BDD2）で証明する。main.rs:1407-1409 の cache warming コメント契約（--json 経路でも detect 結果を保存する）は唯一の flush 呼び出し箇所へ移して維持する
-- [ ] External arm の dry-run 解決（main.rs:1821 custom 経路 / 1844 plugin 経路）を 1 箇所にまとめる
-- [ ] opts 渡し形状の pin（「flag 持ち arm はローカル構築、それ以外は clean_opts」）を source pin（include_str! grep）で固定する。Clean 特殊 arm のうち opts をローカル構築してよいのは flag 持ち arm（例: LibraryLogs の all フラグ付き再束縛、main.rs:1558-1562）のみで、Trash arm の `CleanOptions::default()`（main.rs:1534）は Report-only 契約（main.rs:1530-1532）とセットの文書化済み例外として pin に含める。source pin は tests/AGENTS.md の規約（最後の手段・定義行アンカー・pin 自己参照回避）に従う
-- [ ] 全 E2E pin 無傷（出力 byte 等価の実測を記録）+ `cargo clippy --tests -- -D warnings` 0 + `cargo fmt --check` clean
-- [ ] 抽出の前に既存 E2E pin の棚卸し（auto / all / --yes の skip 出力・stream を含む）を実施し、不足分を先に足す
+- [x] 11 フロー（Doctor / Auto / Scan(+--json) / Targets / None(TUI) / Explore / Clean 特殊 12 arm + 標準 dispatch / Stats）を `fn run_<flow>` 自由関数へ抽出する。reporter / home / config / opts を引数で明示し、フロー関数内でスコープ共有変数（`cli` 全体・`clean_opts`・`scan_cache_path` 等）を直接参照しない。標準 dispatch（main.rs:1856-1865）は既に統一済みのため `run_and_exit` + `dispatch_clean` の 1 行 arm に留めてよい
+- [x] Scan --json の early return（main.rs:1413）を撤去し、`scan_cache::flush` を main() 末尾 1 箇所（main.rs:1883-1885）に寄せる。byte 等価 pin（BDD2）で証明する。main.rs:1407-1409 の cache warming コメント契約（--json 経路でも detect 結果を保存する）は唯一の flush 呼び出し箇所へ移して維持する
+- [x] External arm の dry-run 解決（main.rs:1821 custom 経路 / 1844 plugin 経路）を 1 箇所にまとめる
+- [x] opts 渡し形状の pin（「flag 持ち arm はローカル構築、それ以外は clean_opts」）を source pin（include_str! grep）で固定する。Clean 特殊 arm のうち opts をローカル構築してよいのは flag 持ち arm（例: LibraryLogs の all フラグ付き再束縛、main.rs:1558-1562）のみで、Trash arm の `CleanOptions::default()`（main.rs:1534）は Report-only 契約（main.rs:1530-1532）とセットの文書化済み例外として pin に含める。source pin は tests/AGENTS.md の規約（最後の手段・定義行アンカー・pin 自己参照回避）に従う
+- [x] 全 E2E pin 無傷（出力 byte 等価の実測を記録）+ `cargo clippy --tests -- -D warnings` 0 + `cargo fmt --check` clean
+- [x] 抽出の前に既存 E2E pin の棚卸し（auto / all / --yes の skip 出力・stream を含む）を実施し、不足分を先に足す
 
 ## テスト戦略（parity pin 先行）
 
@@ -81,11 +81,11 @@ Scenario: BDD2: `scan --json` 実行後も scan-cache.json が保存される
 
 ## DoD
 
-- [ ] `cargo test --no-fail-fast` が green（既知の TCC 依存 4 失敗を除く許容: cleaners::huggingface::tests::clean_fallback_deletes_dir / cleaners::library_logs::tests::clean_all_via_opts_processes_all_entries / cleaners::pre_commit::tests::clean_fallback_deletes_dir / trash::tests::delete_ctx_trash_mode_moves_to_trash。実装時に green でない場合はその時点の既知失敗一覧に合わせて注記する）
-- [ ] `cargo clippy --tests -- -D warnings` が 0
-- [ ] `cargo fmt --check` が通る
-- [ ] byte 等価の実測記録: BDD1（`clean trash --dry-run` の pin 走査）と BDD2（`scan --json` の scan-cache.json 保存 + flush 1 箇所 pin）の実測結果を本ファイルに追記する
-- [ ] PBI アーカイブ: 統合側が実施する（git mv で .plan/archived/ へ移動、.plan/00-INDEX.md への追記。サブエージェントは git 操作・INDEX 編集・pbi/ 編集禁止）
+- [x] `cargo test --no-fail-fast` が green（既知の TCC 依存 4 失敗を除く許容: cleaners::huggingface::tests::clean_fallback_deletes_dir / cleaners::library_logs::tests::clean_all_via_opts_processes_all_entries / cleaners::pre_commit::tests::clean_fallback_deletes_dir / trash::tests::delete_ctx_trash_mode_moves_to_trash。実装時に green でない場合はその時点の既知失敗一覧に合わせて注記する）
+- [x] `cargo clippy --tests -- -D warnings` が 0
+- [x] `cargo fmt --check` が通る
+- [x] byte 等価の実測記録: BDD1（`clean trash --dry-run` の pin 走査）と BDD2（`scan --json` の scan-cache.json 保存 + flush 1 箇所 pin）の実測結果を本ファイルに追記する
+- [x] PBI アーカイブ: 統合側が実施する（git mv で .plan/archived/ へ移動、.plan/00-INDEX.md への追記。サブエージェントは git 操作・INDEX 編集・pbi/ 編集禁止）
 
 ## scope 外（やらないこと）
 
@@ -110,3 +110,14 @@ Scenario: BDD2: `scan --json` 実行後も scan-cache.json が保存される
 - 触れるファイルは src/main.rs が主対象。parity pin の補完で必要になった場合の tests/ への pin 追加のみ許容（既存 pin の修正・削除はしない）。pbi/ 配下の他ファイル・.plan/00-INDEX.md・README には触れない
 - 後続 PBI 2026-11-20-03 が当て先にする `fn run_auto_flow` / `fn run_all_flow` は、本 PBI の arm 抽出時にこの名前で用意する（後続の diff 最小化）
 - アンカー行番号は main @ c107011 実測値。着地時点で行番号がずれている場合は file:line を読み替え、契約の内容は変えない
+
+## 実装記録（統合側、2026-11-20）
+
+- 抽出 9 関数: run_doctor_flow / run_auto_flow / run_scan_flow / run_targets_flow / run_tui_flow / run_explore_flow / run_all_flow / run_clean_flow / run_stats_flow。main() は 634 行から約 130 行（初期化 + 1〜3 行ディスパッチ + 末尾 flush）。フロー関数は解決済み状態の明示引数渡しで、cli 全体・clean_opts・scan_cache_path を直接参照しない
+- Scan --json の early return を撤去し flush は main() 末尾 1 箇所。flush 呼び出し箇所数 == 1 を source pin（scan_cache_flush_has_exactly_one_call_site）で固定。opts 渡し形状を source pin（clean_flow_opts_passing_keeps_the_documented_shape、LibraryLogs のローカル構築 1 件 + Trash の default 1 件を文書化済み例外として含む）で固定
+- External arm の dry-run 解決は run_clean_flow 内 1 箇所に hoist（rg 実測で 1 件）
+- 棚卸し結果: (a) auto/all の skip 出力の stream 分離 pin が不足 → 抽出前に 2 本補完（auto_policy.rs: stderr guidance + stdout total / clean_all.rs: stdout skip 行 + stderr count 行 + stdout total）。(c) clean trash --dry-run の Report-only 出力 pin が不足 → history.rs に補完（stdout "Trash holds:" / stderr Finder 警告 / exit 0 / 漏れなし）。(b) 終了コード、(d) scan --json の cache 保存は既存 pin で充足
+- byte 等価実測: clean trash --dry-run → exit 0、stdout "Trash holds: 0 B"、stderr に version banner + Finder 警告のみ。scan --json → scan-cache.json 保存（215 byte、act の detect 結果を記録）
+- 検証実測: cargo fmt --check clean / cargo clippy --tests -- -D warnings 0 / cargo test --lib 901 passed（1 件の既知 TCC flake は隔離再実行で green）/ cargo test --bin sasurahime 50 passed / E2E 41 ターゲット全 green（既存テスト・pin の修正・削除 0 行）
+- 注記: 明示引数渡しの保証のため run_explore_flow(8) / run_all_flow(8) / run_clean_flow(10) に #[allow(clippy::too_many_arguments)] + WHY コメント。引数バンドル struct 化は後続ラウンドの判断事項
+- 実装コミット: c9924ad

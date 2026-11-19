@@ -83,6 +83,24 @@ PR #8 で `main` にマージし、`v0.4.7` としてリリース済みです。
 本番デプロイの実機検証 PBI（`2026-11-17-01`）も完了し、`.plan/archived/` にアーカイブ済みです。
 発見事項（`superpowers/` 配下の本番配信、ローカル jekyll build の復旧）は修正 PBI の起票対象として検証記録に残っています。
 
+## 大局的コード改善 round 9（2026-11-20、全 4 PBI 完了）
+
+holistic-code-improvement スキルによる大局レビュー（DRY/SoC/拡張性/堅牢性）+ なぜなぜ分析
+（3 立場 × 30 段超 × 3 グループ）で RICE 採点した 4 PBI。実行順は依存優先で
+Batch 1（01∥04 並列）→ 02 → 03。最終ゲート: lib 903 passed（既知 TCC 依存 1 件のみ）、
+統合テスト 43 ターゲット全 ok、clippy 0、fmt clean、build ok。
+詳細は `.plan/archived/` と台帳 `2026-11-20-00-backlog-holistic-round9.md` を参照。
+
+| PBI | タイトル | 概要 |
+|:---:|---------|------|
+| 01 | scan-cache flush 時の期限切れ破棄 | record() insert のみで ghost エントリが単調増加する無上限成長を解消（history の MAX_HISTORY_ENTRIES 規約へ揃えた） |
+| 04 | expand_tilde 統一 | explorer の 1 行版を config 正装版に寄せ、MANAGED_PATTERNS 全要素 "~/" 接頭辞を source pin で固定 |
+| 02 | main() フロー抽出 | 634 行の main() を 9 個の run_<flow> へ抽出。flush を main 末尾 1 箇所に、External arm の dry-run 解決を 1 箇所に |
+| 03 | 無人バッチ骨格共有化 | select → batch → 報告の骨格と SkipReason 描画を batch.rs に 1 所有者化（PBI 74 の rendering 呼び出し側決定は維持） |
+
+台帳送り（再検討トリガー付き）: Cleaner trait の capability split（default method 11 超で再評価）、
+tests/ fixture 重複の全数監査、`SCAN_CACHE.set` テストリセット脆弱点、--yes skip 汎用行への語彙追加。
+
 ## 未着手のバックログ
 
 なし。2026-10-22 / 2026-10-23 の各一覧の PBI はすべて実装済みで
