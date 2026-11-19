@@ -168,6 +168,36 @@ fn clean_all_without_include_manual_reports_skipped_target_count() {
 }
 
 #[test]
+fn clean_all_skip_lines_stream_to_stdout_and_the_count_to_stderr() {
+    // Stream parity pin (PBI 2026-11-20-02, added before the flow
+    // extraction): the per-target skip lines print on stdout while the
+    // trailing "Skipped N target(s) that need --include-manual." count goes
+    // to stderr — an arm-internal asymmetry the auto arm does not share
+    // (auto renders its whole skip block on stderr). The arm's extraction
+    // must not move either stream.
+    let tmp = TempDir::new().unwrap();
+    let output = sasurahime(tmp.path())
+        .args(["clean", "all"])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "clean all must exit 0");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stdout.contains("Skipped spm (Moderate): needs --include-manual"),
+        "per-target skip lines must stream to stdout, got stdout:\n{stdout}"
+    );
+    assert!(
+        stderr.contains("target(s) that need --include-manual."),
+        "the skipped-count summary must stream to stderr, got stderr:\n{stderr}"
+    );
+    assert!(
+        stdout.contains("Total freed:"),
+        "the total must stay on stdout, got stdout:\n{stdout}"
+    );
+}
+
+#[test]
 fn per_cleaner_config_filters_apply_in_clean_all() {
     let tmp = TempDir::new().unwrap();
     let spm_cache = tmp.path().join("Library/Caches/org.swift.swiftpm");

@@ -1252,6 +1252,619 @@ fn run_hint_flow(
     Ok(())
 }
 
+/// The `doctor` flow: diagnose Full Disk Access problems before scanning.
+fn run_doctor_flow(home: &Path) {
+    doctor::run(home);
+}
+
+/// The `auto` flow: unattended policy apply. The entry gate (no [policy]
+/// section) stays here (PBI 74): it is not a selection input.
+fn run_auto_flow(
+    home: &Path,
+    config: &Config,
+    reporter: &dyn ProgressReporter,
+    dry_run: bool,
+    trash_mode: sasurahime::trash::TrashMode,
+) -> anyhow::Result<()> {
+    if !config.policy.present {
+        eprintln!(
+            "Error: no [policy] section in ~/.config/sasurahime/config.toml. Write a policy (e.g. older_than_days = 30) before running `auto`."
+        );
+        // This exit bypasses main's trailing scan_cache::flush; kept
+        // verbatim — converting the exit to a Result is out of scope.
+        std::process::exit(1);
+    }
+    let opts = cleaner::CleanOptions {
+        all: true,
+        include_manual: config.policy.include_manual,
+        older_than_days: config.policy.older_than_days,
+        larger_than_mb: config.policy.larger_than_mb,
+        trash_mode,
+    };
+    let cleaners_list = all_cleaners(home, config);
+    // PBI 74: the run/skip classification is owned by
+    // UnattendedPolicy::Auto. The wording stays at the call site: it
+    // is specific to `auto`. Risky (destructive/irreversible) and
+    // Manual (review-first) targets never run unattended, even with
+    // include_manual: whole-dir removals must never happen without a
+    // human.
+    let selection = unattended::UnattendedPolicy::Auto.select(&cleaners_list, &opts);
+    let skipped: Vec<String> = selection
+        .skipped
+        .iter()
+        .map(|(i, reason)| {
+            let c = &cleaners_list[*i];
+            match reason {
+                unattended::SkipReason::NeverUnattended(risk) => {
+                    format!("{} ({}): never runs unattended", c.name(), risk.label())
+                }
+                unattended::SkipReason::NeedsOptIn(risk) => format!(
+                    "{} ({}): set [policy] include_manual = true to include",
+                    c.name(),
+                    risk.label()
+                ),
+                // Auto never classifies a target as scan-gated (it
+                // scans nothing); the arm renders it truthfully if
+                // wiring ever changes.
+                unattended::SkipReason::NeedsExplicitSelection(risk) => format!(
+                    "{} ({}): needs an explicit selection",
+                    c.name(),
+                    risk.label()
+                ),
+            }
+        })
+        .collect();
+    let batch_cleaners: Vec<&dyn cleaner::Cleaner> = selection
+        .run
+        .iter()
+        .map(|&(i, _)| cleaners_list[i].as_ref())
+        .collect();
+    let summary = batch::run_batch(&batch_cleaners, &opts, reporter, dry_run, false, true);
+    interactive::report_batch_failures(
+        &mut std::io::stderr(),
+        &summary,
+        interactive::ReportShape::Named,
+    )?;
+    // The target-skip guidance stays at the call site: the wording is
+    // specific to `auto`.
+    if !skipped.is_empty() {
+        eprintln!("Skipped {} target(s):", skipped.len());
+        for s in &skipped {
+            eprintln!("  - {s}");
+        }
+        eprintln!("Run `sasurahime clean <target>` explicitly for those.");
+    }
+    interactive::report_total_freed(&mut std::io::stdout(), summary.total_freed)?;
+    Ok(())
+}
+
+/// The `scan` flow: table scan + hint flow, or the machine-readable `--json`
+/// variant. The `--json` variant returns without the hint flow (machine
+/// output only); the scan cache is flushed by main's single trailing flush,
+/// which this early flow return passes through.
+fn run_scan_flow(
+    home: &Path,
+    config: &Config,
+    dry_run: bool,
+    reporter: &dyn ProgressReporter,
+    clean_opts: &CleanOptions,
+    json: bool,
+) -> anyhow::Result<()> {
+    let cleaners = all_cleaners(home, config);
+    if json {
+        // Machine-readable output: no hints, no interactive prompt.
+        scanner::run_scan_json(&cleaners, home);
+        return Ok(());
+    }
+    scanner::run_scan(&cleaners, home);
+    run_hint_flow(home, config, dry_run, reporter, clean_opts)
+}
+
+/// The `targets` listing flow.
+fn run_targets_flow() {
+    let mut targets: Vec<&(&str, &str)> = ALL_TARGETS.iter().collect();
+    targets.sort_by_key(|(name, _)| *name);
+    for (name, desc) in targets {
+        println!("{:<12} {}", name, desc);
+    }
+    // Plugin-derived targets are marked so they can be told apart
+    // from built-ins.
+    for p in cleaners::plugin::PluginCleaner::discover_excluding(&builtin_target_names()) {
+        println!("{:<12} (plugin)", p.name());
+    }
+}
+
+/// The no-subcommand flow: the interactive TUI, or the `--yes` unattended
+/// run over the Safe targets.
+fn run_tui_flow(
+    home: &Path,
+    config: &Config,
+    yes: bool,
+    trash_mode: sasurahime::trash::TrashMode,
+    dry_run: bool,
+    reporter: &dyn ProgressReporter,
+    clean_opts: &CleanOptions,
+) -> anyhow::Result<()> {
+    let cleaners = all_cleaners(home, config);
+    // PBI-50: the TUI's sub-target branch cleans in-process through
+    // this seam — the real CleanResult fixes the `Total freed`
+    // under-count of the old self re-exec, and the TUI process's own
+    // flags (trash mode, config path) now apply to the clean.
+    if yes {
+        interactive::run_auto(&cleaners, trash_mode)?;
+    } else {
+        interactive::run_interactive(
+            &cleaners,
+            &|name, sub, dry, rep| clean_by_name(home, config, name, sub, dry, rep, clean_opts),
+            trash_mode,
+        )?;
+    }
+    run_hint_flow(home, config, dry_run, reporter, clean_opts)
+}
+
+/// The `explore` flow: OmniDiskSweeper-style discovery and action.
+// Explicit-argument shape (see run_clean_flow): the flow reads no shared
+// scope, so the argument count is the price of that guarantee.
+#[allow(clippy::too_many_arguments)]
+fn run_explore_flow(
+    home: &Path,
+    config: &Config,
+    dry_run: bool,
+    top: usize,
+    all: bool,
+    dirs: Vec<PathBuf>,
+    reporter: &dyn ProgressReporter,
+    clean_opts: &CleanOptions,
+) -> anyhow::Result<()> {
+    let roots = if dirs.is_empty() {
+        explorer::default_roots(home)
+    } else {
+        dirs
+    };
+    let top_n = if all { None } else { Some(top) };
+    // PBI-50: managed-entry cleans run in-process through the seam
+    // (the CLI reporter keeps the "Cleaning ... [OK] / Freed:" output
+    // the old re-exec'd child printed) instead of spawning this
+    // binary resolved through current_exe / PATH.
+    explorer::run_explore(
+        home,
+        explorer::ExploreOptions {
+            roots,
+            top: top_n,
+            dry_run,
+        },
+        reporter,
+        &|name, sub, dry, rep| clean_by_name(home, config, name, sub, dry, rep, clean_opts),
+    )
+}
+
+/// The `clean all` flow: explicit full clean under the UnattendedPolicy::All
+/// classification. The wording stays at this call site: it is specific to
+/// `clean all`.
+// Explicit-argument shape (see run_clean_flow): the flow reads no shared
+// scope, so the argument count is the price of that guarantee.
+#[allow(clippy::too_many_arguments)]
+fn run_all_flow(
+    home: &Path,
+    config: &Config,
+    dry_run: bool,
+    include_manual: bool,
+    older_than: Option<u32>,
+    larger_than: Option<u64>,
+    trash_mode: sasurahime::trash::TrashMode,
+    reporter: &dyn ProgressReporter,
+) -> anyhow::Result<()> {
+    // Explicit full clean: the user picked every target on
+    // purpose. Safe targets run without --include-manual;
+    // Moderate/Risky/Manual need it. No skip-confirm guard
+    // here — skip policies stay at the call sites
+    // (batch.rs): confirm_suppressed() must stay false so
+    // a cleaner that gates on a prompt (colima's fallback
+    // full delete, generic.rs) still asks before deleting;
+    // moving the guard into run_batch would delete
+    // without asking.
+    let opts = cleaner::CleanOptions {
+        all: true,
+        include_manual,
+        older_than_days: older_than,
+        larger_than_mb: larger_than,
+        trash_mode,
+    };
+    let cleaners_list = all_cleaners(home, config);
+    // PBI 74: the classification is owned by
+    // UnattendedPolicy::All — the opt-in unlocks EVERY
+    // non-Safe risk here (unlike auto, where Risky and
+    // Manual stay locked), except quit-based cleaners,
+    // which stay skipped even with --include-manual
+    // (PBI 87). The wording stays at the call site: it
+    // is specific to `clean all`.
+    let selection = unattended::UnattendedPolicy::All.select(&cleaners_list, &opts);
+    for (i, reason) in &selection.skipped {
+        let c = &cleaners_list[*i];
+        match reason {
+            // PBI 87: a quit-based cleaner is skipped even
+            // with --include-manual; the wording matches
+            // the auto arm's NeverUnattended line.
+            unattended::SkipReason::NeverUnattended(risk) => {
+                println!(
+                    "Skipped {} ({}): never runs unattended",
+                    c.name(),
+                    risk.label()
+                );
+            }
+            unattended::SkipReason::NeedsOptIn(risk) => println!(
+                "Skipped {} ({}): needs --include-manual",
+                c.name(),
+                risk.label()
+            ),
+            // All is registry-driven and never classifies
+            // a target as explicit-selection-only; the
+            // arm renders it truthfully if wiring ever
+            // changes.
+            unattended::SkipReason::NeedsExplicitSelection(risk) => println!(
+                "Skipped {} ({}): needs an explicit selection",
+                c.name(),
+                risk.label()
+            ),
+        }
+    }
+    let batch_cleaners: Vec<&dyn cleaner::Cleaner> = selection
+        .run
+        .iter()
+        .map(|&(i, _)| cleaners_list[i].as_ref())
+        .collect();
+    let summary = batch::run_batch(&batch_cleaners, &opts, reporter, dry_run, false, true);
+    interactive::report_batch_failures(
+        &mut std::io::stderr(),
+        &summary,
+        interactive::ReportShape::Named,
+    )?;
+    if !selection.skipped.is_empty() {
+        eprintln!(
+            "Skipped {} target(s) that need --include-manual.",
+            selection.skipped.len()
+        );
+    }
+    interactive::report_total_freed(&mut std::io::stdout(), summary.total_freed)?;
+    Ok(())
+}
+
+/// The `clean <target>` flow: the special targets' custom dispatch plus the
+/// standard targets' macro-generated dispatch (one line through
+/// `run_and_exit` + `dispatch_clean`). Every dependency arrives as an
+/// explicit argument — a flow must not read `main`'s shared scope. Opts
+/// passing follows one shape: arms that interpret their own flags build
+/// `CleanOptions` locally (LibraryLogs's `--all` rebind), the Trash arm's
+/// `CleanOptions::default()` is the documented Report-only exception
+/// (sasurahime never empties the Trash itself), and every other arm passes
+/// the resolved `clean_opts` through. The remaining `std::process::exit`
+/// calls (apfs-snapshot flag errors, hints failure, external-arm guards)
+/// bypass main's trailing scan_cache::flush; they are kept verbatim —
+/// converting exits to `Result`s is out of scope.
+// The argument count is the price of the explicit-argument guarantee above,
+// not a design smell to bundle away.
+#[allow(clippy::too_many_arguments)]
+fn run_clean_flow(
+    home: &Path,
+    config: &Config,
+    target: CleanTarget,
+    yes: bool,
+    global_dry_run: bool,
+    older_than: Option<u32>,
+    larger_than: Option<u64>,
+    trash_mode: sasurahime::trash::TrashMode,
+    reporter: &dyn ProgressReporter,
+    clean_opts: &CleanOptions,
+) -> anyhow::Result<()> {
+    if target.is_special() {
+        // --- Special targets (custom dispatch logic) ---
+        match target {
+            CleanTarget::Caches { dry_run } => {
+                // The batch is the @group caches rows of the macro
+                // table: membership lives in the table, not here
+                // (PBI-82 Phase 2). The run's resolved opts flow
+                // down as an argument (the one mode resolution), and
+                // the bare batch keeps no post-clean notes (this
+                // entry point never printed them).
+                let caches = caches_group_cleaners(home, config);
+                let batch_cleaners: Vec<&dyn cleaner::Cleaner> =
+                    caches.iter().map(|c| c.as_ref()).collect();
+                run_caches_batch(&batch_cleaners, clean_opts, reporter, dry_run)?;
+            }
+            CleanTarget::Logs { dry_run, keep_days } => {
+                run_and_exit(
+                    "logs",
+                    |dry, rep, opts| {
+                        log_cleaner_from_config(home, config, keep_days).clean(dry, rep, opts)
+                    },
+                    dry_run,
+                    reporter,
+                    clean_opts,
+                )?;
+            }
+            CleanTarget::Xcode { dry_run, sub } => {
+                // The --yes note stays at the call site: it is
+                // specific to the CLI arm's flags (the seam never
+                // prints it). is_xcode_running is a process check
+                // (pgrep -x Xcode), so the arm checks it on a bare
+                // cleaner built exactly like the one
+                // run_xcode_clean builds.
+                if yes
+                    && cleaners::xcode::XcodeCleaner::new(home, Box::new(SystemCommandRunner))
+                        .is_xcode_running()
+                {
+                    eprintln!("Note: Xcode is running. Proceeding with --yes anyway.");
+                }
+                run_xcode_clean(home, sub.as_deref(), dry_run, reporter, clean_opts)?;
+            }
+            CleanTarget::Trash { dry_run } => {
+                let cleaner =
+                    cleaners::generic::PathCleaner::trash(home, Box::new(SystemCommandRunner));
+                // Report-only in both modes: sasurahime never empties
+                // the Trash itself.
+                let _ = dry_run;
+                let result = cleaner.clean(true, reporter, &CleanOptions::default())?;
+                println!("Trash holds: {}", format::format_bytes(result.bytes_freed));
+                eprintln!(
+                    "Warning: sasurahime cannot safely empty ~/.Trash. Open it in Finder (or run `open ~/.Trash`) and empty it there."
+                );
+            }
+            CleanTarget::Ollama { dry_run } => {
+                let cleaner =
+                    cleaners::ollama::OllamaCleaner::new(home, Box::new(SystemCommandRunner));
+                run_and_exit(
+                    "ollama",
+                    move |dry, rep, opts| cleaner.clean(dry, rep, opts),
+                    dry_run,
+                    reporter,
+                    clean_opts,
+                )?;
+            }
+            CleanTarget::LibraryLogs { dry_run, all } => {
+                let cleaner = cleaners::library_logs::LibraryLogsCleaner::new(
+                    home,
+                    Box::new(SystemCommandRunner),
+                );
+                let opts = sasurahime::cleaner::CleanOptions {
+                    all,
+                    trash_mode,
+                    ..Default::default()
+                };
+                run_and_exit(
+                    "library-logs",
+                    move |dry, rep, opts| cleaner.clean(dry, rep, opts),
+                    dry_run,
+                    reporter,
+                    &opts,
+                )?;
+            }
+            CleanTarget::DeviceSupport { dry_run, keep } => {
+                let cleaner = cleaners::device_support::DeviceSupportCleaner::new(
+                    home,
+                    keep,
+                    Box::new(SystemCommandRunner),
+                );
+                run_and_exit(
+                    "device-support",
+                    move |dry, rep, opts| cleaner.clean(dry, rep, opts),
+                    dry_run,
+                    reporter,
+                    clean_opts,
+                )?;
+            }
+            CleanTarget::IosBackup { dry_run } => {
+                let cleaner =
+                    cleaners::ios_backup::IosCleaner::new(home, Box::new(SystemCommandRunner));
+                run_and_exit(
+                    "ios-backup",
+                    move |dry, rep, opts| cleaner.clean(dry, rep, opts),
+                    dry_run,
+                    reporter,
+                    clean_opts,
+                )?;
+            }
+            CleanTarget::ApfsSnapshot {
+                dry_run,
+                all,
+                thin,
+                urgency,
+            } => {
+                // Flags -> SnapshotMode in one place: --all and --thin
+                // are mutually exclusive and --urgency only applies to
+                // --thin, so conflicts and dangling flags fail loudly
+                // (exit 1) instead of being silently dropped.
+                let mode = if all && thin.is_some() {
+                    eprintln!("Error: --all and --thin are mutually exclusive; pick one.");
+                    std::process::exit(1);
+                } else if let Some(spec) = thin {
+                    let Some(bytes) = cleaners::apfs_snapshot::parse_size_decimal(&spec) else {
+                        eprintln!("Error: cannot parse size: {spec} (expected e.g. 10GB)");
+                        std::process::exit(1);
+                    };
+                    cleaners::apfs_snapshot::SnapshotMode::Thin {
+                        target_bytes: bytes,
+                        urgency: urgency.unwrap_or(2),
+                    }
+                } else if urgency.is_some() {
+                    eprintln!("Error: --urgency requires --thin.");
+                    std::process::exit(1);
+                } else {
+                    cleaners::apfs_snapshot::SnapshotMode::Delete { all }
+                };
+                let cleaner = cleaners::apfs_snapshot::ApfsSnapshotCleaner::new(Box::new(
+                    SystemCommandRunner,
+                ))
+                .with_mode(mode);
+                run_and_exit(
+                    "apfs-snapshot",
+                    move |dry, rep, opts| cleaner.clean(dry, rep, opts),
+                    dry_run,
+                    reporter,
+                    clean_opts,
+                )?;
+            }
+            CleanTarget::VmSwap { dry_run } => {
+                // No-op by design: swap files are re-initialized on
+                // reboot, nothing can be deleted from a running system.
+                println!(
+                    "vm-swap is a no-op: swap files in /private/var/vm are re-initialized on reboot. Nothing was deleted."
+                );
+                let cleaner = cleaners::vm_swap::VmSwapCleaner::new(
+                    std::path::PathBuf::from("/private/var/vm"),
+                    Box::new(SystemCommandRunner),
+                );
+                run_and_exit(
+                    "vm-swap",
+                    move |dry, rep, opts| cleaner.clean(dry, rep, opts),
+                    dry_run,
+                    reporter,
+                    clean_opts,
+                )?;
+            }
+            CleanTarget::All {
+                dry_run,
+                include_manual,
+            } => {
+                run_all_flow(
+                    home,
+                    config,
+                    dry_run,
+                    include_manual,
+                    older_than,
+                    larger_than,
+                    trash_mode,
+                    reporter,
+                )?;
+            }
+            CleanTarget::ProjectArtifacts { dry_run } => {
+                let roots = project_artifact_roots(home, config);
+                let cleaner = cleaners::project_artifacts::ProjectArtifactsCleaner::new(roots)
+                    .with_max_depth(config.project_artifacts.max_depth)
+                    .with_recency_days(config.project_artifacts.recency_days);
+                run_and_exit(
+                    "project-artifacts",
+                    move |dry, rep, opts| cleaner.clean(dry, rep, opts),
+                    dry_run,
+                    reporter,
+                    clean_opts,
+                )?;
+            }
+            CleanTarget::Hints { dry_run, sub } => {
+                // PBI-83: the hints target is an explicit selection —
+                // the cleaner carries no prompt (interactive_gated()
+                // is false, the prompt is the scan tip's offer). The
+                // shared runner validates the --sub names and runs
+                // the quit → ledger → relaunch flow through
+                // run_clean_target, so dry_run and the history guard
+                // follow the Cleaner-trait flow contract. The arm
+                // calls it directly (like the Xcode arm): the runner
+                // already wraps run_clean_target, so a run_and_exit
+                // wrap would write the history row twice.
+                let result = run_hints_clean(home, sub.as_deref(), dry_run, reporter, clean_opts)?;
+                if result.exit_code() != 0 {
+                    std::process::exit(1);
+                }
+            }
+            CleanTarget::External(args) => {
+                let Some(name) = args.first().cloned() else {
+                    eprintln!("Error: missing target name.");
+                    std::process::exit(1);
+                };
+                // `--help`/`-h` after the target name is captured
+                // verbatim into the external_subcommand's raw args,
+                // so clap never intercepts it. Running the plugin's
+                // clean for help output would be destructive:
+                // short-circuit with an advisory naming the plugin
+                // and exit 0, like clap does for its own subcommands.
+                if args.iter().any(|a| a == "--help" || a == "-h") {
+                    println!(
+                        "'{name}' is an external plugin target. Run `sasurahime-{name} --help` for the plugin's own usage."
+                    );
+                    std::process::exit(0);
+                }
+                // Honor the global --dry-run (declared `global = true`
+                // on Cli) in addition to the local position carried by
+                // the raw external args. The External arm re-parses
+                // those args by hand, so clap's global-value flow-down
+                // never reaches it: without the OR, `--dry-run clean
+                // <plugin>` ran the plugin's real clean. One resolution
+                // serves both the custom and the plugin path below.
+                let dry_run = global_dry_run || args.iter().any(|a| a == "--dry-run");
+                // PBI-39: a [[custom]] config name resolves before the
+                // plugin lookup, so a user-defined target is reachable
+                // via `clean <name>` instead of falling into this
+                // catch-all. Built-in names never reach this arm: clap
+                // parses them into their own CleanTarget variants, so
+                // their priority is unchanged.
+                if let Some(ct) = config.custom.iter().find(|c| c.name == name) {
+                    let path = config::Config::expand_tilde(&ct.path, home);
+                    // Refuse an unsafe target before any deletion
+                    // attempt: the cleaner-level check only skips
+                    // (exit 0), an explicit `clean <name>` must fail
+                    // loudly and leave the path alone.
+                    if !safety::is_safe_delete_target(&path) {
+                        eprintln!(
+                            "Error: refusing to clean '{name}': {} is not safe to delete.",
+                            path.display()
+                        );
+                        std::process::exit(1);
+                    }
+                    let cleaner = cleaners::custom::CustomPathCleaner::new(ct.name.clone(), path);
+                    run_and_exit(
+                        cleaner.name(),
+                        move |dry, rep, opts| cleaner.clean(dry, rep, opts),
+                        dry_run,
+                        reporter,
+                        clean_opts,
+                    )?;
+                } else {
+                    let Some(plugin) = cleaners::plugin::PluginCleaner::discover_excluding(&[])
+                        .into_iter()
+                        .find(|p| p.name() == name)
+                    else {
+                        eprintln!("Error: no plugin named '{name}' on PATH.");
+                        std::process::exit(1);
+                    };
+                    run_and_exit(
+                        plugin.name(),
+                        move |dry, rep, opts| plugin.clean(dry, rep, opts),
+                        dry_run,
+                        reporter,
+                        clean_opts,
+                    )?;
+                }
+            }
+            _ => unreachable!(),
+        }
+    } else {
+        // --- Standard targets: dispatch through macro-generated handler ---
+        run_and_exit(
+            target.command_name(),
+            |dry, rep, opts| dispatch_clean(home, config, &target, dry, rep, opts),
+            target.dry_run(),
+            reporter,
+            clean_opts,
+        )?;
+    }
+    Ok(())
+}
+
+/// The `stats` (alias `history`) flow.
+fn run_stats_flow(home: &Path, last: usize) {
+    let history_dir = history::default_history_dir(home);
+    let entries = history::load_history(&history_dir.join("history.json"));
+    if entries.is_empty() {
+        println!("No history yet. Run 'sasurahime clean' to get started.");
+    } else {
+        let summary = history::compute_stats(&entries);
+        if last > 0 && last < entries.len() {
+            println!("{}", history::format_stats_last(&summary, last));
+        } else {
+            println!("{}", history::format_stats(&summary));
+        }
+    }
+}
+
 fn main() -> anyhow::Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn"))
         .format_timestamp(None)
@@ -1310,576 +1923,75 @@ fn main() -> anyhow::Result<()> {
     }
 
     // Persistent scan cache: enabled unless --no-cache. Loaded once per
-    // process and saved back at the end; deletion paths never consult it.
+    // process and saved back by the one flush at the end of main (which
+    // every flow's exit path funnels through); deletion paths never consult
+    // it.
     let scan_cache_path = history::default_history_dir(&home).join(scan_cache::CACHE_FILE_NAME);
     if !cli.no_cache {
         scan_cache::init(&scan_cache_path);
     }
 
     match cli.command {
-        Some(Commands::Doctor) => {
-            doctor::run(&home);
-        }
+        Some(Commands::Doctor) => run_doctor_flow(&home),
         Some(Commands::Auto { dry_run }) => {
-            // No [policy] section: refuse to delete anything unattended. The
-            // entry gate stays at the arm (PBI 74): it is not a selection
-            // input.
-            if !config.policy.present {
-                eprintln!(
-                    "Error: no [policy] section in ~/.config/sasurahime/config.toml. Write a policy (e.g. older_than_days = 30) before running `auto`."
-                );
-                std::process::exit(1);
-            }
-            let opts = cleaner::CleanOptions {
-                all: true,
-                include_manual: config.policy.include_manual,
-                older_than_days: config.policy.older_than_days,
-                larger_than_mb: config.policy.larger_than_mb,
-                trash_mode,
-            };
-            let cleaners_list = all_cleaners(&home, &config);
-            // PBI 74: the run/skip classification is owned by
-            // UnattendedPolicy::Auto. The wording stays at the call site: it
-            // is specific to `auto`. Risky (destructive/irreversible) and
-            // Manual (review-first) targets never run unattended, even with
-            // include_manual: whole-dir removals must never happen without a
-            // human.
-            let selection = unattended::UnattendedPolicy::Auto.select(&cleaners_list, &opts);
-            let skipped: Vec<String> = selection
-                .skipped
-                .iter()
-                .map(|(i, reason)| {
-                    let c = &cleaners_list[*i];
-                    match reason {
-                        unattended::SkipReason::NeverUnattended(risk) => {
-                            format!("{} ({}): never runs unattended", c.name(), risk.label())
-                        }
-                        unattended::SkipReason::NeedsOptIn(risk) => format!(
-                            "{} ({}): set [policy] include_manual = true to include",
-                            c.name(),
-                            risk.label()
-                        ),
-                        // Auto never classifies a target as scan-gated (it
-                        // scans nothing); the arm renders it truthfully if
-                        // wiring ever changes.
-                        unattended::SkipReason::NeedsExplicitSelection(risk) => format!(
-                            "{} ({}): needs an explicit selection",
-                            c.name(),
-                            risk.label()
-                        ),
-                    }
-                })
-                .collect();
-            let batch_cleaners: Vec<&dyn cleaner::Cleaner> = selection
-                .run
-                .iter()
-                .map(|&(i, _)| cleaners_list[i].as_ref())
-                .collect();
-            let summary = batch::run_batch(
-                &batch_cleaners,
-                &opts,
-                reporter.as_ref(),
-                dry_run,
-                false,
-                true,
-            );
-            interactive::report_batch_failures(
-                &mut std::io::stderr(),
-                &summary,
-                interactive::ReportShape::Named,
-            )?;
-            // The target-skip guidance stays at the call site: the wording is
-            // specific to `auto`.
-            if !skipped.is_empty() {
-                eprintln!("Skipped {} target(s):", skipped.len());
-                for s in &skipped {
-                    eprintln!("  - {s}");
-                }
-                eprintln!("Run `sasurahime clean <target>` explicitly for those.");
-            }
-            interactive::report_total_freed(&mut std::io::stdout(), summary.total_freed)?;
+            run_auto_flow(&home, &config, reporter.as_ref(), dry_run, trash_mode)?;
         }
         Some(Commands::Scan { json }) => {
-            let cleaners = all_cleaners(&home, &config);
-            if json {
-                // Machine-readable output: no hints, no interactive prompt.
-                scanner::run_scan_json(&cleaners, &home);
-                // The early return below skips the trailing flush: warm the
-                // cache here too, or scripts that only ever run --json would
-                // never save detect results.
-                if !cli.no_cache {
-                    scan_cache::flush(&scan_cache_path);
-                }
-                return Ok(());
-            }
-            scanner::run_scan(&cleaners, &home);
-            run_hint_flow(&home, &config, cli.dry_run, reporter.as_ref(), &clean_opts)?;
+            run_scan_flow(
+                &home,
+                &config,
+                cli.dry_run,
+                reporter.as_ref(),
+                &clean_opts,
+                json,
+            )?;
         }
-        Some(Commands::Targets) => {
-            let mut targets: Vec<&(&str, &str)> = ALL_TARGETS.iter().collect();
-            targets.sort_by_key(|(name, _)| *name);
-            for (name, desc) in targets {
-                println!("{:<12} {}", name, desc);
-            }
-            // Plugin-derived targets are marked so they can be told apart
-            // from built-ins.
-            for p in cleaners::plugin::PluginCleaner::discover_excluding(&builtin_target_names()) {
-                println!("{:<12} (plugin)", p.name());
-            }
-        }
+        Some(Commands::Targets) => run_targets_flow(),
         None => {
-            let cleaners = all_cleaners(&home, &config);
-            // PBI-50: the TUI's sub-target branch cleans in-process through
-            // this seam — the real CleanResult fixes the `Total freed`
-            // under-count of the old self re-exec, and the TUI process's own
-            // flags (trash mode, config path) now apply to the clean.
-            if cli.yes {
-                interactive::run_auto(&cleaners, trash_mode)?;
-            } else {
-                interactive::run_interactive(
-                    &cleaners,
-                    &|name, sub, dry, rep| {
-                        clean_by_name(&home, &config, name, sub, dry, rep, &clean_opts)
-                    },
-                    trash_mode,
-                )?;
-            }
-            run_hint_flow(&home, &config, cli.dry_run, reporter.as_ref(), &clean_opts)?;
+            run_tui_flow(
+                &home,
+                &config,
+                cli.yes,
+                trash_mode,
+                cli.dry_run,
+                reporter.as_ref(),
+                &clean_opts,
+            )?;
         }
         Some(Commands::Explore { top, all, dirs }) => {
-            let roots = if dirs.is_empty() {
-                explorer::default_roots(&home)
-            } else {
-                dirs
-            };
-            let top_n = if all { None } else { Some(top) };
-            // PBI-50: managed-entry cleans run in-process through the seam
-            // (the CLI reporter keeps the "Cleaning ... [OK] / Freed:" output
-            // the old re-exec'd child printed) instead of spawning this
-            // binary resolved through current_exe / PATH.
-            explorer::run_explore(
+            run_explore_flow(
                 &home,
-                explorer::ExploreOptions {
-                    roots,
-                    top: top_n,
-                    dry_run: cli.dry_run,
-                },
+                &config,
+                cli.dry_run,
+                top,
+                all,
+                dirs,
                 reporter.as_ref(),
-                &|name, sub, dry, rep| {
-                    clean_by_name(&home, &config, name, sub, dry, rep, &clean_opts)
-                },
+                &clean_opts,
             )?;
         }
         Some(Commands::Clean { target }) => {
-            if target.is_special() {
-                // --- Special targets (custom dispatch logic) ---
-                match target {
-                    CleanTarget::Caches { dry_run } => {
-                        // The batch is the @group caches rows of the macro
-                        // table: membership lives in the table, not here
-                        // (PBI-82 Phase 2). The run's resolved opts flow
-                        // down as an argument (the one mode resolution), and
-                        // the bare batch keeps no post-clean notes (this
-                        // entry point never printed them).
-                        let caches = caches_group_cleaners(&home, &config);
-                        let batch_cleaners: Vec<&dyn cleaner::Cleaner> =
-                            caches.iter().map(|c| c.as_ref()).collect();
-                        run_caches_batch(&batch_cleaners, &clean_opts, reporter.as_ref(), dry_run)?;
-                    }
-                    CleanTarget::Logs { dry_run, keep_days } => {
-                        run_and_exit(
-                            "logs",
-                            |dry, rep, opts| {
-                                log_cleaner_from_config(&home, &config, keep_days)
-                                    .clean(dry, rep, opts)
-                            },
-                            dry_run,
-                            reporter.as_ref(),
-                            &clean_opts,
-                        )?;
-                    }
-                    CleanTarget::Xcode { dry_run, sub } => {
-                        // The --yes note stays at the call site: it is
-                        // specific to the CLI arm's flags (the seam never
-                        // prints it). is_xcode_running is a process check
-                        // (pgrep -x Xcode), so the arm checks it on a bare
-                        // cleaner built exactly like the one
-                        // run_xcode_clean builds.
-                        if cli.yes
-                            && cleaners::xcode::XcodeCleaner::new(
-                                &home,
-                                Box::new(SystemCommandRunner),
-                            )
-                            .is_xcode_running()
-                        {
-                            eprintln!("Note: Xcode is running. Proceeding with --yes anyway.");
-                        }
-                        run_xcode_clean(
-                            &home,
-                            sub.as_deref(),
-                            dry_run,
-                            reporter.as_ref(),
-                            &clean_opts,
-                        )?;
-                    }
-                    CleanTarget::Trash { dry_run } => {
-                        let cleaner = cleaners::generic::PathCleaner::trash(
-                            &home,
-                            Box::new(SystemCommandRunner),
-                        );
-                        // Report-only in both modes: sasurahime never empties
-                        // the Trash itself.
-                        let _ = dry_run;
-                        let result =
-                            cleaner.clean(true, reporter.as_ref(), &CleanOptions::default())?;
-                        println!("Trash holds: {}", format::format_bytes(result.bytes_freed));
-                        eprintln!(
-                            "Warning: sasurahime cannot safely empty ~/.Trash. Open it in Finder (or run `open ~/.Trash`) and empty it there."
-                        );
-                    }
-                    CleanTarget::Ollama { dry_run } => {
-                        let cleaner = cleaners::ollama::OllamaCleaner::new(
-                            &home,
-                            Box::new(SystemCommandRunner),
-                        );
-                        run_and_exit(
-                            "ollama",
-                            move |dry, rep, opts| cleaner.clean(dry, rep, opts),
-                            dry_run,
-                            reporter.as_ref(),
-                            &clean_opts,
-                        )?;
-                    }
-                    CleanTarget::LibraryLogs { dry_run, all } => {
-                        let cleaner = cleaners::library_logs::LibraryLogsCleaner::new(
-                            &home,
-                            Box::new(SystemCommandRunner),
-                        );
-                        let opts = sasurahime::cleaner::CleanOptions {
-                            all,
-                            trash_mode,
-                            ..Default::default()
-                        };
-                        run_and_exit(
-                            "library-logs",
-                            move |dry, rep, opts| cleaner.clean(dry, rep, opts),
-                            dry_run,
-                            reporter.as_ref(),
-                            &opts,
-                        )?;
-                    }
-                    CleanTarget::DeviceSupport { dry_run, keep } => {
-                        let cleaner = cleaners::device_support::DeviceSupportCleaner::new(
-                            &home,
-                            keep,
-                            Box::new(SystemCommandRunner),
-                        );
-                        run_and_exit(
-                            "device-support",
-                            move |dry, rep, opts| cleaner.clean(dry, rep, opts),
-                            dry_run,
-                            reporter.as_ref(),
-                            &clean_opts,
-                        )?;
-                    }
-                    CleanTarget::IosBackup { dry_run } => {
-                        let cleaner = cleaners::ios_backup::IosCleaner::new(
-                            &home,
-                            Box::new(SystemCommandRunner),
-                        );
-                        run_and_exit(
-                            "ios-backup",
-                            move |dry, rep, opts| cleaner.clean(dry, rep, opts),
-                            dry_run,
-                            reporter.as_ref(),
-                            &clean_opts,
-                        )?;
-                    }
-                    CleanTarget::ApfsSnapshot {
-                        dry_run,
-                        all,
-                        thin,
-                        urgency,
-                    } => {
-                        // Flags -> SnapshotMode in one place: --all and --thin
-                        // are mutually exclusive and --urgency only applies to
-                        // --thin, so conflicts and dangling flags fail loudly
-                        // (exit 1) instead of being silently dropped.
-                        let mode = if all && thin.is_some() {
-                            eprintln!("Error: --all and --thin are mutually exclusive; pick one.");
-                            std::process::exit(1);
-                        } else if let Some(spec) = thin {
-                            let Some(bytes) = cleaners::apfs_snapshot::parse_size_decimal(&spec)
-                            else {
-                                eprintln!("Error: cannot parse size: {spec} (expected e.g. 10GB)");
-                                std::process::exit(1);
-                            };
-                            cleaners::apfs_snapshot::SnapshotMode::Thin {
-                                target_bytes: bytes,
-                                urgency: urgency.unwrap_or(2),
-                            }
-                        } else if urgency.is_some() {
-                            eprintln!("Error: --urgency requires --thin.");
-                            std::process::exit(1);
-                        } else {
-                            cleaners::apfs_snapshot::SnapshotMode::Delete { all }
-                        };
-                        let cleaner = cleaners::apfs_snapshot::ApfsSnapshotCleaner::new(Box::new(
-                            SystemCommandRunner,
-                        ))
-                        .with_mode(mode);
-                        run_and_exit(
-                            "apfs-snapshot",
-                            move |dry, rep, opts| cleaner.clean(dry, rep, opts),
-                            dry_run,
-                            reporter.as_ref(),
-                            &clean_opts,
-                        )?;
-                    }
-                    CleanTarget::VmSwap { dry_run } => {
-                        // No-op by design: swap files are re-initialized on
-                        // reboot, nothing can be deleted from a running system.
-                        println!(
-                            "vm-swap is a no-op: swap files in /private/var/vm are re-initialized on reboot. Nothing was deleted."
-                        );
-                        let cleaner = cleaners::vm_swap::VmSwapCleaner::new(
-                            std::path::PathBuf::from("/private/var/vm"),
-                            Box::new(SystemCommandRunner),
-                        );
-                        run_and_exit(
-                            "vm-swap",
-                            move |dry, rep, opts| cleaner.clean(dry, rep, opts),
-                            dry_run,
-                            reporter.as_ref(),
-                            &clean_opts,
-                        )?;
-                    }
-                    CleanTarget::All {
-                        dry_run,
-                        include_manual,
-                    } => {
-                        // Explicit full clean: the user picked every target on
-                        // purpose. Safe targets run without --include-manual;
-                        // Moderate/Risky/Manual need it. No skip-confirm guard
-                        // here — skip policies stay at the call sites
-                        // (batch.rs): confirm_suppressed() must stay false so
-                        // a cleaner that gates on a prompt (colima's fallback
-                        // full delete, generic.rs) still asks before deleting;
-                        // moving the guard into run_batch would delete
-                        // without asking.
-                        let opts = cleaner::CleanOptions {
-                            all: true,
-                            include_manual,
-                            older_than_days: cli.older_than,
-                            larger_than_mb: cli.larger_than,
-                            trash_mode,
-                        };
-                        let cleaners_list = all_cleaners(&home, &config);
-                        // PBI 74: the classification is owned by
-                        // UnattendedPolicy::All — the opt-in unlocks EVERY
-                        // non-Safe risk here (unlike auto, where Risky and
-                        // Manual stay locked), except quit-based cleaners,
-                        // which stay skipped even with --include-manual
-                        // (PBI 87). The wording stays at the call site: it
-                        // is specific to `clean all`.
-                        let selection =
-                            unattended::UnattendedPolicy::All.select(&cleaners_list, &opts);
-                        for (i, reason) in &selection.skipped {
-                            let c = &cleaners_list[*i];
-                            match reason {
-                                // PBI 87: a quit-based cleaner is skipped even
-                                // with --include-manual; the wording matches
-                                // the auto arm's NeverUnattended line.
-                                unattended::SkipReason::NeverUnattended(risk) => {
-                                    println!(
-                                        "Skipped {} ({}): never runs unattended",
-                                        c.name(),
-                                        risk.label()
-                                    );
-                                }
-                                unattended::SkipReason::NeedsOptIn(risk) => println!(
-                                    "Skipped {} ({}): needs --include-manual",
-                                    c.name(),
-                                    risk.label()
-                                ),
-                                // All is registry-driven and never classifies
-                                // a target as explicit-selection-only; the
-                                // arm renders it truthfully if wiring ever
-                                // changes.
-                                unattended::SkipReason::NeedsExplicitSelection(risk) => println!(
-                                    "Skipped {} ({}): needs an explicit selection",
-                                    c.name(),
-                                    risk.label()
-                                ),
-                            }
-                        }
-                        let batch_cleaners: Vec<&dyn cleaner::Cleaner> = selection
-                            .run
-                            .iter()
-                            .map(|&(i, _)| cleaners_list[i].as_ref())
-                            .collect();
-                        let summary = batch::run_batch(
-                            &batch_cleaners,
-                            &opts,
-                            reporter.as_ref(),
-                            dry_run,
-                            false,
-                            true,
-                        );
-                        interactive::report_batch_failures(
-                            &mut std::io::stderr(),
-                            &summary,
-                            interactive::ReportShape::Named,
-                        )?;
-                        if !selection.skipped.is_empty() {
-                            eprintln!(
-                                "Skipped {} target(s) that need --include-manual.",
-                                selection.skipped.len()
-                            );
-                        }
-                        interactive::report_total_freed(
-                            &mut std::io::stdout(),
-                            summary.total_freed,
-                        )?;
-                    }
-                    CleanTarget::ProjectArtifacts { dry_run } => {
-                        let roots = project_artifact_roots(&home, &config);
-                        let cleaner =
-                            cleaners::project_artifacts::ProjectArtifactsCleaner::new(roots)
-                                .with_max_depth(config.project_artifacts.max_depth)
-                                .with_recency_days(config.project_artifacts.recency_days);
-                        run_and_exit(
-                            "project-artifacts",
-                            move |dry, rep, opts| cleaner.clean(dry, rep, opts),
-                            dry_run,
-                            reporter.as_ref(),
-                            &clean_opts,
-                        )?;
-                    }
-                    CleanTarget::Hints { dry_run, sub } => {
-                        // PBI-83: the hints target is an explicit selection —
-                        // the cleaner carries no prompt (interactive_gated()
-                        // is false, the prompt is the scan tip's offer). The
-                        // shared runner validates the --sub names and runs
-                        // the quit → ledger → relaunch flow through
-                        // run_clean_target, so dry_run and the history guard
-                        // follow the Cleaner-trait flow contract. The arm
-                        // calls it directly (like the Xcode arm): the runner
-                        // already wraps run_clean_target, so a run_and_exit
-                        // wrap would write the history row twice.
-                        let result = run_hints_clean(
-                            &home,
-                            sub.as_deref(),
-                            dry_run,
-                            reporter.as_ref(),
-                            &clean_opts,
-                        )?;
-                        if result.exit_code() != 0 {
-                            std::process::exit(1);
-                        }
-                    }
-                    CleanTarget::External(args) => {
-                        let Some(name) = args.first().cloned() else {
-                            eprintln!("Error: missing target name.");
-                            std::process::exit(1);
-                        };
-                        // `--help`/`-h` after the target name is captured
-                        // verbatim into the external_subcommand's raw args,
-                        // so clap never intercepts it. Running the plugin's
-                        // clean for help output would be destructive:
-                        // short-circuit with an advisory naming the plugin
-                        // and exit 0, like clap does for its own subcommands.
-                        if args.iter().any(|a| a == "--help" || a == "-h") {
-                            println!(
-                                "'{name}' is an external plugin target. Run `sasurahime-{name} --help` for the plugin's own usage."
-                            );
-                            std::process::exit(0);
-                        }
-                        // PBI-39: a [[custom]] config name resolves before the
-                        // plugin lookup, so a user-defined target is reachable
-                        // via `clean <name>` instead of falling into this
-                        // catch-all. Built-in names never reach this arm: clap
-                        // parses them into their own CleanTarget variants, so
-                        // their priority is unchanged.
-                        if let Some(ct) = config.custom.iter().find(|c| c.name == name) {
-                            let path = config::Config::expand_tilde(&ct.path, &home);
-                            // Refuse an unsafe target before any deletion
-                            // attempt: the cleaner-level check only skips
-                            // (exit 0), an explicit `clean <name>` must fail
-                            // loudly and leave the path alone.
-                            if !safety::is_safe_delete_target(&path) {
-                                eprintln!(
-                                    "Error: refusing to clean '{name}': {} is not safe to delete.",
-                                    path.display()
-                                );
-                                std::process::exit(1);
-                            }
-                            let cleaner =
-                                cleaners::custom::CustomPathCleaner::new(ct.name.clone(), path);
-                            // Same two-position dry-run resolution as the
-                            // plugin arm below.
-                            let dry_run = cli.dry_run || args.iter().any(|a| a == "--dry-run");
-                            run_and_exit(
-                                cleaner.name(),
-                                move |dry, rep, opts| cleaner.clean(dry, rep, opts),
-                                dry_run,
-                                reporter.as_ref(),
-                                &clean_opts,
-                            )?;
-                        } else {
-                            let Some(plugin) =
-                                cleaners::plugin::PluginCleaner::discover_excluding(&[])
-                                    .into_iter()
-                                    .find(|p| p.name() == name)
-                            else {
-                                eprintln!("Error: no plugin named '{name}' on PATH.");
-                                std::process::exit(1);
-                            };
-                            // Honor the global --dry-run (declared `global = true`
-                            // on Cli) in addition to the local position carried by
-                            // the raw external args. The External arm re-parses
-                            // those args by hand, so clap's global-value flow-down
-                            // never reaches it: without the OR, `--dry-run clean
-                            // <plugin>` ran the plugin's real clean.
-                            let dry_run = cli.dry_run || args.iter().any(|a| a == "--dry-run");
-                            run_and_exit(
-                                plugin.name(),
-                                move |dry, rep, opts| plugin.clean(dry, rep, opts),
-                                dry_run,
-                                reporter.as_ref(),
-                                &clean_opts,
-                            )?;
-                        }
-                    }
-                    _ => unreachable!(),
-                }
-            } else {
-                // --- Standard targets: dispatch through macro-generated handler ---
-                run_and_exit(
-                    target.command_name(),
-                    |dry, rep, opts| dispatch_clean(&home, &config, &target, dry, rep, opts),
-                    target.dry_run(),
-                    reporter.as_ref(),
-                    &clean_opts,
-                )?;
-            }
+            run_clean_flow(
+                &home,
+                &config,
+                target,
+                cli.yes,
+                cli.dry_run,
+                cli.older_than,
+                cli.larger_than,
+                trash_mode,
+                reporter.as_ref(),
+                &clean_opts,
+            )?;
         }
-        Some(Commands::Stats { last }) => {
-            let history_dir = history::default_history_dir(&home);
-            let entries = history::load_history(&history_dir.join("history.json"));
-            if entries.is_empty() {
-                println!("No history yet. Run 'sasurahime clean' to get started.");
-            } else {
-                let summary = history::compute_stats(&entries);
-                if last > 0 && last < entries.len() {
-                    println!("{}", history::format_stats_last(&summary, last));
-                } else {
-                    println!("{}", history::format_stats(&summary));
-                }
-            }
-        }
+        Some(Commands::Stats { last }) => run_stats_flow(&home, last),
     }
 
+    // The one scan_cache::flush call site: every flow's return funnels
+    // through here, so no flow needs its own. The --json scan returns early
+    // from its flow without running the hint flow, and it is covered by this
+    // flush too: warm the cache here, or scripts that only ever run --json
+    // would never save detect results.
     if !cli.no_cache {
         scan_cache::flush(&scan_cache_path);
     }
@@ -2756,6 +2868,61 @@ mod tests {
                 "println!(\"Total freed: {}\", format::format_bytes(summary.total_freed));"
             ),
             "a hand-written Total freed line is back in main.rs"
+        );
+    }
+
+    // ── Extracted-flow invariants (PBI 2026-11-20-02) ─────────────────────
+
+    #[test]
+    fn scan_cache_flush_has_exactly_one_call_site() {
+        // BDD2 flush-coverage pin: every flow's exit path funnels through the
+        // ONE trailing flush in main(). The old `scan --json` early return
+        // duplicated the call; a second call site here would mean some flow
+        // exit bypassed the trailing flush and needed its own again.
+        let src = include_str!("main.rs");
+        let needle = concat!("scan_cache", "::flush(");
+        assert_eq!(
+            src.matches(needle).count(),
+            1,
+            "scan_cache::flush must keep exactly one call site in main.rs"
+        );
+    }
+
+    #[test]
+    fn clean_flow_opts_passing_keeps_the_documented_shape() {
+        // Opts-passing shape pin: inside run_clean_flow the only local
+        // CleanOptions constructions are the two documented exceptions — the
+        // flag-carrying LibraryLogs arm (it interprets --all into its own
+        // opts) and the Trash arm's default opts, which belong to the
+        // Report-only contract (sasurahime never empties the Trash itself,
+        // so the run's trash mode must not leak in). Every other arm passes
+        // the resolved `clean_opts` through; a third construction here would
+        // be a new silent exception.
+        let src = include_str!("main.rs");
+        let start = src
+            .find("fn run_clean_flow(")
+            .expect("run_clean_flow must stay the one clean-arm flow");
+        let end = src[start + 1..]
+            .find("\nfn ")
+            .map(|i| start + 1 + i)
+            .unwrap_or(src.len());
+        let body = &src[start..end];
+        assert_eq!(
+            body.matches(concat!("CleanOptions", " {")).count(),
+            1,
+            "only the flag-carrying LibraryLogs arm may build CleanOptions locally in run_clean_flow"
+        );
+        assert_eq!(
+            body.matches(concat!("CleanOptions", "::default()")).count(),
+            1,
+            "the Trash arm's default opts are the one documented Report-only exception"
+        );
+        let library_logs = body
+            .find("let opts = sasurahime::cleaner::CleanOptions")
+            .expect("the LibraryLogs arm's local opts construction");
+        assert!(
+            body[library_logs..library_logs + 160].contains("trash_mode,"),
+            "the LibraryLogs arm's local opts must carry the resolved trash mode"
         );
     }
 

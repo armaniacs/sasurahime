@@ -263,6 +263,38 @@ fn clean_trash_shows_size_and_finder_guidance() {
 }
 
 #[test]
+fn clean_trash_dry_run_is_report_only_on_both_streams() {
+    // Stream parity pin (PBI 2026-11-20-02, added before the flow
+    // extraction): `clean trash --dry-run` is Report-only in both modes —
+    // the arm deliberately ignores the dry-run flag (`let _ = dry_run;`,
+    // sasurahime never empties the Trash itself), the size report streams
+    // to stdout, the Finder guidance to stderr, and the run exits 0. The
+    // Trash arm's extraction must not move either stream or the
+    // flag-ignoring contract.
+    let tmp = TempDir::new().unwrap();
+    let output = sasurahime(tmp.path())
+        .args(["clean", "trash", "--dry-run"])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "clean trash --dry-run must exit 0");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stdout.contains("Trash holds:"),
+        "the Trash size report must stream to stdout, got stdout:\n{stdout}"
+    );
+    assert!(
+        stderr.contains("Warning: sasurahime cannot safely empty ~/.Trash."),
+        "the Finder guidance must stream to stderr, got stderr:\n{stderr}"
+    );
+    assert!(
+        !stderr.contains("Trash holds:"),
+        "the size report must not leak to stderr, got stderr:\n{stderr}"
+    );
+}
+
+#[test]
 fn stats_shows_trash_method_after_a_trash_clean() {
     let tmp = TempDir::new().unwrap();
     // A trash-mode clean of a PathCleaner target really moves files to the

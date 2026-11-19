@@ -192,6 +192,40 @@ fn auto_with_age_filter_skips_fresh_entries() {
 }
 
 #[test]
+fn auto_skip_guidance_streams_to_stderr_and_the_total_to_stdout() {
+    // Stream parity pin (PBI 2026-11-20-02, added before the flow
+    // extraction): the auto arm prints its target-skip guidance on stderr
+    // while "Total freed" goes to stdout (PBI 74's call-site rendering).
+    // The arm's extraction must not move either stream.
+    let tmp = TempDir::new().unwrap();
+    write_policy(
+        tmp.path(),
+        "[policy]\nolder_than_days = 30\ninclude_manual = true\n",
+    );
+
+    let output = sasurahime(tmp.path()).arg("auto").output().unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("Skipped ") && stderr.contains("never runs unattended"),
+        "the auto skip guidance must stream to stderr, got stderr:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("Run `sasurahime clean <target>` explicitly for those."),
+        "the explicit-run guidance must stay with the skip block on stderr, got stderr:\n{stderr}"
+    );
+    assert!(
+        stdout.contains("Total freed:"),
+        "the total must stay on stdout, got stdout:\n{stdout}"
+    );
+    assert!(
+        !stdout.contains("never runs unattended"),
+        "no skip guidance may leak to stdout, got stdout:\n{stdout}"
+    );
+}
+
+#[test]
 fn auto_never_runs_manual_targets_even_with_include_manual() {
     // A Manual target (downloads: whole-dir removal) must never run
     // unattended, even when [policy] sets include_manual = true.
