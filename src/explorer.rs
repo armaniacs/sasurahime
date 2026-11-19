@@ -6,6 +6,7 @@ use comfy_table::Table;
 use dialoguer::{Confirm, MultiSelect};
 
 use crate::cleaner::CleanByName;
+use crate::config::Config;
 use crate::format::{dir_size, format_bytes};
 use crate::progress::ProgressReporter;
 
@@ -118,14 +119,10 @@ pub fn default_roots(home: &Path) -> Vec<PathBuf> {
     ]
 }
 
-fn expand_tilde(pattern: &str, home: &Path) -> PathBuf {
-    home.join(pattern.trim_start_matches("~/"))
-}
-
 /// Returns `Some(clean_target)` if `path` matches a managed pattern, else `None`.
 fn is_managed(path: &Path, home: &Path) -> Option<&'static str> {
     for pat in MANAGED_PATTERNS {
-        let expanded = expand_tilde(pat.path_pattern, home);
+        let expanded = Config::expand_tilde(pat.path_pattern, home);
         if pat.path_pattern.ends_with('*') {
             let Some(prefix_dir) = expanded.parent() else {
                 continue;

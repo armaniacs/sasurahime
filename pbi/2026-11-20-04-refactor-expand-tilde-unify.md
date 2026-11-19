@@ -76,7 +76,7 @@ Scenario: source pin が MANAGED_PATTERNS の非 "~/" 要素を検出する
 
 ## 等価性実測記録
 
-- 未記録（削除前の性質テスト green をもって全 18 件一致を確認し、実装時にここへ 1 行で追記する）
+- 2026-11-20 実測: `expand_tilde_all_managed_patterns_match_config_expand_tilde`（tempdir home で MANAGED_PATTERNS 全 18 件を簡略版/正装版の両方に通して assert_eq）が green。全 18 パターン（`~/.cache/uv` 〜 `~/.local/share/pre-commit`、ワイルドカード `~/Library/Caches/ms-playwright*` を含む）で出力完全一致を確認後、簡略版を削除してこの一時テストを撤去した。source pin の RED 確認は仮想要素 `path_pattern: "/absolute/cache"`（配列末尾仮配置）で失敗 `MANAGED_PATTERNS entry "/absolute/cache" (line 91) must start with "~/"` を実測。同要素では性質テストが green のまま（`home.join("/abs")` と `PathBuf::from("/abs")` が偶然一致）で、pin だけが検出することも実証済み。統合検証: `cargo test --test explorer` 1 passed、`cargo test --lib expand_tilde` 3 passed、clippy 0、fmt clean
 
 ## DoD
 
