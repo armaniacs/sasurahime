@@ -226,6 +226,36 @@ fn auto_skip_guidance_streams_to_stderr_and_the_total_to_stdout() {
 }
 
 #[test]
+fn auto_skip_optin_targets_name_the_policy_optin_on_stderr() {
+    // Parity pin (PBI 2026-11-20-03, added before the skip-renderer move):
+    // the auto arm's NeedsOptIn advice is its own wording — distinct from
+    // clean all's "needs --include-manual" line — and it streams to stderr
+    // with the rest of the skip block (PBI 74's call-site rendering).
+    let tmp = TempDir::new().unwrap();
+    write_policy(tmp.path(), "[policy]\nolder_than_days = 30\n");
+    let cache = tmp.path().join(".cache/node-gyp");
+    fs::create_dir_all(&cache).unwrap();
+    fs::write(cache.join("api.json"), [0u8; 4096]).unwrap();
+
+    let output = sasurahime(tmp.path()).arg("auto").output().unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("node-gyp (Moderate): set [policy] include_manual = true to include"),
+        "the opt-in advice is the auto arm's own wording on stderr, got stderr:\n{stderr}"
+    );
+    assert!(
+        !stdout.contains("include_manual = true"),
+        "no skip advice may leak to stdout, got stdout:\n{stdout}"
+    );
+    assert!(
+        cache.exists(),
+        "the Moderate target must not be deleted without the opt-in"
+    );
+}
+
+#[test]
 fn auto_never_runs_manual_targets_even_with_include_manual() {
     // A Manual target (downloads: whole-dir removal) must never run
     // unattended, even when [policy] sets include_manual = true.

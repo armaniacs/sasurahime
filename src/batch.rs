@@ -179,6 +179,79 @@ pub fn run_batch(
     summary
 }
 
+/// The one unattended-batch skeleton (PBI 2026-11-20-03): `select`'s run
+/// list is dropped onto [`run_batch`] here, so the three unattended entry
+/// points (`auto`, `clean all`, `--yes`) hand over their selection instead
+/// of each hand-writing the registry-index mapping and a positional-bool
+/// `run_batch` call — those bool meanings live at exactly one call site.
+/// Skip rendering is NOT part of the skeleton: the wording and the stream
+/// choice stay at the caller (PBI 74), rendered through [`render_skip_line`].
+pub fn run_selected_batch(
+    cleaners: &[Box<dyn crate::cleaner::Cleaner>],
+    selection: &crate::unattended::UnattendedSelection,
+    opts: &crate::cleaner::CleanOptions,
+    reporter: &dyn crate::progress::ProgressReporter,
+    dry_run: bool,
+    animated: bool,
+    with_notes: bool,
+) -> BatchSummary {
+    let batch_cleaners: Vec<&dyn crate::cleaner::Cleaner> = selection
+        .run
+        .iter()
+        .map(|&(i, _)| cleaners[i].as_ref())
+        .collect();
+    run_batch(
+        &batch_cleaners,
+        opts,
+        reporter,
+        dry_run,
+        animated,
+        with_notes,
+    )
+}
+
+/// The per-variant advice wordings one unattended flow owns (PBI 74: the
+/// wording stays at the call site). `None` renders the bare risk-only shape
+/// (`--yes`'s E2E-pinned generic line); `Some` renders
+/// "{name} ({risk}): {advice}".
+pub struct SkipAdvice {
+    pub never_unattended: Option<&'static str>,
+    pub needs_opt_in: Option<&'static str>,
+    pub needs_explicit_selection: Option<&'static str>,
+}
+
+/// The ONE renderer for unattended skip lines (PBI 2026-11-20-03): the
+/// single exhaustive match over `SkipReason`. A new variant breaks the
+/// build here — one error covering all three unattended paths — instead of
+/// silently flowing into `--yes`'s generic risk-only line (round 9 whywhy
+/// §2.a), and the per-flow [`SkipAdvice`] table forces the wording decision
+/// at every call site. The stream write stays at the caller (PBI 74): this
+/// fn returns the line and prints nothing.
+pub fn render_skip_line(
+    name: &str,
+    reason: crate::unattended::SkipReason,
+    advice: &SkipAdvice,
+) -> String {
+    match reason {
+        crate::unattended::SkipReason::NeverUnattended(risk) => {
+            render_advised_line(name, risk.label(), advice.never_unattended)
+        }
+        crate::unattended::SkipReason::NeedsOptIn(risk) => {
+            render_advised_line(name, risk.label(), advice.needs_opt_in)
+        }
+        crate::unattended::SkipReason::NeedsExplicitSelection(risk) => {
+            render_advised_line(name, risk.label(), advice.needs_explicit_selection)
+        }
+    }
+}
+
+fn render_advised_line(name: &str, risk_label: &str, advice: Option<&str>) -> String {
+    match advice {
+        Some(advice) => format!("{name} ({risk_label}): {advice}"),
+        None => format!("{name} ({risk_label})"),
+    }
+}
+
 /// Minimal audit trail / restore guidance printed after a clean, so the
 /// record exists even without `--verbose`. `None` when nothing was freed.
 /// `uses_trash` is the cleaner's own report: a cleaner that deletes outside
@@ -222,8 +295,9 @@ pub fn write_history_entry_if_needed(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cleaner::{CleanOptions, CleanResult, ScanResult, ScanStatus};
+    use crate::cleaner::{CleanOptions, CleanResult, Risk, ScanResult, ScanStatus};
     use crate::progress::ProgressReporter;
+    use crate::unattended::SkipReason;
     use anyhow::Result;
     use tempfile::TempDir;
 
@@ -687,5 +761,161 @@ mod tests {
     fn post_clean_note_is_silent_when_nothing_was_freed() {
         assert_eq!(post_clean_note(0, true, true), None);
         assert_eq!(post_clean_note(0, false, false), None);
+    }
+
+    #[test]
+    fn render_skip_line_pins_the_line_structure_for_every_variant() {
+        // The renderer owns the "{name} ({risk}): {advice}" structure and
+        // the risk label of each variant; the wording itself is the
+        // caller's advice argument (PBI 74). The None-advice mode is
+        // --yes's E2E-pinned generic shape.
+        let advised = SkipAdvice {
+            never_unattended: Some("never runs unattended"),
+            needs_opt_in: Some("needs --include-manual"),
+            needs_explicit_selection: Some("needs an explicit selection"),
+        };
+        assert_eq!(
+            render_skip_line(
+                "hints",
+                SkipReason::NeverUnattended(Risk::Moderate),
+                &advised
+            ),
+            "hints (Moderate): never runs unattended"
+        );
+        assert_eq!(
+            render_skip_line("spm", SkipReason::NeedsOptIn(Risk::Moderate), &advised),
+            "spm (Moderate): needs --include-manual"
+        );
+        assert_eq!(
+            render_skip_line(
+                "docker",
+                SkipReason::NeedsExplicitSelection(Risk::Risky),
+                &advised
+            ),
+            "docker (Risky): needs an explicit selection"
+        );
+        let bare = SkipAdvice {
+            never_unattended: None,
+            needs_opt_in: None,
+            needs_explicit_selection: None,
+        };
+        assert_eq!(
+            render_skip_line(
+                "cargo",
+                SkipReason::NeedsExplicitSelection(Risk::Moderate),
+                &bare
+            ),
+            "cargo (Moderate)"
+        );
+    }
+
+    #[test]
+    fn run_selected_batch_runs_only_the_selections_run_list() {
+        // The skeleton maps select's registry indices onto run_batch's
+        // slice in registry order — a mis-mapped index would clean the
+        // wrong target or run a skipped one.
+        let boxed: Vec<Box<dyn crate::cleaner::Cleaner>> = vec![
+            Box::new(OkCleaner("sel-a")),
+            Box::new(FailingCleaner("sel-b")),
+            Box::new(OkCleaner("sel-c")),
+        ];
+        let selection = crate::unattended::UnattendedSelection {
+            run: vec![(0, 0), (2, 0)],
+            skipped: vec![(
+                1,
+                crate::unattended::SkipReason::NeedsOptIn(crate::cleaner::Risk::Moderate),
+            )],
+        };
+        let summary = run_selected_batch(
+            &boxed,
+            &selection,
+            &CleanOptions::default(),
+            &crate::progress::SuppressReporter,
+            true,  // dry_run: never deletes and never writes history
+            false, // animated
+            false, // with_notes
+        );
+        assert_eq!(
+            summary.total_freed, 200,
+            "only the run list's targets run, in registry order"
+        );
+        assert!(
+            summary.failures.is_empty(),
+            "the skipped index must never run, got: {:?}",
+            summary.failures
+        );
+    }
+
+    #[test]
+    fn the_skip_reason_match_lives_only_in_the_shared_renderer() {
+        // Source pin (PBI 2026-11-20-03 BDD2; tests/AGENTS.md last-resort
+        // rule): the guarded structure — a new SkipReason variant must
+        // surface as ONE build error at the renderer's match instead of
+        // silently flowing into --yes's generic risk-only line — has no
+        // behavioural surface while the E2E pins only see the three current
+        // variants (round 9 whywhy §2.a). The variant literals are
+        // assembled so this pin never matches its own source.
+        let variant = |name: &str| format!("SkipReason::{name}(");
+        let arms = [
+            variant("NeverUnattended"),
+            variant("NeedsOptIn"),
+            variant("NeedsExplicitSelection"),
+        ];
+
+        // The renderer owns the one exhaustive match: every arm appears
+        // exactly once in batch.rs's production code and no wildcard arm
+        // can swallow a new variant.
+        let batch_prod = include_str!("batch.rs")
+            .split("#[cfg(test)]")
+            .next()
+            .unwrap();
+        let start = batch_prod
+            .find("pub fn render_skip_line(")
+            .expect("the shared skip renderer must stay defined");
+        let end = batch_prod[start..]
+            .find("fn render_advised_line(")
+            .expect("the renderer's line helper must stay beside the match");
+        let body = &batch_prod[start..start + end];
+        assert!(
+            body.contains("match reason {"),
+            "the renderer must still match on the skip reason"
+        );
+        for arm in &arms {
+            assert_eq!(
+                body.matches(arm).count(),
+                1,
+                "the SkipReason match must stay in the one renderer, got {arm} outside it"
+            );
+        }
+        assert!(
+            !body.contains("_ =>"),
+            "a wildcard arm would silently swallow a new SkipReason variant"
+        );
+        let rest = &batch_prod[start + end..];
+        for arm in &arms {
+            assert!(
+                !rest.contains(arm),
+                "a second SkipReason match appeared in batch.rs: {arm}"
+            );
+        }
+
+        // The unattended flows must not hand-write reason rendering: no
+        // variant references and no direct risk-label line in main.rs or
+        // interactive.rs.
+        for (file, src) in [
+            ("main.rs", include_str!("main.rs")),
+            ("interactive.rs", include_str!("interactive.rs")),
+        ] {
+            for arm in &arms {
+                assert!(
+                    !src.contains(arm),
+                    "{file} must render skips through the shared renderer, found {arm}"
+                );
+            }
+            assert!(
+                !src.contains(".risk().label()"),
+                "{file} must not hand-write the generic risk-only line"
+            );
+        }
     }
 }

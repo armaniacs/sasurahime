@@ -344,11 +344,20 @@ pub fn run_auto(cleaners: &[Box<dyn Cleaner>], mode: crate::trash::TrashMode) ->
     let selection = crate::unattended::UnattendedPolicy::Yes { results }.select(cleaners, &opts);
 
     // Non-Safe targets (Moderate, Risky) are only reachable by an explicit
-    // selection, so tell the user they were left out and why.
+    // selection, so tell the user they were left out and why. The bare
+    // risk-only line is this flow's E2E-pinned shape (the advice vocabulary
+    // is a recorded backlog decision): the renderer's None-advice mode
+    // keeps the bytes identical while the SkipReason match still guards
+    // this path.
+    let advice = crate::batch::SkipAdvice {
+        never_unattended: None,
+        needs_opt_in: None,
+        needs_explicit_selection: None,
+    };
     let skipped: Vec<String> = selection
         .skipped
         .iter()
-        .map(|(i, reason)| format!("{} ({})", cleaners[*i].name(), reason.risk().label()))
+        .map(|(i, reason)| crate::batch::render_skip_line(cleaners[*i].name(), *reason, &advice))
         .collect();
     if !skipped.is_empty() {
         println!(
@@ -397,17 +406,14 @@ pub fn run_auto(cleaners: &[Box<dyn Cleaner>], mode: crate::trash::TrashMode) ->
 
     // The one batch path: animated spinner per cleaner, accumulation, the
     // history guard and per-target error collection all live in
-    // batch::run_batch. with_notes=false: this flow never printed notes, and
-    // passing the run's options is behavior-identical to the old bare
-    // `clean(false, rep)` calls (every reachable cleaner computes the same
-    // work when the options carry nothing). dry_run is always false here.
-    let selected: Vec<&dyn Cleaner> = selection
-        .run
-        .iter()
-        .map(|&(i, _)| cleaners[i].as_ref())
-        .collect();
-    let summary = crate::batch::run_batch(
-        &selected,
+    // batch::run_batch, reached through the shared unattended skeleton.
+    // with_notes=false: this flow never printed notes, and passing the
+    // run's options is behavior-identical to the old bare `clean(false,
+    // rep)` calls (every reachable cleaner computes the same work when the
+    // options carry nothing). dry_run is always false here.
+    let summary = crate::batch::run_selected_batch(
+        cleaners,
+        &selection,
         &opts,
         &crate::progress::SuppressReporter,
         false, // dry_run: interactive always deletes

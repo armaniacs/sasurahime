@@ -1289,37 +1289,27 @@ fn run_auto_flow(
     // include_manual: whole-dir removals must never happen without a
     // human.
     let selection = unattended::UnattendedPolicy::Auto.select(&cleaners_list, &opts);
+    let advice = batch::SkipAdvice {
+        never_unattended: Some("never runs unattended"),
+        needs_opt_in: Some("set [policy] include_manual = true to include"),
+        // Auto never classifies a target as scan-gated (it scans nothing);
+        // the arm renders it truthfully if wiring ever changes.
+        needs_explicit_selection: Some("needs an explicit selection"),
+    };
     let skipped: Vec<String> = selection
         .skipped
         .iter()
-        .map(|(i, reason)| {
-            let c = &cleaners_list[*i];
-            match reason {
-                unattended::SkipReason::NeverUnattended(risk) => {
-                    format!("{} ({}): never runs unattended", c.name(), risk.label())
-                }
-                unattended::SkipReason::NeedsOptIn(risk) => format!(
-                    "{} ({}): set [policy] include_manual = true to include",
-                    c.name(),
-                    risk.label()
-                ),
-                // Auto never classifies a target as scan-gated (it
-                // scans nothing); the arm renders it truthfully if
-                // wiring ever changes.
-                unattended::SkipReason::NeedsExplicitSelection(risk) => format!(
-                    "{} ({}): needs an explicit selection",
-                    c.name(),
-                    risk.label()
-                ),
-            }
-        })
+        .map(|(i, reason)| batch::render_skip_line(cleaners_list[*i].name(), *reason, &advice))
         .collect();
-    let batch_cleaners: Vec<&dyn cleaner::Cleaner> = selection
-        .run
-        .iter()
-        .map(|&(i, _)| cleaners_list[i].as_ref())
-        .collect();
-    let summary = batch::run_batch(&batch_cleaners, &opts, reporter, dry_run, false, true);
+    let summary = batch::run_selected_batch(
+        &cleaners_list,
+        &selection,
+        &opts,
+        reporter,
+        dry_run,
+        false, // animated
+        true,  // with_notes
+    );
     interactive::report_batch_failures(
         &mut std::io::stderr(),
         &summary,
@@ -1479,41 +1469,35 @@ fn run_all_flow(
     // (PBI 87). The wording stays at the call site: it
     // is specific to `clean all`.
     let selection = unattended::UnattendedPolicy::All.select(&cleaners_list, &opts);
+    let advice = batch::SkipAdvice {
+        // PBI 87: a quit-based cleaner is skipped even
+        // with --include-manual; the wording matches
+        // the auto arm's NeverUnattended line.
+        never_unattended: Some("never runs unattended"),
+        needs_opt_in: Some("needs --include-manual"),
+        // All is registry-driven and never classifies
+        // a target as explicit-selection-only; the
+        // arm renders it truthfully if wiring ever
+        // changes.
+        needs_explicit_selection: Some("needs an explicit selection"),
+    };
+    // The stream choice is the caller's (PBI 74): this arm prints its
+    // per-target skip lines on stdout, before the batch.
     for (i, reason) in &selection.skipped {
-        let c = &cleaners_list[*i];
-        match reason {
-            // PBI 87: a quit-based cleaner is skipped even
-            // with --include-manual; the wording matches
-            // the auto arm's NeverUnattended line.
-            unattended::SkipReason::NeverUnattended(risk) => {
-                println!(
-                    "Skipped {} ({}): never runs unattended",
-                    c.name(),
-                    risk.label()
-                );
-            }
-            unattended::SkipReason::NeedsOptIn(risk) => println!(
-                "Skipped {} ({}): needs --include-manual",
-                c.name(),
-                risk.label()
-            ),
-            // All is registry-driven and never classifies
-            // a target as explicit-selection-only; the
-            // arm renders it truthfully if wiring ever
-            // changes.
-            unattended::SkipReason::NeedsExplicitSelection(risk) => println!(
-                "Skipped {} ({}): needs an explicit selection",
-                c.name(),
-                risk.label()
-            ),
-        }
+        println!(
+            "Skipped {}",
+            batch::render_skip_line(cleaners_list[*i].name(), *reason, &advice)
+        );
     }
-    let batch_cleaners: Vec<&dyn cleaner::Cleaner> = selection
-        .run
-        .iter()
-        .map(|&(i, _)| cleaners_list[i].as_ref())
-        .collect();
-    let summary = batch::run_batch(&batch_cleaners, &opts, reporter, dry_run, false, true);
+    let summary = batch::run_selected_batch(
+        &cleaners_list,
+        &selection,
+        &opts,
+        reporter,
+        dry_run,
+        false, // animated
+        true,  // with_notes
+    );
     interactive::report_batch_failures(
         &mut std::io::stderr(),
         &summary,
