@@ -239,8 +239,11 @@ pub fn write_history_entry(
     let home = crate::config::resolved_home_dir().unwrap_or_default();
     let history_dir = default_history_dir(&home);
     let entry = HistoryEntry {
-        timestamp: chrono::Local::now()
-            .format("%Y-%m-%dT%H:%M:%S%:z")
+        // Same strtime format string the chrono implementation used: jiff's
+        // %:z emits the same colon-carrying local offset, so history.json
+        // stays byte-equal.
+        timestamp: jiff::Zoned::now()
+            .strftime("%Y-%m-%dT%H:%M:%S%:z")
             .to_string(),
         cleaner: label.to_string(),
         freed_bytes,
@@ -632,6 +635,31 @@ mod tests {
             "HOME must resolve in the test environment"
         );
         write_history_entry("probe", 1024, 0, false);
+    }
+
+    #[test]
+    fn generated_timestamp_keeps_the_rfc3339_local_offset_shape() {
+        // Unit parity pin for the chrono → jiff swap: strtime with the same
+        // format string the chrono implementation used must emit the same
+        // byte shape — a 16-char "YYYY-MM-DDTHH:MM" slice, seconds, and a
+        // colon-carrying ±HH:MM offset. Wall-clock independent.
+        let ts = jiff::Zoned::now()
+            .strftime("%Y-%m-%dT%H:%M:%S%:z")
+            .to_string();
+        let b = ts.as_bytes();
+        let digits_at = |idx: &[usize]| idx.iter().all(|&i| b[i].is_ascii_digit());
+        assert_eq!(ts.len(), 25, "YYYY-MM-DDTHH:MM:SS±HH:MM is 25 bytes: {ts}");
+        assert!(
+            digits_at(&[0, 1, 2, 3, 5, 6, 8, 9, 11, 12, 14, 15, 17, 18, 20, 21, 23, 24]),
+            "date, time and offset digits in the chrono shape: {ts}"
+        );
+        assert_eq!(b[4], b'-', "year-month separator: {ts}");
+        assert_eq!(b[7], b'-', "month-day separator: {ts}");
+        assert_eq!(b[10], b'T', "date-time separator: {ts}");
+        assert_eq!(b[13], b':', "hour-minute separator: {ts}");
+        assert_eq!(b[16], b':', "minute-second separator: {ts}");
+        assert!(b[19] == b'+' || b[19] == b'-', "offset sign: {ts}");
+        assert_eq!(b[22], b':', "offset must carry a colon: {ts}");
     }
 
     #[test]

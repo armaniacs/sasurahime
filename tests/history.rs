@@ -1,5 +1,7 @@
 use assert_cmd::Command;
+use filetime::FileTime;
 use std::fs;
+use std::time::{Duration, SystemTime};
 use tempfile::TempDir;
 
 const TWO_ENTRIES: &str = r#"[
@@ -313,4 +315,61 @@ fn stats_shows_trash_method_after_a_trash_clean() {
         "stats must surface the trash/physical distinction, got:\n{stdout}"
     );
     assert!(stdout.contains("Method"), "stats: {stdout}");
+}
+
+#[test]
+fn written_history_entries_keep_the_rfc3339_local_offset_shape() {
+    // Parity pin for the chrono → jiff timestamp swap: a freshly written
+    // history row must keep the exact byte shape the chrono implementation
+    // produced with "%Y-%m-%dT%H:%M:%S%:z" — a 19-char local stem plus a
+    // colon-carrying ±HH:MM offset. The assert is wall-clock independent:
+    // it checks character classes at fixed positions, never the actual
+    // date or offset value.
+    let tmp = TempDir::new().unwrap();
+    let log_dir = tmp.path().join(".local/share/kilo/log");
+    fs::create_dir_all(&log_dir).unwrap();
+    let aged = log_dir.join("parity-pin.log");
+    fs::write(&aged, b"log content").unwrap();
+    let mtime = SystemTime::now() - Duration::from_secs(10 * 86_400);
+    filetime::set_file_mtime(&aged, FileTime::from_system_time(mtime)).unwrap();
+
+    let output = sasurahime(tmp.path())
+        .args(["--permanent", "clean", "logs"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let history_path = tmp.path().join(".local/share/sasurahime/history.json");
+    let content = fs::read_to_string(&history_path).unwrap();
+    let entries: Vec<serde_json::Value> = serde_json::from_str(&content).unwrap();
+    assert_eq!(entries.len(), 1, "one logs run must record one entry");
+    assert_eq!(entries[0]["cleaner"], "logs");
+    assert!(
+        entries[0]["freed_bytes"].as_u64().unwrap() > 0,
+        "the aged log deletion must free > 0 bytes"
+    );
+    let ts = entries[0]["timestamp"].as_str().unwrap();
+    assert_rfc3339_local_offset_shape(ts);
+}
+
+fn assert_rfc3339_local_offset_shape(ts: &str) {
+    let b = ts.as_bytes();
+    let digits_at = |idx: &[usize]| idx.iter().all(|&i| b[i].is_ascii_digit());
+    // 19-char stem + sign + HH:MM.
+    assert_eq!(ts.len(), 25, "YYYY-MM-DDTHH:MM:SS±HH:MM is 25 bytes: {ts}");
+    assert!(
+        digits_at(&[0, 1, 2, 3, 5, 6, 8, 9, 11, 12, 14, 15, 17, 18, 20, 21, 23, 24]),
+        "date, time and offset digits in the chrono shape: {ts}"
+    );
+    assert_eq!(b[4], b'-', "year-month separator: {ts}");
+    assert_eq!(b[7], b'-', "month-day separator: {ts}");
+    assert_eq!(b[10], b'T', "date-time separator: {ts}");
+    assert_eq!(b[13], b':', "hour-minute separator: {ts}");
+    assert_eq!(b[16], b':', "minute-second separator: {ts}");
+    assert!(b[19] == b'+' || b[19] == b'-', "offset sign: {ts}");
+    assert_eq!(b[22], b':', "offset must carry a colon: {ts}");
 }

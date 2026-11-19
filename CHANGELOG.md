@@ -4,6 +4,17 @@ All notable changes to sasurahime will be documented in this file. The format is
 
 ---
 
+## [Unreleased]
+
+### Changed
+
+- Replaced the direct `chrono` dependency with `jiff` for history
+  timestamps. The timestamp format string is unchanged, so `history.json`
+  stays byte-equal; `chrono` remains in the dependency tree only as a
+  transitive requirement of the `trash` crate.
+
+---
+
 ## [0.4.7] - 2026-11-17
 
 ### Added
