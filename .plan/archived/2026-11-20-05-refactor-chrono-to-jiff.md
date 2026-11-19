@@ -29,14 +29,14 @@ As a 保守担当者, I want the timestamp source to be jiff (a maintained, soun
 
 ## 受け入れ基準
 
-- [ ] `Cargo.toml` から `chrono` 行を削除し、`jiff = "0.2"` を追加する（serde feature 不要: `HistoryEntry.timestamp` は String のまま。`Zoned::now()` に必要な既定 feature を維持）
-- [ ] `src/` と `tests/` から `chrono` 参照が 0 件になる（grep 実測）
-- [ ] タイムスタンプの生成は jiff の strtime `%Y-%m-%dT%H:%M:%S%:z` に置き換え、**出力形式は現行と byte 等価**（書式文字列自体は現行どおり保持）
-- [ ] BDD 1 の E2E pin（書き出された timestamp の形状 assert）を追加する。pin は壁時計の値に依存せず形状のみを主張する（regex 相当の検査または 16 文字スライス + コロン付きオフションの存在確認）
-- [ ] 既存テスト（tests/history.rs、src/history.rs tests 等）を 1 行も修正せずに green
-- [ ] `cargo tree -i chrono` の結果を記録する: chrono は `trash` 依存としてのみ残り、sasurahime の直接依存から消えること
-- [ ] CHANGELOG に Unreleased 節を設けて Changed に 1 行追記（直接依存の chrono 廃止・jiff 置換。タイムスタンプ形式は不変である旨）
-- [ ] `cargo clippy --tests -- -D warnings` が 0、`cargo fmt --check` が clean、`cargo build` が green
+- [x] `Cargo.toml` から `chrono` 行を削除し、`jiff = "0.2"` を追加する（serde feature 不要: `HistoryEntry.timestamp` は String のまま。`Zoned::now()` に必要な既定 feature を維持）
+- [x] `src/` と `tests/` から `chrono` 参照が 0 件になる（grep 実測）
+- [x] タイムスタンプの生成は jiff の strtime `%Y-%m-%dT%H:%M:%S%:z` に置き換え、**出力形式は現行と byte 等価**（書式文字列自体は現行どおり保持）
+- [x] BDD 1 の E2E pin（書き出された timestamp の形状 assert）を追加する。pin は壁時計の値に依存せず形状のみを主張する（regex 相当の検査または 16 文字スライス + コロン付きオフションの存在確認）
+- [x] 既存テスト（tests/history.rs、src/history.rs tests 等）を 1 行も修正せずに green
+- [x] `cargo tree -i chrono` の結果を記録する: chrono は `trash` 依存としてのみ残り、sasurahime の直接依存から消えること
+- [x] CHANGELOG に Unreleased 節を設けて Changed に 1 行追記（直接依存の chrono 廃止・jiff 置換。タイムスタンプ形式は不変である旨）
+- [x] `cargo clippy --tests -- -D warnings` が 0、`cargo fmt --check` が clean、`cargo build` が green
 
 ## テスト戦略
 
@@ -50,11 +50,11 @@ As a 保守担当者, I want the timestamp source to be jiff (a maintained, soun
 
 ## DoD
 
-- [ ] cargo test が green（既知の TCC 依存 4 失敗を許容: cleaners::huggingface::tests::clean_fallback_deletes_dir、cleaners::library_logs::tests::clean_all_via_opts_processes_all_entries、cleaners::pre_commit::tests::clean_fallback_deletes_dir、trash::tests::delete_ctx_trash_mode_moves_to_trash。実装時に green でない場合はその時点の既知失敗に合わせる）
-- [ ] cargo clippy --tests -- -D warnings が 0
-- [ ] cargo fmt --check が通る
-- [ ] cargo build が green
-- [ ] PBI アーカイブ（統合側が実施: git mv → `.plan/archived/`、INDEX 追記）
+- [x] cargo test が green（既知の TCC 依存 4 失敗を許容: cleaners::huggingface::tests::clean_fallback_deletes_dir、cleaners::library_logs::tests::clean_all_via_opts_processes_all_entries、cleaners::pre_commit::tests::clean_fallback_deletes_dir、trash::tests::delete_ctx_trash_mode_moves_to_trash。実装時に green でない場合はその時点の既知失敗に合わせる）
+- [x] cargo clippy --tests -- -D warnings が 0
+- [x] cargo fmt --check が通る
+- [x] cargo build が green
+- [x] PBI アーカイブ（統合側が実施: git mv → `.plan/archived/`、INDEX 追記）
 
 ## scope 外（やらないこと）
 
@@ -68,3 +68,12 @@ As a 保守担当者, I want the timestamp source to be jiff (a maintained, soun
 - 実装は subagent-driven（AGENTS.md の実装ワークフロー）。git 操作・pbi/ 編集は統合側が実施
 - 触れるファイル: `Cargo.toml`、`Cargo.lock`（cargo add/update 由来）、`src/history.rs`、`tests/history.rs`（pin 追加のみ）、`CHANGELOG.md`（Unreleased 1 行）
 - 触れてはいけないファイル: その他の src/、tests/ 既存ファイルの変更（pin の needle が壊れた場合のみ最小修正で、理由を報告に記す）
+
+## 実装記録（統合側、2026-11-20）
+
+- 置き換え: src/history.rs の timestamp 生成を `jiff::Zoned::now().strftime("%Y-%m-%dT%H:%M:%S%:z").to_string()` に差し替え（書式文字列は chrono 時代と同一。WHY コメント 3 行で jiff 選択と互換契約を記録）。jiff 0.2.38（jiff-core 0.1.1 解決）。serde feature 不要（timestamp は String のまま）
+- parity pin の証拠: E2E pin `written_history_entries_keep_the_rfc3339_local_offset_shape` を chrono 実装のまま green 実測 → jiff 置換後に同一 assert で green（1 行も変更せず）。pin は 25 バイト長 + 19 文字の `YYYY-MM-DDTHH:MM:SS` + コロン付きオフセット（`±HH:MM`）の形状のみを主張し、壁時計の値に非依存。ユニット層でも同一契約を pin（`generated_timestamp_keeps_the_rfc3339_local_offset_shape`）
+- E2E の実行経路: tests/log.rs の実績パターンに倣い `--permanent clean logs`（物理削除で freed > 0 確定、trash モードの Apple Events/TCC 非決定性を回避）
+- `cargo tree -i chrono` 実測: 既定ターゲットの依存ツリーから chrono は消滅（`nothing to print`）。`--target all` では `trash v5.2.9` のみが依存（trash の chrono 依存はターゲットゲート付き）。Cargo.lock に chrono 0.4.45 パッケージブロックが残る（trash 要件、PBI scope の記載どおり）
+- 検証実測: fmt clean / clippy 0 / cargo test --test history 14 passed / --test log 6 passed / --lib history 23 passed / cargo build green / 最終ゲート cargo test --workspace 1288 passed 0 failed / 既存テスト修正 0 行
+- 実装コミット: c0a9950
