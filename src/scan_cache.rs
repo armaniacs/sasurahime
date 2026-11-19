@@ -93,6 +93,15 @@ impl ScanCache {
         }
         self.record(dir, size_bytes);
     }
+
+    /// Drops entries past the age expiry. Expired entries already miss every
+    /// lookup, so discarding them changes no observable behavior — without
+    /// this sweep the map only ever grows on disk.
+    pub(crate) fn prune(&mut self) {
+        let now = now_secs();
+        self.entries
+            .retain(|_, entry| now.saturating_sub(entry.scanned_at) <= MAX_AGE_SECS);
+    }
 }
 
 fn now_secs() -> u64 {
@@ -128,8 +137,9 @@ pub fn init(cache_path: &Path) {
 
 /// Saves the cache back to `path` and keeps it enabled.
 pub fn flush(cache_path: &Path) {
-    let cell = cache_cell().lock().unwrap_or_else(|p| p.into_inner());
-    if let Some(cache) = cell.as_ref() {
+    let mut cell = cache_cell().lock().unwrap_or_else(|p| p.into_inner());
+    if let Some(cache) = cell.as_mut() {
+        cache.prune();
         cache.save(cache_path);
     }
 }
@@ -261,6 +271,62 @@ mod tests {
         write_file(&measured_dir, "a", 512);
         let mut cache = ScanCache::default();
         cache.record(&measured_dir, 512);
+        cache.save(&path);
+        let loaded = ScanCache::load(&path);
+        assert_eq!(loaded.cached_size(&measured_dir), Some(512));
+    }
+
+    #[test]
+    fn prune_expired_drops_only_stale_entries() {
+        let fresh = tempfile::TempDir::new().unwrap();
+        let stale = tempfile::TempDir::new().unwrap();
+        write_file(fresh.path(), "a", 1024);
+        write_file(stale.path(), "a", 2048);
+        let mut cache = ScanCache::default();
+        cache.record(fresh.path(), 1024);
+        cache.record(stale.path(), 2048);
+        let stale_key = stale.path().to_string_lossy().to_string();
+        if let Some(entry) = cache.entries.get_mut(&stale_key) {
+            entry.scanned_at = now_secs().saturating_sub(MAX_AGE_SECS + 1);
+        }
+        cache.prune();
+        assert!(
+            !cache.entries.contains_key(&stale_key),
+            "expired entry must be dropped"
+        );
+        assert_eq!(
+            cache.cached_size(fresh.path()),
+            Some(1024),
+            "fresh entries must survive"
+        );
+        // BDD1 Then: the expired path must not be written back to disk.
+        let out = tempfile::TempDir::new().unwrap();
+        let save_path = out.path().join("scan-cache.json");
+        cache.save(&save_path);
+        let raw = std::fs::read_to_string(&save_path).unwrap();
+        assert!(
+            !raw.contains(&stale_key),
+            "expired path must not be persisted"
+        );
+        assert_eq!(
+            ScanCache::load(&save_path).cached_size(fresh.path()),
+            Some(1024)
+        );
+    }
+
+    #[test]
+    fn prune_then_roundtrip_keeps_fresh_entries() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        // The cache file must live outside the measured directory so saving
+        // does not change the measured dir's mtime.
+        let path = tmp.path().join("other/nested/scan-cache.json");
+        let measured_dir = tmp.path().join("data");
+        std::fs::create_dir_all(&measured_dir).unwrap();
+        write_file(&measured_dir, "a", 512);
+        let mut cache = ScanCache::default();
+        cache.record(&measured_dir, 512);
+        cache.prune();
+        assert_eq!(cache.entries.len(), 1, "prune must not drop fresh entries");
         cache.save(&path);
         let loaded = ScanCache::load(&path);
         assert_eq!(loaded.cached_size(&measured_dir), Some(512));

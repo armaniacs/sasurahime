@@ -175,7 +175,9 @@ installed with cargo); no resident daemon is required.
   keyed by directory mtime, so unchanged directories skip the expensive walk.
   Invalidation is conservative: any mtime mismatch, hourly expiry, filesystem
   error or corrupt cache file falls back to a full walk. Deletion paths never
-  consult the cache. Use `--no-cache` to always walk.
+  consult the cache. Use `--no-cache` to always walk. Entries expire after
+  one hour; expired entries are pruned when the cache is saved, so the file
+  does not grow unboundedly.
 - mise runtime removal checks both global and per-project `.mise.toml` before deleting.
 - macOS immutable flags (`uchg`) are handled automatically.
 - `--yes` cleans only `Safe` targets. Targets classified `Moderate` / `Risky` /
@@ -420,6 +422,8 @@ launchd で定期実行するには、以下を
   walk をスキップします。無効化は保守的です: mtime の不一致・1時間の期限切れ・
   ファイルシステムエラー・キャッシュ破損のいずれかでフルスキャンにフォールバックします。
   削除経路はキャッシュを参照しません。常にwalkしたい場合は `--no-cache` を使用してください。
+  エントリは 1 時間で期限切れとなり、保存時に期限切れエントリは破棄されるため、
+  ファイルが無制限に大きくなることはありません。
 - `--yes` が削除するのは `Safe` 分類のターゲットのみです。`Moderate` /
   `Risky` / `Manual` のターゲットは分類付きでスキップとして表示され、
   明示的な選択（ピッカーまたは `clean <target>`）が必要です。
