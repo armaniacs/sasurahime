@@ -42,3 +42,4 @@ DoD 反映漏れ棚卸し: `pbi/` 直下に PBI ファイルなし → 対象 0 
 ## 経過記録
 
 - 2026-11-21: フェーズA〜C 完了。ユーザー確認 3 回（候補リスト → RICE 承認 → run_batch 契約発見による部分適用裁定）。
+- 2026-11-21: フェーズD〜F 完了。3 PBI 実装・検証・アーカイブ済み（01 → `3bc8a6f`、03 → `c9afc3e`、02 → `0796f45`。バッチ構成 2 バッチ・Batch 1 は 2 体並列）。Batch 2 で統合側が --yes のラッパー行の理由二重表現を発見し、header から理由を外して per-target 行に所有者を一本化（1 行追加調整）。最終ゲート: workspace 1289 passed 0 failed、clippy 0、fmt clean、cargo build ok。未完了 0。

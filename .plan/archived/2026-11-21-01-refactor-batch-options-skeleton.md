@@ -31,13 +31,13 @@ As a 保守担当者, I want the unattended batch call sites to pass named optio
 
 ## 受け入れ基準
 
-- [ ] `BatchOptions { dry_run, animated, with_notes }` を src/batch.rs に新設（derive は最小限。`Default` は全 false で実装してよい）
-- [ ] `run_selected_batch` の署名を `BatchOptions` 受け取りに変更し、内部の `run_batch` 呼び出し（src/batch.rs:203）で展開する。**`run_batch` 本体の署名は 1 行も変えない**（round 7 契約の維持）
-- [ ] 無人 3 経路の呼び出し（src/main.rs:1304、:1492、src/interactive.rs:414）を named フィールドに置き換える
-- [ ] `run_selected_batch` に bounds `debug_assert` を追加: `selection.run` と `selection.skipped` の全インデックスが `cleaners.len()` 未満であること（debug ビルドで契約違反が発火する）
-- [ ] batch.rs tests 内の `run_selected_batch` 直接呼び出し（src/batch.rs:829）を新署名に置き換える。`run_batch` の呼び出しテスト（:408, :446, :481, :514, :547, :589, :621, :692, :703）は**無修正で green**（run_batch 本体を触らないことの証明）
-- [ ] 全 E2E pin 無傷（byte 等価）+ `cargo clippy --tests -- -D warnings` 0 + `cargo fmt --check` clean
-- [ ] 触れないこと: `run_batch` の署名・本体、`run_caches_batch`（src/main.rs:1018）、`run_interactive` whole-target 分岐（src/interactive.rs:520）、src/unattended.rs
+- [x] `BatchOptions { dry_run, animated, with_notes }` を src/batch.rs に新設（derive は最小限。`Default` は全 false で実装してよい）
+- [x] `run_selected_batch` の署名を `BatchOptions` 受け取りに変更し、内部の `run_batch` 呼び出し（src/batch.rs:203）で展開する。**`run_batch` 本体の署名は 1 行も変えない**（round 7 契約の維持）
+- [x] 無人 3 経路の呼び出し（src/main.rs:1304、:1492、src/interactive.rs:414）を named フィールドに置き換える
+- [x] `run_selected_batch` に bounds `debug_assert` を追加: `selection.run` と `selection.skipped` の全インデックスが `cleaners.len()` 未満であること（debug ビルドで契約違反が発火する）
+- [x] batch.rs tests 内の `run_selected_batch` 直接呼び出し（src/batch.rs:829）を新署名に置き換える。`run_batch` の呼び出しテスト（:408, :446, :481, :514, :547, :589, :621, :692, :703）は**無修正で green**（run_batch 本体を触らないことの証明）
+- [x] 全 E2E pin 無傷（byte 等価）+ `cargo clippy --tests -- -D warnings` 0 + `cargo fmt --check` clean
+- [x] 触れないこと: `run_batch` の署名・本体、`run_caches_batch`（src/main.rs:1018）、`run_interactive` whole-target 分岐（src/interactive.rs:520）、src/unattended.rs
 
 ## テスト戦略
 
@@ -51,15 +51,23 @@ As a 保守担当者, I want the unattended batch call sites to pass named optio
 
 ## DoD
 
-- [ ] cargo test が green（既知の TCC 依存 4 失敗を許容: cleaners::huggingface::tests::clean_fallback_deletes_dir、cleaners::library_logs::tests::clean_all_via_opts_processes_all_entries、cleaners::pre_commit::tests::clean_fallback_deletes_dir、trash::tests::delete_ctx_trash_mode_moves_to_trash。実装時に green でない場合はその時点の既知失敗に合わせる）
-- [ ] cargo clippy --tests -- -D warnings が 0
-- [ ] cargo fmt --check が通る
-- [ ] cargo build が green
-- [ ] run_batch 本体の無変更を実測で記録（git diff に run_batch 署名の変更が無いこと）
-- [ ] PBI アーカイブ（統合側が実施: git mv → `.plan/archived/`、INDEX 追記）
+- [x] cargo test が green（既知の TCC 依存 4 失敗を許容: cleaners::huggingface::tests::clean_fallback_deletes_dir、cleaners::library_logs::tests::clean_all_via_opts_processes_all_entries、cleaners::pre_commit::tests::clean_fallback_deletes_dir、trash::tests::delete_ctx_trash_mode_moves_to_trash。実装時に green でない場合はその時点の既知失敗に合わせる）
+- [x] cargo clippy --tests -- -D warnings が 0
+- [x] cargo fmt --check が通る
+- [x] cargo build が green
+- [x] run_batch 本体の無変更を実測で記録（git diff に run_batch 署名の変更が無いこと）
+- [x] PBI アーカイブ（統合側が実施: git mv → `.plan/archived/`、INDEX 追記）
 
 ## scope 外（やらないこと）
 
 - `run_batch` 本体の引数リスト変更・form enum・stage 3 統合（round 7 契約により台帳送り: stage 3 統合 PR と同時）
 - `run_caches_batch` と `run_interactive` whole-target 分岐の BatchOptions 化（PBI 03 の scope-out 引継。stage 3 統合時に判断）
 - `CleanOptions` との統合検討（別概念: 実行オプション vs 表示制御）
+
+## 実装記録（統合側、2026-11-21）
+
+- BatchOptions { dry_run, animated, with_notes }（Debug/Clone/Copy/Default、Default は全 false）を batch.rs に新設。doc に round 7 契約により run_batch 本体を据え置く旨の WHY を記載
+- run_selected_batch の署名を BatchOptions 受け取りに変更し、内部で run_batch に展開（run_batch 本体: 署名・本体 0 行変更を git diff で確認）。bounds debug_assert（selection.run / skipped の全インデックス < cleaners.len()）を冒頭に追加
+- 呼び出し面: run_auto_flow（main.rs:1309-1313）、run_all_flow（:1499-1503）、interactive::run_auto（:419-423）を named フィールドに置換。run_caches_batch（main.rs:1018）と run_interactive whole-target 分岐（interactive.rs:520）は scope 外（stage 3 統合時に判断）として据え置き
+- 検証実測: fmt clean / clippy 0 / cargo test --lib batch 21 passed / --bin sasurahime 50 passed / E2E（auto_policy 12・clean_all 8・scan 22）全 green。run_batch 呼び出しテスト 9 本は無修正で green（本体無変更の証明）
+- 実装コミット: 3bc8a6f

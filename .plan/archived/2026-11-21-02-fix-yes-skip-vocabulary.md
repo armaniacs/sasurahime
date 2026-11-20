@@ -27,13 +27,13 @@ As a --yes ユーザー, I want the skipped targets to state why they did not ru
 
 ## 受け入れ基準
 
-- [ ] `interactive::run_auto` の `SkipAdvice` を `needs_explicit_selection: Some("needs an explicit selection")` に変更する（`never_unattended` / `needs_opt_in` は Yes policy が生成しないため `None` のまま、doc コメントでその理由を 1〜2 行記す）
-- [ ] 変更**前に**新語彙を主張する E2E pin を追加する（`stdout.contains("cargo (Moderate): needs an explicit selection")` 相当）。pin は現行実装では RED、変更後に GREEN になる順序で Red→Green を記録する
-- [ ] 既存 pin（tests/scan.rs:474-477、:505 付近、tests/ollama.rs の gate_skipped 系）は無修正で green（gate_skipped は SkipReason ではなく TTY 観測の別系統、unattended.rs:38-44 の記録どおり）
-- [ ] auto / clean all の skip 出力は byte 等価（tests/auto_policy.rs、tests/clean_all.rs 無修正で green）
-- [ ] unattended.rs には触れない（rendering は unattended.rs に入れない PBI 74 決定。96 セル matrix pin 無傷）
-- [ ] `cargo clippy --tests -- -D warnings` 0 + `cargo fmt --check` clean
-- [ ] 触れないこと: src/batch.rs（レンダラ本体）、src/unattended.rs、src/main.rs
+- [x] `interactive::run_auto` の `SkipAdvice` を `needs_explicit_selection: Some("needs an explicit selection")` に変更する（`never_unattended` / `needs_opt_in` は Yes policy が生成しないため `None` のまま、doc コメントでその理由を 1〜2 行記す）
+- [x] 変更**前に**新語彙を主張する E2E pin を追加する（`stdout.contains("cargo (Moderate): needs an explicit selection")` 相当）。pin は現行実装では RED、変更後に GREEN になる順序で Red→Green を記録する
+- [x] 既存 pin（tests/scan.rs:474-477、:505 付近、tests/ollama.rs の gate_skipped 系）は無修正で green（gate_skipped は SkipReason ではなく TTY 観測の別系統、unattended.rs:38-44 の記録どおり）
+- [x] auto / clean all の skip 出力は byte 等価（tests/auto_policy.rs、tests/clean_all.rs 無修正で green）
+- [x] unattended.rs には触れない（rendering は unattended.rs に入れない PBI 74 決定。96 セル matrix pin 無傷）
+- [x] `cargo clippy --tests -- -D warnings` 0 + `cargo fmt --check` clean
+- [x] 触れないこと: src/batch.rs（レンダラ本体）、src/unattended.rs、src/main.rs
 
 ## テスト戦略
 
@@ -47,15 +47,24 @@ As a --yes ユーザー, I want the skipped targets to state why they did not ru
 
 ## DoD
 
-- [ ] cargo test が green（既知の TCC 依存 4 失敗を許容: cleaners::huggingface::tests::clean_fallback_deletes_dir、cleaners::library_logs::tests::clean_all_via_opts_processes_all_entries、cleaners::pre_commit::tests::clean_fallback_deletes_dir、trash::tests::delete_ctx_trash_mode_moves_to_trash。実装時に green でない場合はその時点の既知失敗に合わせる）
-- [ ] cargo clippy --tests -- -D warnings が 0
-- [ ] cargo fmt --check が通る
-- [ ] cargo build が green
-- [ ] 新語彙 pin の Red→Green 実測を本ファイルに記録
-- [ ] PBI アーカイブ（統合側が実施: git mv → `.plan/archived/`、INDEX 追記）
+- [x] cargo test が green（既知の TCC 依存 4 失敗を許容: cleaners::huggingface::tests::clean_fallback_deletes_dir、cleaners::library_logs::tests::clean_all_via_opts_processes_all_entries、cleaners::pre_commit::tests::clean_fallback_deletes_dir、trash::tests::delete_ctx_trash_mode_moves_to_trash。実装時に green でない場合はその時点の既知失敗に合わせる）
+- [x] cargo clippy --tests -- -D warnings が 0
+- [x] cargo fmt --check が通る
+- [x] cargo build が green
+- [x] 新語彙 pin の Red→Green 実測を本ファイルに記録
+- [x] PBI アーカイブ（統合側が実施: git mv → `.plan/archived/`、INDEX 追記）
 
 ## scope 外（やらないこと）
 
 - auto / clean all の advice 語彙変更（byte 等価の対象外）
 - gate_skipped 行の変更（TTY 観測の別系統、PBI 74 決定）
 - NeedsOptIn / NeverUnattended に対する --yes 固有の advice 語彙（Yes policy が生成しないため None 維持。将来 policy が変わるならその時の判断）
+
+## 実装記録（統合側、2026-11-21）
+
+- run_auto の SkipAdvice を needs_explicit_selection: Some("needs an explicit selection") に変更（never_unattended / needs_opt_in は Yes policy が生成しないため None 維持、理由を doc に記載）
+- **統合側の追加調整（1 行）**: ラッパー行 "Skipped N target(s) that need an explicit selection: {joined}" が per-target 語彙と同一行で二重表現になるため、header を "Skipped N target(s):" に変更し理由の所有者を per-target 行に一本化（1 事実 = 1 所有者）。header テキストは pin 対象外（grep 実測で 0 件）のため無 pin
+- 新語彙 pin: yes_skip_line_names_the_explicit_selection_reason（tests/scan.rs:512-542）。RED 実測（現行実装で "cargo (Moderate)" のみ出力し panic）→ GREEN 実測
+- 検証実測: fmt clean / clippy 0 / scan 23・interactive 20・ollama 5・lib unattended 13・auto_policy 12・clean_all 8 全 green（auto / clean all は既存 pin 無修正 green により byte 等価）。最終ゲート workspace 1289 passed 0 failed
+- CHANGELOG: [Unreleased] を新設し Changed に 1 エントリ（v0.4.8 リリースで前 Unreleased を消費済みのため）
+- 実装コミット: 0796f45

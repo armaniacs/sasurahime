@@ -104,6 +104,21 @@ Batch 1（01∥04 並列）→ 02 → 03。最終ゲート: lib 903 passed（既
 台帳送り（再検討トリガー付き）: Cleaner trait の capability split（default method 11 超で再評価）、
 tests/ fixture 重複の全数監査、`SCAN_CACHE.set` テストリセット脆弱点、--yes skip 汎用行への語彙追加。
 
+## 大局的コード改善 round 10（2026-11-21、全 3 PBI 完了）
+
+継続ラウンド（差分スコープ）。round 9 の台帳送りトリガーを再評価し 3 PBI を実装。
+最終ゲート: workspace 1289 passed 0 failed、clippy 0、fmt clean、build ok。
+
+| PBI | タイトル | 概要 |
+|:---:|---------|------|
+| 01 | BatchOptions 部分適用 | run_selected_batch と無人 3 経路の呼び出し面を named 化 + bounds debug_assert。run_batch 本体は round 7 契約（引数リスト変更 = stage 3 統合同時）により据え置き |
+| 03 | Cleaner trait 裁定 | 12 メソッドのオーバーライド率実測に基づき split 不採用・4 消費者群分類枠を trait doc に記録（investigate） |
+| 02 | --yes skip 語彙付与 | --yes の skip summary に needs an explicit selection を付与。header の重複理由は削除し理由の所有者を per-target 行に一本化 |
+
+台帳送り（再検討トリガー付き）: run_batch 引数リストの全面移行（stage 3 統合 PR と同時）、
+exit-path 列挙 pin（フロー 15 超で）、RFC3339 形状 helper 統合（同型 pin 3 箇所で）、
+tests/ fixture 監査（explore 系タスク時）、SCAN_CACHE.set 脆弱点（scan_cache テスト基盤を触る機会）。
+
 ## 未着手のバックログ
 
 なし。2026-10-22 / 2026-10-23 の各一覧の PBI はすべて実装済みで
