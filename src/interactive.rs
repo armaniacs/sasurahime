@@ -416,9 +416,11 @@ pub fn run_auto(cleaners: &[Box<dyn Cleaner>], mode: crate::trash::TrashMode) ->
         &selection,
         &opts,
         &crate::progress::SuppressReporter,
-        false, // dry_run: interactive always deletes
-        true,  // animated
-        false, // with_notes
+        crate::batch::BatchOptions {
+            dry_run: false, // interactive always deletes
+            animated: true,
+            with_notes: false,
+        },
     );
     // Failure output (PBI-33 recorded decision, option b): run_batch collects
     // per-target failures and every caller prints them after the batch. The

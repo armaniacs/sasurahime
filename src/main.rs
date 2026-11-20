@@ -1306,9 +1306,11 @@ fn run_auto_flow(
         &selection,
         &opts,
         reporter,
-        dry_run,
-        false, // animated
-        true,  // with_notes
+        batch::BatchOptions {
+            dry_run,
+            animated: false,
+            with_notes: true,
+        },
     );
     interactive::report_batch_failures(
         &mut std::io::stderr(),
@@ -1494,9 +1496,11 @@ fn run_all_flow(
         &selection,
         &opts,
         reporter,
-        dry_run,
-        false, // animated
-        true,  // with_notes
+        batch::BatchOptions {
+            dry_run,
+            animated: false,
+            with_notes: true,
+        },
     );
     interactive::report_batch_failures(
         &mut std::io::stderr(),

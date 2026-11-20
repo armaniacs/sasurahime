@@ -179,6 +179,22 @@ pub fn run_batch(
     summary
 }
 
+/// Display and behavior switches for one unattended batch run, passed by
+/// name so an `animated`/`with_notes` swap is a compile error instead of a
+/// silent spinner regression invisible to non-TTY E2E (round 9 whywhy
+/// §2.a: positional bools are the attack surface).
+///
+/// WHY this does not migrate [`run_batch`] itself: its argument list is
+/// frozen by the round-7 recorded contract (see `run_batch`'s doc — an
+/// argument-list change takes the form enum plus stage 3); the full
+/// migration lands together with the stage-3 unification PR.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct BatchOptions {
+    pub dry_run: bool,
+    pub animated: bool,
+    pub with_notes: bool,
+}
+
 /// The one unattended-batch skeleton (PBI 2026-11-20-03): `select`'s run
 /// list is dropped onto [`run_batch`] here, so the three unattended entry
 /// points (`auto`, `clean all`, `--yes`) hand over their selection instead
@@ -191,10 +207,20 @@ pub fn run_selected_batch(
     selection: &crate::unattended::UnattendedSelection,
     opts: &crate::cleaner::CleanOptions,
     reporter: &dyn crate::progress::ProgressReporter,
-    dry_run: bool,
-    animated: bool,
-    with_notes: bool,
+    opts_for_batch: BatchOptions,
 ) -> BatchSummary {
+    // The panic contract "selection indices index into this same slice" is
+    // doc-only otherwise: this keeps a mis-wired selection a loud debug
+    // failure instead of an out-of-bounds panic deep in the loop.
+    debug_assert!(
+        selection
+            .run
+            .iter()
+            .map(|&(i, _)| i)
+            .chain(selection.skipped.iter().map(|&(i, _)| i))
+            .all(|i| i < cleaners.len()),
+        "selection indices must be select's output over this same cleaners slice"
+    );
     let batch_cleaners: Vec<&dyn crate::cleaner::Cleaner> = selection
         .run
         .iter()
@@ -204,9 +230,9 @@ pub fn run_selected_batch(
         &batch_cleaners,
         opts,
         reporter,
-        dry_run,
-        animated,
-        with_notes,
+        opts_for_batch.dry_run,
+        opts_for_batch.animated,
+        opts_for_batch.with_notes,
     )
 }
 
@@ -831,9 +857,11 @@ mod tests {
             &selection,
             &CleanOptions::default(),
             &crate::progress::SuppressReporter,
-            true,  // dry_run: never deletes and never writes history
-            false, // animated
-            false, // with_notes
+            BatchOptions {
+                dry_run: true, // never deletes and never writes history
+                animated: false,
+                with_notes: false,
+            },
         );
         assert_eq!(
             summary.total_freed, 200,
