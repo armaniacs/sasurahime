@@ -4,7 +4,16 @@ All notable changes to sasurahime will be documented in this file. The format is
 
 ---
 
-## [Unreleased]
+## [0.4.8] - 2026-11-20
+
+### Fixed
+
+- The persistent scan cache no longer grows without bound: entries
+  older than the one-hour age limit are pruned when the cache is
+  saved, so deleted or replaced directories (old browser builds,
+  mise versions) stop accumulating as ghost entries in
+  `~/.local/share/sasurahime/scan-cache.json`. Fresh entries keep
+  their exact previous behavior.
 
 ### Changed
 
@@ -12,6 +21,15 @@ All notable changes to sasurahime will be documented in this file. The format is
   timestamps. The timestamp format string is unchanged, so `history.json`
   stays byte-equal; `chrono` remains in the dependency tree only as a
   transitive requirement of the `trash` crate.
+- Entry-point refactors with no behavior change (all pinned byte-equal
+  by the E2E suite): `main()` now dispatches through per-flow
+  `run_<flow>` functions with explicit arguments; the single
+  `scan_cache::flush` call site moved to the end of `main` (covering the
+  `scan --json` path); the unattended flows (`auto`, `clean all`,
+  `--yes`) share one batch skeleton and one skip-line renderer in
+  `batch.rs`, so a new `SkipReason` variant can no longer silently drop
+  its wording on the `--yes` path; `explore` reuses the pinned
+  `Config::expand_tilde` instead of a private duplicate.
 
 ---
 
