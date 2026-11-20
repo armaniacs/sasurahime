@@ -344,15 +344,14 @@ pub fn run_auto(cleaners: &[Box<dyn Cleaner>], mode: crate::trash::TrashMode) ->
     let selection = crate::unattended::UnattendedPolicy::Yes { results }.select(cleaners, &opts);
 
     // Non-Safe targets (Moderate, Risky) are only reachable by an explicit
-    // selection, so tell the user they were left out and why. The bare
-    // risk-only line is this flow's E2E-pinned shape (the advice vocabulary
-    // is a recorded backlog decision): the renderer's None-advice mode
-    // keeps the bytes identical while the SkipReason match still guards
-    // this path.
+    // selection, so tell the user they were left out and why. Yes policy's
+    // skip list is NeedsExplicitSelection only (the scan asymmetry already
+    // excludes non-Safe targets and --yes has no opt-in flag), so the other
+    // two advice slots stay None: those wordings would be unreachable here.
     let advice = crate::batch::SkipAdvice {
         never_unattended: None,
         needs_opt_in: None,
-        needs_explicit_selection: None,
+        needs_explicit_selection: Some("needs an explicit selection"),
     };
     let skipped: Vec<String> = selection
         .skipped
@@ -360,8 +359,11 @@ pub fn run_auto(cleaners: &[Box<dyn Cleaner>], mode: crate::trash::TrashMode) ->
         .map(|(i, reason)| crate::batch::render_skip_line(cleaners[*i].name(), *reason, &advice))
         .collect();
     if !skipped.is_empty() {
+        // The reason is carried per-target by render_skip_line above (the
+        // one owner), so the header stays generic — restating it here would
+        // print the same words twice on one line.
         println!(
-            "Skipped {} target(s) that need an explicit selection: {}",
+            "Skipped {} target(s): {}",
             skipped.len(),
             skipped.join(", ")
         );

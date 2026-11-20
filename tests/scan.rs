@@ -512,6 +512,42 @@ fn yes_never_runs_irreversible_risky_targets() {
 }
 
 #[test]
+fn yes_skip_line_names_the_explicit_selection_reason() {
+    let tmp = TempDir::new().unwrap();
+    let bin_dir = tmp.path().join("bin");
+    fs::create_dir_all(&bin_dir).unwrap();
+    // Moderate target with reclaimable data: cargo registry cache. The skip
+    // line must carry the same advice vocabulary as auto / clean all, not
+    // the bare risk-only shape (round 10: PBI 74 vocabulary parity).
+    let cargo_cache = tmp.path().join(".cargo/registry/cache");
+    fs::create_dir_all(&cargo_cache).unwrap();
+    fs::write(cargo_cache.join("dummy.crate"), b"x".repeat(512)).unwrap();
+
+    let original_path = std::env::var("PATH").unwrap_or_default();
+    let output = sasurahime(tmp.path())
+        .env("PATH", format!("{}:{original_path}", bin_dir.display()))
+        .args(["--permanent", "--yes"])
+        .write_stdin("y\n")
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success(),
+        "exit code was not 0\nstdout:\n{stdout}\nstderr:\n{stderr}"
+    );
+    assert!(
+        stdout.contains("cargo (Moderate): needs an explicit selection"),
+        "--yes must state why cargo was skipped, got:\n{stdout}"
+    );
+    assert!(
+        cargo_cache.join("dummy.crate").exists(),
+        "cargo cache (Moderate) must not be deleted by --yes"
+    );
+}
+
+#[test]
 fn config_exclude_removes_the_risk_from_scan() {
     let tmp = TempDir::new().unwrap();
     let cargo_cache = tmp.path().join(".cargo/registry/cache");

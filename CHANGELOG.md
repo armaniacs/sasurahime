@@ -4,6 +4,18 @@ All notable changes to sasurahime will be documented in this file. The format is
 
 ---
 
+## [Unreleased]
+
+### Changed
+
+- The `--yes` flow's skipped-target summary now states why each target
+  did not run — each entry reads like `cargo (Moderate): needs an
+  explicit selection` — instead of the bare risk-only shape, so the
+  unattended output tells the same story as `auto` and `clean all`.
+  The `auto` and `clean all` wordings are unchanged.
+
+---
+
 ## [0.4.8] - 2026-11-20
 
 ### Fixed
