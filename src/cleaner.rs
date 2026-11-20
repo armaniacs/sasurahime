@@ -324,6 +324,14 @@ impl Risk {
 /// would blur that role split.
 pub type OwnedPaths = (crate::hint::BaseDir, &'static [&'static str]);
 
+/// Consumer groups of the methods below — a new method states its group in
+/// its doc, so the trait stays classified as it grows: `core` (name /
+/// detect / clean / is_available, every run path); `unattended selection`
+/// (risk / auto_clean_allowed / interactive_gated / quits_running_apps, the
+/// run/skip predicates read by unattended select, the ManualOnly wrap and
+/// the --yes gate notice); `scan & warnings` (advisory /
+/// per_cleaner_filters, scanner notes and startup warnings); `TUI
+/// selection` (sub_targets / sub_owned_paths, the interactive mapping).
 pub trait Cleaner: Send + Sync {
     fn name(&self) -> &'static str;
     /// Read-only. Never deletes anything.

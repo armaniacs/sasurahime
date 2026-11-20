@@ -43,10 +43,10 @@ As a 保守担当者, I want a recorded verdict on whether the 12-method Cleaner
 
 ## 受け入れ基準
 
-- [ ] メソッド別オーバーライド率の実測表を本ファイルに記録する（12 メソッド × オーバーライド impl 数・呼び出し元モジュール）
-- [ ] 3 選択肢（現状維持 / 小トレイト split / 構造体分解）それぞれの波及見積もり（41 impl・registry・matrix pin・E2E）を記録する
-- [ ] 裁定と根拠を「裁定」セクションに記録する（次ラウンドでの再評価トリガーも併記する）
-- [ ] 裁定が「split しない」場合、src/cleaner.rs の trait doc に 4 消費者群の分類枠を追加する（byte 等価・挙動不変、cargo test / clippy / fmt green）
+- [x] メソッド別オーバーライド率の実測表を本ファイルに記録する（12 メソッド × オーバーライド impl 数・呼び出し元モジュール）
+- [x] 3 選択肢（現状維持 / 小トレイト split / 構造体分解）それぞれの波及見積もり（41 impl・registry・matrix pin・E2E）を記録する
+- [x] 裁定と根拠を「裁定」セクションに記録する（次ラウンドでの再評価トリガーも併記する）
+- [x] 裁定が「split しない」場合、src/cleaner.rs の trait doc に 4 消費者群の分類枠を追加する（byte 等価・挙動不変、cargo test / clippy / fmt green）
 - [ ] 既存テスト・E2E pin に無修正で green（doc 追加のみの実装変更）
 - [ ] src/cleaner.rs 以外の実装変更をしない（本 PBI は裁定まで）
 
@@ -67,3 +67,74 @@ As a 保守担当者, I want a recorded verdict on whether the 12-method Cleaner
 - split の実装（裁定採用時は次ラウンド PBI 化）
 - Cleaner trait のメソッド追加・削除・署名変更（本 PBI は doc と裁定のみ）
 - src/AGENTS.md の書き換え（列挙回避方針は維持）
+
+## 裁定
+
+裁定: **split しない**。現状維持 + 4 消費者群分類 doc（選択肢 (a)）を採用する。src/cleaner.rs の trait doc（`pub trait Cleaner` 直上、:327-335）に分類枠 8 行を追記済み。split 実装は行わないため次ラウンド PBI 化も不要。
+
+### 実測 1: メソッド別オーバーライド率
+
+実装ブロック総数の実測は **43**（本番 29 + テスト専用スタブ 14）。背景節の「41 impl」は `impl Cleaner for` の素 grep 値で、うち 2 件はテスト内の文字列リテラル（cleaners/generic.rs:1956、cleaners/orphan_containers.rs:1055）、batch.rs の 4 実装は完全修飾形 `impl crate::cleaner::Cleaner for`（テストスタブ）で素 grep から漏れる。本番 impl のみで裁定に影響はない。
+
+| メソッド | 群 | 本番 29 impl 中のオーバーライド | 本番率 | スタブ込み総数 |
+|---|---|---|---|---|
+| name（required） | core | 29 | 100% | 43 |
+| detect（required） | core | 29 | 100% | 43 |
+| clean（required） | core | 29 | 100% | 43 |
+| is_available | core | 13 | 45% | 15 |
+| risk | 無人選別述語 | 25 | 86% | 29 |
+| auto_clean_allowed | 無人選別述語 | 6 | 21% | 6 |
+| interactive_gated | 無人選別述語 | 3 | 10% | 4 |
+| quits_running_apps | 無人選別述語 | 2 | 7% | 4 |
+| advisory | scan / warnings | 5 | 17% | 5 |
+| per_cleaner_filters | scan / warnings | 3 | 10% | 3 |
+| sub_targets | TUI 専用 | 3 | 10% | 4 |
+| sub_owned_paths | TUI 専用 | 1 | 3% | 2 |
+
+### 実測 2: 呼び出し面（本番コードのみ。テスト内呼び出しと ManualOnly / HuggingFace / PreCommit の内部委譲は除く）
+
+| メソッド | 本番呼び出し元 |
+|---|---|
+| name | 全モジュール（registry 名寄せ・notice・filter_support 等、設計上の全経路） |
+| detect | scanner.rs detect_all（:193）のみ |
+| clean | batch.rs 実行 seam（:112-122）+ main.rs CleanTarget dispatch |
+| is_available | scanner.rs detect_all の単一パス（:176）のみ |
+| risk | unattended.rs select（:153/:180/:209）、scanner.rs scan_preamble（:225） |
+| auto_clean_allowed | unattended.rs select（:164/:183/:205）、main.rs all_cleaners の ManualOnly ラップ（:742）、interactive.rs gate_skipped_names（:171） |
+| interactive_gated | interactive.rs gate_skipped_names（:172、--yes 通知）のみ |
+| quits_running_apps | unattended.rs select（:161/:181）のみ |
+| advisory | scanner.rs run_scan の Notes（:303）のみ |
+| per_cleaner_filters | main.rs filter_support → 起動警告（:807/:811）のみ |
+| sub_targets | interactive.rs 選択マッピング（:34）のみ |
+| sub_owned_paths | interactive.rs 選択マッピング（:39）のみ |
+
+背景節の整理に対する実測上の補正 2 点:
+
+- interactive_gated の本番消費者は unattended.rs の select ではなく interactive.rs の gate_skipped_names（--yes の skipped-targets 通知）。select と 96 セル matrix（3 variant × 4 risk × include_manual × 2 status × quits = 96）が消費するのは risk / auto_clean_allowed / quits_running_apps で、Yes は interactive_gated を参照しない。分類枠では TTY 系述語として同じ群に置く（消費者の性質は無人選別と共通）。
+- auto_clean_allowed は select 以外に registry 合成時の ManualOnly ラップ（main.rs:742）と --yes 通知（interactive.rs:171）の 2 消費者を持ち、無人選別述語群で唯一モジュール境界をまたぐ。risk も scanner の表示面で 2 モジュール目を持つ。それ以外の 8 述語は 1 モジュールに収まる。
+
+### 3 選択肢の波及見積もり
+
+| 選択肢 | 43 impl への波及 | registry 型 | matrix pin / E2E | 得られるもの |
+|---|---|---|---|---|
+| (a) 現状維持 + 4 群分類 doc | 0（doc 追記のみ） | `Box<dyn Cleaner>` 維持 | 無修正 | 次回メソッド追加時の分類判断が doc 1 読で完結する |
+| (b) 小トレイト split（UnattendedInfo / TuiSubTargets 等への group 化） | 43 実装すべてに sub-trait の impl 追加（supertrait 合成で同一 impl ブロックにまとめても境界の型注釈は増える）。ManualOnly は委譲 6 メソッドの再配置 | supertrait 合成なら `Box<dyn Cleaner>` 維持だが利得は型注釈のみ。並列 `Vec<Box<dyn SubTrait>>` 化なら detect_all の index alignment と select Yes の「同一 slice の detect 結果」という型注釈（unattended.rs:191-195 の debug_assert）が崩れる | 96 セル matrix の fixture 型変更。E2E の語彙は不変でも回帰面が広がる | 「未実装群を型で強制」だが、強制先の default はオーバーライド率 3〜21% であり、29 本番 impl の大多数は default だけを持つ sub-trait 名の列挙追加になる |
+| (c) 構造体分解 | 29 本番 impl を struct 合成へ再構成。macro テーブル・plugin discovery・custom cleaners・ManualOnly を全面書き換え | registry の型と構築経路の再設計 | E2E 含め全 pin 再検証 | なし。8 述語の消費者はすでに 1-2 モジュールに収まり、trait に共有状態が無いため分解すべき対象が存在しない |
+
+### 根拠（裁定の 4 軸）
+
+- (i) オーバーライド率: 9 つの default メソッドのうち 8 個が本番率 45% 以下（6 個は 21% 以下）。split の利得が最も薄い群（TUI 3%/10%、scan/warnings 10%/17%）こそ sub-trait 化の自然な候補であり、型で未実装を強制しても大多数の impl に新情報がない。required 3 + risk はどの split でも共有されるため移動対象にならない。
+- (ii) registry: `Box<dyn Cleaner>` 単一オブジェクトが ManualOnly の合成時ラップ、detect_all の index alignment、select Yes の同一 slice 型注釈の 3 点を支える。split はこの 3 点のどれかを壊すか、supertrait 合成で形だけ残すかの二択で、後者は 43 実装の書き換えに見合う利得を持たない。
+- (iii) 「1 つの事実 = 1 所有者」規律と YAGNI: 実測では 8 つの default 述語の本番消費者は 1-2 モジュールに収まっており、所有者規律はすでに成立している。sub-trait は所有者の追加であって統合ではない。第 2 の消費者家族は現時点で不在であり、split の動機になる未来の要件も観測されていない。
+- (iv) 次回メソッド追加: 実際の保守コストは src/AGENTS.md が記録する「列挙の陳腐化」であり、trait doc の 4 群分類枠が追加時の判断（どの群・どの消費者モジュール・どの default）を doc 1 読に圧縮する。分類枠に収まらないメソッドが現れた時点で split 再審査が発火する。
+
+### 次ラウンド再評価トリガー
+
+- default 述語の本番消費者に第 3 モジュールが生えたとき（特に cleaner 側が advisory 等を参照し始めたとき）
+- OwnedPaths の doc に記録済みの「第 2 の cleaner family が owned-path 注釈を要する」時点（型 split の議論として同時に審議）
+- registry の `Box<dyn Cleaner>` 形状が別の理由で変わるとき（その変更に乗じて ride-along で再評価）
+- 追加後 2 ラウンド経ってもオーバーライド 0 の default メソッドが出たとき（split ではなく削除審議）
+
+### 検証（本 PBI の実施スコープ）
+
+- cargo fmt --check / cargo clippy --tests -- -D warnings / cargo test --lib cleaner を green で確認済み。doc コメントのみの追加で src の挙動は不変。フルスイート・E2E pin は統合側の最終ゲートで実施する（受け入れ基準の残りチェックボックスと DoD の cargo test 系は統合側が [x] にする）。
