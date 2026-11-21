@@ -3,7 +3,7 @@ mod cleaner;
 mod detector;
 
 pub use cleaner::{is_known_hint_name, offer_auto_clean, print_hints, KnownAppHintsCleaner};
-pub(crate) use cleaner::{quit_app_and_wait, relaunch_app};
+pub(crate) use cleaner::{quit_app_and_wait, relaunch_app, QUIT_POLL_INTERVAL};
 pub use detector::collect_hints;
 pub(crate) use detector::is_running;
 
@@ -74,6 +74,10 @@ mod tests {
     use cleaner::auto_clean_hint;
     use std::os::unix::process::ExitStatusExt;
     use std::process::Output;
+
+    /// Test quit poll: 1ms keeps the fixed iteration-count × interval shape
+    /// of the quit wait while removing every real sleep from the suite.
+    const TEST_POLL: std::time::Duration = std::time::Duration::from_millis(1);
 
     fn make_output(exit_code: i32, stdout: &str) -> Output {
         Output {
@@ -431,7 +435,13 @@ mod tests {
             running: true,
         };
 
-        let result = auto_clean_hint(&hint, home, &runner, crate::trash::TrashMode::Permanent);
+        let result = auto_clean_hint(
+            &hint,
+            home,
+            &runner,
+            crate::trash::TrashMode::Permanent,
+            TEST_POLL,
+        );
         assert!(result.is_err());
         let calls = runner.recorded_calls();
         assert!(calls.iter().any(|(p, _)| p == "osascript"));
@@ -458,8 +468,14 @@ mod tests {
             running: true,
         };
 
-        auto_clean_hint(&hint, home, &runner, crate::trash::TrashMode::Permanent)
-            .expect("should succeed");
+        auto_clean_hint(
+            &hint,
+            home,
+            &runner,
+            crate::trash::TrashMode::Permanent,
+            TEST_POLL,
+        )
+        .expect("should succeed");
         // The seam attempted one uchg clear per deleted path (the recording
         // runner rejects `chflags`, which exercises the warn-and-continue
         // contract), and the permanent removal actually deleted the dirs.
@@ -497,8 +513,14 @@ mod tests {
             running: true,
         };
 
-        auto_clean_hint(&hint, home, &runner, crate::trash::TrashMode::Permanent)
-            .expect("should succeed");
+        auto_clean_hint(
+            &hint,
+            home,
+            &runner,
+            crate::trash::TrashMode::Permanent,
+            TEST_POLL,
+        )
+        .expect("should succeed");
         let calls = runner.recorded_calls();
         let open_calls: Vec<_> = calls.iter().filter(|(p, _)| p == "open").collect();
         assert_eq!(open_calls.len(), 1);
@@ -521,8 +543,14 @@ mod tests {
             running: true,
         };
 
-        auto_clean_hint(&hint, home, &runner, crate::trash::TrashMode::Permanent)
-            .expect("should succeed");
+        auto_clean_hint(
+            &hint,
+            home,
+            &runner,
+            crate::trash::TrashMode::Permanent,
+            TEST_POLL,
+        )
+        .expect("should succeed");
         let calls = runner.recorded_calls();
         assert!(!calls.iter().any(|(p, _)| p == "open"));
     }
@@ -766,7 +794,8 @@ mod tests {
         );
 
         let runner = RecordingRunner::new(&["Code"], 1);
-        let c = cleaner::KnownAppHintsCleaner::new(home, Box::new(runner));
+        let c = cleaner::KnownAppHintsCleaner::new(home, Box::new(runner))
+            .with_test_poll_interval(TEST_POLL);
         let result = c
             .clean(
                 false,
@@ -1064,7 +1093,7 @@ mod tests {
     #[test]
     fn quit_app_and_wait_errors_when_entry_has_no_quit_app() {
         let runner = RecordingRunner::new(&[], 0);
-        let err = cleaner::quit_app_and_wait(&NO_QUIT_ENTRY, &runner).unwrap_err();
+        let err = cleaner::quit_app_and_wait(&NO_QUIT_ENTRY, &runner, TEST_POLL).unwrap_err();
         assert!(err.to_string().contains("cannot be auto-quit"));
         assert!(runner.recorded_calls().is_empty());
     }
@@ -1086,7 +1115,8 @@ mod tests {
         // A `"` in the app name must not close the `quit app "..."` literal
         // early: the recorded osascript argument carries it escaped.
         let runner = RecordingRunner::new(&[], 0);
-        cleaner::quit_app_and_wait(&QUOTED_QUIT_ENTRY, &runner).expect("quit should succeed");
+        cleaner::quit_app_and_wait(&QUOTED_QUIT_ENTRY, &runner, TEST_POLL)
+            .expect("quit should succeed");
         let calls = runner.recorded_calls();
         let osascript = calls
             .iter()
@@ -1122,7 +1152,7 @@ mod tests {
         // quit, so the bail must surface it instead of falling through to the
         // 10s quit poll (the pgrep fixtures report the app as still running).
         let runner = RecordingRunner::new(&["Code"], usize::MAX).with_exit_code("osascript", 1);
-        let err = cleaner::quit_app_and_wait(&VSCODE_ENTRY, &runner).unwrap_err();
+        let err = cleaner::quit_app_and_wait(&VSCODE_ENTRY, &runner, TEST_POLL).unwrap_err();
         let msg = err.to_string();
         assert!(
             msg.contains("osascript failed to quit"),

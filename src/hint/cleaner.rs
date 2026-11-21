@@ -10,13 +10,21 @@ use std::path::{Path, PathBuf};
 use super::detector::collect_hints;
 use super::{base_path, HintEntry, ProcessHint, PromptReader};
 
-const QUIT_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
+/// One production source of truth for the quit poll cadence: every caller
+/// passes this explicitly, so the 1s × 10 wait has a single owner.
+pub(crate) const QUIT_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
 const QUIT_TIMEOUT_SECS: usize = 10;
 
 /// Quit the app via osascript and wait until its process is gone.
+///
+/// `poll_interval` is a parameter, not an env var: an env override is
+/// process-global and would race parallel tests, while the parameter keeps
+/// the wait local to each call. Production passes [`QUIT_POLL_INTERVAL`]
+/// (1s × 10, unchanged); tests inject 1ms so the poll loop never real-sleeps.
 pub(crate) fn quit_app_and_wait(
     entry: &HintEntry,
     runner: &dyn CommandRunner,
+    poll_interval: std::time::Duration,
 ) -> anyhow::Result<()> {
     let quit_app = match entry.quit_app {
         Some(a) => a,
@@ -37,7 +45,7 @@ pub(crate) fn quit_app_and_wait(
 
     let process_name = entry.process_name.unwrap_or(quit_app);
     for _ in 0..QUIT_TIMEOUT_SECS {
-        std::thread::sleep(QUIT_POLL_INTERVAL);
+        std::thread::sleep(poll_interval);
         let still_running = runner
             .run("pgrep", &["-x", process_name])
             .map(|o| o.status.success())
@@ -54,7 +62,7 @@ pub(crate) fn quit_app_and_wait(
         anyhow::bail!(
             "{} did not quit within {}s — skipping cache deletion",
             entry.display_name,
-            QUIT_TIMEOUT_SECS
+            (poll_interval * QUIT_TIMEOUT_SECS as u32).as_secs()
         );
     }
     Ok(())
@@ -116,6 +124,7 @@ pub fn auto_clean_hint(
     home: &Path,
     runner: &dyn CommandRunner,
     mode: crate::trash::TrashMode,
+    poll_interval: std::time::Duration,
 ) -> anyhow::Result<crate::cleaner::CleanResult> {
     let entry = hint.entry;
     // The quit branch fires only for a running hint that configures
@@ -123,7 +132,7 @@ pub fn auto_clean_hint(
     // the bail inside quit_app_and_wait), and the offer flow never selects
     // a running hint without one.
     if hint.running && entry.quit_app.is_some() {
-        quit_app_and_wait(entry, runner)?;
+        quit_app_and_wait(entry, runner, poll_interval)?;
     }
 
     let base = base_path(home, entry.base_dir);
@@ -220,6 +229,11 @@ pub struct KnownAppHintsCleaner {
     /// Sub-target filter: display names from `sub_targets()`. `None` cleans
     /// every hint above its threshold; `Some` cleans only the named entries.
     subs: Option<Vec<String>>,
+    /// The quit poll interval rides the struct because the Cleaner-trait
+    /// clean() signature cannot carry the parameter: `new` seeds it with
+    /// QUIT_POLL_INTERVAL so production is pinned, and tests shorten it to
+    /// keep the poll loop off real time.
+    poll_interval: std::time::Duration,
 }
 
 impl KnownAppHintsCleaner {
@@ -228,6 +242,7 @@ impl KnownAppHintsCleaner {
             home: home.to_path_buf(),
             runner,
             subs: None,
+            poll_interval: QUIT_POLL_INTERVAL,
         }
     }
 
@@ -243,6 +258,15 @@ impl KnownAppHintsCleaner {
     /// sub_targets()).
     pub fn with_sub_names(mut self, subs: Vec<String>) -> Self {
         self.subs = Some(subs);
+        self
+    }
+
+    /// Test-only seam for the struct-carried poll interval: the trait's
+    /// clean() cannot take one, so tests shorten it here instead of
+    /// real-sleeping through the quit wait.
+    #[cfg(test)]
+    pub(crate) fn with_test_poll_interval(mut self, interval: std::time::Duration) -> Self {
+        self.poll_interval = interval;
         self
     }
 
@@ -422,7 +446,13 @@ impl Cleaner for KnownAppHintsCleaner {
         }
 
         for hint in &selected {
-            match auto_clean_hint(hint, &self.home, &*self.runner, opts.trash_mode) {
+            match auto_clean_hint(
+                hint,
+                &self.home,
+                &*self.runner,
+                opts.trash_mode,
+                self.poll_interval,
+            ) {
                 Ok(result) => {
                     summary.bytes_freed += result.bytes_freed;
                     summary.uses_trash |= result.uses_trash;

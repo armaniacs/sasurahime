@@ -475,7 +475,7 @@ impl AppSupportCleaner {
         if !approved.contains(target.hint_name) {
             return AppState::Blocked(format!("{} is running", target.hint_name));
         }
-        match quit_app_and_wait(entry, self.runner.as_ref()) {
+        match quit_app_and_wait(entry, self.runner.as_ref(), crate::hint::QUIT_POLL_INTERVAL) {
             Ok(()) => AppState::Quit,
             Err(e) => AppState::Blocked(format!("{e}")),
         }

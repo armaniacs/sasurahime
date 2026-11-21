@@ -34,13 +34,18 @@ Scenario: テストは実時間を待たない(境界ケース)
 
 ## 受け入れ基準
 
-- [ ] `quit_app_and_wait` が `poll_interval: Duration` を引数として受け取る(本 PBI の設計判断: 環境変数ではなくパラメータ注入。根拠は下記「設計判断」)
-- [ ] `auto_clean_hint` も `poll_interval` を受け取り、`quit_app_and_wait` へ素通しする
-- [ ] 本番呼び出し元(src/hint/cleaner.rs:425 の KnownAppHintsCleaner)は `QUIT_POLL_INTERVAL`(=1s)を明示的に渡し、**本番の待ち時間は 1 ミリ秒も変わらない**
-- [ ] quit フロー系テスト 8 本(`RecordingRunner::new` を使うもの全て)はテスト用定数(例: `Duration::from_millis(1)`)を注入する
-- [ ] `auto_clean_skips_if_quit_times_out` の主張内容(エラー返却、`rm` 非呼び出し)は無変更で green
-- [ ] bail メッセージの秒数は「反復数 × 注入間隔」から導出する(本番は従来どおり "10s"、テストは実測値になりメッセージ内容の pin は存在しないことを確認済み)
-- [ ] `cargo clippy --tests -- -D warnings` と `cargo fmt --check` がクリーン
+- [x] `quit_app_and_wait` が `poll_interval: Duration` を引数として受け取る(本 PBI の設計判断: 環境変数ではなくパラメータ注入。根拠は下記「設計判断」)
+- [x] `auto_clean_hint` も `poll_interval` を受け取り、`quit_app_and_wait` へ素通しする
+- [x] 本番呼び出し元は `QUIT_POLL_INTERVAL`(=1s)を明示的に渡し、**本番の待ち時間は 1 ミリ秒も変わらない**(実装時に第 2 の本番呼び出し元 src/cleaners/app_support.rs:478 `prepare_app` を発見 — 起票時の「KnownAppHintsCleaner のみ」は誤り。こちらも本番定数を明示渡し)
+- [x] quit フロー系テスト 8 本(`RecordingRunner::new` を使うもの全て)はテスト用定数 `TEST_POLL`(1ms)を注入する
+- [x] `auto_clean_skips_if_quit_times_out` の主張内容(エラー返却、`rm` 非呼び出し)は無変更で green
+- [x] bail メッセージの秒数は「反復数 × 注入間隔」から導出する(本番は従来どおり "10s"、テストは実測値になりメッセージ内容の pin は存在しないことを確認済み)
+- [x] `cargo clippy --tests -- -D warnings` と `cargo fmt --check` がクリーン
+
+### 実装時の設計補足(起票後に確定した差分)
+
+- Cleaner トレイトの `clean()` シグネチャは interval を運べないため、`KnownAppHintsCleaner` に `poll_interval` フィールド(`new()` で本番定数をシード)と `#[cfg(test)] with_test_poll_interval` を追加。クリーン経路の統合テストも 1 秒未満にするために必要
+- 境界ケース「注入間隔 0 で反復数 10 回」の新規テストは追加せず。反復数契約は既存の pgrep 呼び出し回数主張が既に pin しており、テスト総数 916 の固定と矛盾しない方を優先した
 
 ## テスト戦略(t_wada スタイル)
 
@@ -96,9 +101,16 @@ rg -n "auto_clean_hint\(" src/
 - hint 系 E2E(tests/hints.rs)は実プロセスを spawn するため本 PBI の影響を受けない。触らない
 
 ## Definition of Done
-- [ ] 全 BDD シナリオが自動テストとして実装されパスする
-- [ ] `cargo test --lib` の wall 時間が変更前後で記録され、quit 系テストがすべて 1 秒未満
-- [ ] コードレビュー完了(GitHub PR での approve を必須)
-- [ ] リファクタリング完了(green 後)
-- [ ] ロールバック手段: 本番待ち時間が不変であることを実測で確認済みのため、revert で安全に戻る
-- [ ] ドキュメント更新: 不要(本番挙動不変)
+- [x] 全 BDD シナリオが自動テストとして実装されパスする
+- [x] `cargo test --lib` の wall 時間が変更前後で記録され、quit 系テストがすべて 1 秒未満(13.50s → 12.97s。**「概ね半減」目標は撤回**: 実測の結果、lib スイートの真の下限は `history::append_history_truncates_to_max_entries` の 12.85s(append 1 件ごとの全ファイル再書き込みで O(n²)、MAX_HISTORY_ENTRIES=1000)であり、quit の 10s は並列実行でその陰に隠れていた。起票時のレビューによる下限の帰属は誤りだった → PBI 2026-11-21-09 として台帳化)
+- [ ] コードレビュー完了(GitHub PR での approve を必須) — ユーザー作業: 1121z ブランチの実装コミットのレビュー
+- [x] リファクタリング完了(green 後)
+- [x] ロールバック手段: 本番待ち時間が不変であることを実測で確認済みのため、revert で安全に戻る
+- [x] ドキュメント更新: 不要(本番挙動不変)
+
+## 実績(2026-11-21 クローズ)
+
+- hint モジュール単独: 62 tests, 0.30s(変更前はタイムアウト 1 テストだけで 10 秒超)
+- `cargo test --lib`: 916 passed, 12.97s(変更前 13.50s — 差分は hint 分のみ。残りは history O(n²) が支配)
+- `cargo test --test hints`: 11 passed, 無修正で green。clippy -D warnings / fmt --check クリーン
+- なぜなぜ記録: `.plan/whywhy-round11-quit-poll-sleep.md`
