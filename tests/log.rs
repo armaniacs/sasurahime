@@ -1,5 +1,4 @@
 use assert_cmd::Command;
-use filetime::FileTime;
 use std::fs;
 use std::time::{Duration, SystemTime};
 use tempfile::TempDir;
@@ -11,10 +10,23 @@ fn sasurahime(home: &std::path::Path) -> Command {
     cmd
 }
 
+fn set_mtime(path: &std::path::Path, mtime: SystemTime) {
+    // std::fs::set_times requires an open fd, and write-open is impossible
+    // for directories, so dirs open read-only (futimens accepts that).
+    let f = if path.is_dir() {
+        fs::File::open(path)
+    } else {
+        fs::File::options().write(true).open(path)
+    }
+    .unwrap();
+    f.set_times(fs::FileTimes::new().set_modified(mtime))
+        .unwrap();
+}
+
 fn write_aged(path: &std::path::Path, days_old: u64) {
     fs::write(path, b"log content").unwrap();
     let mtime = SystemTime::now() - Duration::from_secs(days_old * 86_400);
-    filetime::set_file_mtime(path, FileTime::from_system_time(mtime)).unwrap();
+    set_mtime(path, mtime);
 }
 
 #[test]

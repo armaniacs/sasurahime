@@ -326,7 +326,7 @@ impl LibraryLogsCleaner {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use filetime::{set_file_mtime, FileTime};
+    use crate::test_helpers::set_mtime;
     use std::fs;
     use std::io::IsTerminal;
     use std::time::Duration;
@@ -359,7 +359,7 @@ mod tests {
         let f = logs.join("old.log");
         fs::write(&f, b"xx").unwrap();
         let past = SystemTime::now() - Duration::from_secs(200 * 86400);
-        set_file_mtime(&f, FileTime::from_system_time(past)).unwrap();
+        set_mtime(&f, past);
         let results = scan_logs(&logs, 90, u64::MAX);
         let entry = results.iter().find(|e| e.path == f).unwrap();
         assert!(entry
@@ -406,7 +406,7 @@ mod tests {
         let f = logs.join("future.log");
         fs::write(&f, b"xx").unwrap();
         let future = SystemTime::now() + Duration::from_secs(3600);
-        set_file_mtime(&f, FileTime::from_system_time(future)).unwrap();
+        set_mtime(&f, future);
         let results = scan_logs(&logs, 1, u64::MAX);
         assert!(results.is_empty(), "future mtime must not trigger stale");
     }
@@ -462,7 +462,7 @@ mod tests {
         let logs = logs_dir(&tmp);
         fs::write(logs.join("test.log"), b"x").unwrap();
         let past = SystemTime::now() - Duration::from_secs(200 * 86400);
-        set_file_mtime(logs.join("test.log"), FileTime::from_system_time(past)).unwrap();
+        set_mtime(&logs.join("test.log"), past);
 
         let runner = crate::test_helpers::MockRunner::new().with_success("chflags");
         let cleaner = LibraryLogsCleaner::new(tmp.path(), Box::new(runner));
@@ -504,7 +504,7 @@ mod tests {
         let logs = logs_dir(&tmp);
         fs::write(logs.join("aged.log"), b"x").unwrap();
         let past = SystemTime::now() - Duration::from_secs(200 * 86400);
-        set_file_mtime(logs.join("aged.log"), FileTime::from_system_time(past)).unwrap();
+        set_mtime(&logs.join("aged.log"), past);
 
         let runner = crate::test_helpers::MockRunner::new().with_success("chflags");
         let cleaner = LibraryLogsCleaner::new(tmp.path(), Box::new(runner));
@@ -535,7 +535,7 @@ mod tests {
         let logs = logs_dir(&tmp);
         fs::write(logs.join("aged.log"), b"x").unwrap();
         let past = SystemTime::now() - Duration::from_secs(200 * 86400);
-        set_file_mtime(logs.join("aged.log"), FileTime::from_system_time(past)).unwrap();
+        set_mtime(&logs.join("aged.log"), past);
 
         let runner = crate::test_helpers::MockRunner::new().with_success("chflags");
         let cleaner = LibraryLogsCleaner::new(tmp.path(), Box::new(runner));
@@ -568,7 +568,7 @@ mod tests {
         let logs = logs_dir(&tmp);
         fs::write(logs.join("aged.log"), b"x").unwrap();
         let past = SystemTime::now() - Duration::from_secs(200 * 86400);
-        set_file_mtime(logs.join("aged.log"), FileTime::from_system_time(past)).unwrap();
+        set_mtime(&logs.join("aged.log"), past);
 
         let runner = crate::test_helpers::MockRunner::new().with_success("chflags");
         let cleaner = LibraryLogsCleaner::new(tmp.path(), Box::new(runner));

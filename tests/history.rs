@@ -1,5 +1,4 @@
 use assert_cmd::Command;
-use filetime::FileTime;
 use std::fs;
 use std::time::{Duration, SystemTime};
 use tempfile::TempDir;
@@ -331,7 +330,12 @@ fn written_history_entries_keep_the_rfc3339_local_offset_shape() {
     let aged = log_dir.join("parity-pin.log");
     fs::write(&aged, b"log content").unwrap();
     let mtime = SystemTime::now() - Duration::from_secs(10 * 86_400);
-    filetime::set_file_mtime(&aged, FileTime::from_system_time(mtime)).unwrap();
+    fs::File::options()
+        .write(true)
+        .open(&aged)
+        .unwrap()
+        .set_times(fs::FileTimes::new().set_modified(mtime))
+        .unwrap();
 
     let output = sasurahime(tmp.path())
         .args(["--permanent", "clean", "logs"])

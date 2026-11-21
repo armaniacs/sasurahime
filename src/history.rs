@@ -242,7 +242,7 @@ pub fn write_history_entry(
         // Same strtime format string the chrono implementation used: jiff's
         // %:z emits the same colon-carrying local offset, so history.json
         // stays byte-equal.
-        timestamp: jiff::Zoned::now()
+        timestamp: jiff::ZonedDateTime::now()
             .strftime("%Y-%m-%dT%H:%M:%S%:z")
             .to_string(),
         cleaner: label.to_string(),
@@ -643,7 +643,7 @@ mod tests {
         // format string the chrono implementation used must emit the same
         // byte shape — a 16-char "YYYY-MM-DDTHH:MM" slice, seconds, and a
         // colon-carrying ±HH:MM offset. Wall-clock independent.
-        let ts = jiff::Zoned::now()
+        let ts = jiff::ZonedDateTime::now()
             .strftime("%Y-%m-%dT%H:%M:%S%:z")
             .to_string();
         let b = ts.as_bytes();

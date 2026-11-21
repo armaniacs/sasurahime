@@ -45,7 +45,7 @@ dirs        = "7"
 toml        = "1.1"
 serde       = { version = "1", features = ["derive"] }
 serde_json  = "1"
-jiff = "0.2"
+jiff = "1"
 wait-timeout = "0.2"
 trash = "5"
 rayon = "1"
@@ -62,6 +62,5 @@ panic          = "abort"  # Abort on panic removes unwinding code
 
 [dev-dependencies]
 assert_cmd = "2"
-filetime   = "0.2"
 tempfile   = "3"
-rstest     = "0.22"
+rstest     = "0.28"

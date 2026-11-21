@@ -188,7 +188,6 @@ fn custom_target_nonexistent_path_shows_not_found() {
 
 #[test]
 fn per_cleaner_older_than_days_hides_new_files_in_scan() {
-    use filetime::FileTime;
     use std::fs;
     use std::time::{Duration, SystemTime};
     use tempfile::TempDir;
@@ -200,7 +199,10 @@ fn per_cleaner_older_than_days_hides_new_files_in_scan() {
     fs::write(cache_dir.join("data"), b"content").unwrap();
     // Set mtime to 60 days ago (old enough to pass older_than_days = 30)
     let old_mtime = SystemTime::now() - Duration::from_secs(60 * 86_400);
-    filetime::set_file_mtime(&cache_dir, FileTime::from_system_time(old_mtime)).unwrap();
+    fs::File::open(&cache_dir)
+        .unwrap()
+        .set_times(fs::FileTimes::new().set_modified(old_mtime))
+        .unwrap();
 
     // Create a new cache dir that should be excluded
     let new_cache = tmp.path().join(".cache/new-tool");
@@ -289,7 +291,6 @@ fn per_cleaner_larger_than_mb_hides_small_files_in_scan() {
 
 #[test]
 fn per_cleaner_older_than_days_for_logs_affects_scan() {
-    use filetime::FileTime;
     use std::fs;
     use std::time::{Duration, SystemTime};
     use tempfile::TempDir;
@@ -303,11 +304,12 @@ fn per_cleaner_older_than_days_for_logs_affects_scan() {
     // Write an old log file (should be cleaned)
     fs::write(log_dir.join("old.log"), b"old content").unwrap();
     let old_mtime = SystemTime::now() - Duration::from_secs(60 * 86_400);
-    filetime::set_file_mtime(
-        log_dir.join("old.log"),
-        FileTime::from_system_time(old_mtime),
-    )
-    .unwrap();
+    fs::File::options()
+        .write(true)
+        .open(log_dir.join("old.log"))
+        .unwrap()
+        .set_times(fs::FileTimes::new().set_modified(old_mtime))
+        .unwrap();
 
     // Config: older_than_days = 7 for "logs"
     // With keep_days=7, a 60-day-old log is pruneable

@@ -1,5 +1,4 @@
 use crate::command::CommandRunner;
-use filetime::{set_file_mtime, FileTime};
 use std::os::unix::process::ExitStatusExt;
 use std::path::Path;
 use std::time::{Duration, SystemTime};
@@ -129,11 +128,26 @@ impl CommandRunner for MockRunner {
 
 // ── Fixture utilities ──
 
+/// Set the modification time of a file or directory to `mtime`.
+///
+/// std::fs::set_times requires an open fd, and write-open is impossible
+/// for directories, so dirs open read-only (futimens accepts that).
+pub fn set_mtime(path: &Path, mtime: SystemTime) {
+    let f = if path.is_dir() {
+        std::fs::File::open(path)
+    } else {
+        std::fs::File::options().write(true).open(path)
+    }
+    .unwrap_or_else(|e| panic!("test fixture {path:?} must open for set_times: {e}"));
+    f.set_times(std::fs::FileTimes::new().set_modified(mtime))
+        .unwrap_or_else(|e| panic!("set_times failed on test fixture {path:?}: {e}"));
+}
+
 /// Write a file and set its modification time to `days_old` days ago.
 pub fn write_aged_file(path: &Path, days_old: u64, content: &[u8]) {
     std::fs::write(path, content).unwrap();
     let mtime = SystemTime::now() - Duration::from_secs(days_old * 86_400);
-    set_file_mtime(path, FileTime::from_system_time(mtime)).unwrap();
+    set_mtime(path, mtime);
 }
 
 // ── EnvGuard ──

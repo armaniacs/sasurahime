@@ -1581,7 +1581,7 @@ mod tests {
 
     // ── is_older_than / meets_age_filter / meets_size_filter ─────────────────
 
-    use filetime::FileTime;
+    use crate::test_helpers::set_mtime;
     use std::time::{Duration, SystemTime};
 
     fn write_aged_dir(path: &Path, secs_old: u64) {
@@ -1591,7 +1591,7 @@ mod tests {
         // so we must set mtime after the write.
         fs::write(path.join(".aged"), b"x").unwrap();
         let mtime = SystemTime::now() - Duration::from_secs(secs_old);
-        filetime::set_file_mtime(path, FileTime::from_system_time(mtime)).unwrap();
+        set_mtime(path, mtime);
     }
 
     #[test]
@@ -1752,7 +1752,7 @@ mod tests {
         fs::write(data_dir.join("old.log"), b"x").unwrap();
         // Set directory mtime after writing file (file writes can update dir mtime)
         let old = SystemTime::now() - Duration::from_secs(7 * 86_400);
-        filetime::set_file_mtime(&data_dir, FileTime::from_system_time(old)).unwrap();
+        crate::test_helpers::set_mtime(&data_dir, old);
 
         let mut per_cleaner = std::collections::HashMap::new();
         per_cleaner.insert(

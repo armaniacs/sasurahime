@@ -207,13 +207,12 @@ impl Cleaner for LogCleaner {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use filetime::FileTime;
     use tempfile::TempDir;
 
     fn write_aged(path: &Path, secs_old: u64) {
         fs::write(path, b"x").unwrap();
         let mtime = SystemTime::now() - Duration::from_secs(secs_old);
-        filetime::set_file_mtime(path, FileTime::from_system_time(mtime)).unwrap();
+        crate::test_helpers::set_mtime(path, mtime);
     }
 
     #[test]

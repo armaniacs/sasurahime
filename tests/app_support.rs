@@ -15,6 +15,19 @@ fn put(home: &Path, rel: &str, bytes: usize) {
     fs::write(p, vec![1u8; bytes]).unwrap();
 }
 
+fn set_mtime(path: &Path, mtime: std::time::SystemTime) {
+    // std::fs::set_times requires an open fd, and write-open is impossible
+    // for directories, so dirs open read-only (futimens accepts that).
+    let f = if path.is_dir() {
+        fs::File::open(path)
+    } else {
+        fs::File::options().write(true).open(path)
+    }
+    .unwrap();
+    f.set_times(fs::FileTimes::new().set_modified(mtime))
+        .unwrap();
+}
+
 const OVER_THRESHOLD: usize = 65 * 1024 * 1024;
 
 #[test]
@@ -213,7 +226,6 @@ fn dry_run_shows_full_paths_without_the_hints_tag() {
 
 #[test]
 fn dry_run_shows_leftovers_without_deleting() {
-    use filetime::{set_file_mtime, FileTime};
     use std::time::{Duration, SystemTime};
 
     let tmp = TempDir::new().unwrap();
@@ -221,9 +233,9 @@ fn dry_run_shows_leftovers_without_deleting() {
     let dir = tmp
         .path()
         .join("Library/Application Support/ZzzNoSuchApp12345");
-    let old = FileTime::from_system_time(SystemTime::now() - Duration::from_secs(200 * 86_400));
-    set_file_mtime(dir.join("data.bin"), old).unwrap();
-    set_file_mtime(&dir, old).unwrap();
+    let old = SystemTime::now() - Duration::from_secs(200 * 86_400);
+    set_mtime(&dir.join("data.bin"), old);
+    set_mtime(&dir, old);
 
     let output = sasurahime(tmp.path())
         .args(["--permanent", "clean", "app-support", "--dry-run"])
@@ -239,7 +251,6 @@ fn dry_run_shows_leftovers_without_deleting() {
 
 #[test]
 fn non_interactive_clean_does_not_list_leftovers() {
-    use filetime::{set_file_mtime, FileTime};
     use std::time::{Duration, SystemTime};
 
     let tmp = TempDir::new().unwrap();
@@ -248,9 +259,9 @@ fn non_interactive_clean_does_not_list_leftovers() {
     let dir = tmp
         .path()
         .join("Library/Application Support/ZzzNoSuchApp12345");
-    let old = FileTime::from_system_time(SystemTime::now() - Duration::from_secs(200 * 86_400));
-    set_file_mtime(dir.join("data.bin"), old).unwrap();
-    set_file_mtime(&dir, old).unwrap();
+    let old = SystemTime::now() - Duration::from_secs(200 * 86_400);
+    set_mtime(&dir.join("data.bin"), old);
+    set_mtime(&dir, old);
 
     let output = sasurahime(tmp.path())
         .args(["--permanent", "clean", "app-support"])

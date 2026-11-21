@@ -1856,12 +1856,12 @@ mod tests {
         );
     }
 
-    use filetime::{set_file_mtime, FileTime};
+    use crate::test_helpers::set_mtime;
     use std::time::{Duration, SystemTime};
 
     fn age(path: &Path, days: u64) {
         let t = SystemTime::now() - Duration::from_secs(days * 86_400);
-        set_file_mtime(path, FileTime::from_system_time(t)).unwrap();
+        set_mtime(path, t);
     }
 
     /// Creates `<base>/<name>/data.bin` of `bytes` bytes, all aged `days` days.
@@ -1927,7 +1927,7 @@ mod tests {
         make_folder(&base, "Recent", 2 * MIB, 3);
         let fut = make_folder(&base, "Future", 2 * MIB, 200);
         let t = SystemTime::now() + Duration::from_secs(86_400);
-        set_file_mtime(&fut, FileTime::from_system_time(t)).unwrap();
+        set_mtime(&fut, t);
         assert!(
             find_leftovers(&base, &installed(&[], &[]), SystemTime::now(), 1 << 20, 30).is_empty()
         );
