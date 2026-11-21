@@ -179,6 +179,38 @@ mod tests {
         std::fs::write(dir.join(name), vec![0u8; bytes]).unwrap();
     }
 
+    /// Resets the process-global SCAN_CACHE to its initial disabled state.
+    ///
+    /// Swaps inside the Mutex instead of `SCAN_CACHE.set(...)`: OnceLock is
+    /// set-once, so a second `set` silently fails and the previous test's
+    /// inventory leaks into the next test.
+    ///
+    /// Deliberately no TEST_LOCK: std Mutex is non-reentrant, so tests taking
+    /// it here would deadlock as soon as they call code that takes the same
+    /// lock itself (the config.rs TEST_LOCK users). Lock-free swap keeps this
+    /// module free of that re-entrancy trap.
+    ///
+    /// Boundary trigger: lock-free swap is deterministic while only one test
+    /// touches the global SCAN_CACHE; when a second such test is written,
+    /// re-judge introducing a (scan_cache-dedicated) test lock.
+    fn reset_scan_cache() {
+        let cell = SCAN_CACHE.get_or_init(|| Mutex::new(None));
+        let mut guard = cell.lock().unwrap_or_else(|p| p.into_inner());
+        *guard = None;
+    }
+
+    /// Whether the global cache currently holds an entry for `dir`.
+    fn global_has_entry(dir: &Path) -> bool {
+        let guard = SCAN_CACHE
+            .get_or_init(|| Mutex::new(None))
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        match guard.as_ref() {
+            Some(cache) => cache.entries.contains_key(dir.to_string_lossy().as_ref()),
+            None => false,
+        }
+    }
+
     #[test]
     fn record_if_unchanged_rejects_mid_walk_changes() {
         // A directory changed during the walk must not be cached under its
@@ -336,7 +368,7 @@ mod tests {
     fn cached_dir_size_matches_dir_size_and_caches() {
         let tmp = tempfile::TempDir::new().unwrap();
         write_file(tmp.path(), "a", 300);
-        let _ = SCAN_CACHE.set(Mutex::new(None));
+        reset_scan_cache();
         init(&tmp.path().join("cache.json"));
         let measured = crate::format::dir_size(tmp.path());
         assert_eq!(cached_dir_size(tmp.path()), measured);
@@ -346,5 +378,30 @@ mod tests {
         write_file(tmp.path(), "b", 100);
         let updated = crate::format::dir_size(tmp.path());
         assert_eq!(cached_dir_size(tmp.path()), updated);
+    }
+
+    #[test]
+    fn reset_scan_cache_clears_seeded_inventory_deterministically() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        write_file(tmp.path(), "a", 300);
+        // Seed one entry through the real path: enable the global, then let
+        // cached_dir_size record this directory.
+        init(&tmp.path().join("cache.json"));
+        let _ = cached_dir_size(tmp.path());
+        reset_scan_cache();
+        // Absence of the seeded key is the strongest assertion that holds
+        // under parallel execution: every test keys its own tempdir, so once
+        // the reset drops the key nothing can re-insert it.
+        assert!(
+            !global_has_entry(tmp.path()),
+            "first reset must clear the seeded entry"
+        );
+        // A consecutive reset must stay empty: a set-once rewrite
+        // (SCAN_CACHE.set) would silently no-op here.
+        reset_scan_cache();
+        assert!(
+            !global_has_entry(tmp.path()),
+            "second reset must keep the inventory empty"
+        );
     }
 }
