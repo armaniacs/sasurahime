@@ -1,8 +1,6 @@
 use anyhow::Result;
 use std::fs;
 use std::path::Path;
-#[cfg(test)]
-use std::sync::atomic::{AtomicBool, Ordering};
 use trash::macos::{DeleteMethod, TrashContextExtMacos};
 
 /// Deletion mode carried through the clean flow. `main` resolves it once
@@ -71,34 +69,41 @@ impl DeleteCtx {
 // ── test-only backend override ──
 
 #[cfg(test)]
-static TRASH_BACKEND_OVERRIDE: AtomicBool = AtomicBool::new(false);
+thread_local! {
+    /// Thread-local so an installed override can never leak into parallel
+    /// tests on other threads: `delete_path` consults this flag only on the
+    /// thread that installed it.
+    static TRASH_BACKEND_OVERRIDE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
 
 /// Simulates a refusing trash backend so the seam's skip classification and
 /// claims can be exercised deterministically. The platform backends (Finder
 /// via osascript, `trashItemAtURL` via trashd) move entries out of read-only
 /// parent directories on modern macOS, so a chmod alone no longer forces the
-/// refusal the tests need. Install under TEST_LOCK; the guard restores the
-/// default backend on drop.
+/// refusal the tests need. The flag is thread-local, so only this thread's
+/// `delete_path` calls see the override: installing it cannot turn a
+/// lock-free parallel test red. The guard restores the default backend on
+/// drop.
 #[cfg(test)]
 pub fn set_trash_backend_override(enabled: bool) {
-    TRASH_BACKEND_OVERRIDE.store(enabled, Ordering::Relaxed);
+    TRASH_BACKEND_OVERRIDE.with(|override_flag| override_flag.set(enabled));
 }
 
 #[cfg(test)]
 fn trash_backend_override_enabled() -> bool {
-    TRASH_BACKEND_OVERRIDE.load(Ordering::Relaxed)
+    TRASH_BACKEND_OVERRIDE.with(|override_flag| override_flag.get())
 }
 
 /// Installs the test-only override and restores the default backend on drop.
-/// `set` takes TEST_LOCK and holds it until Drop: two parallel tests can
-/// never install the override at the same time, so one guard's release can
-/// never clear the flag under another test's run (the lock-free release
-/// window that flaked under `cargo test --lib`).
+/// `set` takes TEST_LOCK and holds it until Drop, preserving the existing
+/// serialization with the other TEST_LOCK users; the thread-local flag adds
+/// thread isolation on top, so even a lock-free parallel test on another
+/// thread never observes an installed override.
 #[cfg(test)]
 pub struct TrashBackendOverrideGuard {
     /// Held for the guard's whole lifetime: the override is installed and
     /// cleared while the lock is held, so a parallel override user blocks
-    /// on `set` instead of racing the flag.
+    /// on `set` instead of installing under another user's run.
     _lock: std::sync::MutexGuard<'static, ()>,
 }
 
@@ -383,8 +388,10 @@ mod tests {
     use std::fs;
     use tempfile::TempDir;
 
-    // DeleteCtx-based tests carry the mode as an argument: no global, no
-    // TEST_LOCK, safe to run fully in parallel.
+    // DeleteCtx-based tests carry the mode as an argument and need no
+    // TEST_LOCK: the one global delete_path consults is the test-only trash
+    // backend override, and that override is thread-local, so a guard held
+    // on another test's thread is invisible here.
 
     #[test]
     fn delete_ctx_trash_mode_moves_to_trash() {
@@ -394,6 +401,41 @@ mod tests {
         fs::create_dir_all(&d).unwrap();
         ctx.delete_path(&d).unwrap();
         assert!(!d.exists(), "trash mode removes the source path");
+    }
+
+    #[test]
+    fn delete_ctx_trash_mode_is_unaffected_by_another_threads_override() {
+        // The lock-free DeleteCtx tests run fully in parallel with tests
+        // holding TrashBackendOverrideGuard, so an override installed on
+        // another thread must be invisible here — otherwise the lock-free
+        // trash tests observe the flag and flake red. Channels pin the
+        // interleaving deterministically (no sleeps): the child's guard is
+        // provably installed before the parent deletes.
+        let (installed_tx, installed_rx) = std::sync::mpsc::channel();
+        let (verified_tx, verified_rx) = std::sync::mpsc::channel();
+        let child = std::thread::spawn(move || {
+            let _guard = TrashBackendOverrideGuard::set();
+            installed_tx
+                .send(())
+                .expect("parent still waiting for the installed signal");
+            verified_rx
+                .recv()
+                .expect("parent still inside the verification window");
+        });
+        installed_rx
+            .recv()
+            .expect("override thread must install its guard");
+        let tmp = TempDir::new().unwrap();
+        let d = tmp.path().join("subdir");
+        fs::create_dir_all(&d).unwrap();
+        DeleteCtx::new(TrashMode::Trash)
+            .delete_path(&d)
+            .expect("another thread's override must be invisible to this thread");
+        assert!(!d.exists(), "trash mode removes the source path");
+        verified_tx
+            .send(())
+            .expect("override thread still waiting to release its guard");
+        child.join().unwrap();
     }
 
     #[test]
