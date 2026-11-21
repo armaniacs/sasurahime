@@ -33,13 +33,13 @@ Scenario: オーバーライド自身の契約は変わらない(エラー/境�
 
 ## 受け入れ基準
 
-- [ ] `TRASH_BACKEND_OVERRIDE` を `thread_local!`(`Cell<bool>`)に変更し、読み書きを同一スレッドに限定する
-- [ ] `TrashBackendOverrideGuard` は現行どおり TEST_LOCK を保持する(他の TEST_LOCK 利用者との既存の直列化を変えない)
-- [ ] 下記テスト戦略の決定的 red-first テストが、変更前のコードで red、変更後は green であることを確認する
-- [ ] オーバーライド利用 3 箇所(trash.rs:801 / cli_fallback.rs:406 / mise.rs:864)は無修正で green
-- [ ] src/trash.rs:386-387 の誤ったコメントを事実に合わせて修正する(自スレッドのオーバーライドのみを見る旨)
-- [ ] ソースピン `delete_ctx_delete_path_selects_the_nsfilemanager_backend`(src/trash.rs:683)が無修正で green する
-- [ ] 本番コード(`#[cfg(test)]` 外)は 1 行も変更しない
+- [x] `TRASH_BACKEND_OVERRIDE` を `thread_local!`(`Cell<bool>`)に変更し、読み書きを同一スレッドに限定する
+- [x] `TrashBackendOverrideGuard` は現行どおり TEST_LOCK を保持する(他の TEST_LOCK 利用者との既存の直列化を変えない)
+- [x] 下記テスト戦略の決定的 red-first テストが、変更前のコードで red、変更後は green であることを確認する
+- [x] オーバーライド利用 3 箇所(trash.rs:801 / cli_fallback.rs:406 / mise.rs:864)は無修正で green
+- [x] src/trash.rs:386-387 の誤ったコメントを事実に合わせて修正する(自スレッドのオーバーライドのみを見る旨)
+- [x] ソースピン `delete_ctx_delete_path_selects_the_nsfilemanager_backend`(src/trash.rs:683)が無修正で green する
+- [x] 本番コード(`#[cfg(test)]` 外)は 1 行も変更しない
 
 ## テスト戦略(t_wada スタイル)
 
@@ -92,9 +92,16 @@ thread_local 化は未実装。オーバーライド利用は 3 箇所のみ。
 - ガードから TEST_LOCK を外したくなる誘惑に注意。外すと verbose フラグなど他の TEST_LOCK 利用者との相互排除の意味論が変わり、影響調査が本 PBI のスコープを超える
 
 ## Definition of Done
-- [ ] 全 BDD シナリオが自動テストとして実装されパスする
-- [ ] `cargo test --lib` 10 連続 green(フレーク 0 回)
-- [ ] コードレビュー完了(GitHub PR での approve を必須)
-- [ ] リファクタリング完了(green 後)
-- [ ] ロールバック手段: 本番コード非変更のため revert 1 コミットで完全に戻る
-- [ ] ドキュメント更新: 不要(本番挙動不変、TEST_LOCK 規約は変更しない)
+- [x] 全 BDD シナリオが自動テストとして実装されパスする
+- [x] `cargo test --lib` 10 連続 green(フレーク 0 回)
+- [ ] コードレビュー完了(GitHub PR での approve を必須) — ユーザー作業: 1121z ブランチの実装コミットのレビュー
+- [x] リファクタリング完了(green 後)
+- [x] ロールバック手段: 本番コード非変更のため revert 1 コミットで完全に戻る
+- [x] ドキュメント更新: 不要(本番挙動不変、TEST_LOCK 規約は変更しない)
+
+## 実績(2026-11-21 クローズ)
+
+- red-first: 決定的 pin テスト(`delete_ctx_trash_mode_is_unaffected_by_another_threads_override`)が旧グローバル実装で `TrashRefused` により確実に red
+- green: `cargo test --lib` 916 passed(thread_local 化後)× 10 連続、フレーク 0
+- clippy -D warnings / fmt --check クリーン。本番コード無変更
+- なぜなぜ記録: `.plan/whywhy-round11-trash-override-race.md`
