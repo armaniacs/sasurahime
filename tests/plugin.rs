@@ -438,3 +438,76 @@ fn plugin_freed_claim_is_capped_at_the_verified_size() {
         "the Freed line must report the verified size, got:\n{stdout}"
     );
 }
+
+fn failing_clean_plugin_body() -> &'static str {
+    "#!/bin/sh\nif [ \"$1\" = \"scan\" ]; then echo '{\"status\":\"pruneable\",\"bytes\":512}'; exit 0; fi\nexit 1\n"
+}
+
+#[test]
+fn failing_plugin_clean_shows_the_failed_token_under_the_default_reporter() {
+    // Stage-3 pin inventory (PBI 2026-11-21-05): the single engine's
+    // [FAILED] status token had no E2E pin. A plugin whose clean exits 1
+    // drives run_clean_target's spinner branch into the Err arm: the
+    // "Cleaning foo... [FAILED]" token prints, the Err contract surfaces
+    // the plugin's error to the caller, and the run exits 1.
+    let tmp = TempDir::new().unwrap();
+    let bin_dir = tmp.path().join("bin");
+    fs::create_dir_all(&bin_dir).unwrap();
+    install_plugin(&bin_dir, "sasurahime-foo", failing_clean_plugin_body());
+    let path = format!("{}:/usr/bin:/bin", bin_dir.display());
+
+    let output = sasurahime(tmp.path(), &path)
+        .args(["clean", "foo"])
+        .output()
+        .unwrap();
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "a failed single clean exits 1, stderr:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("[FAILED]"),
+        "the spinner reporter must show the [FAILED] token:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("plugin exited with code 1"),
+        "the Err contract must carry the plugin's error to the caller:\n{stderr}"
+    );
+}
+
+#[test]
+fn failing_plugin_clean_suppresses_the_failed_token_under_deep_suppress() {
+    // Stage-3 pin inventory (PBI 2026-11-21-05): the single engine's quiet
+    // branch (reporter.show_spinner() == false) must NOT print the
+    // [FAILED] token — the deep-suppress reporter gets none, and the error
+    // still reaches the caller through the rebuilt Err (exit 1). The
+    // batch-side counterpart is pinned by the run_batch source pin
+    // (run_batch_status_line_is_owned_by_the_reporter_kind).
+    let tmp = TempDir::new().unwrap();
+    let bin_dir = tmp.path().join("bin");
+    fs::create_dir_all(&bin_dir).unwrap();
+    install_plugin(&bin_dir, "sasurahime-foo", failing_clean_plugin_body());
+    let path = format!("{}:/usr/bin:/bin", bin_dir.display());
+
+    let output = sasurahime(tmp.path(), &path)
+        .args(["--deep-suppress", "clean", "foo"])
+        .output()
+        .unwrap();
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "the Err contract must still fail the run, stderr:\n{stderr}"
+    );
+    assert!(
+        !stderr.contains("[FAILED]"),
+        "the quiet reporter must suppress the [FAILED] token:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("plugin exited with code 1"),
+        "the error must still reach the caller through the Err contract:\n{stderr}"
+    );
+}

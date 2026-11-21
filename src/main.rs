@@ -2,9 +2,14 @@ use sasurahime::{
     batch, cleaner, cleaners, command, config, doctor, explorer, format, hint, history,
     interactive, progress, safety, scan_cache, scanner, unattended,
 };
+// Stage 3 (PBI 2026-11-21-05) moved the freed-message wording to its line
+// family's one owner (batch.rs); the bin-side pins keep reaching it through
+// this test-only import.
+#[cfg(test)]
+use sasurahime::batch::freed_message;
 
 use clap::{Parser, Subcommand};
-use cleaner::{CancelClassified, CleanOptions, CleanResult, Cleaner};
+use cleaner::{CleanOptions, CleanResult, Cleaner};
 use command::SystemCommandRunner;
 use config::Config;
 use progress::{build_reporter_from_flags, merge_suppress_flags, ProgressReporter};
@@ -759,34 +764,6 @@ fn all_cleaners(home: &std::path::Path, config: &config::Config) -> Vec<Box<dyn 
     cleaners
 }
 
-/// Message shown after a clean. `uses_trash` is the cleaner's own report: a
-/// cleaner that deletes outside the Trash (tmutil, rustup, ...) must not claim
-/// its bytes can be restored.
-///
-/// # freed 意味論の契約(PBI 97)
-///
-/// "Freed" の意味は対象によって異なる。来歴の検証はこの表で 1 hop に落ちる:
-///
-/// | 種 | 意味 | anchor |
-/// |---|---|---|
-/// | (a) ledger 総和 | caller 提供の per-item size(計測は待ち窓の後、対話 select 経路)の和、成功分だけ | src/trash.rs:293-295 + :333 |
-/// | (b) 差分 | 外部ツール実行前後の dir_size 差 | src/cleaners/generic.rs:640 / src/cleaners/uv.rs:158 |
-/// | (c) 実行前全量 | CLI 実行成功時に実行前のディレクトリ全量を freed として報告 | src/cli_fallback.rs:147 + :168 |
-/// | (d) 検証済み上限 | plugin の claimed freed を削除後の残り実測サイズで上限切り | src/cleaners/plugin.rs:431-438 |
-/// | 解釈 | Trash 軸の分離表示(Logical/Physical) | src/main.rs:765-776(本 doc) |
-fn freed_message(bytes_freed: u64, uses_trash: bool, trash_mode: bool) -> String {
-    if trash_mode && uses_trash && bytes_freed > 0 {
-        // Two axes: the logical size is gone from the caches, but the bytes
-        // still sit in the Trash until it is emptied.
-        format!(
-            "Logical freed: {} / Physical freed: 0 B (in Trash)",
-            sasurahime::format::format_bytes(bytes_freed)
-        )
-    } else {
-        format!("Freed: {}", sasurahime::format::format_bytes(bytes_freed))
-    }
-}
-
 /// Cleaners that accept `[cleaner.<name>]` filters, keyed by `Cleaner::name()`.
 ///
 /// The set matches what actually runs: the core cleaners (the macro table's
@@ -902,7 +879,7 @@ where
     F: FnOnce(bool, &dyn ProgressReporter, &CleanOptions) -> anyhow::Result<CleanResult>,
 {
     let msg = format!("Cleaning {label}...");
-    let result = if reporter.show_spinner() {
+    let outcome = if reporter.show_spinner() {
         // One shared spinner: each deletion updates its message with the
         // folder being removed, so the user sees what is happening. No
         // steady tick: an in-cleaner confirmation prompt must not compete
@@ -910,79 +887,35 @@ where
         let spinner = sasurahime::progress::SharedSpinner::start(&msg, false);
         let r = cleaner_fn(dry_run, &spinner.reporter(), opts);
         spinner.finish();
-        match r {
-            Ok(v) => {
-                eprintln!("{msg} [OK]");
-                v
-            }
-            Err(e) if e.is_user_cancelled() => {
-                // User cancelled — clean shutdown, no [FAILED], no Freed line.
-                // The hint was already printed in GenericCleaner.
-                return Ok(CleanResult::cancelled());
-            }
-            Err(e) => {
-                eprintln!("{msg} [FAILED]");
-                return Err(e);
-            }
-        }
+        r
     } else {
-        let r = cleaner_fn(dry_run, reporter, opts);
-        match r {
-            Ok(v) => v,
-            Err(e) if e.is_user_cancelled() => return Ok(CleanResult::cancelled()),
-            Err(e) => return Err(e),
-        }
+        cleaner_fn(dry_run, reporter, opts)
     };
 
-    if reporter.show_spinner() {
-        println!(
-            "{}",
-            freed_message(
-                result.bytes_freed,
-                result.uses_trash,
-                opts.trash_mode == sasurahime::trash::TrashMode::Trash,
-            )
-        );
-        if let Some(note) = batch::post_clean_note(
-            result.bytes_freed,
-            result.uses_trash,
-            opts.trash_mode == sasurahime::trash::TrashMode::Trash,
-        ) {
-            println!("{note}");
-        }
-    }
-
-    if !result.skipped.is_empty() {
-        eprintln!(
-            "{} file(s) skipped due to errors (permission/lock):",
-            result.skipped.len()
-        );
-        for entry in &result.skipped {
-            eprintln!("  - {}: {}", entry.path.display(), entry.reason);
-        }
-    }
-
-    // Aligned contract (PBI 78): both engines treat CleanCancelled as a
-    // run-level decision, not an error — this path returns Ok(cancelled)
-    // (exit 0), run_batch collects the target name into
-    // BatchSummary.cancelled and the caller reports a neutral
-    // `cancelled by user` line. The [OK]/[FAILED] status line is owned by
-    // the reporter kind on both engines: it prints only when
-    // reporter.show_spinner(), and `animated` stays the caller's flag
-    // (no-tick-while-prompting). What stays single-target here is only the
-    // CleanResult-shaped report (per-target freed_message and the skip
-    // lines above — PBI 73's shared report_batch_failures takes a
-    // BatchSummary); the history write funnels through the one guard in
-    // batch.rs, so `!dry_run && bytes_freed > 0` has exactly one owner.
-    batch::write_history_entry_if_needed(
+    // Stage 3 (PBI 2026-11-21-05): the five display families and the
+    // single-target contract have ONE owner — batch::report_single_target.
+    // The outcome rides the same carry the batch loop produces
+    // (BatchSummary::from_single_outcome), and the report engine rebuilds
+    // the contract from it: the [OK]/[FAILED] token rules, the silent
+    // CleanCancelled Ok, the nameless skip lines, the gated freed/note
+    // lines, the one history guard, and the exit_code() == 1 survivor for
+    // run_and_exit. Every label comes from `label` — never
+    // CleanResult::name (the stage-3 trap, pinned in batch.rs's tests).
+    // The mechanics above stay this engine's own: single runs a
+    // SharedSpinner(false) whose bound reporter feeds the cleaner's
+    // progress — the unified mechanism absorbs that difference instead of
+    // collapsing the spinner dispatch.
+    batch::report_single_target(
+        &mut std::io::stdout(),
+        &mut std::io::stderr(),
         label,
-        dry_run,
-        result.bytes_freed,
-        result.skipped.len(),
-        result.uses_trash,
-    );
-
-    Ok(result)
+        batch::BatchSummary::from_single_outcome(label, outcome),
+        batch::SingleTargetReport {
+            show_spinner: reporter.show_spinner(),
+            dry_run,
+            trash_mode: opts.trash_mode == sasurahime::trash::TrashMode::Trash,
+        },
+    )
 }
 
 /// Wraps `run_clean_target` and exits with code 1 if `CleanResult.exit_code() != 0`.
@@ -1015,7 +948,16 @@ fn run_caches_batch(
     dry_run: bool,
 ) -> anyhow::Result<()> {
     // Bare batch: no post-clean notes (this entry point never printed them).
-    let summary = batch::run_batch(cleaners, opts, reporter, dry_run, false, false);
+    let summary = batch::run_batch(
+        cleaners,
+        opts,
+        reporter,
+        batch::BatchOptions {
+            dry_run,
+            animated: false,
+            with_notes: false,
+        },
+    );
     interactive::report_batch_failures(
         &mut std::io::stderr(),
         &summary,

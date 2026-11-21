@@ -525,9 +525,11 @@ pub fn run_interactive(
                 &batch_targets,
                 &opts,
                 &crate::progress::SuppressReporter,
-                false, // dry_run: interactive always deletes
-                true,  // animated
-                false, // with_notes
+                crate::batch::BatchOptions {
+                    dry_run: false, // interactive always deletes
+                    animated: true,
+                    with_notes: false,
+                },
             );
             freed += summary.total_freed;
             // This flow's error line names no cleaner; the skip report keeps

@@ -221,6 +221,71 @@ fn clean_caches_reports_skipped_files() {
 }
 
 #[test]
+fn clean_node_gyp_reports_skipped_files_from_the_single_engine() {
+    // Stage-3 pin inventory (PBI 2026-11-21-05): the single-target engine's
+    // skip family — run_clean_target's "N file(s) skipped" report with the
+    // nameless `path: reason` lines — had no E2E pin (the batch side was
+    // pinned by clean_caches_reports_skipped_files above). Same fixture,
+    // one target: the report must come from the single engine, and the
+    // all-skipped run must exit 1 through the single-target exit-code
+    // contract (batch always exits 0 — the #6 intentional asymmetry).
+    let tmp = TempDir::new().unwrap();
+    let home = tmp.path().canonicalize().unwrap();
+    let cache = home.join(".cache");
+    let node_gyp = cache.join("node-gyp");
+    fs::create_dir_all(&node_gyp).unwrap();
+    fs::write(node_gyp.join("dummy"), b"x").unwrap();
+
+    struct ReadOnlyGuard(std::path::PathBuf);
+    impl Drop for ReadOnlyGuard {
+        fn drop(&mut self) {
+            use std::os::unix::fs::PermissionsExt;
+            if let Ok(meta) = fs::metadata(&self.0) {
+                let mut perms = meta.permissions();
+                perms.set_mode(0o755);
+                let _ = fs::set_permissions(&self.0, perms);
+            }
+        }
+    }
+    let _read_only = {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(&cache).unwrap().permissions();
+        perms.set_mode(0o555);
+        fs::set_permissions(&cache, perms).unwrap();
+        ReadOnlyGuard(cache.clone())
+    };
+
+    let output = Command::cargo_bin("sasurahime")
+        .unwrap()
+        .env("HOME", &home)
+        .args(["clean", "node-gyp"])
+        .output()
+        .unwrap();
+
+    // Restore the mode before the assertions so TempDir cleanup always works.
+    drop(_read_only);
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("1 file(s) skipped due to errors (permission/lock):"),
+        "the single engine must report skipped files:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("node-gyp"),
+        "the nameless skip line carries the path:\n{stderr}"
+    );
+    assert!(
+        node_gyp.exists(),
+        "the skipped entry must survive the run, stderr:\n{stderr}"
+    );
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "an all-skipped single-target clean exits 1, stderr:\n{stderr}"
+    );
+}
+
+#[test]
 fn clean_spm_cache_dry_run_deletes_nothing() {
     let tmp = TempDir::new().unwrap();
     let spm_dir = tmp.path().join("Library/Caches/org.swift.swiftpm");

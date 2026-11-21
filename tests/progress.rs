@@ -298,3 +298,32 @@ fn clean_all_deep_suppress_hides_per_target_notes() {
         "the clean itself must still run under --deep-suppress, got:\n{combined}"
     );
 }
+
+#[test]
+fn single_target_deep_suppress_hides_the_post_clean_note() {
+    // Stage-3 pin inventory (PBI 2026-11-21-05): the note gate on the
+    // SINGLE engine had no E2E pin (the batch side is pinned by
+    // clean_all_deep_suppress_hides_per_target_notes above, the show side
+    // of the single engine by history.rs's audit-trail pin). A single
+    // `clean library-logs --permanent --deep-suppress` frees real bytes,
+    // so the note WOULD print under the default reporter — the
+    // reporter-kind gate must hide it together with the Freed line.
+    let tmp = TempDir::new().unwrap();
+    create_log_app(tmp.path(), "MyApp", 100 * 1024 * 1024);
+
+    let output = sasurahime(tmp.path())
+        .args(["--permanent", "--deep-suppress", "clean", "library-logs"])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        !combined.contains("Permanently deleted"),
+        "--deep-suppress must hide the single-target note:\n{combined}"
+    );
+}
