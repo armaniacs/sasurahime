@@ -4,7 +4,7 @@ All notable changes to sasurahime will be documented in this file. The format is
 
 ---
 
-## [Unreleased]
+## [0.4.9] - 2026-11-21
 
 ### Changed
 
@@ -13,6 +13,13 @@ All notable changes to sasurahime will be documented in this file. The format is
   explicit selection` — instead of the bare risk-only shape, so the
   unattended output tells the same story as `auto` and `clean all`.
   The `auto` and `clean all` wordings are unchanged.
+- Entry-point refactors with no behavior change (pinned byte-equal by
+  the E2E suite): the single-target and batch display paths now share
+  one `report_single_target` engine for the five status line families
+  (the exit-code asymmetry — batch always 0, single exits 1 on failure —
+  is kept deliberately), `run_batch` takes a named `BatchOptions`
+  struct instead of positional booleans, and the `Cleaner` trait doc
+  groups its twelve methods by consumer.
 
 ---
 
