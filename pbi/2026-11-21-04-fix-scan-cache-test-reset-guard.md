@@ -33,7 +33,8 @@ Scenario: 並列実行での決定性（エラー/境界ケース）
 
 ## 受け入れ基準
 
-- [ ] src/scan_cache.rs の tests モジュールにテスト専用リセットガードを新設する（context.rs の `TEST_LOCK` + `with_test_lock` 先例を踏襲。リセットは `*guard = None` の swap で決定的に行い、`let _ = set` の沈黙を残さない）
+- [ ] src/scan_cache.rs の tests モジュールにリセットヘルパーを新設する（設計は**lock なし swap** に確定: `SCAN_CACHE.get_or_init(|| Mutex::new(None))` で必ず初期化してから Mutex 内を `*guard = None` で swap。`TEST_LOCK` の流用はしない — std Mutex は非再入のため、scan_cache テスト内から TEST_LOCK を取るコード（config.rs:533-536 系）を呼ぶと deadlock の溝が残る。lock を導入しないことで残る並列競合の境界は下記トリガーで管理）
+- [ ] **境界トリガーの記録**: 「グローバル SCAN_CACHE を触るテストが 2 本目になる」まで lock なし swap は決定的。2 本目のテストを書くときに test lock 導入を再判断する（本 PBI はトリガーを doc コメントで残す）
 - [ ] src/scan_cache.rs:339 の `let _ = SCAN_CACHE.set(Mutex::new(None));` をリセットヘルパー経由に置き換える
 - [ ] 本番コード（`SCAN_CACHE` / `init` / `flush` / `prune` / `cached_dir_size` / `record`）は **1 行も変更しない**（#[cfg(test)] 配下のみ）
 - [ ] 既存テストは無修正で green（prune pin 2 本を含む）
@@ -65,6 +66,7 @@ Scenario: 並列実行での決定性（エラー/境界ケース）
 - 依存関係: なし（PBI 05 と同時実装する場合はファイル排他成立・並列可）
 - テスタビリティ: OnceLock<Mutex<Option<ScanCache>>> の内側を swap する形なら、OnceLock 自体の set-once 制約に触れずに済む
 - 非機能要件: なし（テスト基盤のみ。セキュリティ・性能への影響なし）
+- **残存リスク（深掘り裁定）**: lock なしのため、グローバルを触るテスト同士の操作列（record → assert）とリセットのインターリーブは理論上可能。グローバルを触るテストが 1 本の間は影響なし。2 本目で test lock（scan_cache 専用）の導入を再判断する
 
 ## 実装者向け注記
 

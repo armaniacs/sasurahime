@@ -37,10 +37,18 @@ Scenario: stage-3 trap の遵守（境界ケース）
   Then ラベルは batch ループの cleaner 名から取り、results[0].name は使われない
 ```
 
+## 深掘り裁定（deep-dig 2026-11-21・実装の前提）
+
+1. **統合機構の形状は実装判断（round 7 契約を目的に修正）**: 契約文の「form enum plus stage 3」は手段まで指定していたが、目的（行家族の 1 所有者化）と手段を分離し、「**統合機構**（form enum / 引数構造体 / 小関数群のいずれでもよい）plus stage 3」に文言を修正する。実装時に batch.rs:82-90 の doc を修正し、変更理由（3 種 spinner mechanics の実測・byte 等価検証の単位）を記録する。1 PR 束ね要件（BatchOptions 全面移行 + stage 3 同時）は維持する
+2. **行家族表 #6（exit code）は統合対象外**: single = CLI エラー慣習（exit 1）、batch = report-only（always 0）は本質的に異なるセマンティクス（PBI 78 fence 2 で pin）。表示 5 家族のみ統合し、#6 は行家族表に「意図的な非対称」として記録する
+3. （PBI 04 で確定: scan-cache リセットは lock なし swap・グローバルを触るテスト 2 本目で lock 再判断 — 本 PBI とは無関係）
+
 ## 受け入れ基準
 
-- [ ] `form enum` を導入し、2 エンジンの 6 行家族出力を report_single_target（stage 3）に統合する。行家族表（src/batch.rs:59-66）を統合後の所有者で更新する
-- [ ] `run_batch` 本体の引数リストを BatchOptions 化する（round 7 契約が本 PR 内での実施を要求）し、残る直接呼び出し 2 箇所（run_caches_batch: main.rs:1018、run_interactive whole-target: interactive.rs:520 付近）も named 化する
+- [ ] **統合機構**（form enum / 引数構造体 / 小関数群のいずれか — 形状は実装判断、truth table pin で 1 所有者を検証）を導入し、2 エンジンの 6 行家族のうち**表示 5 家族**（status / cancel / note / freed / skip）を report_single_target（stage 3）に統合する。行家族表（src/batch.rs:59-66）を統合後の所有者で更新する
+- [ ] **round 7 契約文言の修正**: src/batch.rs:82-90 の「form enum plus stage 3」を「統合機構 plus stage 3」に修正し、変更理由（deep-dig 裁定: 目的と手段の分離、3 種 spinner mechanics の実測）を doc に記録する。1 PR 束ね要件は維持
+- [ ] **#6（exit code）を統合対象外として行家族表に明記**: batch always exit 0 / single exit 1 は「意図的な非対称」（PBI 78 fence 2）として記録する
+- [ ] `run_batch` 本体の引数リストを BatchOptions 化する（修正後契約が本 PR 内での実施を要求）し、残る直接呼び出し 2 箇所（run_caches_batch: main.rs:1018、run_interactive whole-target: interactive.rs:520 付近）も named 化する
 - [ ] stage-3 trap を遵守: 表示・履歴ラベルは batch ループの cleaner 名から取り、`results[0].name` を使わない。この非不変条件の pin（意図的な source pin または doc）を残す
 - [ ] 統合の**前に**両エンジンの出力 pin を棚卸しし、不足分（single 側の [SKIPPED] 行、quiet reporter の [FAILED] 抑制等）を先に足す
 - [ ] 96 セル matrix pin（src/unattended.rs）、selection matrix、既存 E2E 全て無修正で green
@@ -53,19 +61,18 @@ Scenario: stage-3 trap の遵守（境界ケース）
 - 棚卸しで不足した single 側の行家族 pin（[SKIPPED] 行、quiet reporter の [FAILED] 抑制、note gate）を統合**前**に補完
 
 ### 統合テスト
-- batch.rs tests の run_batch / run_selected_batch 群に report_single_target の unit pin（form enum の全バリアント網羅・BatchSummary の carry 消費）
+- batch.rs tests の run_batch / run_selected_batch 群に report_single_target の unit pin（**統合機構の truth table** — 表示 5 家族 × gate 組み合わせを網羅。BatchSummary の carry 消費）
 - 履歴記録の契約（write_history_entry_if_needed の 1 回ガード）が両経路で維持される pin
 
 ### 単体テスト
-- report_single_target の gate 組み合わせ truth table（show_spinner × animated × with_notes × suppress の 2^4 組合せのうち行家族に効く面）
+- report_single_target の gate 組み合わせ truth table（show_spinner × animated × with_notes × suppress のうち行家族に効く面。#6 exit code は統合外のため対象としない）
 - CleanCancelled の無トークン契約（CancelClassified 経由）の境界値 pin
-- exit code 契約（batch always 0 / single exit 1）の例外ハンドリング pin
 
 ## 実装アプローチ
 
-- **Outside-In**: 行家族表（batch.rs:59-66）が契約 → 両エンジンの出力 pin 棚卸し・補完（失敗なし、現行 green を pin）→ form enum 設計（行家族 × gate の表から導出）→ report_single_target 実装 → batch / single 呼び出し側の切替 → green → 行家族表の所有者列を更新
+- **Outside-In**: 行家族表（batch.rs:59-66）が契約 → 両エンジンの出力 pin 棚卸し・補完（失敗なし、現行 green を pin）→ 統合機構設計（truth table から導出、形状は実装判断）→ report_single_target 実装 → batch / single 呼び出し側の切替 → green → 行家族表の所有者列と round 7 契約文言を更新
 - **Red-Green-Refactor**: report_single_target の truth table pin を先に Red で書き、統合で Green。byte 等価 pin は常に green に保ち、red になったら統合の誤りとして扱う
-- **リファクタリング**: Green 後に 2 エンジンの旧表示コード（main.rs show_spinner 分岐のインライン表示、batch.rs の分岐）を削除し、行家族表を更新
+- **リファクタリング**: Green 後に 2 エンジンの旧表示コード（main.rs show_spinner 分岐のインライン表示、batch.rs の分岐）を削除し、行家族表と契約文言を更新
 
 ## 見積もり
 
@@ -90,12 +97,13 @@ sasurahime targets
 
 ### 実装手順
 1. pin 棚卸し: batch.rs:59-66 の行家族表を行ごとに single / batch の現行出力で pin し、不足分（single の [SKIPPED]、quiet の [FAILED] 抑制）を tests に先に足す
-2. form enum 設計: 行家族表の「Gate」列が form の切り替え条件（animated / show_spinner / with_notes / suppress / dry_run）— enum のバリアントは gate 組み合わせから導出し、行家族ごとの出力責務を report_single_target に集約
-3. report_single_target を src/batch.rs に新設: stage-3 carry（results / failures / skipped / cancelled）を消費し、single 契約（Err 再構築・exit_code()==1 の生存）を再構築する
-4. run_batch 本体の BatchOptions 化 + run_caches_batch / run_interactive whole-target の named 化（round 7 契約により本 PR 内で実施）
-5. run_clean_target の表示部分を report_single_target へ寄せ、main.rs のインライン表示を削除
-6. stage-3 trap の pin: `CleanResult.name` と `c.name()` の非同値性が pin されていない旨の source pin（または doc）を batch.rs に残す
-7. 行家族表（batch.rs:59-66）の所有者列を統合後の形に更新
+2. round 7 契約文言の修正（batch.rs:82-90）: 「form enum plus stage 3」→「統合機構 plus stage 3」に変更し、変更理由（deep-dig 裁定）を doc に記録
+3. 統合機構の設計: 行家族表の「Gate」列が切り替え条件（animated / show_spinner / with_notes / suppress / dry_run）— truth table から表示 5 家族の出力責務を report_single_target に集約する形を導出（enum / 引数構造体 / 小関数群の選択はこの時点で裁定し、理由を doc に残す）
+4. report_single_target を src/batch.rs に新設: stage-3 carry（results / failures / skipped / cancelled）を消費し、single 契約（Err 再構築・exit_code()==1 の生存）を再構築する
+5. run_batch 本体の BatchOptions 化 + run_caches_batch / run_interactive whole-target の named 化（修正後契約により本 PR 内で実施）
+6. run_clean_target の表示部分を report_single_target へ寄せ、main.rs のインライン表示を削除
+7. stage-3 trap の pin: `CleanResult.name` と `c.name()` の非同値性が pin されていない旨の source pin（または doc）を batch.rs に残す
+8. 行家族表（batch.rs:59-66）の所有者列を統合後の形に更新（#6 は「意図的な非対称」記載）
 
 ### 落とし穴
 - **stage-3 trap**: `results[0].name` を表示・履歴に使うと、name 非不変条件の下でラベルが静かに壊れる（batch.rs:76-80）。ラベルは必ず batch ループの `c.name()` から
