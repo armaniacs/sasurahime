@@ -4,6 +4,26 @@ All notable changes to sasurahime will be documented in this file. The format is
 
 ---
 
+## [Unreleased]
+
+### Changed
+
+- **Dependency updates:** `jiff` 0.2.38→1.0.1, `rstest` 0.22→0.28
+  (dev), plus semver-compatible bumps (clap 4.6.7→4.6.9, toml
+  1.1.8→1.2.2, trash 5.2.9→5.4.0, env_logger 0.11.11→0.11.12, walkdir
+  2.5.0→2.5.1). jiff's only breaking change that reaches this crate is
+  the `Zoned` → `ZonedDateTime` rename at the two history call sites;
+  the strtime format string is unchanged, so `history.json` timestamps
+  keep their exact shape (pinned by the parity tests). The `filetime`
+  dev-dependency is gone: 0.2.30 deprecated `set_file_mtime`, so the
+  test mtime fixtures now set times through std `fs::set_times`
+  (directories open read-only, files with write access). The lockfile
+  slims down: `chrono` and the `iana-time-zone` family drop out because
+  trash 5.4.0 no longer requires them, and `defmt` drops out with
+  jiff 1.0.
+
+---
+
 ## [0.4.9] - 2026-11-21
 
 ### Changed
