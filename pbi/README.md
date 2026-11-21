@@ -119,6 +119,16 @@ tests/ fixture 重複の全数監査、`SCAN_CACHE.set` テストリセット脆
 exit-path 列挙 pin（フロー 15 超で）、RFC3339 形状 helper 統合（同型 pin 3 箇所で）、
 tests/ fixture 監査（explore 系タスク時）、SCAN_CACHE.set 脆弱点（scan_cache テスト基盤を触る機会）。
 
+## autonomous-task-closer（2026-11-21、PBI 04・05 の自律実装）
+
+pbi-backlog-prioritizer で起票した 2 PBI を worktree 隔離の並列クローザーで実装。
+最終ゲート: workspace **1303 passed 0 failed**、clippy 0、fmt clean、build ok。
+
+| PBI | タイトル | 概要 |
+|:---:|---------|------|
+| 04 | scan-cache テストリセットの決定化 | lock なし swap 設計（get_or_init → Mutex 内 swap）。境界トリガー（グローバルを触るテスト 2 本目で lock 再判断）を doc に記録。`--lib scan_cache` 連続 10 回 green |
+| 05 | stage 3 統合 | report_single_target で表示 5 家族を 1 所有者化（BatchOptions 全面移行 + 小関数群移設）。round 7 契約文言を「統合機構 plus stage 3」に修正、#6 は意図的な非対称、stage-3 trap source pin 新設 |
+
 ## 未着手のバックログ
 
 なし。2026-10-22 / 2026-10-23 の各一覧の PBI はすべて実装済みで

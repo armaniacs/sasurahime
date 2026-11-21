@@ -33,12 +33,12 @@ Scenario: 並列実行での決定性（エラー/境界ケース）
 
 ## 受け入れ基準
 
-- [ ] src/scan_cache.rs の tests モジュールにリセットヘルパーを新設する（設計は**lock なし swap** に確定: `SCAN_CACHE.get_or_init(|| Mutex::new(None))` で必ず初期化してから Mutex 内を `*guard = None` で swap。`TEST_LOCK` の流用はしない — std Mutex は非再入のため、scan_cache テスト内から TEST_LOCK を取るコード（config.rs:533-536 系）を呼ぶと deadlock の溝が残る。lock を導入しないことで残る並列競合の境界は下記トリガーで管理）
-- [ ] **境界トリガーの記録**: 「グローバル SCAN_CACHE を触るテストが 2 本目になる」まで lock なし swap は決定的。2 本目のテストを書くときに test lock 導入を再判断する（本 PBI はトリガーを doc コメントで残す）
-- [ ] src/scan_cache.rs:339 の `let _ = SCAN_CACHE.set(Mutex::new(None));` をリセットヘルパー経由に置き換える
-- [ ] 本番コード（`SCAN_CACHE` / `init` / `flush` / `prune` / `cached_dir_size` / `record`）は **1 行も変更しない**（#[cfg(test)] 配下のみ）
-- [ ] 既存テストは無修正で green（prune pin 2 本を含む）
-- [ ] `cargo clippy --tests -- -D warnings` 0 + `cargo fmt --check` clean
+- [x] src/scan_cache.rs の tests モジュールにリセットヘルパーを新設する（設計は**lock なし swap** に確定: `SCAN_CACHE.get_or_init(|| Mutex::new(None))` で必ず初期化してから Mutex 内を `*guard = None` で swap。`TEST_LOCK` の流用はしない — std Mutex は非再入のため、scan_cache テスト内から TEST_LOCK を取るコード（config.rs:533-536 系）を呼ぶと deadlock の溝が残る。lock を導入しないことで残る並列競合の境界は下記トリガーで管理）
+- [x] **境界トリガーの記録**: 「グローバル SCAN_CACHE を触るテストが 2 本目になる」まで lock なし swap は決定的。2 本目のテストを書くときに test lock 導入を再判断する（本 PBI はトリガーを doc コメントで残す）
+- [x] src/scan_cache.rs:339 の `let _ = SCAN_CACHE.set(Mutex::new(None));` をリセットヘルパー経由に置き換える
+- [x] 本番コード（`SCAN_CACHE` / `init` / `flush` / `prune` / `cached_dir_size` / `record`）は **1 行も変更しない**（#[cfg(test)] 配下のみ）
+- [x] 既存テストは無修正で green（prune pin 2 本を含む）
+- [x] `cargo clippy --tests -- -D warnings` 0 + `cargo fmt --check` clean
 
 ## テスト戦略（t_wadaスタイル）
 
@@ -92,14 +92,22 @@ sasurahime targets
 
 ## Definition of Done
 
-- [ ] 全 BDD シナリオが自動テストとして実装されパスする
-- [ ] cargo test green（既知 TCC 依存 4 失敗を除く許容）+ clippy 0 + fmt clean
-- [ ] コードレビュー完了（統合側によるバッチ境界検証。PR 運用時は approve 必須）
-- [ ] ロールバック手段: 本 PBI は 1 コミットのテスト基盤変更のみで、`git revert` で完全に切り戻せる（本番挙動への影響ゼロ）
-- [ ] ドキュメント更新済み（不要 — 本番 doc / README に触れないため。台帳の経過記録のみ統合側が更新）
+- [x] 全 BDD シナリオが自動テストとして実装されパスする
+- [x] cargo test green（既知 TCC 依存 4 失敗を除く許容）+ clippy 0 + fmt clean
+- [x] コードレビュー完了（統合側によるバッチ境界検証。PR 運用時は approve 必須）
+- [x] ロールバック手段: 本 PBI は 1 コミットのテスト基盤変更のみで、`git revert` で完全に切り戻せる（本番挙動への影響ゼロ）
+- [x] ドキュメント更新済み（不要 — 本番 doc / README に触れないため。台帳の経過記録のみ統合側が更新）
 
 ## scope 外（やらないこと）
 
 - 本番の SCAN_CACHE / OnceLock 構造の変更
 - history.rs 等の他グローバルへの横展開（同型脆弱点が見つかった場合のみ台帳経由で判断）
 - prune pin の追加変更（round 9 で着地済み）
+
+## 実装記録（統合側、2026-11-21・autonomous-task-closer）
+
+- worktree closer-04 で実装（5 Whys: /tmp/whywhy-scan-cache-test-reset-guard.md。根本原因: リセットが set-once 制約の上での試みで Mutex 内 swap の決定的手段を使っていなかった）
+- 実装内容（src/scan_cache.rs の mod tests 内のみ、+58/-1）: `reset_scan_cache()`（get_or_init で必ず初期化 → lock → `*guard = None` swap。set-once 沈黙の理由・TEST_LOCK 非流用の理由（非再入 deadlock 溝）・境界トリガー（グローバルを触るテスト 2 本目で test lock 再判断）を doc に記録）、`global_has_entry()` 観測ヘルパー、:339 の置換、決定性 pin `reset_scan_cache_clears_seeded_inventory_deterministically`（自 seed キー不在の不変式で assert）
+- 本番コード 0 行変更（git diff の 3 ハンク全て mod tests 内）
+- 検証実測: fmt clean / clippy 0 / cargo test --lib scan_cache 11 passed を**連続 10 回**達成（PBI の測定方法どおり）。最終ゲート workspace 1303 passed 0 failed
+- 実装コミット: `018c4b7`（worktree closer-04 の 0a88311 を cherry-pick）

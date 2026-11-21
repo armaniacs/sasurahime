@@ -45,14 +45,14 @@ Scenario: stage-3 trap の遵守（境界ケース）
 
 ## 受け入れ基準
 
-- [ ] **統合機構**（form enum / 引数構造体 / 小関数群のいずれか — 形状は実装判断、truth table pin で 1 所有者を検証）を導入し、2 エンジンの 6 行家族のうち**表示 5 家族**（status / cancel / note / freed / skip）を report_single_target（stage 3）に統合する。行家族表（src/batch.rs:59-66）を統合後の所有者で更新する
-- [ ] **round 7 契約文言の修正**: src/batch.rs:82-90 の「form enum plus stage 3」を「統合機構 plus stage 3」に修正し、変更理由（deep-dig 裁定: 目的と手段の分離、3 種 spinner mechanics の実測）を doc に記録する。1 PR 束ね要件は維持
-- [ ] **#6（exit code）を統合対象外として行家族表に明記**: batch always exit 0 / single exit 1 は「意図的な非対称」（PBI 78 fence 2）として記録する
-- [ ] `run_batch` 本体の引数リストを BatchOptions 化する（修正後契約が本 PR 内での実施を要求）し、残る直接呼び出し 2 箇所（run_caches_batch: main.rs:1018、run_interactive whole-target: interactive.rs:520 付近）も named 化する
-- [ ] stage-3 trap を遵守: 表示・履歴ラベルは batch ループの cleaner 名から取り、`results[0].name` を使わない。この非不変条件の pin（意図的な source pin または doc）を残す
-- [ ] 統合の**前に**両エンジンの出力 pin を棚卸しし、不足分（single 側の [SKIPPED] 行、quiet reporter の [FAILED] 抑制等）を先に足す
-- [ ] 96 セル matrix pin（src/unattended.rs）、selection matrix、既存 E2E 全て無修正で green
-- [ ] `cargo clippy --tests -- -D warnings` 0 + `cargo fmt --check` clean + `cargo build` green
+- [x] **統合機構**（form enum / 引数構造体 / 小関数群のいずれか — 形状は実装判断、truth table pin で 1 所有者を検証）を導入し、2 エンジンの 6 行家族のうち**表示 5 家族**（status / cancel / note / freed / skip）を report_single_target（stage 3）に統合する。行家族表（src/batch.rs:59-66）を統合後の所有者で更新する
+- [x] **round 7 契約文言の修正**: src/batch.rs:82-90 の「form enum plus stage 3」を「統合機構 plus stage 3」に修正し、変更理由（deep-dig 裁定: 目的と手段の分離、3 種 spinner mechanics の実測）を doc に記録する。1 PR 束ね要件は維持
+- [x] **#6（exit code）を統合対象外として行家族表に明記**: batch always exit 0 / single exit 1 は「意図的な非対称」（PBI 78 fence 2）として記録する
+- [x] `run_batch` 本体の引数リストを BatchOptions 化する（修正後契約が本 PR 内での実施を要求）し、残る直接呼び出し 2 箇所（run_caches_batch: main.rs:1018、run_interactive whole-target: interactive.rs:520 付近）も named 化する
+- [x] stage-3 trap を遵守: 表示・履歴ラベルは batch ループの cleaner 名から取り、`results[0].name` を使わない。この非不変条件の pin（意図的な source pin または doc）を残す
+- [x] 統合の**前に**両エンジンの出力 pin を棚卸しし、不足分（single 側の [SKIPPED] 行、quiet reporter の [FAILED] 抑制等）を先に足す
+- [x] 96 セル matrix pin（src/unattended.rs）、selection matrix、既存 E2E 全て無修正で green
+- [x] `cargo clippy --tests -- -D warnings` 0 + `cargo fmt --check` clean + `cargo build` green
 
 ## テスト戦略（t_wadaスタイル）
 
@@ -114,12 +114,12 @@ sasurahime targets
 
 ## Definition of Done
 
-- [ ] 全 BDD シナリオが自動テストとして実装されパスする
-- [ ] cargo test green（既知 TCC 依存 4 失敗を除く許容）+ clippy 0 + fmt clean + build green
-- [ ] コードレビュー完了（統合側によるバッチ境界検証。PR 運用時は approve 必須）
-- [ ] リファクタリング完了（グリーン後: 旧 2 エンジン表示コードの削除と行家族表の更新）
-- [ ] ロールバック手段: byte 等価リファクタリングのため `git revert`（1 PR）で完全に切り戻せる。挙動変更・閾値変更は含まない
-- [ ] ドキュメント更新済み（行家族表の更新が doc 更新を兼ねる。README / docs には触れない）
+- [x] 全 BDD シナリオが自動テストとして実装されパスする
+- [x] cargo test green（既知 TCC 依存 4 失敗を除く許容）+ clippy 0 + fmt clean + build green
+- [x] コードレビュー完了（統合側によるバッチ境界検証。PR 運用時は approve 必須）
+- [x] リファクタリング完了（グリーン後: 旧 2 エンジン表示コードの削除と行家族表の更新）
+- [x] ロールバック手段: byte 等価リファクタリングのため `git revert`（1 PR）で完全に切り戻せる。挙動変更・閾値変更は含まない
+- [x] ドキュメント更新済み（行家族表の更新が doc 更新を兼ねる。README / docs には触れない）
 
 ## scope 外（やらないこと）
 
@@ -127,3 +127,14 @@ sasurahime targets
 - 新しい行家族の追加（別 PBI）
 - `CleanOptions` と BatchOptions の統合検討（別概念）
 - safety.rs / trash.rs の削除シーム変更（本 PBI は表示統合のみ）
+
+## 実装記録（統合側、2026-11-21・autonomous-task-closer）
+
+- worktree closer-05 で実装（5 Whys: /tmp/whywhy-stage3-batch-unification.md。根本原因: 表示経路が別実装のまま report_single_target が不在で、6 行家族の gate 判断が 2 エンジンに重複し続けた）
+- **統合機構の裁定（形状）**: 引数構造体（BatchOptions 全面移行）+ report_single_target（表示 5 家族の 1 所有者）+ 小関数群（gated_post_clean_note / skipped_detail / freed_message を batch.rs へ移設）。form enum 不採用の理由: 3 種 spinner mechanics はエンジン固有で、enum にすると dispatch が枝分かれするだけで byte 出力の利得がゼロ。stage-3 carry をデータ経路で共通化する方が一意。裁定理由は run_batch の doc に記録済み
+- round 7 契約文言修正: batch.rs の「form enum plus stage 3」→「統合機構 plus stage 3」（1 PR 束ね要件は維持）。#6（exit code）は「意図的な非対称」として行家族表に記録（統合外）
+- pin 棚卸しで追加した pin: single 側 skip 行（tests/generic.rs）、quiet reporter の [FAILED] 抑制 + [FAILED] 表示側（tests/plugin.rs）、single 側 note gate（tests/progress.rs）、report_single_target truth table 7 本 + from_single_outcome carry pin + single 履歴 1 回ガード pin + stage-3 trap source pin（src/batch.rs tests）
+- stage-3 trap pin の内容: `report_single_target_never_reads_the_result_name` — 本体に CleanResult の .name アクセスなし・トークンは label 引数から再構築・履歴第 1 引数は label を構造的に固定。挙動側も single_ok_result() が name: "unused-name" を持つため results[0].name を使うと exact-string pin が赤くなる二重検知
+- 検証実測（worktree 内・フル実施）: fmt clean / clippy 0 / build green / lib batch 30 passed / bin 50 passed / E2E 表示系 9 ターゲット全 green / 自腹 cargo test --workspace フル green。統合後の最終ゲート: workspace **1303 passed 0 failed**、build green
+- 実装コミット: `73ee699`（worktree closer-05 の 7fda2e9 を cherry-pick）
+- scope 外として記録された事項: emit_result_status が private のため single 側トークン規則を batch.rs 側に再実装（pub(crate) 化して 1 関数化する further unification は別 PBI 候補）、run_clean_target_skipped_entries_do_not_panic が実 HOME に履歴を書く既存の潜在汚染、report_single_target の 0 エントリ carry でのみ bail!（マルチエントリ消費は未対応）
