@@ -67,3 +67,4 @@
 - 2026-11-21: PBI 04・05 を pbi-create-bdd-workspace テンプレートへ書き直し（既実装確認・テストピラミッド・実装者向け注記・落とし穴・ロールバックを追加）
 - 2026-11-21: deep-dig スキルで両 PBI の高リスク仮定を 2 段階掘り（上記「深掘りセッション」）
 - 2026-11-21: autonomous-task-closer で PBI 04・05 を実装・アーカイブ（worktree 並列クローザー closer-04/closer-05 → cherry-pick で main 取り込み。04 → `018c4b7`、05 → `73ee699`。最終ゲート workspace 1303 passed 0 failed）。本台帳の PBI は全件完了
+- 2026-11-21: テスト手法レビュー（round 11、アンカー 0481291）の対応策として PBI 06・07・08 を起票し、同日中に autonomous-task-closer で全件実装・アーカイブ（06 → `e8401d5`、07 → `af883c7`、08 → `d04ef87`。詳細は各アーカイブ済み PBI と `.plan/whywhy-round11-*.md`）。**新規候補 1 件を台帳送り**: history append の O(n²) テストコスト（`append_history_truncates_to_max_entries` が nextest 計測で 17.9s、全 1300 テスト中最大。追記最適化は監査証跡の書き込み原子性とトレードオフのため設計判断が必要）。トリガー: history 周辺の変更依頼時に併走、または次回 prioritizer ラウンドで候補化（`.plan/whywhy-round11-history-append-o-n2.md` 参照）
