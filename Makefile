@@ -4,7 +4,7 @@ BINARY      := sasurahime
 VERSION := $(shell grep '^version' Cargo.toml | cut -d'"' -f2)
 TAG     := v$(VERSION)
 
-.PHONY: build test lint fmt install uninstall clean publish release release-tag \
+.PHONY: build test test-nextest lint fmt install uninstall clean publish release release-tag \
         release-github tap-update check-deps outdated audit msrv
 
 build:
@@ -12,6 +12,14 @@ build:
 
 test:
 	cargo test
+
+test-nextest:
+	@if command -v cargo-nextest >/dev/null 2>&1; then \
+		cargo nextest run --retries 2 && cargo test --doc; \
+	else \
+		echo "⚠️   cargo-nextest not installed."; \
+		echo "    Install: cargo install cargo-nextest --locked"; \
+	fi
 
 lint:
 	cargo fmt --check

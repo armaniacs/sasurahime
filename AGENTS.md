@@ -11,6 +11,7 @@ sasurahime is a macOS developer cache cleaner written in Rust. See `README.md` f
 ```bash
 cargo build                  # build
 cargo test                   # run all tests
+make test-nextest            # per-test timing + retries 2 for flake attribution (also runs doc-tests)
 cargo test <test_name>       # run a single test by name
 cargo clippy --tests -- -D warnings  # lint (must pass with zero warnings)
 cargo fmt --check            # check formatting

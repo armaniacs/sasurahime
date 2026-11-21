@@ -34,12 +34,12 @@ Scenario: 稀なフレーキーを記録に残す(エラー/境界ケース)
 
 ## 受け入れ基準
 
-- [ ] Makefile に `test-nextest` ターゲットを追加する。cargo-outdated / audit と同じ「あれば使う、なければ導入案内を出す」パターンに従う
-- [ ] `cargo nextest run` に `--retries 2` を設定し、retry の発生がレポートで分かる
-- [ ] per-test timing が確認できる実行方法を tests/AGENTS.md または AGENTS.md のコマンド節に 1 行追記する
-- [ ] 既存の `make test` / `make release`(lint test build …)は無変更で動く(release の test は cargo test のまま)
-- [ ] nextest 未導入環境で `make test-nextest` が導入案内を出して失敗しない(exit 0 の案内 or 明示的な案内メッセージ。outdated ターゲットの現行挙動に合わせる)
-- [ ] `cargo clippy --tests -- -D warnings` と `cargo fmt --check` がクリーン(Makefile 変更のみでも実行して確認)
+- [x] Makefile に `test-nextest` ターゲットを追加する。cargo-outdated / audit と同じ「あれば使う、なければ導入案内を出す」パターンに従う
+- [x] `cargo nextest run` に `--retries 2` を設定し、retry の発生がレポートで分かる
+- [x] per-test timing が確認できる実行方法を AGENTS.md のコマンド節に 1 行追記する
+- [x] 既存の `make test` / `make release`(lint test build …)は無変更で動く(release の test は cargo test のまま)
+- [x] nextest 未導入環境で `make test-nextest` が導入案内を出して失敗しない(exit 0 の案内 or 明示的な案内メッセージ。outdated ターゲットの現行挙動に合わせる)
+- [x] `cargo clippy --tests -- -D warnings` と `cargo fmt --check` がクリーン(Makefile 変更のみでも実行して確認)
 
 ## テスト戦略(t_wada スタイル)
 
@@ -97,9 +97,16 @@ nextest 未導入。Makefile:58-83 に「あれば使う」パターンの先例
 - Makefile のレシピ行はタブで書く(スペースだと make が落ちる)
 
 ## Definition of Done
-- [ ] 全 BDD シナリオが手順として確認されパスする(per-test timing の表示、retry の記録)
-- [ ] 既存の `make test` / `make release` が無変更で動く
-- [ ] コードレビュー完了(GitHub PR での approve を必須)
-- [ ] リファクタリング完了(確認後)
-- [ ] ロールバック手段: Makefile 追記と docs 1 行のみのため revert で完全に戻る
-- [ ] ドキュメント更新済み(AGENTS.md または tests/AGENTS.md の 1 行)
+- [x] 全 BDD シナリオが手順として確認されパスする(per-test timing の表示、retry の記録)
+- [x] 既存の `make test` / `make release` が無変更で動く
+- [ ] コードレビュー完了(GitHub PR での approve を必須) — ユーザー作業: 1121z ブランチの実装コミットのレビュー
+- [x] リファクタリング完了(確認後)
+- [x] ロールバック手段: Makefile 追記と docs 1 行のみのため revert で完全に戻る
+- [x] ドキュメント更新済み(AGENTS.md の 1 行)
+
+## 実績(2026-11-21 クローズ)
+
+- cargo-nextest v0.9.152 を導入(ソースコンパイル 3m55s)。`make test-nextest` で per-test timing が表示され、1300 tests 21.9s で全 green(retry 発生なし)
+- doc-tests はターゲット内で `cargo test --doc` を併走(4 passed を確認)。次テスト実行時の黙視的カバレッジ欠落を構造的に排除
+- **副次所見**: cargo test 約 60 秒 → nextest 21.9 秒。また `append_history_truncates_to_max_entries` が 17.9s で最大(history append の O(n²) — round 11 のなぜなぜで台帳送り裁定、トリガー記録済み)、30 秒スパイクの grandchild テストは nextest 下では 1.1s で非再現(プロセス分離が効いている可能性)
+- なぜなぜ記録: `.plan/whywhy-round11-no-per-test-timing.md`
