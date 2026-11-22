@@ -4,7 +4,7 @@ All notable changes to sasurahime will be documented in this file. The format is
 
 ---
 
-## [Unreleased]
+## [0.4.10] - 2026-11-22
 
 ### Changed
 
@@ -21,6 +21,16 @@ All notable changes to sasurahime will be documented in this file. The format is
   slims down: `chrono` and the `iana-time-zone` family drop out because
   trash 5.4.0 no longer requires them, and `defmt` drops out with
   jiff 1.0.
+- **Test-infrastructure hardening** with no user-facing behavior
+  change: the trash backend test override is thread-local now, killing
+  a parallel-run flake observed once in three full-suite runs (pinned
+  by a deterministic channel-synchronized test); the quit-wait poll
+  interval is injected per call, so unit tests no longer real-sleep
+  (the hint module suite drops from over 10 seconds to 0.30s while the
+  production wait stays 1s × 10); and a new `make test-nextest` target
+  adds per-test timing, `--retries 2` for flake attribution, and
+  doc-tests — the full suite runs in about 22s there versus about 60s
+  under `cargo test`.
 
 ---
 
