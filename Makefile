@@ -15,7 +15,14 @@ test:
 
 test-nextest:
 	@if command -v cargo-nextest >/dev/null 2>&1; then \
-		cargo nextest run --retries 2 && cargo test --doc; \
+		cargo nextest run --retries 2; \
+		nextest_status=$$?; \
+		cargo test --doc; \
+		doc_status=$$?; \
+		if [ $$nextest_status -ne 0 ] || [ $$doc_status -ne 0 ]; then \
+			echo "test-nextest: nextest=$$nextest_status doc=$$doc_status"; \
+			exit 1; \
+		fi; \
 	else \
 		echo "⚠️   cargo-nextest not installed."; \
 		echo "    Install: cargo install cargo-nextest --locked"; \
