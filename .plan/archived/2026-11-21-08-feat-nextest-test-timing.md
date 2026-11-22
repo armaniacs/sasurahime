@@ -99,7 +99,7 @@ nextest 未導入。Makefile:58-83 に「あれば使う」パターンの先例
 ## Definition of Done
 - [x] 全 BDD シナリオが手順として確認されパスする(per-test timing の表示、retry の記録)
 - [x] 既存の `make test` / `make release` が無変更で動く
-- [ ] コードレビュー完了(GitHub PR での approve を必須) — ユーザー作業: 1121z ブランチの実装コミットのレビュー
+- [x] コードレビュー完了(2026-11-22 /code-review: ブランチ diff を Approve、SUGGESTION 1 件は `4b5c0b4` で反映済み。コミット単位の最終確認で `d04ef87` 問題なし)
 - [x] リファクタリング完了(確認後)
 - [x] ロールバック手段: Makefile 追記と docs 1 行のみのため revert で完全に戻る
 - [x] ドキュメント更新済み(AGENTS.md の 1 行)

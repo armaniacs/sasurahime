@@ -102,8 +102,8 @@ rg -n "auto_clean_hint\(" src/
 
 ## Definition of Done
 - [x] 全 BDD シナリオが自動テストとして実装されパスする
-- [x] `cargo test --lib` の wall 時間が変更前後で記録され、quit 系テストがすべて 1 秒未満(13.50s → 12.97s。**「概ね半減」目標は撤回**: 実測の結果、lib スイートの真の下限は `history::append_history_truncates_to_max_entries` の 12.85s(append 1 件ごとの全ファイル再書き込みで O(n²)、MAX_HISTORY_ENTRIES=1000)であり、quit の 10s は並列実行でその陰に隠れていた。起票時のレビューによる下限の帰属は誤りだった → PBI 2026-11-21-09 として台帳化)
-- [ ] コードレビュー完了(GitHub PR での approve を必須) — ユーザー作業: 1121z ブランチの実装コミットのレビュー
+- [x] `cargo test --lib` の wall 時間が変更前後で記録され、quit 系テストがすべて 1 秒未満(13.50s → 12.97s。**「概ね半減」目標は撤回**: 実測の結果、lib スイートの真の下限は `history::append_history_truncates_to_max_entries` の 12.85s(append 1 件ごとの全ファイル再書き込みで O(n²)、MAX_HISTORY_ENTRIES=1000)であり、quit の 10s は並列実行でその陰に隠れていた。起票時のレビューによる下限の帰属は誤りだった → round 11 の台帳送り候補として prioritizer 台帳に記録)
+- [x] コードレビュー完了(2026-11-22 /code-review: ブランチ diff を Approve、SUGGESTION 1 件は `4b5c0b4` で反映済み。コミット単位の最終確認で `af883c7` 問題なし)
 - [x] リファクタリング完了(green 後)
 - [x] ロールバック手段: 本番待ち時間が不変であることを実測で確認済みのため、revert で安全に戻る
 - [x] ドキュメント更新: 不要(本番挙動不変)

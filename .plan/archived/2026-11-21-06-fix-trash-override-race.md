@@ -94,7 +94,7 @@ thread_local 化は未実装。オーバーライド利用は 3 箇所のみ。
 ## Definition of Done
 - [x] 全 BDD シナリオが自動テストとして実装されパスする
 - [x] `cargo test --lib` 10 連続 green(フレーク 0 回)
-- [ ] コードレビュー完了(GitHub PR での approve を必須) — ユーザー作業: 1121z ブランチの実装コミットのレビュー
+- [x] コードレビュー完了(2026-11-22 /code-review: ブランチ diff を Approve、SUGGESTION 1 件は `4b5c0b4` で反映済み。コミット単位の最終確認で `e8401d5` 問題なし)
 - [x] リファクタリング完了(green 後)
 - [x] ロールバック手段: 本番コード非変更のため revert 1 コミットで完全に戻る
 - [x] ドキュメント更新: 不要(本番挙動不変、TEST_LOCK 規約は変更しない)
